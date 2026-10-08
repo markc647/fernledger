@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.worker.tsbuildinfo",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["./worker-configuration.d.ts"],
+    "lib": ["ES2023"]
+  },
+  "include": ["worker", "worker-configuration.d.ts"]
+}

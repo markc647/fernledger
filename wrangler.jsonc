@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fernledger",
+  "main": "worker/index.ts",
+  "workers_dev": true,
+  // Off: version preview URLs would fall outside this app's own Access application.
+  "preview_urls": false,
+  "compatibility_date": "2026-09-01",
+  // Run next to the D1 database rather than at the visitor's edge location (ADR 0007).
+  "placement": { "mode": "smart" },
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true },
+  // This repo is public: never put names, emails, account numbers or resource IDs here.
+  // D1/R2 are created by the setup script in the chosen region (ADR 0007).
+  "d1_databases": [{ "binding": "DB", "database_name": "fernledger", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "fernledger-backups" }],
+  "triggers": {
+    // UTC. Daily Sync ~06:00-07:00 NZ, Sync retry ~10:00-11:00 NZ, weekly backup Sunday.
+    "crons": ["0 18 * * *", "0 22 * * *", "0 15 * * SUN"]
+  }
+}

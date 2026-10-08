@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local dev (git-ignored). Access isn't in front of `npm run dev`,
+# so DEV_USER_EMAIL stands in for the signed-in Member (honoured on localhost only).
+DEV_USER_EMAIL=admin@example.com
+ADMIN_EMAIL=admin@example.com

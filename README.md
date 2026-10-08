@@ -1,0 +1,333 @@
+# Fernledger
+
+**A private, self-hosted tracker for New Zealand bank accounts.** It syncs daily from your bank through [Akahu](https://www.akahu.nz) and runs on your own Cloudflare account, on the free plan. One person manages it, and a small group of family members can view it read-only.
+
+> **Status: early development.** The design is settled and the code is being built. Nothing here is ready for real data yet. This README records each decision as it is made, so you can judge whether Fernledger suits you before you use it.
+
+---
+
+## Contents
+
+- [Who it's for](#who-its-for)
+- [What it does](#what-it-does)
+- [What it doesn't do](#what-it-doesnt-do)
+- [What you need](#what-you-need)
+- [What it costs](#what-it-costs)
+- [How it works](#how-it-works)
+- [Security and privacy](#security-and-privacy)
+- [Where your data is stored](#where-your-data-is-stored)
+- [Reliability](#reliability)
+- [Accessibility](#accessibility)
+- [Getting your history in](#getting-your-history-in)
+- [Setting it up](#setting-it-up)
+- [Updating](#updating)
+- [Technology choices](#technology-choices)
+- [Project status and roadmap](#project-status-and-roadmap)
+- [Contributing](#contributing)
+- [Licence and disclaimer](#licence-and-disclaimer)
+
+---
+
+## Who it's for
+
+- **Families overseeing someone else's money.** This is the case Fernledger was built for: an elderly parent's accounts, managed by an attorney under Enduring Power of Attorney, with siblings able to see everything but change nothing. Every change is logged, and printable reports support the attorney's record-keeping.
+- **Households** who want one shared, private view of their accounts.
+- **Individuals** who want their own finance dashboard without handing bank data to a third-party app.
+
+Fernledger is **one family per deployment**. You run your own copy, nobody else's data is in it, and the project's authors never see yours.
+
+## What it does
+
+- **Daily sync** of transactions from your NZ bank accounts through Akahu, including **pending transactions**, which are shown as pending until they settle.
+- **Imports your bank's CSV exports:** years of history older than Akahu can provide, or as your regular source if you'd rather not use Akahu at all. Fernledger works without Akahu: you import a CSV each month instead of syncing.
+- **Bank Time:** a transaction's time of day is shown only when the bank actually supplied one, which is rare, because most banks give a date only. Fernledger never invents a time. It also records when Akahu first saw each transaction.
+- **Full transaction detail for record-keeping:** the counterparty's account number, card suffix, and payment particulars, code and reference. That way you can show exactly where money went.
+- **Your own categories**, with a starter list, and **rules** that categorise automatically. The Admin can override any single transaction and add a note.
+- **Transfers between your own accounts** are detected and left out of spending.
+- **Monthly budgets** per category. Unspent amounts don't carry over, and changing a budget doesn't rewrite past months.
+- **Dashboard:** balances, net worth over time, spending by category, budget vs actual, searchable transactions.
+- **Printable reports:** spending by category, budget vs actual, income vs spending, balances over time, full transaction listing with notes. Print them or save as PDF from your browser.
+- **CSV export** for any date range.
+- **Change Log** of every edit the Admin makes, visible to everyone.
+- **Light and dark themes.**
+- **Your own title:** for example "Mum's finances", shown in the header and on reports.
+- **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications.
+
+## What it doesn't do
+
+These are deliberate choices. Each is recorded as an [architecture decision](docs/adr/):
+
+- **It can't move money.** Akahu personal apps are read-only, with no payments.
+- **No shared hosting.** There's no "Fernledger cloud". You host it yourself (ADR 0006).
+- **NZD and NZ banks only.** It's NZ English only, too (ADR 0006).
+- **No emails, no analytics, no telemetry.** The app contacts no one but Akahu.
+- **No native mobile app.** The web app works in a phone browser.
+- **No investment tracking or manually entered assets** in v1.
+
+## What you need
+
+| | Why |
+|---|---|
+| A **Cloudflare account** (free) | Hosts the app, database, backups and sign-in. We recommend a new account just for Fernledger (see [Security](#security-and-privacy)). |
+| Optional: an **Akahu account** with a free **personal app** | Daily automatic sync. You create it at [my.akahu.nz](https://my.akahu.nz). Personal apps can connect only the accounts *you* can log in to. **We're confirming with Akahu that ongoing personal use is allowed under their terms** (see [docs/privacy.md](docs/privacy.md#akahus-developer-terms)). Without Akahu, use monthly CSV imports. |
+| A **GitHub account** | Only if you use the Deploy button or want automatic updates. |
+| Optional: your bank's **CSV exports** | For history older than Akahu provides. |
+
+**If you manage someone else's accounts:** connect Akahu using *your own* bank login, the one your bank gave you as attorney or authorised third party. Never use the account holder's own password: that usually breaches your bank's terms, even with Power of Attorney.
+
+## What it costs
+
+**Nothing, for a typical household.** Fernledger is designed to run within Cloudflare's **Workers Free plan** (ADR 0004):
+
+| Service | Free allowance | Fernledger's typical use |
+|---|---|---|
+| Workers | 100,000 requests/day | A few hundred |
+| D1 database | 500 MB per database, 100k row writes/day | Years of transactions in a few MB |
+| R2 (backups) | 10 GB | Weekly backups of a few MB each |
+| Cloudflare Access | Free for up to 50 users | 1–6 people |
+| Akahu personal app | Free | One app |
+
+R2 may ask for a payment method on file even within the free allowance (unconfirmed). Fernledger has no paid tier and never will.
+
+## How it works
+
+```
+ Your family's browsers
+        │  sign in with an email code (or Google/Microsoft)
+        ▼
+ Cloudflare Access ── blocks anyone not on your list
+        │  signed identity token
+        ▼
+ Fernledger Worker ── checks the token on every request
+        │                  └─ daily: pulls new transactions from Akahu
+        ▼
+ D1 database (your account, Oceania) ── weekly backup ──▶ R2 bucket
+```
+
+- **Admin and Members.** One Admin, set by email, can edit categories, rules, budgets, overrides and notes. Everyone else is a read-only Member who can view, print and export.
+- **Sync** runs once a day, after Akahu's own daily refresh. A banner shows when data was last synced and turns red after 2 days, for example when a bank connection needs reconnecting.
+- **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu covers it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003).
+- **Category precedence:** a hand-set override beats a rule, which beats Akahu's suggestion. Rules apply to all history but never replace an override.
+
+## Security and privacy
+
+We're as clear about the limits as about the protections. A full threat model will be in [docs/security.md](docs/security.md).
+
+### What protects your data
+
+- **It lives in your own Cloudflare account.** There's no Fernledger server. The authors can't see your data, lose it, or be breached for it.
+- **No passwords in the app.** Sign-in is handled by [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) with email one-time codes, or Google/Microsoft with MFA. The app checks Access's signed token (signature, issuer, audience) on **every** request. If configuration is missing, it refuses all requests rather than allowing them (ADR 0002).
+- **Only people you list can reach the app at all.** Anyone else stops at Cloudflare's login page. The example policy also limits sign-in to New Zealand.
+- **Read-only by default.** Only the Admin can change anything, and every change goes in a Change Log that all Members can see.
+- **Read-only bank access.** Akahu personal-app tokens can't make payments. A leaked token exposes history, not money.
+- **Encrypted** in transit (TLS) and at rest (D1, R2). Akahu tokens are stored as encrypted Worker secrets, never in code or the database.
+- **Protection against cross-site attacks:** changes must come from the app's own address with a JSON body. Strict security headers are set: a Content Security Policy, no framing, no referrer.
+- **Safe exports:** CSV cells that would run as spreadsheet formulas, such as a payee named `=HYPERLINK(…)`, are escaped.
+- **Quiet logs:** logs contain only IDs, counts and error types, never transactions, tokens or emails. A test enforces this.
+- **Nothing calls home:** no analytics, telemetry, email or third-party scripts.
+
+### If something goes wrong
+
+[docs/security.md](docs/security.md) will include a breach checklist:
+1. Revoke the Akahu token.
+2. Change the app's secrets.
+3. Review Cloudflare Access sign-in logs.
+4. Tell Akahu, as its terms require.
+5. Check whether you must notify the Privacy Commissioner and the people affected.
+
+### What it can't protect against
+
+- **Your Cloudflare account is the master key.** Anyone who controls it controls your data. The setup guide requires two-factor authentication on it, and as few account members as possible.
+- **Each Member's email is their key.** If someone's inbox is compromised, so is their access. Use Google or Microsoft sign-in with MFA for stronger protection.
+- **No app-level encryption.** We rely on Cloudflare's encryption at rest. Encrypting inside the app wouldn't add real protection, because the key would live in the same Worker as the data, and it would make search and reports much harder.
+- **Cloudflare can technically access data in your account,** as with any cloud host. See Cloudflare's [privacy policy](https://www.cloudflare.com/privacypolicy/).
+
+### How the code is kept safe
+
+- Open source, so anyone can audit it.
+- Every change goes through a pull request with automated checks:
+  - type checks and tests
+  - [gitleaks](https://github.com/gitleaks/gitleaks) secret scanning, with extra rules that block NZ bank account numbers and bank CSV exports from ever being committed
+  - GitHub CodeQL code scanning
+- Dependabot keeps dependencies patched, and we use few of them on purpose.
+- An independent security audit runs before the first public release, and its findings and fixes will be published.
+- To report a vulnerability, see [SECURITY.md](SECURITY.md). Please don't open a public issue.
+
+### Privacy and the law
+
+Read **[docs/privacy.md](docs/privacy.md)** for the details: what the Privacy Act, the PPPR Act and Akahu's terms mean for you, with sources, and the questions to take to a lawyer. In short, and as our understanding rather than legal advice:
+
+- **You're responsible for your deployment, not the project.** Fernledger's maintainers collect nothing.
+- **Your own household's finances** are very likely outside most of the Privacy Act (s 27, "personal or domestic affairs").
+- **Attorneys sharing a parent's finances with family** are in a grey area. There's no guidance either way, so get advice.
+- **Akahu's terms apply regardless:** security, data minimisation, deletion on request, and telling Akahu about breaches.
+- **Every Member sees an "About your data" page** saying what's held, who can see it, where it's stored, how long it's kept and who to ask.
+- **Nothing is deleted automatically.** Attorneys must keep records of every transaction, and tax rules set minimums, not maximums. You decide when to delete, using the teardown.
+
+### Leaving Fernledger
+
+A documented teardown exports everything, deletes your database and backups, and revokes your Akahu token. Your data is yours, and you can take it with you or destroy it at any time.
+
+## Where your data is stored
+
+- **The database and backups are created in Oceania by default** (`REGION=oc`). Cloudflare doesn't say which city within Oceania, and has no New Zealand storage region. You can choose another region when you set up (ADR 0007).
+- **This is a location *hint*, not a legal residency guarantee.** Cloudflare offers guaranteed jurisdictions only for the EU and FedRAMP.
+- **Requests arrive at your nearest Cloudflare location,** such as Auckland. Smart Placement then runs the app next to its database.
+- **Read replication is off,** so your data isn't copied to other regions.
+- **Region is fixed at creation.** Changing it later means exporting and re-importing.
+
+## Reliability
+
+Fernledger aims to keep your data **correct, current and recoverable**.
+
+### Correct
+
+- **Balance check after every sync.** Fernledger compares each account's balance as reported by your bank, via Akahu, with the balance it calculates from its own transactions. If they differ, a warning shows the amount and the date it started, so missing or duplicated transactions can't go unnoticed.
+- **Syncs are safe to repeat.** Transactions are matched by Akahu's ID. Each sync also re-checks the last 30 days, because banks sometimes delete and re-issue a transaction.
+- **Transactions are never deleted because a bank link changed.** If your bank reconnects or changes systems and Akahu issues a new account ID, Fernledger flags "Account link broken". The Admin re-links it in one step.
+
+### Current
+
+- **Sync runs daily, with an automatic retry** a few hours later if it failed. A sync only counts as successful when every account has finished.
+- **The status banner says what's wrong and what to do.** For example: "ASB needs reconnecting in Akahu (Admin)", "Akahu unavailable — retrying" or "Akahu token invalid (Admin)". Members see the status, and the Admin sees the action. It turns red after 2 days without a successful sync.
+
+### Recoverable
+
+- **Weekly full backups** go to your own R2 bucket and are all kept. They're a few MB each, so years of them fit in the free allowance. Each backup includes a manifest of row counts and checksums.
+- **Point-in-time restore:** Cloudflare D1 can restore your database to any point in the last **7 days** on the free plan, or 30 days on paid plans.
+- **Restore is tested:** CI tests the restore script, and the docs describe a restore practice run to do twice a year.
+- **Safe upgrades:** before a release changes the database, the deploy script records a restore point and takes a backup. If an upgrade goes wrong, roll back by restoring that point and redeploying the previous release.
+
+### If the Admin becomes unavailable
+
+The Admin also owns the Akahu connection. If they can't continue, viewing and backups keep working, but edits and syncing stop. The docs include a **succession procedure**: who else should hold access to the Cloudflare account, how to change the Admin, and how a new Admin connects their own Akahu app. If you act under Power of Attorney, plan this early.
+
+### What we don't promise
+
+- **No failover.** If Cloudflare or Akahu has an outage, Fernledger is unavailable or out of date until it ends.
+- **Nothing is lost during an outage.** Your bank remains the source of truth, and the next sync catches up.
+
+## Accessibility
+
+Fernledger is often used by families where some members are older, and by people managing their own money in later life. It's built to be easy to read and use.
+
+- **Standard:** every release meets [WCAG 2.2 AA](https://www.w3.org/TR/WCAG22/). Automated accessibility checks (axe) run on every page in both themes in CI. Before each release we test by keyboard only, with a screen reader (VoiceOver/NVDA), and at 200% zoom.
+- **Readable text:** an in-app text-size control (**A / A+ / A++**) is remembered on each device. Body text starts at 16px, and table text is never smaller than 15px. Everything works at 200% browser zoom with no sideways scrolling.
+- **Plain language:** "Money in" and "Money out", not debit and credit. Dates like "Tue 8 Oct 2026", amounts like "−$1,234.56". Technical settings, such as cutover dates and account links, appear only in the Admin's settings, each with a one-line explanation.
+- **Colour is never the only signal.** Amounts carry a sign, and statuses carry an icon and words. Red and green are chosen to stay distinguishable for colour-blind users. Contrast meets AA in both light and dark themes.
+- **Respects your device:** follows your light/dark setting, reduced-motion preference and Windows high-contrast mode.
+- **A calm home page for Members:** read-only Members land on a simple Summary. It shows each account's balance, this month's spending against budget, recent transactions and when the data was last updated. Charts and filters are one click away.
+- **Phones and tablets:** large touch targets (at least 44px), and tables become cards on narrow screens. Tested on iPad Safari and Android.
+- **Printed reports for any reader:** at least 12pt text, page numbers ("Page 2 of 5"), table headings repeated on every page, and a header showing the account, date range and who generated the report and when.
+- **Help signing in:** a one-page printable "How to sign in" guide for family members.
+
+## Getting your history in
+
+Akahu's history is limited:
+
+| | History available when you first connect |
+|---|---|
+| Akahu personal apps | Up to 2 years |
+| ASB | About 12 months |
+| Kiwibank credit cards | About 180 days |
+| SBS | About 6 months |
+
+For anything older, export CSVs from your internet banking and **import** them. Fernledger parses the file in your browser and uploads it in chunks, so even 7 years of history stays within the free plan. **ASB CSV** is supported first. Other banks' formats will follow, and contributions are welcome.
+
+## Setting it up
+
+*The full guide arrives with the first release.* In outline:
+
+1. **Before you start:** create an Akahu personal app and note its two tokens. Create a new Cloudflare account and turn on two-factor authentication.
+2. **Deploy:** run the setup script, which creates the database and backup bucket in your chosen region, or use the **Deploy to Cloudflare** button (coming before the public release).
+3. **Lock it down:** turn on Cloudflare Access for the app's address, add your Members' emails, and paste the two Access values into the app's secrets. Until you do, the app refuses every request.
+4. **Load your data:** import your CSV history, link each account to Akahu, and let the first sync run.
+
+**Choosing public names:** your app's address (`fernledger.<subdomain>.workers.dev`) and sign-in page (`<team>.cloudflareaccess.com`) are visible to anyone who sees the link. Use neutral names, not the account holder's name.
+
+## Updating
+
+**How you hear about updates:**
+- If you used the Deploy button, a small GitHub Action in your copy checks weekly for a new Fernledger release. When it finds one, it opens a pull request with the release notes. Review it, click **Merge**, and Cloudflare deploys it.
+- You can also **Watch → Releases** on this repo, and subscribe to its security advisories.
+- The app itself never checks for updates. That would mean contacting GitHub, and Fernledger contacts no one but Akahu.
+
+**Command-line deployments:** check out the new release tag, then run `npm run deploy`.
+
+**What version numbers mean** ([semver](https://semver.org)):
+
+| Release | Example | What to expect |
+|---|---|---|
+| Patch | 1.2.**3** | Fixes only. Security fixes ship this way immediately, with a GitHub Security Advisory |
+| Minor | 1.**3**.0 | New features, no manual steps |
+| Major | **2**.0.0 | Manual steps, explained in the upgrade notes |
+
+Only the latest release receives fixes. Please stay current.
+
+**Your data during an upgrade:**
+- Before any database change, the deploy script records a restore point and takes a backup.
+- Database changes only ever **add** at first. Anything is removed only in a later release, once nothing uses it, so **rolling back to the previous version always works** (ADR 0009).
+- You can skip versions: CI upgrades sample databases from every earlier minor release to the latest and checks the data is intact.
+- Large data changes run in chunks and resume where they left off, so they stay within the free plan's daily limits.
+- If a release needs a new setting, the app shows the Admin **"Setup needed"** and switches off just that feature until it's done. Everything else keeps working.
+
+## Technology choices
+
+| Area | Choice | Why |
+|---|---|---|
+| Hosting | Cloudflare Workers + D1 + R2 | Free plan, no servers to run, built-in sign-in (ADR 0001, 0004) |
+| Sign-in | Cloudflare Access | No passwords in the app (ADR 0002) |
+| Database access | Plain SQL, no ORM | The app is mostly reports, which are best written as SQL (ADR 0005) |
+| API | [Hono](https://hono.dev) + [zod](https://zod.dev) | Small, Workers-native, typed, validates input at the boundary |
+| UI | React, [shadcn/ui](https://ui.shadcn.com), Tailwind | Clean neutral look, light/dark, accessible components |
+| Tables | [TanStack Table](https://tanstack.com/table) | Sorting, filtering and paging for transaction lists |
+| Charts | [Recharts](https://recharts.org) via shadcn Charts | Matches the UI theme |
+| Routing/data | TanStack Router + Query | Typed routes, caching |
+| Tests | Vitest + Cloudflare's Workers test pool | Business logic and SQL tested against a real local D1 |
+| Browser tests | [Playwright](https://playwright.dev) | Accessibility (axe), print layouts, and phone/tablet layouts in a real browser |
+| Accessibility checks | [axe-core](https://github.com/dequelabs/axe-core) in CI | WCAG 2.2 AA on every page, in both themes |
+| Deploy | Wrangler | Standard Cloudflare tooling |
+
+**Conventions:**
+- Money is stored as integer cents, and dates are NZ dates.
+- Business logic lives in pure, tested functions.
+- Amounts are right-aligned in fixed-width digits, and always shown with a sign as well as a colour, so they read correctly for colour-blind users and on paper.
+
+Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 0001](docs/adr/0001-custom-build-on-workers-d1.md).
+
+## Project status and roadmap
+
+| Milestone | Status |
+|---|---|
+| Design, decisions, glossary | Done |
+| Skeleton, CI, sign-in and roles | In progress |
+| Database, CSV import (ASB) | Planned |
+| Akahu sync | Planned |
+| Categories, rules, transfers, budgets | Planned |
+| Dashboard | Planned |
+| Reports and export | Planned |
+| Backups and teardown | Planned |
+| Security audit, Deploy button, v1.0 | Planned |
+| Receipt attachments, more bank CSV formats | After v1 |
+
+## Contributing
+
+Contributions are welcome once v1 lands. A code of conduct (Contributor Covenant), issue templates (bug report, request a bank's CSV format) and a pull request template will be added before the public announcement.
+- [GLOSSARY.md](GLOSSARY.md) defines the project's terms. Please use them in code, issues and PRs.
+- [docs/adr/](docs/adr/) explains why things are the way they are.
+- **Never commit real bank data.** Use the made-up fixtures in `test/fixtures/`. CI will reject commits containing NZ account numbers.
+- AI coding agents: see `AGENTS.md`.
+
+To develop locally:
+
+```bash
+npm install
+cp .dev.vars.example .dev.vars
+npm run dev
+```
+
+## Licence and disclaimer
+
+[MIT](LICENSE).
+
+Fernledger isn't financial, legal or tax advice. It isn't affiliated with Akahu, Cloudflare or any bank. Check bank and Akahu figures against your official statements. If you act under a Power of Attorney, your record-keeping obligations are yours. Fernledger helps, but doesn't replace professional advice.
