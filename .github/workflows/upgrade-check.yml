@@ -1,12 +1,15 @@
 name: Check for a Fernledger update
 
 # For copies made with the Deploy button. Once a week it looks for a newer Fernledger release and, if there is one,
-# opens a pull request that brings this copy up to it. Merge it and Cloudflare deploys.
-# It does nothing in the upstream repository. The decisions are in scripts/upgrade-check.mjs (tested by
-# scripts/upgrade-check.test.mjs, which also checks the rules in this file); README.md#updating explains the rest.
+# opens a pull request that brings this copy up to it. Merging does not touch your database: run `npm run deploy`
+# from the merged commit (README.md#updating).
+# It does nothing in the upstream repository. This file is deliberately thin, because a copy never receives workflow
+# updates: the logic is in scripts/upgrade-check.mjs (tested by scripts/upgrade-check.test.mjs, which also checks the
+# rules in this file), and README.md#updating explains the rest.
 #
 # One setting is needed in your copy: Settings > Actions > General > Workflow permissions >
-# "Allow GitHub Actions to create and approve pull requests".
+# "Allow GitHub Actions to create and approve pull requests". It lets Actions approve pull requests as well as create
+# them. Pull requests opened with GITHUB_TOKEN do not trigger pull_request checks, so no CI runs on them.
 
 on:
   schedule:
@@ -14,6 +17,11 @@ on:
   workflow_dispatch:
 
 permissions: {}
+
+# One run at a time, so a manual run and the schedule can't push the same branch together.
+concurrency:
+  group: fernledger-upgrade-check
+  cancel-in-progress: false
 
 jobs:
   upgrade:
@@ -25,42 +33,22 @@ jobs:
       pull-requests: write
     env:
       UPSTREAM: markc647/fernledger
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      # The credentials checkout leaves behind are what `git push` uses in the last step.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Look for a newer release
         id: plan
-        run: |
-          if gh api "repos/$UPSTREAM/releases/latest" > "$RUNNER_TEMP/release.json" 2> "$RUNNER_TEMP/error.txt"; then
-            node scripts/upgrade-check.mjs plan "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/pr-body.md"
-          elif grep -q "HTTP 404" "$RUNNER_TEMP/error.txt"; then
-            echo "No release has been published yet."
-            echo "upgrade=false" >> "$GITHUB_OUTPUT"
-          else
-            cat "$RUNNER_TEMP/error.txt"
-            exit 1
-          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/upgrade-check.mjs check "$UPSTREAM" "$RUNNER_TEMP/pr-body.md"
 
       - name: Open a pull request
         if: steps.plan.outputs.upgrade == 'true'
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.plan.outputs.tag }}
           BRANCH: ${{ steps.plan.outputs.branch }}
           TITLE: ${{ steps.plan.outputs.title }}
           BASE: ${{ github.ref_name }}
-        run: |
-          if [ "$(gh pr list --state all --head "$BRANCH" --json number --jq length)" != "0" ]; then
-            echo "A pull request for $TAG already exists (open, merged or closed). Nothing to do."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$BRANCH"
-          node scripts/upgrade-check.mjs apply "https://github.com/$UPSTREAM.git" "$TAG" "$RUNNER_TEMP/pr-body.md"
-          git commit -m "Update Fernledger to ${TAG#v}"
-          git push origin "$BRANCH"
-          if ! gh pr create --base "$BASE" --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/pr-body.md"; then
-            echo "::error::Could not open the pull request. Turn on Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests, then run this workflow again."
-            exit 1
-          fi
+        run: node scripts/upgrade-check.mjs open "https://github.com/$UPSTREAM.git" "$TAG" "$BRANCH" "$BASE" "$TITLE" "$RUNNER_TEMP/pr-body.md"

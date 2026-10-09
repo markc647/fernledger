@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { after, test } from 'node:test'
 import { pathToFileURL } from 'node:url'
-import { applyRelease, compareVersions, parseTag, planUpgrade } from './upgrade-check.mjs'
+import { PR_REFUSED, applyRelease, checkUpstream, compareVersions, openPullRequest, parseTag, planUpgrade } from './upgrade-check.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const cleanup = []
@@ -18,6 +18,13 @@ const tempDir = () => {
   cleanup.push(dir)
   return dir
 }
+
+// Git ignores the developer's own configuration (signing, hooks, autocrlf, a default branch), here and in the scripts
+// under test, which inherit this environment.
+const emptyGitConfig = join(tempDir(), 'gitconfig')
+writeFileSync(emptyGitConfig, '')
+process.env.GIT_CONFIG_GLOBAL = emptyGitConfig
+process.env.GIT_CONFIG_NOSYSTEM = '1'
 
 const identity = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com' }
 function git(cwd, ...args) {
@@ -209,10 +216,12 @@ test('the workflow is a no-op in the upstream repository and runs weekly or on d
   assert.equal(workflow.match(/^\s+UPSTREAM: (\S+)$/m)?.[1], 'markc647/fernledger')
 })
 
-test('the workflow asks for the least it needs: no default permissions, and no secret but GITHUB_TOKEN', () => {
+test('the workflow asks for the least it needs: no default permissions, no secret but GITHUB_TOKEN, and that only in the steps that use gh', () => {
   assert.match(workflow, /^permissions: \{\}$/m)
   assert.match(workflow, /^\s{6}contents: write\n\s{6}pull-requests: write$/m)
-  assert.deepEqual([...workflow.matchAll(/\$\{\{\s*secrets\.(\w+)/g)].map((m) => m[1]), ['GITHUB_TOKEN'])
+  assert.deepEqual([...new Set([...workflow.matchAll(/\$\{\{\s*secrets\.(\w+)/g)].map((m) => m[1]))], ['GITHUB_TOKEN'])
+  assert.doesNotMatch(workflow, /^ {4}env:\n(?: {6}.*\n)*? {6}GH_TOKEN:/m, 'GH_TOKEN is set per step, not for the whole job')
+  assert.equal(workflow.match(/^ {10}GH_TOKEN: /gm)?.length, 2, 'both steps that call gh set it')
   assert.ok(!/^\s*(pull_request_target|pull_request|push):/m.test(workflow), 'only schedule and workflow_dispatch trigger it')
 })
 
@@ -226,4 +235,122 @@ test('no expression is interpolated into a shell script, so release data cannot 
   const scripts = [...workflow.matchAll(/^\s+run: \|\n((?:\s{10,}.*\n?)+)/gm)].map((m) => m[1]).concat([...workflow.matchAll(/^\s+run: (?!\|)(.+)$/gm)].map((m) => m[1]))
   assert.ok(scripts.length >= 2)
   for (const script of scripts) assert.doesNotMatch(script, /\$\{\{/, script)
+})
+
+test('the workflow runs one at a time and stays thin: the logic is in scripts/upgrade-check.mjs', () => {
+  assert.match(workflow, /^concurrency:\n {2}group: \S+\n {2}cancel-in-progress: false$/m)
+  assert.match(workflow, /run: node scripts\/upgrade-check\.mjs check /)
+  assert.match(workflow, /run: node scripts\/upgrade-check\.mjs open /)
+  assert.doesNotMatch(workflow.replace(/^\s*#.*$/gm, ''), /\bgit push\b|\bgh pr\b|\bgh api\b/, 'git and gh are driven by the script, which a copy receives in an update; this file it does not')
+})
+
+test('the update branch is force-pushed, and a refused pull request names the setting that allows it', () => {
+  const script = readFileSync(join(root, 'scripts', 'upgrade-check.mjs'), 'utf8')
+  assert.match(script, /\['push', '--force', 'origin', branch\]/)
+  assert.match(PR_REFUSED, /Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests/)
+  assert.match(workflow, /Allow GitHub Actions to create and approve pull requests/)
+})
+
+test('the pull request body says that npm run deploy, not the merge, backs up and migrates the database', () => {
+  const { body } = planUpgrade({ currentVersion: '1.2.5', release: release() })
+  assert.match(body, /Merging does not change your database/)
+  assert.match(body, /npm run deploy/)
+  assert.match(body, /pre-deploy backup/)
+  assert.match(body, /restore point/)
+  assert.match(body, /migrations/)
+  assert.match(body, /Cloudflare build[^.]*skips those steps[^.]*as well \(or instead\)/)
+  assert.doesNotMatch(body, /Deploy button/, 'the Deploy button is Planned; the body does not describe it')
+})
+
+// The open command, with git real (a local bare repository stands in for GitHub) and gh faked.
+function copyWithRemote() {
+  const { source } = upstreamWithRelease('1.3.0', { 'src/app.ts': 'new app\n' })
+  const copy = copyWith({ 'package.json': pkg('1.2.0'), 'src/app.ts': 'old app\n' })
+  const remote = tempDir()
+  git(remote, 'init', '-q', '--bare')
+  git(copy, 'remote', 'add', 'origin', pathToFileURL(remote).href)
+  git(copy, 'push', '-q', 'origin', 'main')
+  const bodyFile = join(tempDir(), 'body.md')
+  writeFileSync(bodyFile, 'body\n')
+  const options = { repoDir: copy, source, tag: 'v1.3.0', branch: 'fernledger-update/v1.3.0', base: 'main', title: 'Update Fernledger to 1.3.0', bodyFile }
+  return { copy, remote, options }
+}
+/** A stand-in for gh: `existing` is the number of pull requests `pr list` reports; `createFails` makes `pr create` fail. */
+function fakeGh({ existing = 0, createFails = false } = {}) {
+  const calls = []
+  const exec = (command, args) => {
+    calls.push([command, ...args])
+    assert.equal(command, 'gh')
+    if (args[0] === 'pr' && args[1] === 'list') return { status: 0, stdout: `${existing}\n`, stderr: '' }
+    if (args[0] === 'pr' && args[1] === 'create') {
+      return createFails ? { status: 1, stdout: '', stderr: 'GitHub Actions is not permitted to create or approve pull requests\n' } : { status: 0, stdout: 'https://github.com/example/x/pull/1\n', stderr: '' }
+    }
+    return assert.fail(`unexpected gh ${args.join(' ')}`)
+  }
+  return { exec, calls }
+}
+
+test('open pushes the update branch as the bot, commits the release and opens the pull request', () => {
+  const { copy, remote, options } = copyWithRemote()
+  const gh = fakeGh()
+
+  assert.deepEqual(openPullRequest({ ...options, exec: gh.exec }), { opened: true })
+
+  assert.equal(git(remote, 'show', 'fernledger-update/v1.3.0:src/app.ts'), 'new app\n')
+  assert.match(git(remote, 'log', '-1', '--format=%an <%ae>', 'fernledger-update/v1.3.0'), /^github-actions\[bot\] </)
+  assert.equal(git(remote, 'log', '-1', '--format=%s', 'fernledger-update/v1.3.0').trim(), 'Update Fernledger to 1.3.0')
+  const create = gh.calls.find((c) => c[2] === 'create')
+  assert.deepEqual(create.slice(3), ['--base', 'main', '--head', 'fernledger-update/v1.3.0', '--title', 'Update Fernledger to 1.3.0', '--body-file', options.bodyFile])
+  assert.equal(git(copy, 'rev-parse', '--abbrev-ref', 'HEAD').trim(), 'fernledger-update/v1.3.0')
+})
+
+test('open does nothing when a pull request for the release exists, open, merged or closed', () => {
+  const { remote, options } = copyWithRemote()
+  const gh = fakeGh({ existing: 1 })
+
+  const result = openPullRequest({ ...options, exec: gh.exec })
+
+  assert.equal(result.opened, false)
+  assert.equal(gh.calls.length, 1)
+  assert.equal(git(remote, 'branch', '--format=%(refname:short)').trim(), 'main')
+})
+
+test('a re-run after GitHub refused the pull request force-pushes the branch it already pushed, and says which setting to turn on', () => {
+  const { copy, remote, options } = copyWithRemote()
+  assert.throws(
+    () => openPullRequest({ ...options, exec: fakeGh({ createFails: true }).exec }),
+    (error) => {
+      assert.ok(error.message.startsWith(PR_REFUSED))
+      assert.match(error.message, /Allow GitHub Actions to create and approve pull requests/)
+      return true
+    },
+  )
+  const first = git(remote, 'rev-parse', 'fernledger-update/v1.3.0').trim()
+
+  // A fresh run starts from a new checkout of main, a moment later, so its commit is a different one: not a fast-forward.
+  git(copy, 'switch', '-q', 'main')
+  git(copy, 'branch', '-q', '-D', 'fernledger-update/v1.3.0')
+  process.env.GIT_COMMITTER_DATE = '2030-01-01T00:00:00Z'
+  try {
+    assert.deepEqual(openPullRequest({ ...options, exec: fakeGh().exec }), { opened: true })
+  } finally {
+    delete process.env.GIT_COMMITTER_DATE
+  }
+
+  assert.notEqual(git(remote, 'rev-parse', 'fernledger-update/v1.3.0').trim(), first, 'the branch was replaced, which a plain push would have refused')
+})
+
+test('check reads the latest release with gh: none yet is fine, any other failure is an error', () => {
+  const bodyFile = join(tempDir(), 'body.md')
+  const gh = (result) => (command, args) => {
+    assert.deepEqual([command, ...args], ['gh', 'api', 'repos/example/fernledger/releases/latest'])
+    return result
+  }
+  const base = { upstream: 'example/fernledger', bodyFile, currentVersion: '1.2.0' }
+
+  assert.equal(checkUpstream({ ...base, exec: gh({ status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)\n' }) }).upgrade, false)
+  assert.throws(() => checkUpstream({ ...base, exec: gh({ status: 1, stdout: '', stderr: 'gh: Bad credentials (HTTP 401)\n' }) }), /could not read the latest release: gh: Bad credentials/)
+  const plan = checkUpstream({ ...base, exec: gh({ status: 0, stdout: JSON.stringify(release()), stderr: '' }) })
+  assert.equal(plan.upgrade, true)
+  assert.match(readFileSync(bodyFile, 'utf8'), /New things/)
 })

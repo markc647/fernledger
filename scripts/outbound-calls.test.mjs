@@ -1,6 +1,16 @@
-// Run with `npm run test:scripts`. The static half of the "no outbound calls but Akahu" promise (README: Security and
-// privacy). worker/outbound.test.ts runs the routes and crons and watches `fetch`; this catches code paths those
-// don't reach. The browser is held to the same promise by the CSP (`connect-src 'self'`, worker/security-headers.ts).
+// Run with `npm run test:scripts`. The static half of the outbound-calls promise (ADR 0010: no one but Akahu, only if you
+// use Sync, and, to check a sign-in, your own Cloudflare Access). worker/outbound.test.ts runs the routes and crons and
+// watches `fetch`; this catches code paths those don't reach. The browser is held to the same promise by the CSP
+// (`connect-src 'self'`, worker/security-headers.ts).
+//
+// Known limits. It is a line scan, a tripwire for honest mistakes, not a defence against deliberate evasion:
+// - It reads only .ts and .tsx files under worker/ and src/, skipping tests and generated code. Other file types, root
+//   configs, scripts/ and dependencies (node_modules, including a library that fetches on its own) are not scanned.
+// - It matches call syntax: `fetch(`, `new WebSocket`, `XMLHttpRequest`, `sendBeacon`, `EventSource`, `cloudflare:sockets`.
+//   An alias (`const f = fetch`), a computed name, a dynamic `import()` of a URL, or a URL set on an element from code
+//   is not caught. The CSP and worker/outbound.test.ts cover some of these.
+// - A line that starts with `//`, `*` or `/*` is skipped whole, even if code follows on it.
+// - Only index.html is checked for external `src` and `href` (public/ files and CSS are not).
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
@@ -39,7 +49,7 @@ test('no source file in worker/ or src/ makes an outbound call', () => {
       return ALLOWED_FILES.includes(file) ? [] : findOutboundCalls(file, readFileSync(path, 'utf8'))
     }),
   )
-  assert.deepEqual(found, [], 'Fernledger contacts no one but Akahu. Akahu Sync belongs in ALLOWED_FILES, with a test in worker/outbound.test.ts.')
+  assert.deepEqual(found, [], 'ADR 0010: no one but Akahu (only if you use Sync) and your own Cloudflare Access. Akahu Sync belongs in ALLOWED_FILES, with a test in worker/outbound.test.ts.')
 })
 
 test('the finder recognises each way of calling out, and skips comments', () => {

@@ -30,7 +30,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 - `npm run check` also upgrades every sample database in `test/sample-dbs/` and fails if data is lost or a merged migration was edited ([docs/releasing.md](docs/releasing.md#sample-databases)). A migration that rewrites existing values needs its expected change written into that test.
 
 ## Outbound calls
-- The app contacts no one but Akahu (README [Security and privacy](README.md#security-and-privacy)). Don't add a `fetch`, socket or beacon without Akahu Sync's reason for it: `worker/outbound.test.ts` and `scripts/outbound-calls.test.mjs` fail on one, and a new Akahu call extends both rather than widening what they allow.
+- The app contacts no one but Akahu (only if you use Sync) and, to check a sign-in, your own Cloudflare Access ([ADR 0010](docs/adr/0010-outbound-calls.md)). Don't add a `fetch`, socket or beacon without Akahu Sync's reason for it: `worker/outbound.test.ts` and `scripts/outbound-calls.test.mjs` fail on one, and a new Akahu call extends both rather than widening what they allow.
 
 ## Docs
 - Each meaning has one home. `README.md` carries every decision for prospective users. Other docs link to README sections rather than restating them, and add only detail the README lacks.

@@ -2,23 +2,22 @@ import { createScheduledController } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BACKUP_CRON } from './backup'
+import { app } from './app'
 import worker from './index'
 
-// Seam 1, privacy promise: the app contacts no one but Akahu (README: Security and privacy; ADR 0008).
+// Seam 1, privacy promise: the app contacts no one but Akahu (only if you use Sync) and, to check a sign-in, your own
+// Cloudflare Access (README: Security and privacy; ADR 0010).
 // Every request below goes through the real Worker with `fetch` replaced by a recorder that refuses to answer, so
 // a code path that makes an outbound call shows up here as a host that isn't allowed.
 //
-// Allowed hosts:
-// - Akahu's API, for Akahu Sync (not built yet, so no test below can reach it).
-// - The Deployer's own Cloudflare Access team domain: verifying a sign-in fetches its public keys. That is the
-//   Deployer's own sign-in service, not a third party, and it is the only call the app makes today.
-// Anything else, GitHub in particular, fails this test. Adding Akahu Sync means extending the exercise below, not
-// widening the allowed hosts.
-const AKAHU_HOST = 'api.akahu.io'
+// Allowed host: the Deployer's own Cloudflare Access team domain. Verifying a sign-in fetches its public keys. That is
+// the Deployer's own sign-in service, not a third party, and it is the only call the app makes today. Anything else,
+// GitHub in particular, fails this test. Akahu Sync is not built yet; when it is, its host is added here together with
+// an exercise that reaches it, not by widening the list in passing.
 const ACCESS_HOST = env.ACCESS_TEAM_DOMAIN!
-const ALLOWED_HOSTS = [AKAHU_HOST, ACCESS_HOST]
+const ALLOWED_HOSTS = [ACCESS_HOST]
 
-// Same as `triggers.crons` in wrangler.jsonc. scripts/wrangler-config.test.mjs checks BACKUP_CRON against it.
+// Same as `triggers.crons` in wrangler.jsonc; scripts/wrangler-config.test.mjs fails if the two differ.
 const CRONS = ['0 18 * * *', '0 22 * * *', BACKUP_CRON]
 
 const origin = 'http://localhost:5173'
@@ -43,36 +42,50 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
   )
 }
 
+// Every route the app declares, as Hono lists them, with the request that exercises it. A route added without an entry
+// here fails 'exercises every route the app declares' below, so a new route can't escape this test.
+type Exercise = { route: string; path: (accountId: number) => string; opts?: { method?: string; body?: unknown } }
+const EXERCISES: Exercise[] = [
+  // First: it creates the Account that the PATCH below renames.
+  { route: 'POST /api/imports/chunks', path: () => '/api/imports/chunks', opts: { method: 'POST', body: {
+      account: { number: '99-9999-9999999-99' },
+      chunk: { index: 0, count: 1 },
+      file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-01', to: '2026-10-31' },
+      rows: [{ date: '2026-10-01', uniqueId: 'ID1', tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SHOP', bankMemo: 'EFTPOS', amountCents: -1000 }],
+    } } },
+  { route: 'GET /api/me', path: () => '/api/me' },
+  { route: 'GET /api/settings', path: () => '/api/settings' },
+  { route: 'GET /api/features', path: () => '/api/features' },
+  { route: 'GET /api/accounts', path: () => '/api/accounts' },
+  { route: 'GET /api/change-log', path: () => '/api/change-log' },
+  { route: 'GET /api/transactions', path: () => '/api/transactions' },
+  { route: 'PATCH /api/settings', path: () => '/api/settings', opts: { method: 'PATCH', body: { app_title: 'Example family' } } },
+  { route: 'PATCH /api/accounts/:id', path: (id) => `/api/accounts/${id}`, opts: { method: 'PATCH', body: { name: 'Example savings' } } },
+]
+// Not routes of their own: an unknown API path, and anything outside /api (the static assets).
+const OTHER_PATHS = ['/api/no-such-route', '/not-api']
+
 describe('outbound calls', () => {
+  it('exercises every route the app declares', () => {
+    const declared = new Set(app.routes.filter((r) => r.method !== 'ALL').map((r) => `${r.method} ${r.path}`))
+    expect([...new Set(EXERCISES.map((e) => e.route))].sort()).toEqual([...declared].sort())
+  })
+
   it('notices a call to a host that is not allowed (the tripwire itself)', async () => {
     await fetch('https://github.com/markc647/fernledger/releases/latest').catch(() => {})
     expect(hostsContacted().filter((host) => !ALLOWED_HOSTS.includes(host))).toEqual(['github.com'])
   })
 
   it('makes none from any route, signed in as the Admin', async () => {
-    const imported = await call('/api/imports/chunks', {
-      method: 'POST',
-      body: {
-        account: { number: '99-9999-9999999-99' },
-        chunk: { index: 0, count: 1 },
-        file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-01', to: '2026-10-31' },
-        rows: [{ date: '2026-10-01', uniqueId: 'ID1', tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SHOP', bankMemo: 'EFTPOS', amountCents: -1000 }],
-      },
-    })
-    expect(imported.status).toBe(200)
-    const [account] = (await (await call('/api/accounts')).json()) as { id: number }[]
-    const requests: [string, { method?: string; body?: unknown }?][] = [
-      ['/api/me'],
-      ['/api/settings'],
-      ['/api/features'],
-      ['/api/accounts'],
-      ['/api/transactions'],
-      ['/api/settings', { method: 'PATCH', body: { app_title: 'Example family' } }],
-      [`/api/accounts/${account.id}`, { method: 'PATCH', body: { name: 'Example savings' } }],
-      ['/api/no-such-route'],
-      ['/not-api'],
-    ]
-    for (const [path, opts] of requests) await call(path, opts)
+    let accountId = 0
+    for (const { route, path, opts } of EXERCISES) {
+      const res = await call(path(accountId), opts)
+      if (route === 'POST /api/imports/chunks') {
+        expect(res.status).toBe(200)
+        accountId = ((await (await call('/api/accounts')).json()) as { id: number }[])[0].id
+      }
+    }
+    for (const path of OTHER_PATHS) await call(path)
 
     expect(attempts).toEqual([])
   })
