@@ -151,6 +151,51 @@ describe('local development identity', () => {
   it('cannot be spoofed with a Host header on a non-localhost URL', async () => {
     expect((await call('/api/me', { headers: { Host: 'localhost' } })).status).toBe(401)
   })
+
+  describe('switching between an Admin and a Member', () => {
+    const asCookie = (value: string) => ({ Cookie: `fernledger_dev_as=${value}` })
+    const local = 'http://localhost:5173'
+
+    it('becomes the Admin when asked, whoever DEV_USER_EMAIL is', async () => {
+      const res = await call('/api/me', { origin: local, headers: asCookie('admin') })
+      expect(await res.json()).toEqual({ email: 'admin@example.com', role: 'admin' })
+    })
+
+    it('becomes a read-only Member when asked, even if DEV_USER_EMAIL is the Admin', async () => {
+      const res = await callWith(`${local}/api/me`, { DEV_USER_EMAIL: 'admin@example.com' }, { headers: asCookie('member') })
+      expect(await res.json()).toEqual({ email: 'dev.member@example.com', role: 'member' })
+    })
+
+    it('keeps the Member read-only on writes', async () => {
+      const res = await call('/api/me', { origin: local, method: 'POST', headers: asCookie('member') })
+      expect(res.status).toBe(403)
+    })
+
+    it('falls back to DEV_USER_EMAIL for an unknown value', async () => {
+      const res = await call('/api/me', { origin: local, headers: asCookie('root') })
+      expect(await res.json()).toEqual({ email: 'dev@example.com', role: 'member' })
+    })
+
+    it('does not make Admin of anyone when ADMIN_EMAIL is not set', async () => {
+      const res = await callWith(`${local}/api/me`, { ADMIN_EMAIL: undefined }, { headers: asCookie('admin') })
+      expect(await res.json()).toEqual({ email: 'dev@example.com', role: 'member' })
+    })
+
+    it('is ignored on any other host, so the cookie cannot grant Admin', async () => {
+      expect((await call('/api/me', { headers: asCookie('admin') })).status).toBe(401)
+    })
+
+    it('is ignored when DEV_USER_EMAIL is not set, as in production', async () => {
+      const res = await callWith(`${local}/api/me`, { DEV_USER_EMAIL: undefined }, { headers: asCookie('admin') })
+      expect(res.status).toBe(401)
+    })
+
+    it('does not weaken a real Access token elsewhere', async () => {
+      const token = await sign({ email: 'sib@example.com' })
+      const res = await call('/api/me', { token, headers: asCookie('admin') })
+      expect(await res.json()).toEqual({ email: 'sib@example.com', role: 'member' })
+    })
+  })
 })
 
 describe('local D1', () => {

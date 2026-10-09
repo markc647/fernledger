@@ -18,6 +18,8 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.104.1",
+    "@tanstack/react-router": "^1.170.41",
     "hono": "^4.13.13",
     "jose": "^6.2.12",
     "react": "^19.2.8",
@@ -26,10 +28,14 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@cloudflare/vite-plugin": "^1.63.0",
     "@cloudflare/vitest-plugin": "^1.4.0",
     "@cloudflare/workers-types": "^5.20261008.1",
+    "@playwright/test": "^1.64.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/router-cli": "^1.167.40",
+    "@tanstack/router-plugin": "^1.168.42",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
