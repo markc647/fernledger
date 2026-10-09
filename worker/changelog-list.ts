@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { CHANGE_TYPE_IDS, CHANGE_TYPES, type ChangeLogRow } from './changelog'
-import { isRealDate } from './import-rows'
+import { isRealDate } from './dates'
 import { nextDay, nzDayStart } from './nz-time'
 import { validate } from './validate'
 

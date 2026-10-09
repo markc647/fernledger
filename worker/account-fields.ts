@@ -1,4 +1,5 @@
 import * as z from 'zod/mini'
+import { isRealDate } from './dates'
 
 /** An Account's display name, as the Admin types it (trimmed, 1 to 60 characters). */
 export const accountName = z.string().check(z.trim(), z.minLength(1), z.maxLength(60))
@@ -11,3 +12,6 @@ export const bankAccountNumber = z.string().check(z.regex(/^\d{2}-\d{4}-\d{7}-\d
  * and `-99` are the same Account. Expects a string that passed `bankAccountNumber`.
  */
 export const normaliseAccountNumber = (number: string) => number.replace(/-0(\d{2})$/, '-$1')
+
+/** An NZ calendar date as `YYYY-MM-DD`, which must be a real day (not 30 February). */
+export const isoDate = z.string().check(z.refine(isRealDate))
