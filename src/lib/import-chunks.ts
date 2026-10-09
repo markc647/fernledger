@@ -1,13 +1,25 @@
-import type { MAX_CHUNKS as WORKER_MAX_CHUNKS, MAX_ROWS_PER_CHUNK } from '@/generated/api/import-rows'
+import type { DAILY_ROW_WRITES as WORKER_DAILY_ROW_WRITES, MAX_CHUNKS as WORKER_MAX_CHUNKS, MAX_ROWS_PER_CHUNK, REPLACE_SLICE as WORKER_REPLACE_SLICE, WRITES_PER_ROW as WORKER_WRITES_PER_ROW } from '@/generated/api/import-rows'
 import type { BankCsvRow } from './bank-csv'
 
 // The Worker's limits (worker/import-rows.ts; the sizing is explained in worker/imports.ts). Typing these as the
 // Worker's literal types makes the build fail if the two sides drift apart.
 export const CHUNK_SIZE: typeof MAX_ROWS_PER_CHUNK = 500
 export const MAX_CHUNKS: typeof WORKER_MAX_CHUNKS = 20
+/** Most imported rows removed in one step when replacing imported history. */
+export const REPLACE_SLICE: typeof WORKER_REPLACE_SLICE = 5000
+/** The free plan's D1 row writes a day, and what one row costs (the row and its two indexes). */
+export const DAILY_ROW_WRITES: typeof WORKER_DAILY_ROW_WRITES = 100_000
+export const WRITES_PER_ROW: typeof WORKER_WRITES_PER_ROW = 3
 
 /** The most rows one Import can carry. */
 export const MAX_IMPORT_ROWS = CHUNK_SIZE * MAX_CHUNKS
+
+/** About how many of the day's D1 writes it takes to remove `imported` rows and import `incoming` rows. */
+export const replaceWrites = (imported: number, incoming: number): number => WRITES_PER_ROW * (imported + incoming)
+
+/** How many rows are dated on or after the Cutover Date, so the preview can say how many an Import will drop. ISO dates compare as text. */
+export const countOnOrAfter = (rows: readonly BankCsvRow[], cutoverDate: string | null | undefined): number =>
+  cutoverDate ? rows.filter((row) => row.date >= cutoverDate).length : 0
 
 /**
  * Orders rows oldest first (bank unique IDs start with the date and end with a daily sequence, so ordering by
