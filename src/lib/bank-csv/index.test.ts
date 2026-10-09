@@ -63,6 +63,11 @@ describe('parseBankCsv with an ASB export', () => {
     expect(result.ledgerBalance).toEqual({ cents: -125075, date: '2026-10-02' })
   })
 
+  it('reads a three-digit suffix with a leading zero as the two-digit suffix, as the Worker does', () => {
+    const result = parseBankCsv(withLine(savings, 2, 'Bank 99; Branch 9999; Account 9999999-099 (Savings Example)'))
+    expect(result.accountNumber).toBe('99-9999-9999999-99')
+  })
+
   it('gives the same result for Windows line endings and a byte order mark', () => {
     const crlf = '﻿' + savings.replace(/\n/g, '\r\n')
     expect(parseBankCsv(crlf)).toEqual(parseBankCsv(savings))

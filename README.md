@@ -50,7 +50,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **CSV export** for any date range.
 - **Change Log** of every edit the Admin makes, visible to everyone.
 - **Light and dark themes.**
-- **Your own title:** for example "Mum's finances", shown in the header and on reports.
+- **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header and reports will show it.
 - **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications.
 
 ## What it doesn't do
@@ -269,7 +269,7 @@ Only the latest release receives fixes. Please stay current.
 - Database changes only ever **add** at first. Anything is removed only in a later release, once nothing uses it, so **rolling back to the previous version always works** (ADR 0009).
 - You can skip versions: CI upgrades sample databases from every earlier minor release to the latest and checks the data is intact.
 - Large data changes run in chunks and resume where they left off, so they stay within the free plan's daily limits.
-- If a release needs a new setting, the app shows the Admin **"Setup needed"** and switches off just that feature until it's done. Everything else keeps working.
+- If a release needs a new setting, the Settings screen shows the Admin **"Setup needed"** and switches off just that feature until it's done. A feature you don't use, such as Akahu Sync, can stay off. Everything else keeps working.
 
 ## Technology choices
 
@@ -301,6 +301,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 |---|---|
 | Design, decisions, glossary | Done |
 | Skeleton, CI, sign-in and roles, guardrails, setup and deploy scripts | Done |
+| Settings screen and "Setup needed" | Done |
 | Database, CSV import (ASB) | In progress |
 | Akahu sync | Planned |
 | Categories, rules, transfers, budgets | Planned |

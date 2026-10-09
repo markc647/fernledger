@@ -91,3 +91,13 @@ _Avoid_: Audit trail, history
 **Report**:
 A print-formatted view of Transactions over a date range, which any Member can print or save as PDF.
 _Avoid_: Statement, export
+
+## Configuration
+
+**Setting**:
+A value the Admin chooses in the app, such as the app title or the About your data text; the Admin themselves is not a Setting.
+_Avoid_: Preference, option, config
+
+**Setup needed**:
+What the Admin is shown for a feature that is switched off until the Deployer adds configuration it requires, with what to add and how; Members see only that the feature isn't set up. For an optional feature such as Akahu Sync, it can be ignored.
+_Avoid_: Misconfigured, disabled, error
