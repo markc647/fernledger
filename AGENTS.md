@@ -7,6 +7,7 @@ Self-hosted NZ bank-account tracker on Cloudflare Workers (free plan) + D1 + R2,
 - `docs/adr/`: decisions. Read the ones touching your area before changing it.
 - `CODING_STANDARDS.md`: what reviewers enforce. Read it when you're unsure how to do something.
 - `migrations/`: add-only SQL, `<ticket number × 100 + n>_<name>.sql`; each ticket owns its range. See CODING_STANDARDS.md#migrations.
+- `docs/releasing.md`: how a release is made; `test/sample-dbs/` holds the databases every release must upgrade from.
 - `docs/bank-formats/`: bank CSV layouts, with made-up examples. Real exports never enter this repo.
 
 ## Before reporting work done

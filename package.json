@@ -14,6 +14,7 @@
     "test:e2e": "playwright test",
     "test:scripts": "node --test \"scripts/*.test.mjs\"",
     "migrations:check": "node scripts/check-migrations.mjs",
+    "sample-db": "node scripts/sample-db.mjs",
     "scan": "node scripts/scan.mjs",
     "scan:selftest": "node scripts/scan-selftest.mjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run test:scripts && npm run migrations:check && npm run scan && npm run scan:selftest",

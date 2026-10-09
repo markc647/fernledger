@@ -60,7 +60,7 @@ These are deliberate choices. Each is recorded as an [architecture decision](doc
 - **It can't move money.** Akahu personal apps are read-only, with no payments.
 - **No shared hosting.** There's no "Fernledger cloud". You host it yourself (ADR 0006).
 - **NZD and NZ banks only.** It's NZ English only, too (ADR 0006).
-- **No emails, no analytics, no telemetry.** The app contacts no one but Akahu.
+- **No emails, no analytics, no telemetry.** The app contacts no one but Akahu and, to check a sign-in, your own Cloudflare Access. A test fails if any other outbound call appears.
 - **No native mobile app.** The web app works in a phone browser.
 - **No investment tracking or manually entered assets** in v1.
 
@@ -249,9 +249,11 @@ For anything older, export CSVs from your internet banking and **import** them. 
 ## Updating
 
 **How you hear about updates:**
-- If you used the Deploy button, a small GitHub Action in your copy checks weekly for a new Fernledger release. When it finds one, it opens a pull request with the release notes. Review it, click **Merge**, and Cloudflare deploys it.
+- If you used the Deploy button, a small GitHub Action in your copy checks weekly for a new Fernledger release. When it finds one, it opens a pull request with the release notes. Review it, click **Merge**, and Cloudflare deploys it. It needs one setting turned on in your copy ([docs/setup.md](docs/setup.md#update-pull-requests)).
 - You can also **Watch → Releases** on this repo, and subscribe to its security advisories.
 - The app itself never checks for updates. That would mean contacting GitHub, and Fernledger contacts no one but Akahu.
+
+How releases are made and tested is in [docs/releasing.md](docs/releasing.md).
 
 **Command-line deployments:** check out the new release tag, then run `npm run deploy`. It needs `npm run setup` to have been run once for this Cloudflare account. Add `--yes` to skip the confirmation prompt when there is no terminal ([docs/setup.md](docs/setup.md)).
 
@@ -268,7 +270,7 @@ Only the latest release receives fixes. Please stay current.
 **Your data during an upgrade:**
 - Before any database change, the deploy script takes a complete backup and records a restore point. If the backup fails, nothing changes.
 - Database changes only ever **add** at first. Anything is removed only in a later release, once nothing uses it, so **rolling back to the previous version always works** (ADR 0009).
-- You can skip versions: CI upgrades sample databases from every earlier minor release to the latest and checks the data is intact.
+- You can skip versions: CI upgrades a sample database from every earlier minor release to the latest and checks the data is intact ([docs/releasing.md](docs/releasing.md#sample-databases)).
 - Large data changes run in chunks and resume where they left off, so they stay within the free plan's daily limits.
 - If a release needs a new setting, the Settings screen shows the Admin **"Setup needed"** and switches off just that feature until it's done. A feature you don't use, such as Akahu Sync, can stay off. Everything else keeps working.
 
@@ -309,6 +311,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Dashboard | Planned |
 | Reports and export | Planned |
 | Backups and teardown | Done |
+| Release process, update pull requests, upgrade tests | Done |
 | Security audit, Deploy button, v1.0 | Planned |
 | Receipt attachments, more bank CSV formats | After v1 |
 

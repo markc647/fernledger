@@ -207,6 +207,18 @@ If your Cloudflare account already has a wildcard or account-wide Access policy,
 
 `preview_urls` is off in `wrangler.jsonc`, because version preview hostnames wouldn't match this application and would fall back to whatever wildcard policy the account has.
 
+## Update pull requests
+
+For a copy made with the **Deploy button** (README [Updating](../README.md#updating)). `.github/workflows/upgrade-check.yml` runs weekly, and from the Actions tab whenever you choose **Run workflow**. It compares your `package.json` version with the latest published Fernledger release. If there is a newer one it opens a pull request, from the branch `fernledger-update/vX.Y.Z`, that carries the release notes and the changes.
+
+- **Once, in your copy:** Settings, Actions, General, Workflow permissions, tick **Allow GitHub Actions to create and approve pull requests**. Without it the workflow fails with a message saying so.
+- **Merging** deploys it, as described in README. For a major release, read its upgrade notes first; the pull request says when it is one.
+- **Closing a pull request without merging** skips that release. The next release opens a new one.
+- The pull request makes your tracked files match the release, so changes you made to them show up in its diff as removals. Files git doesn't track, such as `.dev.vars`, are left alone.
+- **Workflow files are never changed by it**: GitHub doesn't let an Actions run edit them. If a release changes one, the pull request lists it for you to compare and copy by hand.
+- It reads the public release list and nothing else, using the `GITHUB_TOKEN` GitHub provides to the run. It adds no secrets, and the Worker is not involved.
+- GitHub pauses scheduled workflows in a public repository with no activity for 60 days. If the weekly run stops, re-enable it in the Actions tab, or run it by hand.
+
 ## Local development
 
 ```bash
