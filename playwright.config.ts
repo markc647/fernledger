@@ -4,7 +4,7 @@ import { defineConfig } from '@playwright/test'
 // which these tests select with a cookie (the dev-only switcher bar is not in a production build).
 // Run with `npm run test:e2e`. They are kept out of `npm run check` because they need a browser and are slower;
 // CI runs them as their own job. The first run needs `npx playwright install chromium`.
-const port = 5199
+const port = Number(process.env.E2E_PORT ?? 5199) // E2E_PORT lets parallel checkouts each run their own server
 
 export default defineConfig({
   testDir: './e2e',
@@ -20,11 +20,12 @@ export default defineConfig({
   ],
   webServer: {
     // The production build, served by the Worker runtime with the real headers (public/_headers and worker/security-headers.ts).
-    command: `npm run build && npx vite preview --port ${port} --strictPort`,
+    command: `node scripts/e2e-prepare.mjs && npm run build && npx vite preview --port ${port} --strictPort`,
     timeout: 180_000,
     url: `http://localhost:${port}`,
     reuseExistingServer: !process.env.CI,
     // Stand-ins for .dev.vars, so CI needs no file. Made-up values.
-    env: { CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true', ADMIN_EMAIL: 'admin@example.com', DEV_USER_EMAIL: 'admin@example.com' },
+    // E2E_PERSIST_TO is a fresh local database of its own, migrated by scripts/e2e-prepare.mjs and read by vite.config.ts.
+    env: { CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true', ADMIN_EMAIL: 'admin@example.com', DEV_USER_EMAIL: 'admin@example.com', E2E_PERSIST_TO: '.wrangler/e2e-state' },
   },
 })
