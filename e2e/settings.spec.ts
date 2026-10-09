@@ -34,6 +34,16 @@ test('the Admin edits the app title and the About-your-data fields, and they are
   await expect(page.getByLabel('How long the data is kept')).toHaveValue('Until Mum asks us to delete it')
 })
 
+test('saving a new app title changes the header and page title straight away', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  await page.goto('/settings')
+  await expect(page.getByRole('banner').getByText('Fernledger', { exact: true })).toBeVisible()
+  await page.getByLabel('App title').fill("Dad's finances")
+  await page.getByRole('button', { name: 'Save settings' }).click()
+  await expect(page.getByRole('banner').getByText("Dad's finances")).toBeVisible()
+  await expect(page).toHaveTitle("Dad's finances")
+})
+
 test('editing a field clears "Settings saved", so saving again announces it again', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.goto('/settings')

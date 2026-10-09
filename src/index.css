@@ -190,7 +190,7 @@
   }
 }
 
-/* Windows high contrast (forced colours). The browser swaps our colours for the user's palette, which drops
+/* Windows high contrast (forced colours). The browser swaps our colours for the reader's palette, which drops
    box-shadow focus rings and background-only states, so give both a border or outline that survives. */
 @media (forced-colors: active) {
   :focus-visible {

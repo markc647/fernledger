@@ -50,7 +50,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **CSV export** for any date range.
 - **Change Log** of every edit the Admin makes, visible to everyone.
 - **Light and dark themes.**
-- **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header and reports will show it.
+- **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and reports will.
 - **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications.
 
 ## What it doesn't do

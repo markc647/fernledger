@@ -3,12 +3,14 @@
 
 const MINUS = '−' // a real minus sign: a hyphen is too short to read as one, and screen readers say "dash"
 
-const dollars = new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD' })
+const wholeDollars = new Intl.NumberFormat('en-NZ')
 
+// Built from integer parts, never `cents / 100`: a float loses the last cents near Number.MAX_SAFE_INTEGER.
 function dollarsFromCents(cents: number) {
   // The message never includes the value: amounts are private (CODING_STANDARDS.md, Security and privacy).
   if (!Number.isSafeInteger(cents)) throw new RangeError('Amounts are whole cents')
-  return dollars.format(Math.abs(cents) / 100)
+  const magnitude = BigInt(Math.abs(cents)) // Math.abs(-0) is 0, so negative zero reads as "$0.00"
+  return `$${wholeDollars.format(magnitude / 100n)}.${String(magnitude % 100n).padStart(2, '0')}`
 }
 
 /** A Transaction's amount, always signed: "+$1,234.56" for money in, "−$1,234.56" for money out, "$0.00" for none. */
@@ -24,15 +26,16 @@ export function formatBalance(cents: number) {
 }
 
 const dayFormat = (timeZone: string) =>
-  new Intl.DateTimeFormat('en-NZ', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone })
+  new Intl.DateTimeFormat('en-NZ', { weekday: 'short', day: 'numeric', month: 'numeric', year: 'numeric', timeZone })
 
-// Assembled from parts because en-NZ puts a comma after the weekday ("Thu, 8 Oct 2026"). NZ abbreviates September to "Sept".
-const readDay = (format: Intl.DateTimeFormat, date: Date) =>
-  format
-    .formatToParts(date)
-    .filter((part) => part.type !== 'literal')
-    .map((part) => part.value)
-    .join(' ')
+// Written out because browsers disagree on `Intl`'s short month names ("Sep" or "Sept"); NZ writes "Sept".
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
+
+// Assembled from parts because en-NZ puts a comma after the weekday ("Thu, 8 Oct 2026").
+const readDay = (format: Intl.DateTimeFormat, date: Date) => {
+  const parts = Object.fromEntries(format.formatToParts(date).map((part) => [part.type, part.value]))
+  return `${parts.weekday} ${Number(parts.day)} ${MONTHS[Number(parts.month) - 1]} ${parts.year}`
+}
 
 const inNewZealand = dayFormat('Pacific/Auckland')
 const asCalendarDate = dayFormat('UTC')

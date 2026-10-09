@@ -7,7 +7,7 @@ import { formatDate } from '@/lib/format'
 // Not in the navigation. A reference for the shared display building blocks, built from made-up data, so the browser
 // tests (e2e/display.spec.ts) and the accessibility scan exercise each one in both themes and at every text size.
 export const Route = createFileRoute('/styleguide')({
-  component: DisplayExamples,
+  component: Styleguide,
 })
 
 const SAMPLE = [
@@ -16,10 +16,10 @@ const SAMPLE = [
   { id: 3, date: '2026-09-27', description: 'Example Power Company', cents: -888888 },
 ]
 
-function DisplayExamples() {
+function Styleguide() {
   return (
     <>
-      <h1 className="text-2xl font-semibold">Display examples</h1>
+      <h1 className="text-2xl font-semibold">Styleguide</h1>
       <p className="mt-2">
         How amounts, dates, tables and statuses look across Fernledger. The figures here are made up.
       </p>

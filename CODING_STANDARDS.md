@@ -47,10 +47,8 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 - Add one only when a few lines can't do the job. Prefer the smallest entry point (`zod/mini`, not `zod`).
 
 ## UI
-- shadcn/ui components, WCAG 2.2 AA, plain NZ English ("Money in" / "Money out").
-- Amounts are signed, right-aligned NZD with fixed-width digits. Dates read like "Thu 8 Oct 2026".
-- Colour is never the only signal: pair it with an icon or words.
-- Use the shared building blocks rather than formatting by hand: `formatAmount`, `formatBalance`, `formatDate` and `formatInstantDate` (`src/lib/format.ts`), `Amount`, `Status`, and `ResponsiveTable` (table on wide screens, cards on narrow). `/styleguide` shows them, and the browser tests scan it.
-- Size text in `rem` so the A / A+ / A++ control scales it: body 16px at least, table text 15px at least. Interactive targets are at least 44px (`size="touch"`).
-- No sideways scrolling at 200% zoom or 320px wide. Add a new page to the zoom test in `e2e/display.spec.ts`.
-- Don't hide state in a box-shadow or fill alone: Windows high contrast removes both. Keep a border or outline.
+- shadcn/ui components and plain NZ English ("Money in" / "Money out"). The commitments (WCAG 2.2 AA, text sizes, touch targets, zoom, colour, high contrast) are in README [Accessibility](README.md#accessibility); a diff that breaks one fails review.
+- Use the shared building blocks rather than formatting by hand: `formatAmount`, `formatBalance`, `formatDate` and `formatInstantDate` (`src/lib/format.ts`), `Amount`, `Status`, and `ResponsiveTable`. `/styleguide` shows them, and the browser tests scan it.
+- Size text in `rem` so the A / A+ / A++ control scales it, and use `size="touch"` for interactive targets.
+- Add a new page to the zoom test in `e2e/display.spec.ts`.
+- Show state with a border or outline as well as a box-shadow or fill: Windows high contrast removes the latter.

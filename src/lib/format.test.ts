@@ -17,6 +17,16 @@ describe('formatAmount (a Transaction: always signed)', () => {
     expect(formatAmount(-100)).toBe('−$1.00')
     expect(formatAmount(-123456789)).toBe('−$1,234,567.89')
   })
+  it('is exact at the largest safe integer, where cents / 100 in floating point is not', () => {
+    expect(formatAmount(Number.MAX_SAFE_INTEGER)).toBe('+$90,071,992,547,409.91')
+    expect(formatAmount(-Number.MAX_SAFE_INTEGER)).toBe('−$90,071,992,547,409.91')
+    expect(formatAmount(Number.MAX_SAFE_INTEGER - 1)).toBe('+$90,071,992,547,409.90')
+    expect(formatAmount(-(2 ** 52) - 1)).toBe('−$45,035,996,273,704.97')
+  })
+  it('shows negative zero as $0.00, not −$0.00', () => {
+    expect(formatAmount(-0)).toBe('$0.00')
+    expect(formatBalance(-0)).toBe('$0.00')
+  })
   it('refuses cents that are not whole numbers, without echoing the value', () => {
     for (const bad of [12.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 60]) {
       expect(() => formatAmount(bad)).toThrow(RangeError)
@@ -51,6 +61,10 @@ describe('formatDate (an NZ calendar date such as a Transaction date)', () => {
   it('reads like "Thu 8 Oct 2026": weekday, day, month, year, no comma, no leading zero', () => {
     expect(formatDate('2026-10-08')).toBe('Thu 8 Oct 2026')
     expect(formatDate('2026-01-01')).toBe('Thu 1 Jan 2026')
+  })
+  it('writes every month the NZ way, whatever the browser would say ("Sept", never "Sep")', () => {
+    const months = Array.from({ length: 12 }, (_, i) => formatDate(`2026-${String(i + 1).padStart(2, '0')}-01`).split(' ')[2])
+    expect(months).toEqual(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'])
   })
   it('gives the right weekday across a leap day', () => {
     expect(formatDate('2028-02-29')).toBe('Tue 29 Feb 2028')

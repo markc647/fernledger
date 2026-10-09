@@ -138,6 +138,19 @@ test.describe('responsive table', () => {
     await expect(cards.first()).toContainText('−$1,111.11')
   })
 
+  test('builds each cell once, so the page has no duplicate ids, at either width', async ({ page }) => {
+    for (const width of [1024, 390]) {
+      await page.setViewportSize({ width, height: 800 })
+      await page.goto('/styleguide')
+      await expect(page.getByText('Example Supermarket')).toHaveCount(1)
+      const duplicates = await page.evaluate(() => {
+        const ids = [...document.querySelectorAll('[id]')].map((el) => el.id)
+        return ids.filter((id, i) => ids.indexOf(id) !== i)
+      })
+      expect(duplicates).toEqual([])
+    }
+  })
+
   test('shows signed NZD amounts and NZ dates, with the direction in words', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 })
     await page.goto('/styleguide')
