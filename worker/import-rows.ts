@@ -18,6 +18,13 @@ export const MAX_ROWS_PER_CHUNK = 500
  */
 export const MAX_CHUNKS = 20
 
+/**
+ * Most Import-sourced rows removed in one go when replacing imported history. A removed row costs 3 D1 writes (the
+ * row and its two indexes), so 5,000 is 15,000 of the free plan's 100k a day, leaving room for the new file (at most
+ * 10,000 rows, 30,000 writes). Larger histories are removed in steps of this size first (`/api/imports/clear-history`).
+ */
+export const REPLACE_SLICE = 5000
+
 const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 

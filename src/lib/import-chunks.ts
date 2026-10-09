@@ -9,6 +9,10 @@ export const MAX_CHUNKS: typeof WORKER_MAX_CHUNKS = 20
 /** The most rows one Import can carry. */
 export const MAX_IMPORT_ROWS = CHUNK_SIZE * MAX_CHUNKS
 
+/** How many rows are dated on or after the Cutover Date, so the preview can say how many an Import will drop. ISO dates compare as text. */
+export const countOnOrAfter = (rows: readonly BankCsvRow[], cutoverDate: string | null | undefined): number =>
+  cutoverDate ? rows.filter((row) => row.date >= cutoverDate).length : 0
+
 /**
  * Orders rows oldest first (bank unique IDs start with the date and end with a daily sequence, so ordering by
  * date then ID keeps a day's rows in the bank's order), then splits them into chunks.

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { adapters, BankCsvError, parseBankCsv, type BankCsvResult } from '@/lib/bank-csv'
 import { formatDate, formatSignedNzd } from '@/lib/format'
-import { MAX_IMPORT_ROWS } from '@/lib/import-chunks'
+import { countOnOrAfter, MAX_IMPORT_ROWS } from '@/lib/import-chunks'
 import { meQuery } from '@/lib/me'
 import { accountsQuery } from '@/lib/queries'
 import { ImportStopped, runImport, type ImportSummary } from '@/lib/run-import'
@@ -20,7 +20,7 @@ type Step =
   | { name: 'preview'; file: BankCsvResult }
   | { name: 'sending'; sent: number; total: number }
   | { name: 'done'; summary: ImportSummary }
-  | { name: 'stopped'; sent: number; total: number }
+  | { name: 'stopped'; sent: number; total: number; replacing: boolean }
 
 const PREVIEW_ROWS = 5
 const SHOWN_ERRORS = 10
@@ -48,6 +48,8 @@ function ImportFlow() {
   const queryClient = useQueryClient()
   const [step, setStep] = useState<Step>({ name: 'choose' })
   const [accountName, setAccountName] = useState('')
+  const [setCutover, setSetCutover] = useState(false)
+  const [confirmingReplace, setConfirmingReplace] = useState(false)
   const { data: accounts } = useQuery(accountsQuery)
 
   async function onFile(file: File | undefined) {
@@ -55,19 +57,26 @@ function ImportFlow() {
     try {
       setStep({ name: 'preview', file: parseBankCsv(await file.text()) })
       setAccountName('')
+      setSetCutover(false)
+      setConfirmingReplace(false)
     } catch (error) {
       // Error messages name a line or field only, never a value from the file.
       setStep({ name: 'choose', problem: error instanceof BankCsvError ? error.message : 'The file could not be read.' })
     }
   }
 
-  async function confirm(file: BankCsvResult) {
+  async function confirm(file: BankCsvResult, replaceAccountId?: number) {
     setStep({ name: 'sending', sent: 0, total: 1 })
+    const replacing = replaceAccountId !== undefined
     try {
-      const summary = await runImport(file, accountName.trim() || undefined, (sent, total) => setStep({ name: 'sending', sent, total }))
+      const summary = await runImport(
+        file,
+        { accountName: accountName.trim() || undefined, cutoverDate: setCutover ? file.dateRange.to : undefined, replaceAccountId },
+        (sent, total) => setStep({ name: 'sending', sent, total }),
+      )
       setStep({ name: 'done', summary })
     } catch (error) {
-      setStep(error instanceof ImportStopped ? { name: 'stopped', sent: error.sent, total: error.total } : { name: 'stopped', sent: 0, total: 0 })
+      setStep(error instanceof ImportStopped ? { name: 'stopped', sent: error.sent, total: error.total, replacing } : { name: 'stopped', sent: 0, total: 0, replacing })
     } finally {
       await queryClient.invalidateQueries({ queryKey: ['accounts'] })
       await queryClient.invalidateQueries({ queryKey: ['transactions'] })
@@ -101,7 +110,19 @@ function ImportFlow() {
           )}
         </div>
         {file && (
-          <Preview file={file} existingName={existing ? existing.name : undefined} accountName={accountName} onAccountName={setAccountName} onConfirm={() => void confirm(file)} onCancel={reset} />
+          <Preview
+            file={file}
+            existing={existing || undefined}
+            accountName={accountName}
+            onAccountName={setAccountName}
+            setCutover={setCutover}
+            onSetCutover={setSetCutover}
+            confirmingReplace={confirmingReplace}
+            onConfirmingReplace={setConfirmingReplace}
+            onConfirm={() => void confirm(file)}
+            onReplace={() => existing && void confirm(file, existing.id)}
+            onCancel={reset}
+          />
         )}
       </div>
     )
@@ -121,7 +142,11 @@ function ImportFlow() {
         <p role="alert" className="font-medium text-destructive">
           The Import stopped{step.total > 0 ? ` after ${step.sent} of ${step.total} parts were saved` : ''}.
         </p>
-        <p>Nothing is lost. Choose the same file again and import it: rows already saved are recognised and skipped.</p>
+        {step.replacing ? (
+          <p>The old imported history may already have been removed. Choose the same file again and use "Replace imported history" to finish: rows already saved are recognised and skipped.</p>
+        ) : (
+          <p>Nothing is lost. Choose the same file again and import it: rows already saved are recognised and skipped.</p>
+        )}
         <Button size="touch" onClick={reset}>
           Choose the file again
         </Button>
@@ -141,6 +166,14 @@ function ImportFlow() {
         <dd className="text-right tabular-nums">{step.summary.duplicates}</dd>
         <dt>Could not be read (skipped)</dt>
         <dd className="text-right tabular-nums">{step.summary.skipped}</dd>
+        <dt>On or after the Cutover Date (not imported)</dt>
+        <dd className="text-right tabular-nums">{step.summary.dropped}</dd>
+        {step.summary.removed > 0 && (
+          <>
+            <dt>Old imported Transactions removed</dt>
+            <dd className="text-right tabular-nums">{step.summary.removed}</dd>
+          </>
+        )}
       </dl>
       <div className="flex flex-wrap gap-2">
         <Link to="/transactions" className="inline-flex min-h-11 items-center rounded-lg bg-primary px-4 text-primary-foreground hover:bg-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
@@ -156,13 +189,19 @@ function ImportFlow() {
 
 function Preview(props: {
   file: BankCsvResult
-  existingName: string | undefined
+  existing: { id: number; name: string; cutoverDate: string | null } | undefined
   accountName: string
   onAccountName: (name: string) => void
+  setCutover: boolean
+  onSetCutover: (set: boolean) => void
+  confirmingReplace: boolean
+  onConfirmingReplace: (confirming: boolean) => void
   onConfirm: () => void
+  onReplace: () => void
   onCancel: () => void
 }) {
-  const { file, existingName } = props
+  const { file, existing } = props
+  const existingName = existing?.name
   const adapter = adapters.find((a) => a.id === file.adapterId)
   const count = file.rows.length
   const tooMany = count > MAX_IMPORT_ROWS
@@ -196,6 +235,8 @@ function Preview(props: {
           <p className="mt-1 text-sm text-muted-foreground">Optional. You can rename it later.</p>
         </div>
       )}
+
+      <CutoverChoice file={file} accountCutover={existing?.cutoverDate ?? null} setCutover={props.setCutover} onSetCutover={props.onSetCutover} />
 
       {file.errors.length > 0 && (
         <div>
@@ -247,10 +288,57 @@ function Preview(props: {
         <Button size="touch" disabled={count === 0 || tooMany} onClick={props.onConfirm}>
           Import {count} transactions
         </Button>
+        {existing && (
+          <Button size="touch" variant="outline" disabled={count === 0 || tooMany || props.confirmingReplace} onClick={() => props.onConfirmingReplace(true)}>
+            Replace imported history…
+          </Button>
+        )}
         <Button size="touch" variant="outline" onClick={props.onCancel}>
           Cancel
         </Button>
       </div>
+
+      {existing && props.confirmingReplace && (
+        <section role="alertdialog" aria-labelledby="replace-heading" aria-describedby="replace-text" className="max-w-xl space-y-3 rounded-lg border-2 border-foreground p-4">
+          <h3 id="replace-heading" className="text-lg font-semibold">
+            Replace the imported history of {existing.name}?
+          </h3>
+          <p id="replace-text">
+            This removes every Transaction that was imported into this Account, then imports this file in its place. Transactions that came from Sync are not touched. It can't be undone, except by importing the old files again. The Change Log records it.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="touch" autoFocus onClick={props.onReplace}>
+              Yes, replace imported history
+            </Button>
+            <Button size="touch" variant="outline" onClick={() => props.onConfirmingReplace(false)}>
+              No, keep what is there
+            </Button>
+          </div>
+        </section>
+      )}
     </section>
+  )
+}
+
+/** Tells the Admin what the Account's Cutover Date will do to this file, and offers the file's last date as the Cutover Date. */
+function CutoverChoice(props: { file: BankCsvResult; accountCutover: string | null; setCutover: boolean; onSetCutover: (set: boolean) => void }) {
+  const { file, accountCutover } = props
+  const effective = props.setCutover ? file.dateRange.to : accountCutover
+  const dropped = countOnOrAfter(file.rows, effective)
+  return (
+    <div className="max-w-xl space-y-2">
+      {accountCutover !== null && <p>This Account's Cutover Date is {formatDate(accountCutover)}. Rows dated on or after it are not imported, because they come from Sync.</p>}
+      <div className="flex items-start gap-2">
+        <input id="set-cutover" type="checkbox" className="mt-1 size-5" checked={props.setCutover} onChange={(event) => props.onSetCutover(event.target.checked)} />
+        <label htmlFor="set-cutover">
+          {accountCutover === null ? 'Set' : 'Change'} the Cutover Date to the last date in this file, {formatDate(file.dateRange.to)}. Rows dated on or after it are not imported, because they will come from Sync.
+        </label>
+      </div>
+      {effective !== null && (
+        <p role="status" className="font-medium">
+          {dropped} {dropped === 1 ? 'row' : 'rows'} in this file {dropped === 1 ? 'is' : 'are'} dated on or after {formatDate(effective)} and will not be imported.
+        </p>
+      )}
+    </div>
   )
 }

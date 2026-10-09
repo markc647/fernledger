@@ -106,7 +106,8 @@ R2 may ask for a payment method on file even within the free allowance (unconfir
 
 - **Admin and Members.** One Admin, set by email, can edit categories, rules, budgets, overrides and notes. Everyone else is a read-only Member who can view, print and export.
 - **Sync** runs once a day, after Akahu's own daily refresh. A banner shows when data was last synced and turns red after 2 days, for example when a bank connection needs reconnecting.
-- **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu covers it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003).
+- **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu covers it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003). The Admin sets it in Settings, or accepts the last date in the file when importing; an Import then skips rows dated on or after it and says how many.
+- **A bad import can be replaced.** On the Import screen, "Replace imported history" removes an account's imported Transactions, never the ones from Sync, and imports the new file in their place, after the Admin confirms. The Change Log records it.
 - **Category precedence:** a hand-set override beats a rule, which beats Akahu's suggestion. Rules apply to all history but never replace an override.
 
 ## Security and privacy

@@ -2,8 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, type ChangeEvent } from 'react'
 import { Button } from '@/components/ui/button'
+import { api } from '@/lib/api'
 import { featuresQuery } from '@/lib/features'
-import { meQuery } from '@/lib/me'
+import { formatDate } from '@/lib/format'
+import { HttpError, meQuery } from '@/lib/me'
+import { accountsQuery } from '@/lib/queries'
 import { saveSettings, SettingsRejected, settingsQuery, type Settings } from '@/lib/settings'
 
 export const Route = createFileRoute('/settings')({
@@ -19,6 +22,9 @@ const FIELD_LABELS: Record<keyof Settings, string> = {
 
 const inputStyle =
   'mt-1 block w-full min-h-11 rounded-lg border border-foreground/60 bg-background px-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring aria-invalid:border-destructive aria-invalid:border-2'
+
+const dateStyle =
+  'min-h-11 rounded-lg border border-foreground/60 bg-background px-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
 function SettingsScreen() {
   const { data: me } = useQuery(meQuery)
@@ -39,6 +45,7 @@ function AdminSettings() {
   return (
     <>
       <SettingsForm saved={settings} />
+      <CutoverDates />
       <SetupNeeded />
     </>
   )
@@ -123,6 +130,93 @@ function SettingsForm({ saved }: { saved: Settings }) {
           {rejected.length > 0
             ? `Settings weren't saved. Check: ${rejected.map((key) => FIELD_LABELS[key as keyof Settings] ?? key).join(', ')}.`
             : "Settings weren't saved. Try again."}
+        </p>
+      )}
+    </form>
+  )
+}
+
+/** Each Account's Cutover Date (ADR 0003), with a plain explanation of what it does. */
+function CutoverDates() {
+  const { data: accounts, isError } = useQuery(accountsQuery)
+  return (
+    <section aria-labelledby="cutover-dates" className="mt-10 max-w-xl">
+      <h2 id="cutover-dates" className="text-lg font-semibold">
+        Cutover Dates
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        A Cutover Date is the day an Account stops taking Transactions from imported files. Imports cover the dates before it, Sync (the daily pull from Akahu) covers it and later, and an Import skips every row dated on or after it. Setting or clearing it deletes nothing already saved. Leave it blank if the Account is not synced with Akahu. When you import a file, Fernledger offers the file's last date as the Cutover Date.
+      </p>
+      {isError ? (
+        <p role="alert" className="mt-3">
+          Fernledger couldn't load the Accounts. Reload the page to try again.
+        </p>
+      ) : !accounts ? null : accounts.length === 0 ? (
+        <p className="mt-3">There are no Accounts yet. An Account is added the first time you import a file for it.</p>
+      ) : (
+        <ul className="mt-3 space-y-5">
+          {accounts.map((account) => (
+            <li key={account.id}>
+              <CutoverForm id={account.id} name={account.name} cutoverDate={account.cutoverDate} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function CutoverForm({ id, name, cutoverDate }: { id: number; name: string; cutoverDate: string | null }) {
+  const queryClient = useQueryClient()
+  const [value, setValue] = useState(cutoverDate ?? '')
+  const save = useMutation({
+    mutationFn: async (date: string | null) => {
+      const res = await api.accounts[':id']['cutover-date'].$put({ param: { id: String(id) }, json: { cutoverDate: date } })
+      if (!res.ok) throw new HttpError(res.status)
+      return date
+    },
+    onSuccess: async (date) => {
+      setValue(date ?? '')
+      await queryClient.invalidateQueries({ queryKey: ['accounts'] })
+    },
+  })
+  const inputId = `cutover-${id}`
+  return (
+    <form
+      className="space-y-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        save.mutate(value || null)
+      }}
+    >
+      <label htmlFor={inputId} className="block font-medium">
+        Cutover Date for {name}
+      </label>
+      <p className="text-sm text-muted-foreground">{cutoverDate ? `Now ${formatDate(cutoverDate)}.` : 'None set.'}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          id={inputId}
+          type="date"
+          value={value}
+          className={dateStyle}
+          onChange={(event) => {
+            setValue(event.target.value)
+            save.reset()
+          }}
+        />
+        <Button type="submit" size="touch" disabled={save.isPending || value === (cutoverDate ?? '')}>
+          Save Cutover Date
+        </Button>
+        {cutoverDate && (
+          <Button type="button" size="touch" variant="outline" disabled={save.isPending} onClick={() => save.mutate(null)} aria-label={`Clear the Cutover Date for ${name}`}>
+            Clear
+          </Button>
+        )}
+      </div>
+      <p role="status">{save.isSuccess ? 'Cutover Date saved.' : ''}</p>
+      {save.isError && (
+        <p role="alert" className="font-medium text-destructive">
+          The Cutover Date could not be saved. Try again.
         </p>
       )}
     </form>

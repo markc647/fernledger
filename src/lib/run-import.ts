@@ -9,6 +9,19 @@ export type ImportSummary = {
   duplicates: number
   /** Rows in the file that could not be read. */
   skipped: number
+  /** Rows dated on or after the Account's Cutover Date, which are not imported. */
+  dropped: number
+  /** Imported Transactions removed first, when replacing imported history. */
+  removed: number
+}
+
+export type ImportOptions = {
+  /** Used only when the Import creates the Account. */
+  accountName?: string
+  /** Set the Account's Cutover Date to this before importing. */
+  cutoverDate?: string
+  /** Replace the imported history of this existing Account with the file. */
+  replaceAccountId?: number
 }
 
 /** The Import stopped part way: `sent` chunks of `total` were saved. Sending the same file again carries on, because rows already held are skipped. */
@@ -23,30 +36,47 @@ export class ImportStopped extends Error {
   }
 }
 
+/** Steps of clearing a very large history before the first chunk (5,000 rows each, so more than any Account will hold). */
+const MAX_CLEAR_STEPS = 40
+
 /** Sends a parsed file to the Worker one chunk at a time, in order, and adds up what each chunk reports. */
-export async function runImport(
-  file: BankCsvResult,
-  accountName: string | undefined,
-  onProgress: (sent: number, total: number) => void,
-): Promise<ImportSummary> {
+export async function runImport(file: BankCsvResult, options: ImportOptions, onProgress: (sent: number, total: number) => void): Promise<ImportSummary> {
   const chunks = planChunks(file.rows)
-  const summary: ImportSummary = { added: 0, duplicates: 0, skipped: file.errors.length }
+  const summary: ImportSummary = { added: 0, duplicates: 0, skipped: file.errors.length, dropped: 0, removed: 0 }
+  const replacing = options.replaceAccountId !== undefined
+
+  async function send(index: number, rows: (typeof chunks)[number]) {
+    return api.imports.chunks.$post({
+      json: {
+        account: { number: file.accountNumber, ...(options.accountName ? { name: options.accountName } : {}) },
+        chunk: { index, count: chunks.length },
+        file: { adapterId: file.adapterId, rowCount: file.rows.length, skipped: file.errors.length, from: file.dateRange.from, to: file.dateRange.to },
+        rows,
+        // These apply to the whole Import, so they ride on the first chunk only.
+        ...(index === 0 && options.cutoverDate ? { cutoverDate: options.cutoverDate } : {}),
+        ...(index === 0 && replacing ? { replace: true } : {}),
+      },
+    })
+  }
+
   for (const [index, rows] of chunks.entries()) {
     onProgress(index, chunks.length)
     try {
-      const res = await api.imports.chunks.$post({
-        json: {
-          account: { number: file.accountNumber, ...(accountName ? { name: accountName } : {}) },
-          chunk: { index, count: chunks.length },
-          file: { adapterId: file.adapterId, rowCount: file.rows.length, skipped: file.errors.length, from: file.dateRange.from, to: file.dateRange.to },
-          rows,
-        },
-      })
+      let res = await send(index, rows)
+      // A history too big to remove with the first chunk is cleared in steps first, then the first chunk is sent again.
+      for (let step = 0; index === 0 && replacing && res.status === 409 && step < MAX_CLEAR_STEPS; step++) {
+        const cleared = await api.imports['clear-history'].$post({ json: { accountId: options.replaceAccountId! } })
+        if (!cleared.ok) throw new HttpError(cleared.status)
+        summary.removed += (await cleared.json()).removed
+        res = await send(index, rows)
+      }
       if (!res.ok) throw new HttpError(res.status)
       const result = await res.json()
       if (!('added' in result)) throw new HttpError(res.status)
       summary.added += result.added
       summary.duplicates += result.duplicates
+      summary.dropped += result.dropped
+      summary.removed += result.removed
     } catch (error) {
       throw new ImportStopped(index, chunks.length, error)
     }
