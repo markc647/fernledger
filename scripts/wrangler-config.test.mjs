@@ -18,3 +18,11 @@ test('Workers invocation logs are off, but console logs are on', () => {
   assert.equal(config.observability?.logs?.enabled, true)
   assert.equal(config.observability?.logs?.invocation_logs, false)
 })
+
+// worker/backup.ts starts a backup when the cron that fired is exactly this string, so the two must agree.
+test('the weekly backup cron in worker/backup.ts is one of the crons in wrangler.jsonc', () => {
+  const source = readFileSync(new URL('../worker/backup.ts', import.meta.url), 'utf8')
+  const cron = source.match(/export const BACKUP_CRON = '([^']+)'/)?.[1]
+  assert.ok(cron, 'BACKUP_CRON not found')
+  assert.ok(config.triggers.crons.includes(cron))
+})
