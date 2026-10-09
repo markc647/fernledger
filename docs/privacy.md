@@ -50,7 +50,7 @@ Fernledger never deletes data automatically. It keeps everything until you run t
 | Security and encryption | Access sign-in, encrypted storage, read-only Members, Change Log ([Security](../README.md#security-and-privacy)) |
 | Transparency to Members | An in-app **About your data** page saying what's held, who sees it, where it's stored, how long it's kept and who to ask |
 | Access and correction requests | Full CSV export, and Overrides and Notes for corrections |
-| Deletion on request | Documented teardown that exports, deletes everything, and revokes the Akahu token |
+| Deletion on request | Documented teardown that exports, deletes everything, and, if you use Akahu Sync, revokes the Akahu token |
 | Breach response | A checklist in [security.md](security.md) |
 | Attorney record-keeping | Every Transaction kept with the counterparty account and references, Notes, the Change Log, and printable Reports |
 
