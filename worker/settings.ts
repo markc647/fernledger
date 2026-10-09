@@ -8,6 +8,9 @@ export const SETTING_KEYS = ['app_title', 'about_contact', 'about_retention'] as
 export type SettingKey = (typeof SETTING_KEYS)[number]
 export type Settings = Record<SettingKey, string>
 
+/** True for a Setting's key; unlike `in`, it is false for names every object has, such as `constructor`. */
+export const isSettingKey = (key: string): key is SettingKey => (SETTING_KEYS as readonly string[]).includes(key)
+
 /** What a Setting reads as until the Admin sets it. */
 export const DEFAULT_SETTINGS: Settings = { app_title: 'Fernledger', about_contact: '', about_retention: '' }
 
@@ -23,7 +26,7 @@ export const getSetting = (db: D1Database, key: SettingKey): Promise<string | nu
 export async function readSettings(db: D1Database): Promise<Settings> {
   const { results } = await db.prepare('SELECT key, value FROM settings').all<{ key: SettingKey; value: string }>()
   const settings = { ...DEFAULT_SETTINGS }
-  for (const { key, value } of results) if (key in settings) settings[key] = value
+  for (const { key, value } of results) if (isSettingKey(key)) settings[key] = value
   return settings
 }
 
@@ -38,6 +41,11 @@ export const settingsPatch = z.strictObject({
   about_retention: z.optional(text(500)),
 })
 export type SettingsPatch = z.infer<typeof settingsPatch>
+
+/** The names of the Settings a failed validation rejected, once each. Names only: the rejected values stay out of responses. */
+export const rejectedFields = (issues: readonly { path: readonly PropertyKey[] }[]): string[] => [
+  ...new Set(issues.flatMap((issue) => (typeof issue.path[0] === 'string' ? [issue.path[0]] : []))),
+]
 
 /**
  * Applies the Admin's change and logs it (before and after, for the Settings that actually changed).

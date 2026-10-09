@@ -7,7 +7,7 @@ import { FEATURES, featureStatuses } from './features'
 import { logEvent } from './log'
 import { isJson, isWrite } from './request-format'
 import { SECURITY_HEADERS } from './security-headers'
-import { readSettings, settingsPatch, updateSettings } from './settings'
+import { readSettings, rejectedFields, settingsPatch, updateSettings } from './settings'
 
 type AppEnv = { Bindings: Env; Variables: { member: Member } }
 
@@ -44,9 +44,7 @@ export const app = new Hono<AppEnv>()
     validator('json', (body, c) => {
       const parsed = z.safeParse(settingsPatch, body)
       if (parsed.success) return parsed.data
-      // Field names only: the rejected values are the Admin's own text and stay out of the response.
-      const fields = [...new Set(parsed.error.issues.flatMap((issue) => (typeof issue.path[0] === 'string' ? [issue.path[0]] : [])))]
-      return c.json({ error: 'Invalid settings', fields }, 400)
+      return c.json({ error: 'Invalid settings', fields: rejectedFields(parsed.error.issues) }, 400)
     }),
     async (c) => c.json(await updateSettings(c.env.DB, c.var.member, c.req.valid('json'))),
   )

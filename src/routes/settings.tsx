@@ -64,7 +64,11 @@ function SettingsForm({ saved }: { saved: Settings }) {
     name: key,
     value: values[key],
     'aria-invalid': invalid(key) || undefined,
-    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setValues({ ...values, [key]: event.target.value }),
+    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setValues({ ...values, [key]: event.target.value })
+      // Editing again ends the last result, so saving once more announces "Settings saved." afresh.
+      save.reset()
+    },
   })
 
   return (
@@ -88,12 +92,12 @@ function SettingsForm({ saved }: { saved: Settings }) {
         </label>
         <input {...field('app_title')} type="text" maxLength={60} className={inputStyle} aria-describedby="app_title-hint" />
         <p id="app_title-hint" className="mt-1 text-sm text-muted-foreground">
-          Shown in the header and on Reports. For example, "Mum's finances".
+          Will be shown in the header and on Reports. For example, "Mum's finances".
         </p>
       </div>
       <fieldset className="space-y-6">
         <legend className="text-lg font-semibold">About your data</legend>
-        <p className="text-sm text-muted-foreground">Every Member sees these on the About your data page.</p>
+        <p className="text-sm text-muted-foreground">Every Member will see these on the About your data page.</p>
         <div>
           <label htmlFor="about_contact" className="font-medium">
             {FIELD_LABELS.about_contact}
@@ -135,7 +139,7 @@ function SetupNeeded() {
       <h2 id="setup-needed" className="text-lg font-semibold">
         Setup needed
       </h2>
-      <p className="mt-1 text-sm text-muted-foreground">These features are switched off until you do the following. Everything else keeps working.</p>
+      <p className="mt-1 text-sm text-muted-foreground">These features are switched off until you do the following. Everything else keeps working, and an optional feature can stay off if you don't need it.</p>
       <ul className="mt-3 space-y-3">
         {off.map((feature) => (
           <li key={feature.id}>

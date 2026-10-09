@@ -1,6 +1,7 @@
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ChangeLogRow } from './changelog'
+import { DEFAULT_SETTINGS, readSettings, rejectedFields } from './settings'
 
 // Signed in through the localhost dev identity (the cookie picks the role), so these tests exercise the real guard and handlers.
 const origin = 'http://localhost:5173'
@@ -125,5 +126,26 @@ describe('PATCH /api/settings', () => {
       await logAndSettingsUntouched()
       expect(await env.DB.prepare("SELECT count(*) AS n FROM settings WHERE key LIKE '%admin%'").first('n')).toBe(0)
     })
+  })
+})
+
+describe('readSettings', () => {
+  it('ignores a stored key that is not a Setting, even one named like a built-in property', async () => {
+    await env.DB.batch(
+      ['constructor', 'toString', '__proto__', 'unknown'].map((key) => env.DB.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').bind(key, 'x')),
+    )
+    const settings = await readSettings(env.DB)
+    expect(settings).toEqual(DEFAULT_SETTINGS)
+    expect(Object.keys(settings).sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort())
+  })
+})
+
+describe('rejectedFields', () => {
+  it('names each rejected Setting once, in order, and nothing else', () => {
+    expect(rejectedFields([{ path: ['about_contact'] }, { path: ['app_title'] }, { path: ['about_contact'] }])).toEqual(['about_contact', 'app_title'])
+  })
+
+  it('skips issues that are not about one field, such as an unknown key or a body that is not an object', () => {
+    expect(rejectedFields([{ path: [] }, { path: [0] }, { path: [Symbol('x')] }])).toEqual([])
   })
 })

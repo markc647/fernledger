@@ -1,5 +1,5 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
-import { env } from 'cloudflare:workers'
+import { env, exports } from 'cloudflare:workers'
 import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
 import { AKAHU_SYNC, requireFeature } from './features'
@@ -31,6 +31,7 @@ describe('GET /api/features', () => {
       name: 'Akahu Sync',
       enabled: false,
       message:
+        'Optional: you only need this to use Akahu Sync. ' +
         'Setup needed: the Akahu app token. Add it as the Worker secret AKAHU_APP_TOKEN. ' +
         'Setup needed: the Akahu user token. Add it as the Worker secret AKAHU_USER_TOKEN.',
     })
@@ -45,7 +46,9 @@ describe('GET /api/features', () => {
   it('names only what is still missing', async () => {
     const { body } = await getFeatures('admin', { AKAHU_APP_TOKEN: APP_TOKEN })
     expect(akahu(body).enabled).toBe(false)
-    expect(akahu(body).message).toBe('Setup needed: the Akahu user token. Add it as the Worker secret AKAHU_USER_TOKEN.')
+    expect(akahu(body).message).toBe(
+      'Optional: you only need this to use Akahu Sync. Setup needed: the Akahu user token. Add it as the Worker secret AKAHU_USER_TOKEN.',
+    )
   })
 
   it('treats a blank value as missing', async () => {
@@ -67,7 +70,7 @@ describe('GET /api/features', () => {
   })
 
   it('is refused to a visitor who is not signed in', async () => {
-    const res = await worker.fetch!(new Request('https://app.test/api/features') as never, env, createExecutionContext())
+    const res = await exports.default.fetch(new Request('https://app.test/api/features'))
     expect(res.status).toBe(401)
   })
 })

@@ -21,11 +21,14 @@ export type Feature = {
   /** What a Member calls it. */
   name: string
   requires: Requirement[]
+  /** True when the product works fully without this feature (ADR 0008), so its setup is offered, not demanded. */
+  optional?: boolean
 }
 
 export const AKAHU_SYNC: Feature = {
   id: 'akahu-sync',
   name: 'Akahu Sync',
+  optional: true,
   requires: [
     { env: 'AKAHU_APP_TOKEN', what: 'the Akahu app token', how: 'Add it as the Worker secret AKAHU_APP_TOKEN.' },
     { env: 'AKAHU_USER_TOKEN', what: 'the Akahu user token', how: 'Add it as the Worker secret AKAHU_USER_TOKEN.' },
@@ -46,7 +49,9 @@ export function featureStatuses(features: Feature[], env: Env, role: Role): Feat
     const { id, name } = feature
     const missing = missingFor(feature, env)
     if (!missing.length) return { id, name, enabled: true }
-    const message = role === 'admin' ? missing.map(({ what, how }) => `Setup needed: ${what}. ${how}`).join(' ') : `${name} isn't set up yet.`
+    const setup = missing.map(({ what, how }) => `Setup needed: ${what}. ${how}`).join(' ')
+    // An optional feature says so first, so an instance that doesn't use it knows it can ignore the rest.
+    const message = role !== 'admin' ? `${name} isn't set up yet.` : feature.optional ? `Optional: you only need this to use ${name}. ${setup}` : setup
     return { id, name, enabled: false, message }
   })
 }

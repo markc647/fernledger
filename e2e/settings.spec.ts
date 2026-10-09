@@ -3,14 +3,15 @@ import type { BrowserContext } from '@playwright/test'
 import type { Role } from '../src/generated/api/auth'
 import { expect, test } from './fixtures'
 
-const origin = 'http://localhost:5199'
-const signInAs = (context: BrowserContext, role: Role) => context.addCookies([{ name: 'fernledger_dev_as', value: role, url: origin }])
+// Cookies are not scoped by port, so the dev identity needs no copy of the port from playwright.config.ts.
+const signInAs = (context: BrowserContext, role: Role) =>
+  context.addCookies([{ name: 'fernledger_dev_as', value: role, domain: 'localhost', path: '/' }])
 
 // The Settings are shared by every test and both themes, so these run one at a time (workers: 1) and each leaves the defaults behind.
-test.afterEach(async ({ context, request }) => {
+test.afterEach(async ({ context, request, baseURL }) => {
   await signInAs(context, 'admin')
   const reset = await request.patch('/api/settings', {
-    headers: { Origin: origin },
+    headers: { Origin: baseURL! },
     data: { app_title: 'Fernledger', about_contact: '', about_retention: '' },
   })
   expect(reset.ok()).toBe(true)
@@ -33,6 +34,20 @@ test('the Admin edits the app title and the About-your-data fields, and they are
   await expect(page.getByLabel('How long the data is kept')).toHaveValue('Until Mum asks us to delete it')
 })
 
+test('editing a field clears "Settings saved", so saving again announces it again', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  await page.goto('/settings')
+  const saved = page.getByRole('status').filter({ hasText: 'Settings saved' })
+  await page.getByLabel('App title').fill('Nan')
+  await page.getByRole('button', { name: 'Save settings' }).click()
+  await expect(saved).toBeVisible()
+
+  await page.getByLabel('App title').fill('Nana')
+  await expect(saved).toHaveCount(0)
+  await page.getByRole('button', { name: 'Save settings' }).click()
+  await expect(saved).toBeVisible()
+})
+
 test('a blank app title is refused, says so, and nothing is saved', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.goto('/settings')
@@ -49,6 +64,7 @@ test('the Admin is told what to set up, and how, for a feature that is switched 
   await page.goto('/settings')
   const setup = page.getByRole('region', { name: 'Setup needed' })
   await expect(setup).toContainText('Akahu Sync')
+  await expect(setup).toContainText('Optional: you only need this to use Akahu Sync.')
   await expect(setup).toContainText('Setup needed: the Akahu app token. Add it as the Worker secret AKAHU_APP_TOKEN.')
 })
 
@@ -59,7 +75,7 @@ test('the Admin is not a Setting', async ({ page, context }) => {
   await expect(page.getByLabel(/admin/i)).toHaveCount(0)
 })
 
-test('a Member cannot reach the screen, and the API refuses their write', async ({ page, context }) => {
+test('a Member cannot reach the screen, and the API refuses their write', async ({ page, context, baseURL }) => {
   await signInAs(context, 'member')
   await page.goto('/settings')
   await expect(page.getByText('Only the Admin can change settings.')).toBeVisible()
@@ -68,7 +84,7 @@ test('a Member cannot reach the screen, and the API refuses their write', async 
 
   // Sent without a body: the guard refuses before reading one, and Vite's local server then drops the next request on that connection.
   // (The body-carrying refusal is covered at the Worker boundary in worker/settings.test.ts.)
-  const write = await context.request.patch('/api/settings', { headers: { Origin: origin, 'Content-Type': 'application/json' } })
+  const write = await context.request.patch('/api/settings', { headers: { Origin: baseURL!, 'Content-Type': 'application/json' } })
   expect(write.status()).toBe(403)
 })
 
