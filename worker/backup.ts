@@ -107,11 +107,10 @@ async function readSchema(db: D1Database): Promise<{ tables: ManifestTable[]; sk
   return { tables: [...tables.values()], skipped: [...skipped.values()] }
 }
 
-// A blob has no JSON form, so it is written as {"$blob": hex}. A REAL is written with 17 significant
-// digits, which always gets the same double back (the JSON output of some SQLite versions keeps only 15).
+// A blob has no JSON form, so it is written as {"$blob": hex}.
 const cell = (column: string) => {
   const c = quote(column)
-  return `CASE typeof(${c}) WHEN 'blob' THEN json_object('$blob', hex(${c})) WHEN 'real' THEN json(printf('%!.17g', ${c})) ELSE ${c} END`
+  return `CASE WHEN typeof(${c}) = 'blob' THEN json_object('$blob', hex(${c})) ELSE ${c} END`
 }
 // A whole number above 2^53 or an infinity would be changed by JSON, so the backup refuses it.
 const unrepresentable = (column: string) => {
