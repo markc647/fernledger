@@ -90,6 +90,7 @@ await main(async () => {
 
   // 1. The final backup, downloaded and checked. If it can't be made and verified, nothing is deleted.
   let skipped = []
+  let backedUp // the manifest of the final backup, when one was taken
   if (hasDatabase) {
     try {
       if (!hasBucket) throw new ScriptError(`There is no R2 bucket "${bucket}" to take the backup into.`)
@@ -103,8 +104,9 @@ await main(async () => {
         if (different.length) {
           throw new ScriptError(`the database changed while the backup was being taken, so the backup is not all of it: ${different.join('; ')}. Stop whatever writes to the database (Sync, an Import) and run this again.`)
         }
+        backedUp = manifest
         skipped = manifest.skipped.map((s) => s.name)
-        console.log(`\nFinal backup saved in ${out}: manifest.json plus one .ndjson file per table (one JSON row per line). It matches the database row for row. Keep it somewhere private.`)
+        console.log(`\nFinal backup saved in ${out}: manifest.json plus one .ndjson file per table (one JSON row per line). Every table in the database is in it, with the same number of rows. Keep it somewhere private.`)
       } else {
         console.log(`D1 database "${database}" has no tables, so there is nothing to back up.`)
       }
@@ -134,6 +136,13 @@ await main(async () => {
   }
   if (!(await askTyped(`Type ${skipped.length ? `"${phrase}"` : `the database name (${database})`} to delete: `, phrase))) {
     throw new ScriptError('Not confirmed. Nothing was deleted.')
+  }
+  // Check again: the prompt can wait as long as you like, and anything written meanwhile is not in the backup.
+  if (hasDatabase) {
+    const different = backedUp ? liveDifferences(runner, database, backedUp) : databaseHasTables(runner, database) ? ['tables appeared in an empty database'] : []
+    if (different.length) {
+      throw new ScriptError(`The database changed after the backup was taken, so the backup is not all of it: ${different.join('; ')}. Nothing was deleted. Stop whatever writes to the database (Sync, an Import, the app) and run this again.`)
+    }
   }
 
   // 3. The deletes: the database first. If that fails, the bucket (which holds the backup) is left alone.

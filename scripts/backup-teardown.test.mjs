@@ -494,6 +494,43 @@ test('teardown refuses to delete when the database changed after the backup was 
   assert.deepEqual(account.state().buckets, ['fernledger-backups'])
 })
 
+test('teardown refuses to delete when the database changed while the confirmation was waiting', () => {
+  const account = fakeAccount()
+  // The row-count check runs once after the backup and once right after the typed name. A write lands between them.
+  const writer = `
+    const fs = require('node:fs'), path = require('node:path')
+    const real = path.join(process.env.FAKE_DIR, 'real-wrangler.cjs')
+    const args = process.argv.slice(2)
+    if (args[0] === 'd1' && args[1] === 'execute' && args.some((a) => a.includes('UNION ALL'))) {
+      const counter = path.join(process.env.FAKE_DIR, 'count-checks')
+      const n = (fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0) + 1
+      fs.writeFileSync(counter, String(n))
+      if (n === 2) {
+        const { DatabaseSync } = require('node:sqlite')
+        const db = new DatabaseSync(path.join(process.env.FAKE_DIR, 'fernledger.sqlite'))
+        db.exec("INSERT INTO settings (key, value) VALUES ('during-prompt', 'secret-prompt-value')")
+        db.close()
+      }
+    }
+    const r = require('node:child_process').spawnSync(process.execPath, [real, ...args], { stdio: 'inherit', env: process.env })
+    process.exit(r.status)
+  `
+  writeFileSync(join(account.dir, 'real-wrangler.cjs'), fakeWrangler)
+  writeFileSync(join(account.dir, 'wrangler.cjs'), writer)
+
+  const r = teardown(account, 'fernledger\n')
+
+  assert.equal(readFileSync(join(account.dir, 'count-checks'), 'utf8'), '2', 'the check ran again after the confirmation')
+  assert.equal(r.status, 1, r.out)
+  assert.match(r.out, /changed after the backup was taken/)
+  assert.match(r.out, /settings \(backup 2 rows, database 3\)/)
+  assert.match(r.out, /Nothing was deleted/)
+  assert.doesNotMatch(r.out, /secret-prompt-value/)
+  assert.deepEqual(deletes(account), [])
+  assert.deepEqual(account.state().databases, ['fernledger'])
+  assert.deepEqual(account.state().buckets, ['fernledger-backups'])
+})
+
 test('teardown refuses a table the backup could not hold unless its name is typed with the database name', () => {
   for (const [typed, goes] of [['fernledger\n', false], ['yes\n', false], ['fernledger without lookup\n', true]]) {
     const account = fakeAccount()

@@ -2,7 +2,7 @@
 // (migrations applied). It downloads and verifies every part against the manifest's checksums before it
 // writes anything, refuses a database that already holds rows or lacks a backed-up column, and checks the
 // row counts afterwards.
-// Usage: node scripts/restore.mjs <backup date, YYYY-MM-DD> [--database NAME] [--local] [--dry-run] [--yes]
+// Usage: node scripts/restore.mjs <backup date, YYYY-MM-DD, or a final backup folder, YYYY-MM-DD-final-<time>> [--database NAME] [--local] [--dry-run] [--yes]
 //   --database  restore into this D1 database instead of the one in wrangler.jsonc (for a practice run)
 //   --local     read and write Wrangler's local dev storage instead of the Cloudflare account
 //   --dry-run   does everything except load the database: downloads the backup (read-only), verifies it,
@@ -22,12 +22,15 @@ const flagValue = (name) => {
 }
 const date = args.find((a, i) => !a.startsWith('-') && args[i - 1] !== '--database')
 
+// A backup folder name under backups/: an NZ date, or a teardown's final backup (backup-run.mjs finalBackupPrefix). Nothing else, so no path separators.
+const BACKUP_FOLDER = /^\d{4}-\d{2}-\d{2}(-final-\d{8}T\d{9}Z)?$/
+
 // The rows of a `wrangler d1 execute --json` result.
 const rowsOf = (result) => (Array.isArray(result) ? (result[0]?.results ?? []) : [])
 
 await main(async () => {
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    throw new ScriptError('Usage: node scripts/restore.mjs <backup date, YYYY-MM-DD> [--database NAME] [--local] [--dry-run] [--yes]')
+  if (!date || !BACKUP_FOLDER.test(date)) {
+    throw new ScriptError('Usage: node scripts/restore.mjs <backup date, YYYY-MM-DD, or a final backup folder, YYYY-MM-DD-final-<time>> [--database NAME] [--local] [--dry-run] [--yes]')
   }
   const names = readResourceNames()
   const database = flagValue('--database') ?? names.database
