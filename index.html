@@ -5,15 +5,7 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Fernledger</title>
-    <script>
-      // Apply the saved theme before first paint so dark-mode users don't see a white flash.
-      // Mirrors src/lib/theme.ts; the key is THEME_STORAGE_KEY.
-      try {
-        var t = localStorage.getItem('fernledger-theme')
-        var dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
-        document.documentElement.classList.toggle('dark', dark)
-      } catch (e) {}
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

@@ -23,5 +23,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "worker-configuration.d.ts", "worker/env.d.ts"]
+  "include": ["src"]
 }

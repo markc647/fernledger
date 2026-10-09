@@ -45,6 +45,10 @@ Access isn't in front of the local dev server, so `DEV_USER_EMAIL` stands in for
 
 The dev server shows a "Development only" bar to switch between the Admin and a read-only Member. It works by a cookie that the Worker honours only on `localhost`, and only when `DEV_USER_EMAIL` is set. Production builds don't include the bar.
 
-**Sample data:** `npm run seed` applies the local migrations and loads made-up data into the local database. Each feature that adds tables adds its own `seed/NN-name.sql` file (numbered after the tables it needs), safe to run again, with made-up values only.
+**Sample data:** `npm run seed` applies the local migrations, then loads made-up data into the local database that `npm run dev` uses. It only ever touches the local database. The convention for seed files:
 
-**Browser tests:** `npm run test:e2e` runs Playwright with axe checks in both themes. Run `npx playwright install chromium` once first, or set `PLAYWRIGHT_CHANNEL=msedge` (or `chrome`) to use a browser you already have.
+- Each feature that adds tables adds its own `seed/NN-name.sql`. Number it after the tables it needs (ticket 8 uses `08-accounts.sql`). Files run in filename order.
+- Each file is safe to run again: `insert or replace`, or delete then insert.
+- Data is made up, following the hard rules in `AGENTS.md` (bank code 99, no real names or numbers). The secret scan checks these files too.
+
+**Browser tests:** `npm run test:e2e` builds the app and runs Playwright with axe checks in light and dark, against the production build with the real security headers. It fails on any console error or Content-Security-Policy violation. Run `npx playwright install chromium` once first, or set `PLAYWRIGHT_CHANNEL=msedge` (or `chrome`) to use a browser you already have.

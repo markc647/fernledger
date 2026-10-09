@@ -310,6 +310,16 @@ describe('local development identity', () => {
       expect((await call('/api/me', { headers: asCookie('admin') })).status).toBe(401)
     })
 
+    it('cannot be spoofed with a Host header on a non-localhost URL', async () => {
+      const res = await call('/api/me', { headers: { ...asCookie('admin'), Host: 'localhost' } })
+      expect(res.status).toBe(401)
+    })
+
+    it('works on 127.0.0.1 as on localhost', async () => {
+      const res = await callWith('http://127.0.0.1:5173/api/me', {}, { headers: asCookie('admin') })
+      expect(await res.json()).toEqual({ email: 'admin@example.com', role: 'admin' })
+    })
+
     it('is ignored when DEV_USER_EMAIL is not set, as in production', async () => {
       const res = await callWith(`${local}/api/me`, { DEV_USER_EMAIL: undefined }, { headers: asCookie('admin') })
       expect(res.status).toBe(401)

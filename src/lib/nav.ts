@@ -1,12 +1,27 @@
-import type { FileRoutesByTo } from '@/routeTree.gen'
+import type { Role } from './role'
 
-export type Role = 'admin' | 'member'
-type NavItem = { to: keyof FileRoutesByTo; label: string; adminOnly?: true }
+/**
+ * A route opts into the navigation with `staticData: { nav: { label, ... } }` in its own route file
+ * (see src/routes/settings.tsx), so adding a page never means editing a shared list.
+ * Hiding is a courtesy: the API enforces Admin-only on every request.
+ */
+export type NavMeta = {
+  label: string
+  adminOnly?: boolean
+  /** Lower comes first (default 50); ties sort alphabetically. */
+  order?: number
+}
 
-/** Add an item here when a feature's route file lands. Hiding is a courtesy: the API enforces Admin-only on every request. */
-const NAV: NavItem[] = [
-  { to: '/', label: 'Summary' },
-  { to: '/settings', label: 'Settings', adminOnly: true },
-]
+declare module '@tanstack/react-router' {
+  interface StaticDataRouteOption {
+    nav?: NavMeta
+  }
+}
+export type NavEntry<To extends string = string> = NavMeta & { to: To }
 
-export const navFor = (role: Role | undefined) => NAV.filter((item) => !item.adminOnly || role === 'admin')
+const DEFAULT_ORDER = 50
+
+export const navFor = <To extends string>(entries: NavEntry<To>[], role: Role | undefined) =>
+  entries
+    .filter((entry) => !entry.adminOnly || role === 'admin')
+    .sort((a, b) => (a.order ?? DEFAULT_ORDER) - (b.order ?? DEFAULT_ORDER) || a.label.localeCompare(b.label))

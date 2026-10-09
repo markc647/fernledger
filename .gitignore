@@ -12,3 +12,4 @@ dist/
 src/routeTree.gen.ts
 test-results/
 playwright-report/
+src/generated/

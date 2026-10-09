@@ -1,7 +1,5 @@
-// `npm run seed`: applies the local migrations, then loads made-up data into the local D1 that `npm run dev` uses.
-// Each ticket that adds tables adds its own `seed/NN-name.sql`, numbered after the tables it needs. Files run in
-// filename order and must be safe to run again (`insert or replace`, or delete-then-insert). Data is made up
-// (AGENTS.md hard rules: bank code 99, never real names or numbers). Local only: every command passes --local.
+// `npm run seed`: applies the local migrations, then loads the made-up data in seed/*.sql into the local D1.
+// The conventions for seed files are in docs/setup.md (Local development). Local only: every command passes --local.
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'

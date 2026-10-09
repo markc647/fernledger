@@ -44,7 +44,7 @@ export function ThemeToggle() {
       {OPTIONS.map(({ value, label }) => (
         <Button
           key={value}
-          size="lg"
+          size="touch"
           variant={preference === value ? 'default' : 'outline'}
           aria-pressed={preference === value}
           onClick={() => choose(value)}
