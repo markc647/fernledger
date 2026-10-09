@@ -6,7 +6,6 @@ This page sets out what Fernledger protects, what it doesn't, and what to do if 
 
 - [Threat model](#threat-model)
 - [If something goes wrong](#if-something-goes-wrong)
-- [How the code is kept safe](#how-the-code-is-kept-safe)
 
 ## Threat model
 
@@ -20,7 +19,7 @@ Each Deployer runs their own copy in their own Cloudflare account. There is no F
 | Stolen or guessed passwords | The app has no passwords. [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) handles sign-in with email one-time codes, or Google/Microsoft with MFA. |
 | A forged or missing sign-in token | The app checks Access's signed token (signature, issuer, audience) on **every** request. If configuration is missing, it refuses all requests rather than allowing them (ADR 0002). |
 | A Member changing data | Read-only by default. Only the Admin can change anything, and every change goes in the Change Log, which all Members can see. |
-| A leaked Akahu token | Akahu personal-app tokens can't make payments, so a leak exposes history, not money. Tokens are stored as encrypted Worker secrets, never in code or the database. |
+| A leaked Akahu token (if you use Akahu Sync) | Akahu personal-app tokens can't make payments, so a leak exposes history, not money. Tokens are stored as encrypted Worker secrets, never in code or the database. |
 | Interception or disk theft | Data is encrypted in transit (TLS) and at rest (D1, R2). |
 | Cross-site attacks | Changes must come from the app's own address with a JSON body. Strict security headers are set: a Content Security Policy, no framing, no referrer. |
 | Malicious spreadsheet formulas in exports | CSV cells that would run as spreadsheet formulas, such as a payee named `=HYPERLINK(…)`, are escaped. |
@@ -33,28 +32,21 @@ Each Deployer runs their own copy in their own Cloudflare account. There is no F
 - **Your Cloudflare account is the master key.** Anyone who controls it controls your data. The setup guide requires two-factor authentication on it, and as few account members as possible.
 - **Each Member's email is their key.** If someone's inbox is compromised, so is their access. Use Google or Microsoft sign-in with MFA for stronger protection.
 - **There is no app-level encryption.** We rely on Cloudflare's encryption at rest. Encrypting inside the app wouldn't add real protection, because the key would live in the same Worker as the data, and it would make search and reports much harder.
+- **Oceania is a location hint, not a residency guarantee.** Your database and backups are created in Oceania by default, but Cloudflare offers guaranteed jurisdictions only for the EU and FedRAMP (ADR 0007).
 - **Cloudflare can technically access data in your account,** as with any cloud host. See Cloudflare's [privacy policy](https://www.cloudflare.com/privacypolicy/).
 
 ## If something goes wrong
 
 If you think your deployment has been breached, the Deployer should work through this checklist:
 
-1. Revoke the Akahu token.
+1. If you use Akahu Sync, revoke the Akahu token.
 2. Change the app's secrets.
 3. Review Cloudflare Access sign-in logs.
-4. Tell Akahu, as its terms require.
+4. If you use Akahu Sync, tell Akahu, as its terms require.
 5. Check whether you must notify the Privacy Commissioner and the people affected.
 
 [privacy.md](privacy.md) explains the notification rules and Akahu's breach term, and when to get legal advice.
 
 If the problem is a vulnerability in Fernledger itself, report it privately as described in [SECURITY.md](../SECURITY.md).
 
-## How the code is kept safe
-
-- Open source, so anyone can audit it.
-- Every change goes through a pull request with automated checks:
-  - type checks and tests
-  - gitleaks secret scanning
-  - GitHub CodeQL code scanning
-- Dependabot keeps dependencies patched, and we use few of them on purpose.
-- An independent security audit runs before the first public release, and its findings and fixes will be published.
+How the code itself is kept safe is described in the [README](../README.md#how-the-code-is-kept-safe).
