@@ -8,6 +8,8 @@ export type Column<Row> = {
   cell: (row: Row) => ReactNode
   /** Right-align (money and numbers). */
   align?: 'start' | 'end'
+  /** Keep the heading on one line, for a narrow column (such as a number) that the other columns would otherwise squeeze until its heading breaks. */
+  nowrap?: boolean
 }
 
 // Tailwind's `md` breakpoint. In rem, like the CSS, so a page zoomed to 200% switches layout exactly as it did.
@@ -62,7 +64,7 @@ export function ResponsiveTable<Row>({
             <dl className="grid gap-2">
               {columns.map((column) => (
                 <div key={column.key} className="flex items-start justify-between gap-4">
-                  <dt className="text-muted-foreground">{column.header}</dt>
+                  <dt className="shrink-0 text-muted-foreground">{column.header}</dt>
                   <dd className="min-w-0 text-end break-words">{column.cell(row)}</dd>
                 </div>
               ))}
@@ -78,7 +80,7 @@ export function ResponsiveTable<Row>({
       <thead>
         <tr className="border-b-2">
           {columns.map((column) => (
-            <th key={column.key} scope="col" className={cn('px-3 py-2 font-semibold', align(column))}>
+            <th key={column.key} scope="col" className={cn('px-3 py-2 font-semibold', column.nowrap && 'whitespace-nowrap', align(column))}>
               {column.header}
             </th>
           ))}

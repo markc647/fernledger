@@ -72,7 +72,7 @@ What a Transaction is when no Override, Rule or Akahu suggestion gives it a Cate
 _Avoid_: Unassigned, unknown
 
 **Rule**:
-An Admin-defined pattern that assigns a Category to matching Transactions; it overrides Akahu's suggested category.
+An Admin-defined pattern that gives matching Transactions a Category, or marks them as Transfers. It matches on text in the description or bank memo, the bank's transaction type, and the size of the amount. Rules are checked in the order the Admin sets, and the first that matches is used. A Rule's result is stored on each new Transaction as an Import adds it. A Rule outranks Akahu's suggested category but never an Override.
 _Avoid_: Filter, mapping
 
 **Override**:
@@ -94,7 +94,7 @@ The record of every change the Admin makes: who, what and when; visible to all M
 _Avoid_: Audit trail, history
 
 **Change type**:
-The kind of thing a Change Log entry changed, such as Settings, Import, Account, Category or Transaction; Members can filter the Change Log by it. Not a Category.
+The kind of thing a Change Log entry changed, such as Settings, Import, Account, Category, Rule or Transaction; Members can filter the Change Log by it. Not a Category.
 _Avoid_: Type, kind
 
 **Report**:

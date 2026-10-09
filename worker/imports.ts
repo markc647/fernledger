@@ -5,7 +5,7 @@ import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { chunkDetail, chunkStatements, chunkSummary, replaceWouldLeaveNothing } from './import-chunk'
 import { badRowField, MAX_CHUNKS, REPLACE_SLICE, serialiseRows, type ImportRow } from './import-rows'
-import { afterTransactionsChanged } from './transactions-changed'
+import { afterTransactionsChanged, lastTransactionId } from './transactions-changed'
 import { validate } from './validate'
 
 // The browser parses the file (ADR 0004) and sends rows in chunks of about 500. Limits measured and chosen
@@ -16,9 +16,10 @@ import { validate } from './validate'
 //   one INSERT statement with one bound parameter.
 // - A bound string may be 2 MB. Row fields are length-capped (import-rows.ts); 500 worst-case rows measured 335 KB.
 // - 10 ms of CPU: reading, checking and re-serialising 500 typical rows (86 KB) measured about 1-2 ms in Node.
-// - A chunk request costs at most 7 D1 queries (find the Account, count the Import-sourced rows to replace, count the
-//   rows it already holds, then one batch of at most 4 statements: create the Account or set its Cutover Date, remove
-//   the old rows, insert the rows, write the Change Log entry), well under 50.
+// - A chunk request costs at most 9 D1 queries (find the Account, count the Import-sourced rows to replace, count the
+//   rows it already holds, find the highest Transaction ID, then one batch of at most 4 statements: create the Account
+//   or set its Cutover Date, remove the old rows, insert the rows, write the Change Log entry; then one statement to
+//   apply the Rules to the rows just added), well under 50.
 // - MAX_CHUNKS (import-rows.ts) keeps one Import within the free plan's 100k D1 row writes a day.
 // - Rows dated on or after the Account's Cutover Date are filtered out in SQL (`json_each` rows are compared there),
 //   so the Worker never loops over them.
@@ -136,6 +137,8 @@ export const imports = new Hono<AppEnv>()
         insertRows: () => db.prepare(INSERT_ROWS).bind(number, rowsJson, effectiveCutover),
       },
     )
+    // Read before the rows are written: every Transaction above it afterwards is one this chunk added, which is all the Rules apply to.
+    const afterId = await lastTransactionId(db)
     // Every chunk is its own Change Log entry, written in the same batch as its rows.
     const outcome = { accountName: name, replace: replace === true, removed: toRemove, added, dropped, index: chunk.index, count: chunk.count }
     const results = await recordChange(db, statements, {
@@ -146,7 +149,7 @@ export const imports = new Hono<AppEnv>()
       after: chunkDetail(outcome, { file, rowsInChunk: rows.length, cutoverDate: effectiveCutover, newAccount: !existing }),
     })
     const accountId = existing?.id ?? results[0]!.meta.last_row_id
-    await afterTransactionsChanged(db, { accountId })
+    await afterTransactionsChanged(db, { accountId, afterId })
     const inserted = results.at(-1)!.meta.changes
     return c.json({ accountId, added: inserted, duplicates: rows.length - dropped - inserted, dropped, removed: replace && existing ? results.at(-2)!.meta.changes : 0 })
   })

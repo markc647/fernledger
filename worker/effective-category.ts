@@ -13,12 +13,12 @@ export type CategorySource = (typeof CATEGORY_SOURCES)[number]
 export type CategorySlot = { source: CategorySource; column: string | null }
 
 /**
- * In precedence order. Rules and Akahu Sync arrive in later tickets: each gives its slot a column (`t.rule_category`,
- * `t.akahu_category`) and nothing else here changes.
+ * In precedence order. A Rule's result is stored on the Transaction when Rules are applied to it (rule-apply.ts).
+ * Akahu Sync arrives in a later ticket: it gives its slot a column (`t.akahu_category`) and nothing else here changes.
  */
 export const CATEGORY_SLOTS: readonly CategorySlot[] = [
   { source: 'override', column: 't.override_category' },
-  { source: 'rule', column: null },
+  { source: 'rule', column: 't.rule_category' },
   { source: 'akahu', column: null },
 ]
 

@@ -14,13 +14,14 @@ type Row = InferResponseType<typeof api.transactions.$get, 200>['transactions'][
 const selectStyle =
   'block min-h-11 w-full rounded-lg border border-input bg-background px-3 py-2 text-base focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring'
 
-/** The Category column: the effective Category, marked when the Admin set it by hand. */
+/** The Category column: the effective Category, marked when the Admin set it by hand (Override) or a Rule gave it. */
 function CategoryCell({ row }: { row: Row }) {
   if (row.categoryName === null) return <span className="text-muted-foreground">Uncategorised</span>
   return (
     <>
       {row.categoryName}
       {row.categorySource === 'override' && <span className="block text-muted-foreground">Override</span>}
+      {row.categorySource === 'rule' && <span className="block text-muted-foreground">Rule</span>}
     </>
   )
 }

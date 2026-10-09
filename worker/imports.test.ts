@@ -218,11 +218,16 @@ describe('chunked Imports', () => {
     const { accountId } = await viaHandler(rowsFrom(1, 2), 0)
     expect(afterTransactionsChanged).toHaveBeenCalledTimes(1)
 
+    // The hook is told the highest Transaction ID from before the chunk, so it can tell which rows the chunk added.
+    expect(afterTransactionsChanged).toHaveBeenLastCalledWith(env.DB, { accountId, afterId: 0 })
+
     await viaHandler(rowsFrom(3, 4), 1)
+    const lastId = (await env.DB.prepare('SELECT MAX(id) AS id FROM transactions').first<{ id: number }>())!.id
+    expect(lastId).toBeGreaterThan(0)
     await viaHandler(rowsFrom(3, 4), 2) // adds nothing, but the chunk still committed
 
     expect(afterTransactionsChanged).toHaveBeenCalledTimes(3)
-    expect(afterTransactionsChanged).toHaveBeenLastCalledWith(env.DB, { accountId })
+    expect(afterTransactionsChanged).toHaveBeenLastCalledWith(env.DB, { accountId, afterId: lastId })
   })
 
   it('stores the fields of a row, using the memo when the payee is empty', async () => {

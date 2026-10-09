@@ -42,7 +42,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Imports your bank's CSV exports:** years of history older than Akahu can provide, or as your regular source if you'd rather not use Akahu at all. Fernledger works without Akahu: you import a CSV each month instead of syncing.
 - **Bank Time:** a transaction's time of day is shown only when the bank actually supplied one, which is rare, because most banks give a date only. Fernledger never invents a time. It also records when Akahu first saw each transaction.
 - **Full transaction detail for record-keeping:** the counterparty's account number, card suffix, and payment particulars, code and reference. That way you can show exactly where money went.
-- **Your own categories**, from a starter list the Admin can add to, rename and remove. The Admin can override any single transaction's category and add a note, and a list of uncategorised transactions shows what's left. **Rules** that categorise automatically are planned.
+- **Your own categories**, from a starter list the Admin can add to, rename and remove. The Admin can override any single transaction's category and add a note, and a list of uncategorised transactions shows what's left. **Rules** categorise automatically: the Admin sets text to look for in the description or memo, a bank transaction type and an amount range, chooses a category (or marks the transaction as a transfer), puts the rules in order, and sees how many transactions a rule matches before saving it. Rules are used for new transactions as they're imported; applying them to existing history will ship later.
 - **Transfers between your own accounts** are detected and left out of spending.
 - **Monthly budgets** per category. Unspent amounts don't carry over, and changing a budget doesn't rewrite past months.
 - **Dashboard:** balances, net worth over time, spending by category, budget vs actual, searchable transactions.
@@ -107,8 +107,9 @@ R2 may ask for a payment method on file even within the free allowance (unconfir
 - **Admin and Members.** One Admin, set by email, can edit categories, rules, budgets, overrides and notes. Everyone else is a read-only Member who can view, print and export.
 - **Sync** runs once a day, after Akahu's own daily refresh. A banner shows when data was last synced and turns red after 2 days, for example when a bank connection needs reconnecting.
 - **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu covers it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003). The Admin sets it in Settings, or accepts the last date in the file when importing; an Import then skips rows dated on or after it and says how many. Until accounts can be linked to Akahu, any account can have one; limiting it to linked accounts will ship with that feature.
-- **A bad import can be replaced.** On the Import screen, "Replace imported history" removes an account's imported Transactions, never the ones from Sync, and imports the new file in their place, after the Admin confirms and is told how many will go. The Change Log records it. A history of more than 5,000 imported rows is removed in final steps of 5,000. Each removed or imported row costs 3 of the free plan's 100,000 database writes a day, so one day covers about 33,000 rows removed and imported together. Beyond that Fernledger stops with "Daily limit reached" and says part of the old history has been removed; choose the same file again the next day to finish.
-- **Category precedence:** a hand-set override beats a rule, which beats Akahu's suggestion. Rules apply to all history but never replace an override.
+- **A bad import can be replaced.** On the Import screen, "Replace imported history" removes an account's imported Transactions, never the ones from Sync, and imports the new file in their place, after the Admin confirms and is told how many will go. The Change Log records it. A history of more than 5,000 imported rows is removed in final steps of 5,000. Each removed or imported row costs 3 of the free plan's 100,000 database writes a day (an imported row that a rule matches costs one more), so one day covers about 33,000 rows removed and imported together, a little fewer if many match a rule. Beyond that Fernledger stops with "Daily limit reached" and says part of the old history has been removed; choose the same file again the next day to finish.
+- **Category precedence:** a hand-set override beats a rule, which beats Akahu's suggestion. A rule never replaces an override.
+- **Rules:** the first rule in the Admin's order that matches a transaction wins, and a rule whose category has been removed is skipped. Text matching ignores capitals and looks in the description and the bank's memo. A transaction type matches in full (EFTPOS, not part of it). An amount range is on the size of the amount, so $50 covers $50 in and $50 out; the rule can also be limited to money in or money out. Saving, changing, reordering or removing a rule changes no stored transaction: a rule's result is stored on each new transaction as an Import adds it, and applying rules to existing history will ship later. A rule can mark transfers instead of choosing a category; transfer pairing will ship later and will use that mark.
 
 ## Security and privacy
 
@@ -311,7 +312,8 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Database, CSV import (ASB) | In progress |
 | Akahu sync | Planned |
 | Categories, overrides and notes | Done |
-| Rules, transfers, budgets | Planned |
+| Rules for new transactions | Done |
+| Rules over existing history, transfers, budgets | Planned |
 | Dashboard | Planned |
 | Reports and export | Planned |
 | Backups and teardown | Done |
