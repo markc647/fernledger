@@ -1,4 +1,9 @@
 # Default gitleaks rules plus guards against committing real bank data.
+#
+# Each guard rule allows only the made-up bank-99 values used by the test fixtures
+# (not whole paths), so a real account number is still caught everywhere, and the
+# default secret rules still run on test/fixtures.
+# Uses [[rules.allowlists]], supported since gitleaks 8.21; gitleaks-action@v2 runs 8.24.3.
 [extend]
 useDefault = true
 
@@ -6,18 +11,25 @@ useDefault = true
 id = "nz-bank-account-number"
 description = "NZ bank account number (bank-branch-account-suffix)"
 regex = '''\d{2}[- ]\d{4}[- ]\d{7}[- ]\d{2,3}'''
+[[rules.allowlists]]
+description = "Made-up bank 99 account numbers"
+regexTarget = "match"
+regexes = ['''^99[- ]9999[- ]9999999[- ]\d{2,3}$''']
 
 [[rules]]
 id = "asb-csv-export-header"
 description = "ASB CSV export header line"
 regex = '''Bank \d{2}; Branch \d{4}; Account'''
+[[rules.allowlists]]
+description = "Made-up bank 99 export header"
+regexTarget = "match"
+regexes = ['''^Bank 99; Branch 9999; Account$''']
 
 [[rules]]
 id = "asb-account-short-form"
 description = "ASB account number in short 'Account NNNNNNN-NN' form"
 regex = '''Account \d{7}-\d{2,3}'''
-
-# Made-up fixtures (fake bank code 99) legitimately contain these shapes. This path only.
-[allowlist]
-description = "Made-up bank fixtures"
-paths = ['''^test/fixtures/''']
+[[rules.allowlists]]
+description = "Made-up account 9999999"
+regexTarget = "match"
+regexes = ['''^Account 9999999-\d{2,3}$''']

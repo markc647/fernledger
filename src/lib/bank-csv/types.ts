@@ -6,11 +6,11 @@ export interface BankCsvRow {
   tranType: string
   chequeNumber: string | null
   payee: string
-  memo: string
+  bankMemo: string
   amountCents: number
 }
 
-/** A row that could not be parsed. `line` is 1-based in the original file text. */
+/** A row that could not be parsed. Never carries field values (they are transaction data). `line` is 1-based in the original file text. */
 export interface BankCsvRowError {
   line: number
   message: string
@@ -18,7 +18,7 @@ export interface BankCsvRowError {
 
 export interface BankCsvResult {
   /** Id of the adapter that parsed the file. */
-  bank: string
+  adapterId: string
   /** Normalised `BB-bbbb-AAAAAAA-SS`. */
   accountNumber: string
   ledgerBalance: { cents: number; date: string }

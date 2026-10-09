@@ -1,29 +1,32 @@
 import { BankCsvError, type BankCsvAdapter, type BankCsvResult, type BankCsvRow, type BankCsvRowError } from './types'
 
 const COLUMN_HEADER = 'Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount'
+/** The column header sits on this (1-based) line; both `detect` and `parse` rely on it. */
+const COLUMN_HEADER_LINE = 7
+const ACCOUNT_LINE_NUMBER = 2
+
 const ACCOUNT_LINE = /^Bank (\d{2}); Branch (\d{4}); Account (\d{7})-(\d{2,3})(?:\s|$)/
 const BALANCE_LINE = /^Ledger Balance : (-?\d+(?:\.\d{1,2})?) as of (\d{8})\s*$/
 const AMOUNT = /^(-|\+)?(\d+)(?:\.(\d{1,2}))?$/
 
 const splitLines = (text: string) => text.replace(/^﻿/, '').split(/\r\n|\n|\r/)
 
-/** Pure calendar check; returns ISO `YYYY-MM-DD` or null. */
-function isoDate(y: string, m: string, d: string): string | null {
-  const year = Number(y)
-  const month = Number(m)
-  const day = Number(d)
-  const check = new Date(Date.UTC(year, month - 1, day))
-  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return null
-  return `${y}-${m}-${d}`
+/** The only date parser: `YYYYMMDD` (header) or `YYYY/MM/DD` (rows) to ISO `YYYY-MM-DD`, or null if not a real date. */
+function parseDate(text: string): string | null {
+  const parts = /^(\d{4})(\/?)(\d{2})\2(\d{2})$/.exec(text)
+  if (!parts) return null
+  const [, year, , month, day] = parts as unknown as [string, string, string, string, string]
+  const utc = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+  const isRealDate =
+    utc.getUTCFullYear() === Number(year) && utc.getUTCMonth() === Number(month) - 1 && utc.getUTCDate() === Number(day)
+  return isRealDate ? `${year}-${month}-${day}` : null
 }
 
-const compactDate = (s: string) => isoDate(s.slice(0, 4), s.slice(4, 6), s.slice(6, 8))
-
-function toCents(s: string): number | null {
-  const m = AMOUNT.exec(s)
-  if (!m) return null
-  const cents = Number(m[2]) * 100 + Number((m[3] ?? '').padEnd(2, '0'))
-  return m[1] === '-' ? -cents : cents
+function parseCents(text: string): number | null {
+  const parts = AMOUNT.exec(text)
+  if (!parts) return null
+  const magnitude = Number(parts[2]) * 100 + Number((parts[3] ?? '').padEnd(2, '0'))
+  return parts[1] === '-' && magnitude !== 0 ? -magnitude : magnitude
 }
 
 /** Splits one CSV line. Returns null if a quote is left open or text follows a closing quote. */
@@ -60,56 +63,62 @@ function splitFields(line: string): string[] | null {
   return fields
 }
 
-function parseRow(fields: string[]): BankCsvRow | string {
-  if (fields.length !== 7) return `Expected 7 columns but found ${fields.length}`
-  const [dateText, uniqueId, tranType, cheque, payee, memo, amountText] = fields.map((f) => f.trim()) as [
+type RowResult = { ok: true; row: BankCsvRow } | { ok: false; message: string }
+
+/** Error messages name the field only: values are transaction data and must not reach logs. */
+function parseRow(fields: string[]): RowResult {
+  if (fields.length !== 7) return { ok: false, message: `Expected 7 columns but found ${fields.length}` }
+  const [dateText, uniqueId, tranType, chequeNumber, payee, bankMemo, amountText] = fields.map((f) => f.trim()) as [
     string, string, string, string, string, string, string,
   ]
-  const dm = /^(\d{4})\/(\d{2})\/(\d{2})$/.exec(dateText)
-  const date = dm && isoDate(dm[1]!, dm[2]!, dm[3]!)
-  if (!date) return `Invalid date "${dateText}"`
-  if (!uniqueId) return 'Missing unique ID'
-  const amountCents = toCents(amountText)
-  if (amountCents === null) return `Invalid amount "${amountText}"`
-  return { date, uniqueId, tranType, chequeNumber: cheque || null, payee, memo, amountCents }
+  const date = parseDate(dateText)
+  if (!date || dateText.length !== 10) return { ok: false, message: 'Invalid Date' }
+  if (!uniqueId) return { ok: false, message: 'Missing Unique Id' }
+  const amountCents = parseCents(amountText)
+  if (amountCents === null) return { ok: false, message: 'Invalid Amount' }
+  return { ok: true, row: { date, uniqueId, tranType, chequeNumber: chequeNumber || null, payee, bankMemo, amountCents } }
 }
 
 function parse(text: string): BankCsvResult {
   const lines = splitLines(text)
 
-  const account = ACCOUNT_LINE.exec(lines[1] ?? '')
-  if (!account) throw new BankCsvError('Expected the ASB account line ("Bank NN; Branch NNNN; Account ...")', 2)
+  const account = ACCOUNT_LINE.exec(lines[ACCOUNT_LINE_NUMBER - 1] ?? '')
+  if (!account) {
+    throw new BankCsvError('Expected the ASB account line ("Bank NN; Branch NNNN; Account ...")', ACCOUNT_LINE_NUMBER)
+  }
 
-  const range = (index: number, label: string) => {
-    const m = new RegExp(`^${label} (\\d{8})\\s*$`).exec(lines[index] ?? '')
-    const date = m && compactDate(m[1]!)
+  const headerDate = (index: number, label: string) => {
+    const match = new RegExp(`^${label} (\\d{8})\\s*$`).exec(lines[index] ?? '')
+    const date = match && parseDate(match[1]!)
     if (!date) throw new BankCsvError(`Expected "${label} YYYYMMDD"`, index + 1)
     return date
   }
-  const from = range(2, 'From date')
-  const to = range(3, 'To date')
+  const from = headerDate(2, 'From date')
+  const to = headerDate(3, 'To date')
 
   const balance = BALANCE_LINE.exec(lines[5] ?? '')
-  const balanceDate = balance && compactDate(balance[2]!)
+  const balanceDate = balance && parseDate(balance[2]!)
   if (!balance || !balanceDate) throw new BankCsvError('Expected "Ledger Balance : N.NN as of YYYYMMDD"', 6)
 
-  if (lines[6]?.trim() !== COLUMN_HEADER) throw new BankCsvError(`Expected the column header "${COLUMN_HEADER}"`, 7)
+  if (lines[COLUMN_HEADER_LINE - 1]?.trim() !== COLUMN_HEADER) {
+    throw new BankCsvError(`Expected the column header "${COLUMN_HEADER}"`, COLUMN_HEADER_LINE)
+  }
 
   const rows: BankCsvRow[] = []
   const errors: BankCsvRowError[] = []
-  for (let i = 7; i < lines.length; i++) {
+  for (let i = COLUMN_HEADER_LINE; i < lines.length; i++) {
     const line = lines[i]!
     if (line.trim() === '') continue
     const fields = splitFields(line)
-    const row = fields ? parseRow(fields) : 'Unbalanced quotes'
-    if (typeof row === 'string') errors.push({ line: i + 1, message: row })
-    else rows.push(row)
+    const result: RowResult = fields ? parseRow(fields) : { ok: false, message: 'Unbalanced quotes' }
+    if (result.ok) rows.push(result.row)
+    else errors.push({ line: i + 1, message: result.message })
   }
 
   return {
-    bank: 'asb',
+    adapterId: 'asb',
     accountNumber: `${account[1]}-${account[2]}-${account[3]}-${account[4]}`,
-    ledgerBalance: { cents: toCents(balance[1]!)!, date: balanceDate },
+    ledgerBalance: { cents: parseCents(balance[1]!)!, date: balanceDate },
     dateRange: { from, to },
     rows,
     errors,
@@ -120,8 +129,10 @@ export const asbAdapter: BankCsvAdapter = {
   id: 'asb',
   name: 'ASB',
   detect: (text) => {
-    const head = splitLines(text).slice(0, 8)
-    return ACCOUNT_LINE.test(head[1] ?? '') && head.some((l) => l.trim() === COLUMN_HEADER)
+    const lines = splitLines(text)
+    return (
+      ACCOUNT_LINE.test(lines[ACCOUNT_LINE_NUMBER - 1] ?? '') && lines[COLUMN_HEADER_LINE - 1]?.trim() === COLUMN_HEADER
+    )
   },
   parse,
 }
