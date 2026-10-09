@@ -20,7 +20,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 - Every `/api` request is authenticated via the Access JWT and fails closed.
 - Every Admin change is written with `recordChange` (`worker/changelog.ts`), which batches it with its Change Log entry. Never write to the Change Log separately.
 - Log with `logEvent` (`worker/log.ts`), not `console`: it takes only an event name, an ID, a count and an error, which it reduces to its class.
-- Change requests need the Admin, a same-origin `Origin` and a JSON body; the guard runs before any handler, so handlers don't re-check.
+- Change requests need the Admin, a same-origin `Origin` and a JSON body; the guard runs before any handler, so handlers don't re-check. It checks the JSON content type only; each handler validates the body's shape with zod.
 
 ## Migrations
 - Files in `migrations/` are named `<ticket number × 100 + n>_<name>.sql`, n from 01 to 99, lower-case name. Ticket 8 owns `0801_…` to `0899_…`; ticket 2 owns `0201_…` to `0299_…`. Parallel tickets can't collide, and wrangler applies files in numeric order.
@@ -34,6 +34,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 ## Security and privacy
 - Every trust boundary has negative tests, not just the happy path: a wrong issuer, an expired token, a spoofed `Host`, a Member attempting a write, a missing setting (fail closed).
 - Error messages and logs identify a problem by line number, field name, ID, count or error class. They never echo a transaction value, email or token.
+- Workers invocation logs stay off in `wrangler.jsonc` (`observability.logs.invocation_logs: false`): they record request URLs and headers, including the Access email. A script test fails if it's re-enabled.
 - Secret-scan allowlists match specific fake values (bank code 99), never whole paths or whole rules.
 
 ## Tests

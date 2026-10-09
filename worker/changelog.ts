@@ -1,3 +1,5 @@
+import type { Member } from './auth'
+
 export type ChangeLogRow = {
   id: number
   /** UTC time, ISO 8601. */
@@ -11,7 +13,8 @@ export type ChangeLogRow = {
 }
 
 export type ChangeEntry = {
-  actor: string
+  /** The Member making the change; their email is recorded. */
+  actor: Member
   summary: string
   before?: unknown
   after?: unknown
@@ -28,6 +31,6 @@ export async function recordChange(db: D1Database, mutation: D1PreparedStatement
   const statements = Array.isArray(mutation) ? mutation : [mutation]
   const log = db
     .prepare('INSERT INTO change_log (actor, summary, before, after) VALUES (?, ?, ?, ?)')
-    .bind(entry.actor, entry.summary, json(entry.before), json(entry.after))
+    .bind(entry.actor.email,entry.summary, json(entry.before), json(entry.after))
   await db.batch([...statements, log])
 }

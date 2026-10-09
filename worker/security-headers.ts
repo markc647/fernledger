@@ -4,7 +4,8 @@ export const SECURITY_HEADERS: Record<string, string> = {
   'Content-Security-Policy': [
     "default-src 'none'",
     "script-src 'self'",
-    "style-src 'self'",
+    // Styles only: shadcn/Radix components set inline style attributes and <style> elements. Scripts stay strict.
+    "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
     "connect-src 'self'",

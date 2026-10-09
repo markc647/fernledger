@@ -206,6 +206,19 @@ describe('security headers', () => {
     }
   })
 
+  it('are on a 500 too', async () => {
+    const res = await callWith('https://app.test/api/me', { ACCESS_TEAM_DOMAIN: 'bad host' }, { token: await sign({ email: 'admin@example.com' }) })
+    expect(res.status).toBe(500)
+    expect(Object.fromEntries(res.headers)).toMatchObject(expected)
+  })
+
+  it('allow inline styles (UI components need them) but only scripts from the app itself', async () => {
+    const csp = (await call('/api/me')).headers.get('content-security-policy')!
+    expect(csp).toContain("style-src 'self' 'unsafe-inline'")
+    expect(csp).toContain("script-src 'self';")
+    expect(csp).not.toMatch(/script-src[^;]*unsafe/)
+  })
+
   it('forbid framing in the Content Security Policy too', async () => {
     const csp = (await call('/api/me')).headers.get('content-security-policy')
     expect(csp).toContain("frame-ancestors 'none'")

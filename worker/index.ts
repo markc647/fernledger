@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
-import { authConfigFromEnv, authenticate, devMember, isJson, isWrite, type Member } from './auth'
+import { authConfigFromEnv, authenticate, devMember, type Member } from './auth'
 import { logEvent } from './log'
+import { isJson, isWrite } from './request-format'
 import { SECURITY_HEADERS } from './security-headers'
 
 type AppEnv = { Bindings: Env; Variables: { member: Member } }
