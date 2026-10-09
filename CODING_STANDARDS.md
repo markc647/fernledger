@@ -9,10 +9,15 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 ## ADR conformance
 - A diff that contradicts an ADR in `docs/adr/` says so explicitly in its PR or commit message.
 - These ADRs are the ones most often broken in passing:
-  - **0004, free plan:** loops over Transactions run as SQL or in chunks. Writes are batched.
+  - **0004, free plan:** each invocation gets 10 ms of CPU and 50 subrequests / D1 queries. Loops over Transactions run as SQL or in chunks, and writes are batched.
+  - **0005, plain D1 SQL:** no ORM or query builder.
   - **0007, data location:** Oceania is a location hint, never "stored in Sydney" or a residency guarantee.
   - **0008, Akahu optional:** anything about Akahu (tokens, revoking, Sync) is conditional on using Akahu Sync.
   - **0009, add-only migrations.**
+
+## Structure
+- Business logic lives in pure functions with their own tests. Worker handlers stay thin: authenticate, validate, call the logic, respond.
+- Every `/api` request is authenticated via the Access JWT and fails closed.
 
 ## Docs
 - Each meaning has one home. `README.md` carries every decision for prospective users. Other docs link to README sections rather than restating them, and add only detail the README lacks.
@@ -24,8 +29,8 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 - Secret-scan allowlists match specific fake values (bank code 99), never whole paths or whole rules.
 
 ## Tests
-- Test behaviour at the seams named in spec #1. Worker tests go through the real request path (`exports.default.fetch`). Call `worker.fetch` directly only when the test must change the Worker's env.
-- Fixtures are made up and use bank code 99. See `docs/bank-formats/` for each layout.
+- Test behaviour at three seams: the Worker boundary, the bank CSV adapters, and the browser (Playwright, kept small). Worker tests go through the real request path (`exports.default.fetch`). Call `worker.fetch` directly only when the test must change the Worker's env.
+- Fixtures are made up and follow the hard rule in `AGENTS.md`. See `docs/bank-formats/` for each layout.
 - A test proves something only if it would fail when the code it protects is removed. Reviewers check this for security tests.
 
 ## Dependencies

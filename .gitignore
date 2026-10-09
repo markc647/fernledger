@@ -8,4 +8,4 @@ node_modules/
 dist/
 .wrangler/
 *.local
-.claude/
+.claude/worktrees/

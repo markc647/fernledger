@@ -2,9 +2,9 @@
 // outside the repo. Nothing else in the repo downloads or runs unverified binaries.
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 // 8.24.3 is the version gitleaks-action@v2 runs, so local and CI findings agree.
 // To upgrade: change VERSION and copy the new values from
@@ -34,7 +34,17 @@ export function verifySha256(bytes, expected) {
   if (actual !== expected) throw new Error(`Checksum mismatch: expected ${expected}, got ${actual}`)
 }
 
+
+export const binaryName = (platform = process.platform) => (platform === 'win32' ? 'gitleaks.exe' : 'gitleaks')
+
+/** The `--config <path>` argument, defaulting to the repo's .gitleaks.toml. */
+export function configFromArgs(args) {
+  const i = args.indexOf('--config')
+  return resolve(i >= 0 ? args[i + 1] : '.gitleaks.toml')
+}
+
 export function cacheRoot(platform = process.platform, env = process.env, home = homedir()) {
+  if (env.FERNLEDGER_CACHE_DIR) return env.FERNLEDGER_CACHE_DIR
   const base =
     platform === 'win32' ? (env.LOCALAPPDATA ?? join(home, 'AppData', 'Local'))
     : platform === 'darwin' ? join(home, 'Library', 'Caches')
@@ -42,14 +52,20 @@ export function cacheRoot(platform = process.platform, env = process.env, home =
   return join(base, 'fernledger')
 }
 
-/** Returns the path to the verified gitleaks binary, downloading it on first use. */
+const sha256Of = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
+
+/** Returns the path to the verified gitleaks binary, downloading it on first use or if the cached copy changed. */
 export async function ensureGitleaks() {
   const asset = assetFor(process.platform, process.arch)
   const dir = join(cacheRoot(), 'gitleaks', VERSION)
-  const bin = join(dir, process.platform === 'win32' ? 'gitleaks.exe' : 'gitleaks')
-  if (existsSync(bin)) return bin
+  const bin = join(dir, binaryName())
+  const sidecar = `${bin}.sha256` // hash of the extracted binary, recorded when we verified and extracted it
+  if (existsSync(bin)) {
+    if (existsSync(sidecar) && sha256Of(bin) === readFileSync(sidecar, 'utf8').trim()) return bin
+    console.error('Cached gitleaks failed verification; replacing it.')
+  }
 
-  console.error(`Downloading ${asset.name} (once; cached in ${dir})`)
+  console.error(`Downloading ${asset.name} (cached in ${dir})`)
   const res = await fetch(asset.url)
   if (!res.ok) throw new Error(`Download failed: ${res.status} ${asset.url}`)
   const bytes = Buffer.from(await res.arrayBuffer())
@@ -60,12 +76,13 @@ export async function ensureGitleaks() {
   try {
     writeFileSync(join(work, asset.name), bytes)
     // Windows ships bsdtar, which also reads zip. Call it by full path so Git Bash's GNU tar isn't picked up.
-    const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar'
+    const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'tar.exe') : 'tar'
     const out = spawnSync(tar, ['-xf', asset.name], { cwd: work, encoding: 'utf8' })
     if (out.status !== 0) throw new Error(`Could not extract ${asset.name}: ${out.stderr || out.error}`)
     rmSync(dir, { recursive: true, force: true })
     mkdirSync(dir, { recursive: true })
-    renameSync(join(work, process.platform === 'win32' ? 'gitleaks.exe' : 'gitleaks'), bin)
+    renameSync(join(work, binaryName()), bin)
+    writeFileSync(sidecar, sha256Of(bin))
   } finally {
     rmSync(work, { recursive: true, force: true })
   }

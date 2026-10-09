@@ -8,12 +8,10 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { ensureGitleaks } from './gitleaks.mjs'
+import { join } from 'node:path'
+import { configFromArgs, ensureGitleaks } from './gitleaks.mjs'
 
-const args = process.argv.slice(2)
-const configIndex = args.indexOf('--config')
-const config = resolve(configIndex >= 0 ? args[configIndex + 1] : '.gitleaks.toml')
+const config = configFromArgs(process.argv.slice(2))
 
 const dash = (...parts) => parts.join('-')
 const probes = [
