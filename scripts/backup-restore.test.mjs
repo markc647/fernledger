@@ -158,7 +158,7 @@ test('seed, back up, restore, compare: the restored database holds exactly what 
   const r = restore(s)
 
   assert.equal(r.status, 0, r.out)
-  assert.match(r.out, /Restored 2506 rows in 3 tables/)
+  assert.match(r.out, /Restored 2506 rows in \d+ tables/)
   assert.deepEqual(dump(s.target), dump(s.source))
   assert.equal(dump(s.target).change_log.length, 2501)
   assert.ok(r.loads.length > 3, 'change_log should have needed more than one part')

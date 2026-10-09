@@ -394,8 +394,15 @@ describe('values that cannot round-trip', () => {
 
 describe('restoring a backup', () => {
   const dump = async (db: D1Database) => {
+    // Enumerated from sqlite_master of the database being dumped, not from a list in this test, so a table that
+    // is added later or missing from the restore shows up as a difference.
+    const names = (
+      await db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name <> 'd1_migrations' ORDER BY name")
+        .all<{ name: string }>()
+    ).results.map((t) => t.name)
     const out: Record<string, unknown[]> = {}
-    for (const name of await tableNames()) out[name] = (await db.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all()).results
+    for (const name of names) out[name] = (await db.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all()).results
     return out
   }
 
