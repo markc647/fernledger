@@ -1,0 +1,11 @@
+{
+  // Playwright tests run in Node, but pass functions to the page, so they need the DOM types too.
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.e2e.tsbuildinfo",
+    "lib": ["ES2023", "DOM"],
+    "module": "esnext",
+    "moduleResolution": "bundler"
+  },
+  "include": ["playwright.config.ts", "e2e"]
+}
