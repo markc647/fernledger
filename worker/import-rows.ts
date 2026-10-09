@@ -1,6 +1,7 @@
-/** One Transaction row from a bank CSV, as the browser sends it (the shape of `BankCsvRow`, src/lib/bank-csv/types.ts). */
+/** One Transaction row from a bank CSV, as the browser sends it. The browser's `BankCsvRow` (src/lib/bank-csv/types.ts) is this type. Dates are ISO `YYYY-MM-DD` NZ dates; money is integer NZD cents. */
 export type ImportRow = {
   date: string
+  /** The bank's own unique ID for the row. */
   uniqueId: string
   tranType: string
   chequeNumber: string | null
@@ -11,10 +12,16 @@ export type ImportRow = {
 
 export const MAX_ROWS_PER_CHUNK = 500
 
+/**
+ * Chunks in one Import, so 10,000 rows. Free-plan D1 allows 100k rows written a day and a row costs 3 writes
+ * (the row, its date index, its unique index), so one Import can use at most 30k of the day's writes.
+ */
+export const MAX_CHUNKS = 20
+
 const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 
-const isRealDate = (value: unknown) => {
+export const isRealDate = (value: unknown) => {
   const parts = typeof value === 'string' ? ISO_DATE.exec(value) : null
   if (!parts) return false
   const month = Number(parts[2])
@@ -48,3 +55,9 @@ export function badRowField(rows: unknown): string | null {
   }
   return null
 }
+
+/** The chunk's rows as JSON for the database, with only the known fields: anything extra a client sent is dropped. */
+export const serialiseRows = (rows: readonly ImportRow[]) =>
+  JSON.stringify(
+    rows.map(({ date, uniqueId, tranType, chequeNumber, payee, bankMemo, amountCents }) => ({ date, uniqueId, tranType, chequeNumber, payee, bankMemo, amountCents })),
+  )

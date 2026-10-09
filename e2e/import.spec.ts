@@ -1,11 +1,7 @@
 import { AxeBuilder } from '@axe-core/playwright'
-import type { BrowserContext, Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
-import type { Role } from '../src/generated/api/auth'
-import { expect, test } from './fixtures'
-
-const signInAs = (context: BrowserContext, role: Role) =>
-  context.addCookies([{ name: 'fernledger_dev_as', value: role, url: `http://localhost:${process.env.E2E_PORT ?? 5199}` }])
+import { expect, signInAs, test } from './fixtures'
 
 const fixture = (name: string) => readFileSync(new URL(`../test/fixtures/asb/${name}`, import.meta.url), 'utf8')
 
@@ -122,6 +118,31 @@ test('a file over 500 rows is sent in chunks, one request each', async ({ page, 
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
   await expect(page.getByText('Added', { exact: true }).locator('xpath=following-sibling::dd[1]')).toHaveText('1200')
   expect(chunkRequests).toEqual([500, 500, 200])
+})
+
+test('a file with more rows than one Import can take is explained, and cannot be imported', async ({ page, context }, testInfo) => {
+  const { big } = suffixes(testInfo)
+  await signInAs(context, 'admin')
+  await page.goto('/import')
+
+  await chooseFile(page, 'huge.csv', bigFile(10_001, big))
+
+  await expect(page.getByRole('alert')).toContainText('one Import can take at most 10000')
+  await expect(page.getByRole('button', { name: 'Import 10001 transactions' })).toBeDisabled()
+  await noAxeViolations(page)
+})
+
+test('the Import screen shows no controls until the API has said the visitor is the Admin', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  await page.route('**/api/me', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await route.continue()
+  })
+  await page.goto('/import')
+
+  await expect(page.getByText('Checking who you are.')).toBeVisible()
+  await expect(page.getByLabel('Bank export file')).toHaveCount(0)
+  await expect(page.getByLabel('Bank export file')).toBeVisible({ timeout: 10_000 })
 })
 
 test('a file that is not a supported bank export is explained, not imported', async ({ page, context }) => {

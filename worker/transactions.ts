@@ -15,7 +15,7 @@ type TransactionListRow = {
   accountName: string
   date: string
   description: string
-  type: string
+  bankType: string
   amountCents: number
 }
 
@@ -29,7 +29,7 @@ export const transactions = new Hono<AppEnv>().get('/', validate('query', pageQu
     db.prepare('SELECT COUNT(*) AS total FROM transactions'),
     db
       .prepare(
-        `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.description, t.type, t.amount_cents AS amountCents
+        `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.description, t.bank_type AS bankType, t.amount_cents AS amountCents
          FROM transactions t JOIN accounts a ON a.id = t.account_id
          ORDER BY t.date DESC, t.id DESC LIMIT ? OFFSET ?`,
       )

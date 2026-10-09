@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import * as z from 'zod/mini'
+import { accountName, bankAccountNumber, normaliseAccountNumber } from './account-fields'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
-import { badRowField, type ImportRow } from './import-rows'
+import { badRowField, isRealDate, MAX_CHUNKS, serialiseRows, type ImportRow } from './import-rows'
 import { afterTransactionsChanged } from './transactions-changed'
 import { validate } from './validate'
 
@@ -14,21 +15,22 @@ import { validate } from './validate'
 //   one INSERT statement with one bound parameter.
 // - A bound string may be 2 MB. Row fields are length-capped (import-rows.ts); 500 worst-case rows measured 335 KB.
 // - 10 ms of CPU: reading, checking and re-serialising 500 typical rows (86 KB) measured about 1-2 ms in Node.
-// - A chunk request costs 2 D1 queries (find the Account, then one batch of at most 3 statements), well under 50.
-// - Free-plan D1 allows 100k rows written a day, and each index entry counts too. A row costs 3 writes (row, date
-//   index, unique index), so MAX_CHUNKS caps one Import at 30k rows, 90k writes. Duplicates write nothing.
-const MAX_CHUNKS = 60
+// - A chunk request costs 3 D1 queries (find the Account, count the rows it already holds, then one batch of at
+//   most 3 statements), well under 50.
+// - MAX_CHUNKS (import-rows.ts) keeps one Import within the free plan's 100k D1 row writes a day.
 
-const isoDate = z.string().check(z.regex(/^\d{4}-\d{2}-\d{2}$/))
+const isoDate = z.string().check(z.refine(isRealDate))
 
 const chunkRequest = z.object({
   account: z.object({
-    number: z.string().check(z.regex(/^\d{2}-\d{4}-\d{7}-\d{2,3}$/)),
+    number: bankAccountNumber,
     /** Used only when this chunk creates the Account. */
-    name: z.optional(z.string().check(z.trim(), z.minLength(1), z.maxLength(60))),
+    name: z.optional(accountName),
   }),
-  chunk: z.object({ index: z.int().check(z.minimum(0), z.maximum(MAX_CHUNKS - 1)), count: z.int().check(z.minimum(1), z.maximum(MAX_CHUNKS)) }),
-  /** About the whole file, for the Change Log entry. */
+  chunk: z
+    .object({ index: z.int().check(z.minimum(0)), count: z.int().check(z.minimum(1), z.maximum(MAX_CHUNKS)) })
+    .check(z.refine((chunk) => chunk.index < chunk.count, { path: ['index'] })),
+  /** About the whole file, for the Change Log entries. */
   file: z.object({
     adapterId: z.string().check(z.maxLength(40)),
     rowCount: z.int().check(z.minimum(0)),
@@ -36,14 +38,15 @@ const chunkRequest = z.object({
     from: isoDate,
     to: isoDate,
   }),
-  // Checked by badRowField: a schema is too slow for 500 rows within 10 ms of CPU. The custom type only carries the type.
+  // Checked by badRowField: a schema is too slow for 500 rows within 10 ms of CPU (CODING_STANDARDS.md#structure).
+  // The custom type only carries the type.
   rows: z.custom<ImportRow[]>(),
 })
 
 // `ON CONFLICT … DO NOTHING` ignores only a repeat of the bank's unique ID, unlike `OR IGNORE`, which would also
 // swallow a bad row. A repeat is a duplicate: it adds no row, so duplicates = rows sent - rows added.
 const INSERT_ROWS = `
-  INSERT INTO transactions (account_id, date, amount_cents, description, bank_memo, type, reference, source, bank_unique_id)
+  INSERT INTO transactions (account_id, date, amount_cents, description, bank_memo, bank_type, bank_reference, source, bank_unique_id)
   SELECT (SELECT id FROM accounts WHERE account_number = ?1),
          json_extract(value, '$.date'),
          json_extract(value, '$.amountCents'),
@@ -57,36 +60,48 @@ const INSERT_ROWS = `
   WHERE true
   ON CONFLICT (account_id, bank_unique_id) WHERE bank_unique_id IS NOT NULL DO NOTHING`
 
+// How many different unique IDs the chunk carries, and how many of those the Account already holds. The insert
+// adds the difference, so the chunk's Change Log entry (written in the same batch as the insert) can say so up front.
+const COUNT_NEW_ROWS = `
+  WITH incoming AS (SELECT DISTINCT json_extract(value, '$.uniqueId') AS id FROM json_each(?2))
+  SELECT COUNT(*) AS ids, COUNT(t.id) AS held
+  FROM incoming LEFT JOIN transactions t ON t.account_id = ?1 AND t.bank_unique_id = incoming.id`
+
 export const imports = new Hono<AppEnv>().post('/chunks', validate('json', chunkRequest), async (c) => {
   const { account, chunk, file, rows } = c.req.valid('json')
   const db = c.env.DB
   const badField = badRowField(rows)
   if (badField) return c.json({ error: 'Invalid request', field: badField }, 400)
 
-  const existing = await db.prepare('SELECT id, name FROM accounts WHERE account_number = ?').bind(account.number).first<{ id: number; name: string }>()
+  const number = normaliseAccountNumber(account.number)
+  const existing = await db.prepare('SELECT id, name FROM accounts WHERE account_number = ?').bind(number).first<{ id: number; name: string }>()
   if (!existing && chunk.index !== 0) return c.json({ error: 'Send the first chunk of the Import first' }, 409)
 
-  const insertRows = db.prepare(INSERT_ROWS).bind(account.number, JSON.stringify(rows))
-  let accountId = existing?.id
-  let inserted: D1Result
+  const rowsJson = serialiseRows(rows)
+  const { ids, held } = (await db.prepare(COUNT_NEW_ROWS).bind(existing?.id ?? null, rowsJson).first<{ ids: number; held: number }>())!
+  const added = ids - held
+  const name = existing?.name ?? account.name ?? number
+  const create = existing ? [] : [db.prepare('INSERT INTO accounts (account_number, name) VALUES (?, ?)').bind(number, name)]
 
-  if (chunk.index === 0) {
-    // The Import's one Change Log entry is written with its first chunk (and the Account, if the Import creates it),
-    // so an Import that stops part way is still on the record. The later chunks continue that Import.
-    const name = existing?.name ?? account.name ?? account.number
-    const create = existing ? [] : [db.prepare('INSERT INTO accounts (account_number, name) VALUES (?, ?)').bind(account.number, name)]
-    const results = await recordChange(db, [...create, insertRows], {
-      actor: c.var.member,
-      summary: `Imported ${file.rowCount} rows into ${name}`,
-      after: { adapter: file.adapterId, rows: file.rowCount, skipped: file.skipped, from: file.from, to: file.to, chunks: chunk.count, newAccount: !existing },
-    })
-    inserted = results.at(-1)!
-    accountId ??= results[0]!.meta.last_row_id
-  } else {
-    inserted = (await db.batch([insertRows]))[0]!
-  }
-
-  const added = inserted.meta.changes
-  if (chunk.index === chunk.count - 1) await afterTransactionsChanged(db, { accountId: accountId! })
-  return c.json({ accountId: accountId!, added, duplicates: rows.length - added })
+  // Every chunk is its own Change Log entry, written in the same batch as its rows, so the log says exactly what
+  // was saved even if the Import stops part way.
+  const results = await recordChange(db, [...create, db.prepare(INSERT_ROWS).bind(number, rowsJson)], {
+    actor: c.var.member,
+    summary: `Imported ${added} rows into ${name}${chunk.count > 1 ? ` (part ${chunk.index + 1} of ${chunk.count})` : ''}`,
+    after: {
+      adapter: file.adapterId,
+      part: chunk.index + 1,
+      parts: chunk.count,
+      added,
+      duplicates: rows.length - added,
+      fileRows: file.rowCount,
+      skipped: file.skipped,
+      from: file.from,
+      to: file.to,
+      newAccount: !existing,
+    },
+  })
+  const accountId = existing?.id ?? results[0]!.meta.last_row_id
+  await afterTransactionsChanged(db, { accountId })
+  return c.json({ accountId, added: results.at(-1)!.meta.changes, duplicates: rows.length - results.at(-1)!.meta.changes })
 })

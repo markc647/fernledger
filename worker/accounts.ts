@@ -1,12 +1,13 @@
 import { Hono } from 'hono'
 import * as z from 'zod/mini'
+import { accountName } from './account-fields'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { validate } from './validate'
 
 type AccountRow = { id: number; name: string; accountNumber: string }
 
-const rename = z.object({ name: z.string().check(z.trim(), z.minLength(1), z.maxLength(60)) })
+const rename = z.object({ name: accountName })
 
 export const accounts = new Hono<AppEnv>()
   .get('/', async (c) => {
@@ -22,7 +23,7 @@ export const accounts = new Hono<AppEnv>()
 
     await recordChange(db, db.prepare('UPDATE accounts SET name = ? WHERE id = ?').bind(name, id), {
       actor: c.var.member,
-      summary: `Renamed account ${account.name} to ${name}`,
+      summary: `Renamed Account ${account.name} to ${name}`,
       before: { name: account.name },
       after: { name },
     })

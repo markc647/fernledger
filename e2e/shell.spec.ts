@@ -1,10 +1,5 @@
 import { AxeBuilder } from '@axe-core/playwright'
-import type { BrowserContext } from '@playwright/test'
-import type { Role } from '../src/generated/api/auth'
-import { expect, test } from './fixtures'
-
-const signInAs = (context: BrowserContext, role: Role) =>
-  context.addCookies([{ name: 'fernledger_dev_as', value: role, url: `http://localhost:${process.env.E2E_PORT ?? 5199}` }])
+import { expect, signInAs, test } from './fixtures'
 
 const pages = [
   { role: 'admin', path: '/', heading: 'Summary' },

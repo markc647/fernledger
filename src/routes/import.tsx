@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { adapters, BankCsvError, parseBankCsv, type BankCsvResult } from '@/lib/bank-csv'
 import { formatDate, formatSignedNzd } from '@/lib/format'
+import { MAX_IMPORT_ROWS } from '@/lib/import-chunks'
 import { meQuery } from '@/lib/me'
 import { accountsQuery } from '@/lib/queries'
 import { ImportStopped, runImport, type ImportSummary } from '@/lib/run-import'
@@ -25,19 +26,20 @@ const PREVIEW_ROWS = 5
 const SHOWN_ERRORS = 10
 
 function ImportScreen() {
-  const { data: me } = useQuery(meQuery)
-  if (me && me.role !== 'admin') {
-    return (
-      <>
-        <h1 className="text-2xl font-semibold">Import</h1>
-        <p className="mt-2">Only the Admin can import files.</p>
-      </>
-    )
-  }
+  // Fails closed: the Import controls appear only once the API has said the visitor is the Admin.
+  const { data: me, isPending } = useQuery(meQuery)
   return (
     <>
       <h1 className="text-2xl font-semibold">Import</h1>
-      <ImportFlow />
+      {me?.role === 'admin' ? (
+        <ImportFlow />
+      ) : isPending ? (
+        <p role="status" className="mt-2">
+          Checking who you are.
+        </p>
+      ) : (
+        <p className="mt-2">Only the Admin can import files.</p>
+      )}
     </>
   )
 }
@@ -163,6 +165,7 @@ function Preview(props: {
   const { file, existingName } = props
   const adapter = adapters.find((a) => a.id === file.adapterId)
   const count = file.rows.length
+  const tooMany = count > MAX_IMPORT_ROWS
   return (
     <section aria-labelledby="preview-heading" className="space-y-4">
       <h2 id="preview-heading" className="text-xl font-semibold">
@@ -210,6 +213,12 @@ function Preview(props: {
         </div>
       )}
 
+      {tooMany && (
+        <p role="alert" className="font-medium text-destructive">
+          This file has {count} transactions, and one Import can take at most {MAX_IMPORT_ROWS}. Export a shorter date range from your bank and import the files one at a time.
+        </p>
+      )}
+
       {count > 0 && (
         <div className="overflow-x-auto" role="region" aria-label="First rows in this file" tabIndex={0}>
           <table className="w-full text-left">
@@ -235,7 +244,7 @@ function Preview(props: {
       )}
 
       <div className="flex flex-wrap gap-2">
-        <Button size="touch" disabled={count === 0} onClick={props.onConfirm}>
+        <Button size="touch" disabled={count === 0 || tooMany} onClick={props.onConfirm}>
           Import {count} transactions
         </Button>
         <Button size="touch" variant="outline" onClick={props.onCancel}>

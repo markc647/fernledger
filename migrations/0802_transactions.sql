@@ -9,7 +9,7 @@
 --   akahu_category, rule_category, override_category                              (Categories and Rules)
 --   transfer_pair_id                                                              (Transfers)
 --   note                                                                          (Notes)
--- `reference` holds a cheque number for an Import; Sync will store the bank's payment reference there.
+-- `bank_reference` holds a cheque number for an Import; Sync will store the bank's payment reference there.
 CREATE TABLE transactions (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   account_id     INTEGER NOT NULL REFERENCES accounts (id),
@@ -19,8 +19,8 @@ CREATE TABLE transactions (
   description    TEXT NOT NULL,
   bank_memo      TEXT NOT NULL DEFAULT '',
   -- The bank's transaction type, such as EFTPOS or TFR IN.
-  type           TEXT NOT NULL DEFAULT '',
-  reference      TEXT,
+  bank_type      TEXT NOT NULL DEFAULT '',
+  bank_reference TEXT,
   source         TEXT NOT NULL CHECK (source IN ('import', 'sync')),
   -- The bank's own unique ID, used to recognise rows an Import already holds. Unique within an Account.
   bank_unique_id TEXT
