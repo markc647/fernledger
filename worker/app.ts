@@ -5,6 +5,7 @@ import * as z from 'zod/mini'
 import { accounts } from './accounts'
 import type { AppEnv } from './app-env'
 import { authConfigFromEnv, authenticate, devMember } from './auth'
+import { categories } from './categories'
 import { changeLogList } from './changelog-list'
 import { FEATURES, featureStatuses } from './features'
 import { imports } from './imports'
@@ -52,6 +53,7 @@ export const app = new Hono<AppEnv>()
     async (c) => c.json(await updateSettings(c.env.DB, c.var.member, c.req.valid('json'))),
   )
   .route('/api/accounts', accounts)
+  .route('/api/categories', categories)
   .route('/api/change-log', changeLogList)
   .route('/api/imports', imports)
   .route('/api/transactions', transactions)

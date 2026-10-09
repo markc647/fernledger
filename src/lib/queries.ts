@@ -30,13 +30,25 @@ export const changeLogQuery = (filters: ChangeLogFilters, page: number) =>
     },
   })
 
-/** One page of Transactions, newest first. `page` is 0-based. */
-export const transactionsQuery = (page: number) =>
+/** One page of Transactions, newest first; with `uncategorised`, only those with no Category. `page` is 0-based. */
+export const transactionsQuery = (page: number, uncategorised = false) =>
   queryOptions({
-    queryKey: ['transactions', page],
+    queryKey: ['transactions', { uncategorised }, page],
     queryFn: async () => {
-      const res = await api.transactions.$get({ query: { limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) } })
+      const query: Record<string, string> = { limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) }
+      if (uncategorised) query.uncategorised = 'true'
+      const res = await api.transactions.$get({ query })
       if (!res.ok) throw new HttpError(res.status)
       return res.json()
     },
   })
+
+/** The Categories in use, by name. */
+export const categoriesQuery = queryOptions({
+  queryKey: ['categories'],
+  queryFn: async () => {
+    const res = await api.categories.$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})

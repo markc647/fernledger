@@ -25,6 +25,9 @@ const date = args.find((a, i) => !a.startsWith('-') && args[i - 1] !== '--databa
 // A backup folder name under backups/: an NZ date, or a teardown's final backup (backup-run.mjs finalBackupPrefix). Nothing else, so no path separators.
 const BACKUP_FOLDER = /^\d{4}-\d{2}-\d{2}(-final-\d{8}T\d{9}Z)?$/
 
+// Tables a migration fills with starter rows (migrations/1101_categories.sql), so a freshly migrated database holds some.
+const SEEDED_TABLES = ['categories']
+
 // The rows of a `wrangler d1 execute --json` result.
 const rowsOf = (result) => (Array.isArray(result) ? (result[0]?.results ?? []) : [])
 
@@ -75,7 +78,11 @@ await main(async () => {
     if (lacking.length) throw new ScriptError(`Database "${database}" lacks ${lacking.join(', ')}, which the backup has. It is on an older schema: apply the migrations first.`)
     const countSql = manifest.tables.map((t) => `SELECT '${t.name.replaceAll("'", "''")}' AS name, count(*) AS n FROM ${quote(t.name)}`).join(' UNION ALL ')
     const counts = () => new Map(query(countSql).map((r) => [r.name, r.n]))
-    const notEmpty = [...counts()].filter(([, n]) => n !== 0).map(([name]) => name)
+    // A migration may seed a table (the starter Categories), so a freshly migrated database isn't quite empty. If every other
+    // table is empty, nothing the Admin did can be in the seeded ones (any Admin change leaves a Change Log row), so they hold
+    // only the seed and the restore replaces them with the backup's own rows.
+    const notEmpty = [...counts()].filter(([name, n]) => n !== 0 && !SEEDED_TABLES.includes(name)).map(([name]) => name)
+    const clearSeeded = manifest.tables.filter((t) => SEEDED_TABLES.includes(t.name) && counts().get(t.name) !== 0).map((t) => t.name)
     if (notEmpty.length) {
       throw new ScriptError(`Database "${database}" already has rows in ${notEmpty.join(', ')}. Restore into an empty database; nothing was changed.`)
     }
@@ -100,6 +107,12 @@ await main(async () => {
     }
     console.log(`Verified ${files.length} parts against the manifest.`)
 
+    if (clearSeeded.length) {
+      const clearFile = join(work, 'clear-seeded.sql')
+      writeFileSync(clearFile, clearSeeded.map((name) => `DELETE FROM ${quote(name)};`).join('\n') + '\n')
+      console.log(`${dryRun ? 'Would clear' : 'Clearing'} the starter rows in ${clearSeeded.join(', ')}, which the backup replaces`)
+      loader.run(['d1', 'execute', database, ...where, '--file', clearFile])
+    }
     for (const [i, file] of files.entries()) {
       console.log(`${dryRun ? 'Would load' : 'Loading'} part ${i + 1} of ${files.length}`)
       loader.run(['d1', 'execute', database, ...where, '--file', file])

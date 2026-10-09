@@ -53,6 +53,8 @@ describe('GET /api/change-log', () => {
       { id: 'settings', label: 'Settings' },
       { id: 'account', label: 'Account' },
       { id: 'import', label: 'Import' },
+      { id: 'category', label: 'Category' },
+      { id: 'transaction', label: 'Transaction' },
     ])
   })
 

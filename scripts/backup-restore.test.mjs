@@ -149,7 +149,7 @@ function restore(s, args = ['2026-10-12', '--database', 'target', '--local'], en
 
 const dump = (db) =>
   Object.fromEntries(
-    ['settings', 'change_log', 'odd'].map((t) => [t, db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all().map((r) => ({ ...r }))]),
+    ['settings', 'change_log', 'categories', 'odd'].map((t) => [t, db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all().map((r) => ({ ...r }))]),
   )
 
 test('seed, back up, restore, compare: the restored database holds exactly what was backed up', async () => {
@@ -158,9 +158,10 @@ test('seed, back up, restore, compare: the restored database holds exactly what 
   const r = restore(s)
 
   assert.equal(r.status, 0, r.out)
-  assert.match(r.out, /Restored 2506 rows in \d+ tables/)
+  assert.match(r.out, /Restored 2528 rows in \d+ tables/)
   assert.deepEqual(dump(s.target), dump(s.source))
   assert.equal(dump(s.target).change_log.length, 2501)
+  assert.equal(dump(s.target).categories.length, 22, 'the starter Categories are replaced by the backup rows, not added to')
   assert.ok(r.loads.length > 3, 'change_log should have needed more than one part')
 })
 
@@ -171,7 +172,7 @@ test('restore --dry-run downloads and verifies the backup, prints the loads it w
 
   assert.equal(r.status, 0, r.out)
   assert.match(r.out, /\$ npx wrangler r2 object get fernledger-backups\/backups\/2026-10-12\/manifest\.json/)
-  assert.match(r.out, /Verified 5 parts/)
+  assert.match(r.out, /Verified 6 parts/)
   assert.match(r.out, /\$ npx wrangler d1 execute target --local --file /)
   assert.match(r.out, /Dry run only/)
   assert.ok(r.calls.some((c) => c[0] === 'r2'), 'a dry run downloads')
