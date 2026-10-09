@@ -15,7 +15,8 @@
     "scan:selftest": "node scripts/scan-selftest.mjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run test:scripts && npm run migrations:check && npm run scan && npm run scan:selftest",
     "prepare": "node scripts/install-hooks.mjs",
-    "deploy": "npm run build && wrangler deploy",
+    "setup": "node scripts/setup.mjs",
+    "deploy": "node scripts/deploy.mjs",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
