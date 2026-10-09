@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { formatDate, formatSignedNzd } from '@/lib/format'
+import { formatDate, formatAmount } from '@/lib/format'
 import { meQuery } from '@/lib/me'
 import { PAGE_SIZE, transactionsQuery } from '@/lib/queries'
 
@@ -34,7 +34,7 @@ function Transactions() {
         </p>
       ) : (
         <>
-          <div className="mt-4 overflow-x-auto" role="region" aria-label="Transactions table" tabIndex={0}>
+          <div className="relative mt-4 overflow-x-auto" role="region" aria-label="Transactions table" tabIndex={0}>
             <table className="w-full text-left">
               <caption className="sr-only">Transactions, newest first</caption>
               <thead>
@@ -53,7 +53,7 @@ function Transactions() {
                     <td className="py-2 pe-4">{t.description}</td>
                     <td className={`py-2 text-right whitespace-nowrap tabular-nums ${t.amountCents > 0 ? 'text-emerald-700 dark:text-emerald-400' : ''}`}>
                       <span className="sr-only">{t.amountCents > 0 ? 'Money in ' : t.amountCents < 0 ? 'Money out ' : ''}</span>
-                      {formatSignedNzd(t.amountCents)}
+                      {formatAmount(t.amountCents)}
                     </td>
                   </tr>
                 ))}
