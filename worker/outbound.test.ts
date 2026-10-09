@@ -44,7 +44,8 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
 
 // Every route the app declares, as Hono lists them, with the request that exercises it. A route added without an entry
 // here fails 'exercises every route the app declares' below, so a new route can't escape this test.
-type Exercise = { route: string; path: (accountId: number) => string; opts?: { method?: string; body?: unknown } }
+type Opts = { method?: string; body?: unknown }
+type Exercise = { route: string; path: (accountId: number) => string; opts?: Opts | ((accountId: number) => Opts) }
 const EXERCISES: Exercise[] = [
   // First: it creates the Account that the PATCH below renames.
   { route: 'POST /api/imports/chunks', path: () => '/api/imports/chunks', opts: { method: 'POST', body: {
@@ -53,6 +54,9 @@ const EXERCISES: Exercise[] = [
       file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-01', to: '2026-10-31' },
       rows: [{ date: '2026-10-01', uniqueId: 'ID1', tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SHOP', bankMemo: 'EFTPOS', amountCents: -1000 }],
     } } },
+  { route: 'GET /api/imports/imported/:accountId', path: (id) => `/api/imports/imported/${id}` },
+  { route: 'PUT /api/accounts/:id/cutover-date', path: (id) => `/api/accounts/${id}/cutover-date`, opts: { method: 'PUT', body: { cutoverDate: '2026-11-01' } } },
+  { route: 'POST /api/imports/clear-history', path: () => '/api/imports/clear-history', opts: (id) => ({ method: 'POST', body: { accountId: id } }) },
   { route: 'GET /api/me', path: () => '/api/me' },
   { route: 'GET /api/settings', path: () => '/api/settings' },
   { route: 'GET /api/features', path: () => '/api/features' },
@@ -79,7 +83,7 @@ describe('outbound calls', () => {
   it('makes none from any route, signed in as the Admin', async () => {
     let accountId = 0
     for (const { route, path, opts } of EXERCISES) {
-      const res = await call(path(accountId), opts)
+      const res = await call(path(accountId), typeof opts === 'function' ? opts(accountId) : opts)
       if (route === 'POST /api/imports/chunks') {
         expect(res.status).toBe(200)
         accountId = ((await (await call('/api/accounts')).json()) as { id: number }[])[0].id

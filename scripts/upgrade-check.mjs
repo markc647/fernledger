@@ -135,6 +135,9 @@ export function checkUpstream({ upstream, bodyFile, currentVersion, exec = execu
  * and a plain push on the next run would be a non-fast-forward every time. Returns { opened, reason }.
  */
 export function openPullRequest({ repoDir, source, tag, branch, base, title, bodyFile, exec = execute }) {
+  // Checked before anything touches git: `switch -C` resets the named branch and `push --force` overwrites it.
+  if (!parseTag(tag)) throw new Error(`"${tag}" is not a release tag (vMAJOR.MINOR.PATCH)`)
+  if (branch !== `fernledger-update/${tag}`) throw new Error(`"${branch}" is not the update branch for ${tag} (fernledger-update/${tag})`)
   const existing = exec('gh', ['pr', 'list', '--state', 'all', '--head', branch, '--json', 'number', '--jq', 'length'], { cwd: repoDir })
   if (existing.status !== 0) throw new Error(`could not list pull requests: ${firstLine(existing.stderr)}`)
   if (existing.stdout.trim() !== '0') return { opened: false, reason: `a pull request for ${tag} already exists (open, merged or closed)` }

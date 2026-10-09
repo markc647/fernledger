@@ -340,6 +340,24 @@ test('a re-run after GitHub refused the pull request force-pushes the branch it 
   assert.notEqual(git(remote, 'rev-parse', 'fernledger-update/v1.3.0').trim(), first, 'the branch was replaced, which a plain push would have refused')
 })
 
+test('open refuses a branch that is not fernledger-update/<tag> or a tag that is not a plain release, before switching or pushing anything', () => {
+  const { copy, remote, options } = copyWithRemote()
+  const gh = fakeGh()
+  const branches = () => git(copy, 'branch', '--format=%(refname:short)').trim()
+  const before = branches()
+
+  for (const branch of ['main', 'fernledger-update/v9.9.9', 'other/v1.3.0']) {
+    assert.throws(() => openPullRequest({ ...options, branch, exec: gh.exec }), /not the update branch/)
+  }
+  for (const tag of ['main', '--upload-pack=x', 'v1.3.0-rc.1', 'v1.3']) {
+    assert.throws(() => openPullRequest({ ...options, tag, branch: `fernledger-update/${tag}`, exec: gh.exec }), /release tag/)
+  }
+
+  assert.equal(gh.calls.length, 0)
+  assert.equal(branches(), before)
+  assert.equal(git(remote, 'branch', '--format=%(refname:short)').trim(), 'main')
+})
+
 test('check reads the latest release with gh: none yet is fine, any other failure is an error', () => {
   const bodyFile = join(tempDir(), 'body.md')
   const gh = (result) => (command, args) => {
