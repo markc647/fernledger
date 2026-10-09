@@ -100,6 +100,9 @@ test.describe('zoom', () => {
           await page.goto(path)
           await sizeButton(page, size).click()
           await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+          // Measure only once the size is applied and the buttons have finished their width transition.
+          await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
           const { scrollWidth, clientWidth } = await page.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
@@ -108,6 +111,28 @@ test.describe('zoom', () => {
         })
       }
     }
+  }
+
+  // The Admin's full navigation is the widest header. The per-page test above covers it only incidentally,
+  // so this one names the case: nothing in the header may push the page wider than the 320px viewport.
+  for (const path of ['/', '/settings']) {
+    test(`the header with the Admin's full navigation fits 320px at text size A++ on ${path}`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.setViewportSize({ width: 320, height: 256 })
+      await page.goto(path)
+      await sizeButton(page, 'A++').click()
+      // Measure only once the larger size is applied and the buttons have finished their width transition.
+      await expect(page.locator('html')).toHaveAttribute('data-text-size', 'a-plus-plus')
+      await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+      const nav = page.getByRole('navigation', { name: 'Main' })
+      await expect(nav.getByRole('link', { name: 'Settings' })).toBeVisible()
+      await expect(nav.getByRole('link', { name: 'Change Log' })).toBeVisible()
+      const { scrollWidth, innerWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth: window.innerWidth,
+      }))
+      expect(scrollWidth).toBeLessThanOrEqual(innerWidth)
+    })
   }
 
   // The Import screen with a file chosen and the "Replace imported history" question open: the longest text it shows.
@@ -135,15 +160,13 @@ test.describe('zoom', () => {
         await page.getByLabel('Bank export file').setInputFiles({ name: 'zoom.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
         await page.getByRole('button', { name: 'Replace imported history…' }).click()
         await expect(page.getByRole('alertdialog')).toContainText('removed in steps of 5,000')
-        // The page's own content, not the header: with every link of the Admin's navigation showing, the header is 4px
-        // too wide at 320px and text size A++ (a ticket 04 layout issue the other zoom tests don't reach, since they
-        // don't wait for the navigation to load).
-        const overflow = await page.evaluate(() => {
-          const main = document.querySelector('main')!
-          const edge = document.documentElement.clientWidth
-          return { main: main.scrollWidth - main.clientWidth, wide: [...main.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > edge).length }
-        })
-        expect(overflow).toEqual({ main: 0, wide: 0 })
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
       })
     }
   }

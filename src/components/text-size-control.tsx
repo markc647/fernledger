@@ -19,7 +19,7 @@ export function TextSizeControl() {
   }
 
   return (
-    <div role="group" aria-label="Text size" className="flex gap-1">
+    <div role="group" aria-label="Text size" className="flex flex-wrap gap-1">
       {TEXT_SIZES.map(({ value, label }) => (
         <Button
           key={value}
