@@ -31,7 +31,7 @@ const sign = (claims: Record<string, unknown>, opts: SignOptions = {}) =>
     .setExpirationTime(opts.exp ?? '5m')
     .sign(opts.key ?? signingKey)
 
-type CallOptions = { token?: string; method?: string; headers?: Record<string, string>; origin?: string }
+type CallOptions = { token?: string; method?: string; headers?: Record<string, string>; origin?: string; body?: string }
 
 /**
  * Goes through the Worker's exported handler with the env configured in vitest.config.ts.
@@ -40,7 +40,7 @@ type CallOptions = { token?: string; method?: string; headers?: Record<string, s
  */
 async function call(path: string, opts: CallOptions = {}) {
   const headers = { ...opts.headers, ...(opts.token ? { 'Cf-Access-Jwt-Assertion': opts.token } : {}) }
-  return exports.default.fetch(new Request(`${opts.origin ?? 'https://app.test'}${path}`, { method: opts.method ?? 'GET', headers }))
+  return exports.default.fetch(new Request(`${opts.origin ?? 'https://app.test'}${path}`, { method: opts.method ?? 'GET', headers, body: opts.body }))
 }
 
 /** Calls the Worker's fetch handler directly, only for cases that change the Worker's settings or origin. */
@@ -118,15 +118,127 @@ describe('Access verification on /api', () => {
   })
 })
 
+/** A change request from the Admin that satisfies every guard unless an option breaks one. */
+async function adminWrite(opts: CallOptions = {}) {
+  return call('/api/nothing-here', {
+    method: 'POST',
+    token: await sign({ email: 'admin@example.com' }),
+    body: '{}',
+    headers: { Origin: 'https://app.test', 'Content-Type': 'application/json' },
+    ...opts,
+  })
+}
+
 describe('read-only Members', () => {
   it('refuses change requests from a Member', async () => {
     const res = await call('/api/me', { method: 'POST', token: await sign({ email: 'sib@example.com' }) })
     expect(res.status).toBe(403)
   })
 
-  it('lets the Admin past the write check', async () => {
-    const res = await call('/api/me', { method: 'POST', token: await sign({ email: 'admin@example.com' }) })
-    expect(res.status).not.toBe(403)
+  it('lets the Admin past the write checks with the right Origin and a JSON body', async () => {
+    // No route exists for this path, so a 404 means every guard let the request through.
+    expect((await adminWrite()).status).toBe(404)
+  })
+})
+
+describe('change requests', () => {
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'])('are accepted from the Admin on %s', async (method) => {
+    expect((await adminWrite({ method })).status).toBe(404)
+  })
+
+  it('accept a JSON content type with parameters', async () => {
+    const headers = { Origin: 'https://app.test', 'Content-Type': 'application/json; charset=utf-8' }
+    expect((await adminWrite({ headers })).status).toBe(404)
+  })
+
+  it('are refused when the Origin is another site', async () => {
+    const res = await adminWrite({ headers: { Origin: 'https://evil.test', 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(403)
+  })
+
+  it.each(['https://app.test.evil.test', 'http://app.test', 'https://app.test:8443', 'null'])('are refused when the Origin is %s', async (origin) => {
+    const res = await adminWrite({ headers: { Origin: origin, 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(403)
+  })
+
+  it('are refused when there is no Origin', async () => {
+    expect((await adminWrite({ headers: { 'Content-Type': 'application/json' } })).status).toBe(403)
+  })
+
+  it.each(['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data; boundary=x', 'application/jsonx', ''])('are refused with content type "%s"', async (contentType) => {
+    const headers: Record<string, string> = { Origin: 'https://app.test' }
+    if (contentType) headers['Content-Type'] = contentType
+    expect((await adminWrite({ headers })).status).toBe(415)
+  })
+
+  it('still refuse a Member even with the right Origin and a JSON body', async () => {
+    const res = await adminWrite({ token: await sign({ email: 'sib@example.com' }) })
+    expect(res.status).toBe(403)
+  })
+
+  it('do not apply to reads', async () => {
+    const res = await call('/api/me', { token: await sign({ email: 'admin@example.com' }), headers: { Origin: 'https://evil.test' } })
+    expect(res.status).toBe(200)
+  })
+})
+
+describe('security headers', () => {
+  const expected = {
+    'content-security-policy': expect.stringContaining("default-src 'none'"),
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+  }
+
+  it('are on a successful response', async () => {
+    const res = await call('/api/me', { token: await sign({ email: 'sib@example.com' }) })
+    expect(Object.fromEntries(res.headers)).toMatchObject(expected)
+  })
+
+  it('are on a 401, a 404 and a refused change', async () => {
+    const token = await sign({ email: 'sib@example.com' })
+    for (const res of [
+      await call('/api/me'),
+      await call('/api/nothing-here', { token }),
+      await call('/api/me', { method: 'POST', token }),
+    ]) {
+      expect(Object.fromEntries(res.headers)).toMatchObject(expected)
+    }
+  })
+
+  it('forbid framing in the Content Security Policy too', async () => {
+    const csp = (await call('/api/me')).headers.get('content-security-policy')
+    expect(csp).toContain("frame-ancestors 'none'")
+  })
+})
+
+describe('logging', () => {
+  it('never contains an email, token or transaction text, even when a request fails', async () => {
+    const logged: string[] = []
+    for (const level of ['log', 'info', 'warn', 'error', 'debug'] as const)
+      vi.spyOn(console, level).mockImplementation((...args) => void logged.push(args.map(String).join(' ')))
+    try {
+      const adminToken = await sign({ email: 'admin@example.com' })
+      const memberToken = await sign({ email: 'sib@example.com' })
+      const body = JSON.stringify({ bankMemo: 'COUNTDOWN 12.34 FROM mum@leak.test' })
+      const headers = { Origin: 'https://app.test', 'Content-Type': 'application/json' }
+      await call('/api/me', { token: adminToken })
+      await call('/api/me', { token: 'forged.token.value' })
+      await call('/api/me', { method: 'POST', token: memberToken, headers, body })
+      await call('/api/nothing-here', { method: 'POST', token: adminToken, headers, body })
+      await call('/api/nothing-here', { method: 'POST', token: adminToken, headers: { Origin: 'https://evil.test' }, body })
+      // A request that blows up: the error's own message echoes its input, which must not reach the logs.
+      const crash = await callWith('https://app.test/api/me', { ACCESS_TEAM_DOMAIN: 'secret@leak.test bad host' }, { token: adminToken })
+      expect(crash.status).toBe(500)
+
+      const output = logged.join(' ')
+      expect(output).toContain('request.failed') // the failure is logged by event name and error class only
+      expect(output).toContain('TypeError')
+      for (const secret of ['@', adminToken, memberToken, 'forged.token.value', 'COUNTDOWN', '12.34', 'leak.test', 'bad host'])
+        expect(output).not.toContain(secret)
+    } finally {
+      vi.restoreAllMocks()
+    }
   })
 })
 

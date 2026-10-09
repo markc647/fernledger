@@ -59,3 +59,5 @@ export function devMember(request: Request, env: Env): Member | null {
 }
 
 export const isWrite = (method: string) => !['GET', 'HEAD', 'OPTIONS'].includes(method)
+
+export const isJson = (contentType: string | undefined) => contentType?.split(';')[0]?.trim().toLowerCase() === 'application/json'
