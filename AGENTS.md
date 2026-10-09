@@ -9,7 +9,8 @@ Self-hosted NZ bank-account tracker on Cloudflare Workers (free plan) + D1 + R2,
 - `docs/bank-formats/`: bank CSV layouts, with made-up examples. Real exports never enter this repo.
 
 ## Before reporting work done
-- Run `npm run check` (lint, typecheck, tests, secret scan). It's green when it exits 0.
+- Run `npm run check` (lint, typecheck, tests, script tests, secret scan and its self-test). It's green when it exits 0. The first scan downloads a pinned, checksum-verified gitleaks into your user cache.
+- `npm install` points git at `.githooks/`, whose pre-commit hook runs lint, typecheck and a staged-files secret scan.
 
 ## Hard rules
 - This repo is public. Data in it is made up (bank code 99 fixtures). Cloudflare resource IDs, names, emails and real account numbers stay out of it.
