@@ -295,13 +295,13 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Milestone | Status |
 |---|---|
 | Design, decisions, glossary | Done |
-| Skeleton, CI, sign-in and roles | In progress |
-| Database, CSV import (ASB) | Planned |
+| Skeleton, CI, sign-in and roles, guardrails, setup and deploy scripts | Done |
+| Database, CSV import (ASB) | In progress |
 | Akahu sync | Planned |
 | Categories, rules, transfers, budgets | Planned |
 | Dashboard | Planned |
 | Reports and export | Planned |
-| Backups and teardown | Planned |
+| Backups and teardown | In progress |
 | Security audit, Deploy button, v1.0 | Planned |
 | Receipt attachments, more bank CSV formats | After v1 |
 
