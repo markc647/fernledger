@@ -85,8 +85,12 @@ _Avoid_: Limit, allowance, envelope
 ## Accountability
 
 **Change Log**:
-The record of every change the Admin makes, with when; visible to all Members.
+The record of every change the Admin makes: who, what and when; visible to all Members.
 _Avoid_: Audit trail, history
+
+**Change type**:
+The kind of thing a Change Log entry changed, such as Settings, Import or Account; Members can filter the Change Log by it. Not a Category.
+_Avoid_: Type, kind
 
 **Report**:
 A print-formatted view of Transactions over a date range, which any Member can print or save as PDF.

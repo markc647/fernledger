@@ -8,8 +8,8 @@ describe('changeFields', () => {
       showBefore: true,
       showAfter: true,
       rows: [
-        { field: 'App title', before: 'Fernledger', after: "Mum's finances" },
-        { field: 'About contact', before: '(blank)', after: 'Sam' },
+        { key: 'app_title', field: 'App title', before: 'Fernledger', after: "Mum's finances" },
+        { key: 'about_contact', field: 'About contact', before: '(blank)', after: 'Sam' },
       ],
     })
   })
@@ -19,21 +19,21 @@ describe('changeFields', () => {
     expect(fields.showBefore).toBe(false)
     expect(fields.showAfter).toBe(true)
     expect(fields.rows).toEqual([
-      { field: 'Added', before: '(none)', after: '3' },
-      { field: 'Duplicates', before: '(none)', after: '0' },
-      { field: 'New account', before: '(none)', after: 'Yes' },
-      { field: 'File rows', before: '(none)', after: '3' },
-      { field: 'From', before: '(none)', after: 'Thu 1 Oct 2026' },
-      { field: 'To', before: '(none)', after: 'Thu 8 Oct 2026' },
+      { key: 'added', field: 'Added', before: '(none)', after: '3' },
+      { key: 'duplicates', field: 'Duplicates', before: '(none)', after: '0' },
+      { key: 'newAccount', field: 'New account', before: '(none)', after: 'Yes' },
+      { key: 'fileRows', field: 'File rows', before: '(none)', after: '3' },
+      { key: 'from', field: 'From', before: '(none)', after: 'Thu 1 Oct 2026' },
+      { key: 'to', field: 'To', before: '(none)', after: 'Thu 8 Oct 2026' },
     ])
   })
 
   it('lists a field that is on one side only, and keeps the order they were recorded in', () => {
     const fields = changeFields('{"name":"A","old":"x"}', '{"name":"B","extra":"y"}')
     expect(fields.rows).toEqual([
-      { field: 'Name', before: 'A', after: 'B' },
-      { field: 'Old', before: 'x', after: '(none)' },
-      { field: 'Extra', before: '(none)', after: 'y' },
+      { key: 'name', field: 'Name', before: 'A', after: 'B' },
+      { key: 'old', field: 'Old', before: 'x', after: '(none)' },
+      { key: 'extra', field: 'Extra', before: '(none)', after: 'y' },
     ])
   })
 
@@ -42,15 +42,26 @@ describe('changeFields', () => {
   })
 
   it('shows a plain value, a list and a nested record in words rather than JSON braces', () => {
-    expect(changeFields(null, '"Kept for seven years"').rows).toEqual([{ field: 'Value', before: '(none)', after: 'Kept for seven years' }])
+    expect(changeFields(null, '"Kept for seven years"').rows).toEqual([{ key: 'value', field: 'Value', before: '(none)', after: 'Kept for seven years' }])
     expect(changeFields(null, '{"skipped":["Row 4","Row 9"],"nothing":null}').rows).toEqual([
-      { field: 'Skipped', before: '(none)', after: 'Row 4, Row 9' },
-      { field: 'Nothing', before: '(none)', after: '(none)' },
+      { key: 'skipped', field: 'Skipped', before: '(none)', after: 'Row 4, Row 9' },
+      { key: 'nothing', field: 'Nothing', before: '(none)', after: '(none)' },
     ])
     expect(changeFields(null, '{"range":{"from":"2026-10-01"}}').rows[0]!.after).toBe('From: Thu 1 Oct 2026')
   })
 
   it('still shows text that is not valid JSON', () => {
-    expect(changeFields(null, 'not json').rows).toEqual([{ field: 'Value', before: '(none)', after: 'not json' }])
+    expect(changeFields(null, 'not json').rows).toEqual([{ key: 'value', field: 'Value', before: '(none)', after: 'not json' }])
+  })
+
+  it('shows a date only under a date field, and never fails on one that is not real', () => {
+    const rows = changeFields(null, '{"from":"2026-02-30","to":"2026-10-08","note":"2026-02-30","app_title":"2026-10-08","range":{"from":"2026-13-45","other":"2026-10-08"}}').rows
+    expect(rows.map((r) => [r.key, r.after])).toEqual([
+      ['from', '2026-02-30'], // a date field holding an impossible date: shown as stored
+      ['to', 'Thu 8 Oct 2026'],
+      ['note', '2026-02-30'], // text that only looks like a date
+      ['app_title', '2026-10-08'], // an app title of 2026-10-08 stays text
+      ['range', 'From: 2026-13-45; Other: 2026-10-08'],
+    ])
   })
 })

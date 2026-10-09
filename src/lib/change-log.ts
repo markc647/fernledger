@@ -1,6 +1,7 @@
 import { formatDate } from './format'
 
-export type ChangeRow = { field: string; before: string; after: string }
+/** `key` is the field as recorded (unique within an entry); `field` is its label. */
+export type ChangeRow = { key: string; field: string; before: string; after: string }
 export type ChangeFields = { showBefore: boolean; showAfter: boolean; rows: ChangeRow[] }
 
 const NONE = '(none)'
@@ -11,14 +12,26 @@ const label = (key: string) => {
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
-/** One recorded value in words: dates the usual way, yes/no for booleans, lists and records without braces. */
-function show(value: unknown): string {
+/** Fields known to hold an NZ date (an Import's first and last Transaction). Any other text is shown as stored, even if it looks like a date. */
+const DATE_KEYS = new Set(['from', 'to'])
+
+/** A date the usual way, or the text as stored if it isn't a real date: the page must never fail to render. */
+function showDate(text: string) {
+  try {
+    return formatDate(text)
+  } catch {
+    return text
+  }
+}
+
+/** One recorded value in words: dates the usual way, yes/no for booleans, lists and records without braces. `key` is the field it was recorded under. */
+function show(value: unknown, key?: string): string {
   if (value === null || value === undefined) return NONE
   if (value === '') return '(blank)'
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
-  if (typeof value === 'string') return /^\d{4}-\d{2}-\d{2}$/.test(value) ? formatDate(value) : value
-  if (Array.isArray(value)) return value.length ? value.map(show).join(', ') : NONE
-  if (typeof value === 'object') return Object.entries(value).map(([key, v]) => `${label(key)}: ${show(v)}`).join('; ')
+  if (typeof value === 'string') return key !== undefined && DATE_KEYS.has(key) ? showDate(value) : value
+  if (Array.isArray(value)) return value.length ? value.map((v) => show(v, key)).join(', ') : NONE
+  if (typeof value === 'object') return Object.entries(value).map(([k, v]) => `${label(k)}: ${show(v, k)}`).join('; ')
   return String(value)
 }
 
@@ -45,6 +58,6 @@ export function changeFields(before: string | null, after: string | null): Chang
   return {
     showBefore: was !== null,
     showAfter: now !== null,
-    rows: keys.map((key) => ({ field: label(key), before: show(was?.[key]), after: show(now?.[key]) })),
+    rows: keys.map((key) => ({ key, field: label(key), before: show(was?.[key], key), after: show(now?.[key], key) })),
   }
 }

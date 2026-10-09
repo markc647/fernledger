@@ -1,9 +1,10 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { changeFields } from '@/lib/change-log'
+import { changeFields, type ChangeRow } from '@/lib/change-log'
 import { formatDateTime } from '@/lib/format'
 import { CHANGE_LOG_PAGE_SIZE, changeLogQuery, type ChangeLogFilters } from '@/lib/queries'
 
@@ -14,13 +15,44 @@ export const Route = createFileRoute('/change-log')({
 
 const NO_FILTERS: ChangeLogFilters = { type: '', from: '', to: '' }
 
+// The range the API accepts. A date input emits partial years (0002, then 0020...) while one is typed; those aren't searched.
+const MIN_DATE = '2000-01-01'
+const MAX_DATE = '2100-12-31'
+const outOfRange = (date: string) => date !== '' && (date < MIN_DATE || date > MAX_DATE)
+
+/** Field, then Before and After where the entry recorded them (an Import has no Before). */
+const columnsFor = ({ showBefore, showAfter }: { showBefore: boolean; showAfter: boolean }): Column<ChangeRow>[] => [
+  { key: 'field', header: 'Field', cell: (row) => <span className="font-medium">{row.field}</span> },
+  ...(showBefore ? [{ key: 'before', header: 'Before', cell: (row: ChangeRow) => <span className="break-words">{row.before}</span> }] : []),
+  ...(showAfter ? [{ key: 'after', header: 'After', cell: (row: ChangeRow) => <span className="break-words">{row.after}</span> }] : []),
+]
+
 function ChangeLog() {
   const [filters, setFilters] = useState(NO_FILTERS)
   const [page, setPage] = useState(0)
   const backwards = filters.from !== '' && filters.to !== '' && filters.from > filters.to
-  const { data, error } = useQuery({ ...changeLogQuery(filters, page), placeholderData: keepPreviousData, enabled: !backwards })
+  const searchable = !backwards && !outOfRange(filters.from) && !outOfRange(filters.to)
+  const { data, error, isFetching } = useQuery({ ...changeLogQuery(filters, page), placeholderData: keepPreviousData, enabled: searchable })
   const filtered = filters.type !== '' || filters.from !== '' || filters.to !== ''
-  const typeLabel = (id: string | null) => data?.types.find((t) => t.id === id)?.label ?? 'Other'
+  // An entry from before types were recorded has none; it shows no type rather than a made-up one.
+  const typeLabel = (id: string | null) => (id === null ? null : (data?.types.find((t) => t.id === id)?.label ?? null))
+
+  // After Older or Newer, the list starts again at its top. If the press left that button disabled (the first or last page)
+  // focus would be lost, so it moves to the "Showing …" line, which also announces the new page.
+  const results = useRef<HTMLDivElement>(null)
+  const summary = useRef<HTMLParagraphElement>(null)
+  const paged = useRef(false)
+  const lastPage = data !== undefined && (page + 1) * CHANGE_LOG_PAGE_SIZE >= data.total
+  useEffect(() => {
+    if (!paged.current || isFetching) return // wait for the new page, so what is announced and scrolled to is the new list
+    paged.current = false
+    results.current?.scrollIntoView({ block: 'start' })
+    if (page === 0 || lastPage) summary.current?.focus({ preventScroll: true })
+  }, [page, lastPage, isFetching])
+  const go = (next: number) => {
+    paged.current = true
+    setPage(next)
+  }
   const change = (patch: Partial<ChangeLogFilters>) => {
     setFilters({ ...filters, ...patch })
     setPage(0)
@@ -54,13 +86,13 @@ function ChangeLog() {
           <label htmlFor="filter-from" className="block font-medium">
             From
           </label>
-          <Input id="filter-from" type="date" value={filters.from} max={filters.to || undefined} onChange={(event) => change({ from: event.target.value })} />
+          <Input id="filter-from" type="date" value={filters.from} min={MIN_DATE} max={filters.to || MAX_DATE} onChange={(event) => change({ from: event.target.value })} />
         </div>
         <div>
           <label htmlFor="filter-to" className="block font-medium">
             To
           </label>
-          <Input id="filter-to" type="date" value={filters.to} min={filters.from || undefined} onChange={(event) => change({ to: event.target.value })} />
+          <Input id="filter-to" type="date" value={filters.to} min={filters.from || MIN_DATE} max={MAX_DATE} onChange={(event) => change({ to: event.target.value })} />
         </div>
         {filtered && (
           <Button type="button" size="touch" variant="outline" onClick={() => change(NO_FILTERS)}>
@@ -80,37 +112,28 @@ function ChangeLog() {
       ) : data.total === 0 ? (
         <p role="status" className="mt-4">{filtered ? 'No changes match these filters.' : 'Nothing has been changed yet.'}</p>
       ) : (
-        <>
-          <ol className="mt-4 space-y-4">
+        <div ref={results} aria-busy={isFetching} className="mt-4 scroll-mt-4">
+          <p ref={summary} role="status" tabIndex={-1} className="mb-4">
+            Showing {page * CHANGE_LOG_PAGE_SIZE + 1} to {Math.min((page + 1) * CHANGE_LOG_PAGE_SIZE, data.total)} of {data.total}
+          </p>
+          <ol className="space-y-4">
             {data.entries.map((entry) => {
               const fields = changeFields(entry.before, entry.after)
+              const type = typeLabel(entry.type)
               return (
                 <li key={entry.id} className="rounded-lg border p-4">
                   <h2 className="text-lg font-semibold">{entry.summary}</h2>
                   <p className="mt-1">
-                    <time dateTime={entry.at}>{formatDateTime(entry.at)}</time>. {typeLabel(entry.type)} change by {entry.actor}.
+                    <time dateTime={entry.at}>{formatDateTime(entry.at)}</time>. {type ? `${type} change` : 'Change'} by {entry.actor}.
                   </p>
                   {fields.rows.length > 0 && (
-                    <div className="mt-3 overflow-x-auto" role="region" aria-label={`Details of: ${entry.summary}`} tabIndex={0}>
-                      <table className="w-full text-left">
-                        <caption className="sr-only">{`Before and after: ${entry.summary}`}</caption>
-                        <thead>
-                          <tr className="border-b">
-                            <th scope="col" className="py-2 pe-4 font-medium">Field</th>
-                            {fields.showBefore && <th scope="col" className="py-2 pe-4 font-medium">Before</th>}
-                            {fields.showAfter && <th scope="col" className="py-2 font-medium">After</th>}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {fields.rows.map((row) => (
-                            <tr key={row.field} className="border-b last:border-b-0">
-                              <th scope="row" className="py-2 pe-4 align-top font-medium">{row.field}</th>
-                              {fields.showBefore && <td className="py-2 pe-4 align-top break-words">{row.before}</td>}
-                              {fields.showAfter && <td className="py-2 align-top break-words">{row.after}</td>}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="mt-3">
+                      <ResponsiveTable
+                        caption={`Before and after: ${entry.summary}`}
+                        columns={columnsFor(fields)}
+                        rows={fields.rows}
+                        getRowKey={(row) => row.key}
+                      />
                     </div>
                   )}
                 </li>
@@ -118,17 +141,14 @@ function ChangeLog() {
             })}
           </ol>
           <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center gap-2">
-            <Button size="touch" variant="outline" disabled={page === 0} onClick={() => setPage(page - 1)}>
+            <Button size="touch" variant="outline" disabled={page === 0} onClick={() => go(page - 1)}>
               Newer
             </Button>
-            <Button size="touch" variant="outline" disabled={(page + 1) * CHANGE_LOG_PAGE_SIZE >= data.total} onClick={() => setPage(page + 1)}>
+            <Button size="touch" variant="outline" disabled={lastPage} onClick={() => go(page + 1)}>
               Older
             </Button>
-            <span role="status">
-              Showing {page * CHANGE_LOG_PAGE_SIZE + 1} to {Math.min((page + 1) * CHANGE_LOG_PAGE_SIZE, data.total)} of {data.total}
-            </span>
           </nav>
-        </>
+        </div>
       )}
     </>
   )

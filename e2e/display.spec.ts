@@ -65,6 +65,8 @@ test.describe('text size', () => {
   test('has touch targets of at least 44px', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/styleguide')
+    // The links appear once the signed-in Member is known; `.all()` below doesn't wait for them.
+    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link').first()).toBeVisible()
     const targets = [
       ...(['A', 'A+', 'A++'] as const).map((name) => sizeButton(page, name)),
       ...(await page.getByRole('navigation', { name: 'Main' }).getByRole('link').all()),

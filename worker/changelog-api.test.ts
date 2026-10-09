@@ -95,6 +95,12 @@ describe('GET /api/change-log', () => {
       expect(total).toBe(4)
     })
 
+    it('rejects a repeated type, naming only the field', async () => {
+      const res = await get('?type=settings&type=import', 'member')
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'Invalid request', field: 'type' })
+    })
+
     it('rejects a type that does not exist, naming only the field', async () => {
       const res = await get('?type=secret-thing', 'member')
       expect(res.status).toBe(400)
@@ -137,12 +143,22 @@ describe('GET /api/change-log', () => {
       ['from', '?from=2026-02-30'],
       ['from', '?from=08/10/2026'],
       ['from', '?from=2026-10-08T00:00:00Z'],
+      ['from', '?from=1999-12-31'], // below the range
+      ['from', '?from=1900-01-01'],
+      ['from', '?from=0001-01-01'],
+      ['from', '?from=0002-10-08'], // Chrome emits partial years while one is typed
+      ['to', '?to=2101-01-01'], // above the range
+      ['to', '?to=9999-12-31'],
       ['to', '?to=yesterday'],
       ['to', '?to='],
     ])('rejects a bad %s (%s), naming only the field', async (field, query) => {
       const res = await get(query, 'member')
       expect(res.status).toBe(400)
       expect(await res.json()).toEqual({ error: 'Invalid request', field })
+    })
+
+    it('accepts the ends of the range', async () => {
+      expect((await listing('?from=2000-01-01&to=2100-12-31')).total).toBe(4)
     })
 
     it('rejects a range that ends before it starts', async () => {
@@ -169,6 +185,10 @@ describe('GET /api/change-log', () => {
 
     it('caps a page at 100 however many are asked for', async () => {
       expect((await listing('?limit=100000')).entries).toHaveLength(100)
+    })
+
+    it('raises a limit of 0 to 1', async () => {
+      expect((await listing('?limit=0')).entries.map((e) => e.summary)).toEqual(['Change 130'])
     })
 
     it('honours a smaller limit and an offset', async () => {

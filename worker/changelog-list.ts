@@ -10,7 +10,10 @@ const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 100
 
 const digits = z.optional(z.string().check(z.regex(/^\d{1,9}$/)))
-const nzDate = z.optional(z.string().check(z.refine(isRealDate)))
+// Bounded so nzDayStart and nextDay never see a year they can't handle (a date input emits partial years such as 0002 while one is typed).
+const MIN_DATE = '2000-01-01'
+const MAX_DATE = '2100-12-31'
+const nzDate = z.optional(z.string().check(z.refine((value) => isRealDate(value) && value >= MIN_DATE && value <= MAX_DATE)))
 
 const query = z
   .object({ type: z.optional(z.enum(CHANGE_TYPE_IDS)), from: nzDate, to: nzDate, limit: digits, offset: digits })
