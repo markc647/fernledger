@@ -1,17 +1,25 @@
 import { createScheduledController } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BACKUP_CRON } from './backup'
+import { BACKUP_CRON, BACKUP_STATE_KEY, CHUNK_BYTES, INVOCATION_BYTES } from './backup'
 import { BackupFormatError, checkPart, insertStatements, parseManifest, type Manifest } from './backup-format'
 import worker from './index'
 
 // Seam 1: a scheduled event into the Worker, with the real local D1 and R2 from wrangler.jsonc.
 const sunday = new Date('2026-10-11T15:00:00Z') // 04:00 Monday 12 Oct in NZ (NZDT)
+const nextSunday = new Date('2026-10-18T15:00:00Z') // Monday 19 Oct in NZ
 const daily = '0 18 * * *'
 const restoreTarget = (env as unknown as { RESTORE_TARGET: D1Database }).RESTORE_TARGET
 
 async function runCron(cron: string, scheduledTime: Date, bindings: Env = env) {
   await worker.scheduled(createScheduledController({ cron, scheduledTime }), bindings)
+}
+
+// Runs the daily cron on successive days (each its own invocation) until the backup under `prefix` has a manifest.
+async function finishRun(prefix: string, bindings: Env = env, maxInvocations = 14) {
+  for (let day = 0; day < maxInvocations && !(await env.BACKUPS.head(`${prefix}/manifest.json`)); day++) {
+    await runCron(daily, new Date(Date.UTC(2026, 9, 12 + day, 18)), bindings)
+  }
 }
 
 async function readManifest(prefix: string): Promise<Manifest> {
@@ -21,10 +29,15 @@ async function readManifest(prefix: string): Promise<Manifest> {
 }
 
 const partBytes = async (key: string) => new Uint8Array(await (await env.BACKUPS.get(key))!.arrayBuffer())
+const ndjson = async (key: string) => new TextDecoder().decode(await partBytes(key)).trimEnd().split('\n')
+const savedState = async () => JSON.parse(await (await env.BACKUPS.get(BACKUP_STATE_KEY))!.text())
+const backupKeys = async () => (await env.BACKUPS.list()).objects.map((o) => o.key)
 
 // Wraps the bindings and counts every D1 query and R2 call, which the free plan limits to 50 each per invocation.
-function counted() {
-  const ops = { d1: 0, r2: 0, deletes: 0 }
+// `diesAfterParts` simulates the isolate being killed (for example by the CPU limit) after that many parts.
+function counted({ diesAfterParts = Infinity } = {}) {
+  const ops = { d1: 0, r2: 0, deletes: 0, partBytes: 0, parts: 0 }
+  let dead = false
   const statement = (s: D1PreparedStatement): D1PreparedStatement =>
     new Proxy(s, {
       get(target, prop) {
@@ -51,6 +64,14 @@ function counted() {
       return (...args: unknown[]) => {
         ops.r2++
         if (prop === 'delete') ops.deletes++
+        if (prop === 'put') {
+          const isPart = String(args[0]).endsWith('.ndjson')
+          if (dead || (isPart && ops.parts >= diesAfterParts)) throw ((dead = true), new Error('R2 is gone'))
+          if (isPart) {
+            ops.parts++
+            ops.partBytes += (args[1] as Uint8Array).byteLength
+          }
+        }
         return value.apply(target, args)
       }
     },
@@ -58,16 +79,22 @@ function counted() {
   return { ops, bindings: { ...env, DB, BACKUPS } as Env }
 }
 
+// The ordinary tables the backup copies. Virtual tables, their shadow tables and WITHOUT ROWID tables are skipped.
 const tableNames = async (db: D1Database = env.DB) =>
   (
-    await db.prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name <> 'd1_migrations' ORDER BY name",
-    ).all<{ name: string }>()
+    await db
+      .prepare(
+        "SELECT name FROM pragma_table_list WHERE schema = 'main' AND type = 'table' AND wr = 0 AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name <> 'd1_migrations' ORDER BY name",
+      )
+      .all<{ name: string }>()
   ).results.map((t) => t.name)
 
 // Each test starts from the migrated schema with no rows, no extra tables and an empty bucket.
 const reset = async (db: D1Database) => {
-  for (const name of await tableNames(db)) {
+  const named = async (where: string) =>
+    (await db.prepare(`SELECT name FROM pragma_table_list WHERE schema = 'main' AND ${where}`).all<{ name: string }>()).results.map((t) => t.name)
+  for (const name of await named("type = 'virtual'")) await db.prepare(`DROP TABLE "${name}"`).run() // takes its shadow tables with it
+  for (const name of await named("type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name <> 'd1_migrations'")) {
     if (name === 'settings' || name === 'change_log') await db.prepare(`DELETE FROM "${name}"`).run()
     else await db.prepare(`DROP TABLE "${name}"`).run()
   }
@@ -80,6 +107,12 @@ beforeEach(async () => {
   if (objects.length) await env.BACKUPS.delete(objects.map((o) => o.key))
 })
 afterEach(() => vi.restoreAllMocks())
+
+const seedChangeLog = (rows: number) =>
+  env.DB.prepare(
+    `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${rows})
+     INSERT INTO change_log (actor, summary) SELECT 'a@example.com', 'Change ' || i FROM n`,
+  ).run()
 
 describe('weekly backup', () => {
   it('writes a manifest under the NZ date, with a row count for each table', async () => {
@@ -105,6 +138,24 @@ describe('weekly backup', () => {
     expect(manifest.tables.find((t) => t.name === 'future table')?.rows).toBe(1)
   })
 
+  it('skips tables it cannot page by rowid, and says so in the manifest', async () => {
+    await env.DB.prepare('CREATE TABLE pairs (a TEXT, b TEXT, PRIMARY KEY (a, b)) WITHOUT ROWID').run()
+    await env.DB.prepare('CREATE VIRTUAL TABLE search USING fts5(body)').run()
+    await env.DB.prepare("INSERT INTO pairs VALUES ('x', 'y')").run()
+    await env.DB.prepare("INSERT INTO search (body) VALUES ('hello')").run()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    await runCron(BACKUP_CRON, sunday)
+
+    const manifest = await readManifest('backups/2026-10-12')
+    const skipped = manifest.skipped.map((s) => s.name)
+    expect(skipped).toEqual(expect.arrayContaining(['pairs', 'search', 'search_data', 'search_content']))
+    expect(manifest.skipped.every((s) => s.reason.length > 0)).toBe(true)
+    expect(manifest.tables.map((t) => t.name).sort()).toEqual(await tableNames()) // everything else is still there
+    expect(manifest.tables.map((t) => t.name)).not.toContain('pairs')
+    expect(log.mock.calls.map((c) => String(c[0]))).toEqual(expect.arrayContaining([expect.stringContaining('backup.tables_skipped')]))
+  })
+
   it('records the migrations the database had applied', async () => {
     await runCron(BACKUP_CRON, sunday)
 
@@ -126,14 +177,14 @@ describe('weekly backup', () => {
     const bytes = await partBytes(only!.key)
     const digest = await crypto.subtle.digest('SHA-256', bytes)
     expect(only!.sha256).toBe([...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join(''))
-    const rows = new TextDecoder().decode(bytes).trimEnd().split('\n').map((l) => JSON.parse(l))
+    const rows = (await ndjson(only!.key)).map((l) => JSON.parse(l))
     expect(rows).toMatchObject([{ id: 1, summary: 'Line one\nO\'Brien "quoted"', after: null }, { id: 2, summary: 'Second' }])
   })
 
   it('keeps every earlier backup and deletes nothing', async () => {
     const { ops, bindings } = counted()
     await runCron(BACKUP_CRON, sunday, bindings)
-    await runCron(BACKUP_CRON, new Date('2026-10-18T15:00:00Z'), bindings)
+    await runCron(BACKUP_CRON, nextSunday, bindings)
 
     expect(ops.deletes).toBe(0)
     expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).not.toBeNull()
@@ -157,29 +208,81 @@ describe('weekly backup', () => {
 
     expect((await env.BACKUPS.list()).objects).toEqual([])
   })
+})
 
-  it('is split over invocations that each stay inside the free-plan limits, and loses no rows', async () => {
-    const total = 30_000
+describe('free-plan limits', () => {
+  // 42 tables of one row each: every chunk is then limited by the operation budget, not by bytes.
+  async function seedManyTinyTables() {
+    for (let i = 1; i <= 40; i++) {
+      await env.DB.prepare(`CREATE TABLE tiny_${String(i).padStart(2, '0')} (id INTEGER PRIMARY KEY, v TEXT)`).run()
+      await env.DB.prepare(`INSERT INTO tiny_${String(i).padStart(2, '0')} (v) VALUES ('x')`).run()
+    }
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('app_title', 'Fern')").run()
+    await seedChangeLog(1)
+  }
+
+  it('uses exactly the operation budget it is given: 37 on the weekly cron, 16 on a continuation', async () => {
+    await seedManyTinyTables()
+
+    const weekly = counted()
+    await runCron(BACKUP_CRON, sunday, weekly.bindings)
+    // R2: read the saved run, check for a finished backup, then per table a part and a cursor save.
+    // D1: the schema and the applied migrations, then one read per table. A short page needs no empty read after it.
+    expect(weekly.ops).toMatchObject({ d1: 2 + 11, r2: 2 + 11 * 2 })
+    expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).toBeNull()
+
+    const next = counted()
+    await runCron(daily, new Date('2026-10-12T18:00:00Z'), next.bindings)
+    expect(next.ops).toMatchObject({ d1: 5, r2: 1 + 5 * 2 })
+
+    // The 50-query and 50-subrequest limits leave room: Sync shares the daily crons.
+    expect(weekly.ops.d1 + weekly.ops.r2).toBeLessThanOrEqual(40)
+    expect(next.ops.d1 + next.ops.r2).toBeLessThanOrEqual(20)
+  })
+
+  it('stops at about 1 MB of NDJSON per invocation, so the CPU spent on encoding and hashing stays small', async () => {
+    const text = 'x'.repeat(4000)
+    const rows = 500 // 2 MB: more than one invocation may write
     await env.DB.prepare(
-      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${total})
-       INSERT INTO change_log (actor, summary) SELECT 'a@example.com', 'Change ' || i FROM n`,
-    ).run()
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${rows})
+       INSERT INTO change_log (actor, summary) SELECT 'a@example.com', ?1 || i FROM n`,
+    )
+      .bind(text)
+      .run()
 
-    const invocations: { d1: number; r2: number }[] = []
-    const invoke = async (cron: string, time: Date) => {
-      const { ops, bindings } = counted()
-      await runCron(cron, time, bindings)
-      invocations.push({ d1: ops.d1, r2: ops.r2 })
-    }
-    await invoke(BACKUP_CRON, sunday)
+    const weekly = counted()
+    await runCron(BACKUP_CRON, sunday, weekly.bindings)
+
+    expect(weekly.ops.partBytes).toBeGreaterThanOrEqual(INVOCATION_BYTES - CHUNK_BYTES)
+    expect(weekly.ops.partBytes).toBeLessThanOrEqual(INVOCATION_BYTES + CHUNK_BYTES)
+    expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).toBeNull()
+
+    await finishRun('backups/2026-10-12')
+    const log = (await readManifest('backups/2026-10-12')).tables.find((t) => t.name === 'change_log')!
+    expect(log.rows).toBe(rows)
+    expect(log.parts.every((p) => p.bytes <= CHUNK_BYTES)).toBe(true)
+    expect(log.parts.length).toBeGreaterThan(4)
+  })
+
+  it('finishes a run bigger than one invocation across invocations, each inside the limits, and loses no rows', async () => {
+    const total = 30_000
+    await seedChangeLog(total)
+
+    const invocations: { d1: number; r2: number; partBytes: number }[] = []
+    const first = counted()
+    await runCron(BACKUP_CRON, sunday, first.bindings)
+    invocations.push(first.ops)
     expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json'), 'one invocation cannot finish 30,000 rows').toBeNull()
-    for (let day = 0; day < 5 && !(await env.BACKUPS.head('backups/2026-10-12/manifest.json')); day++) {
-      await invoke(daily, new Date(`2026-10-1${2 + day}T18:00:00Z`))
+    for (let day = 0; day < 14 && !(await env.BACKUPS.head('backups/2026-10-12/manifest.json')); day++) {
+      const next = counted()
+      await runCron(daily, new Date(Date.UTC(2026, 9, 12 + day, 18)), next.bindings)
+      invocations.push(next.ops)
     }
 
-    for (const { d1, r2 } of invocations) {
+    for (const { d1, r2, partBytes } of invocations) {
       expect(d1).toBeLessThanOrEqual(50)
       expect(r2).toBeLessThanOrEqual(50)
+      expect(partBytes).toBeLessThanOrEqual(INVOCATION_BYTES + CHUNK_BYTES)
     }
     const log = (await readManifest('backups/2026-10-12')).tables.find((t) => t.name === 'change_log')!
     expect(log.rows).toBe(total)
@@ -187,35 +290,106 @@ describe('weekly backup', () => {
     const ids = new Set<number>()
     for (const part of log.parts) {
       await checkPart(part, await partBytes(part.key))
-      for (const line of new TextDecoder().decode(await partBytes(part.key)).trimEnd().split('\n')) ids.add(JSON.parse(line).id)
+      for (const line of await ndjson(part.key)) ids.add(JSON.parse(line).id)
     }
     expect(ids.size).toBe(total)
   }, 60_000)
 
-  it('leaves a resumable run and no manifest when a read fails, and logs only the error class', async () => {
+  it('keeps the progress of an invocation that is killed part-way, and never redoes its chunks', async () => {
+    const total = 5000
+    await seedChangeLog(total)
+    const dying = counted({ diesAfterParts: 2 })
+
+    await expect(runCron(BACKUP_CRON, sunday, dying.bindings)).rejects.toThrow()
+
+    // The cursor was saved after each chunk, before the invocation died: no manifest, but two parts are safe.
+    const state = await savedState()
+    const done = state.tables.find((t: { name: string }) => t.name === 'change_log')
+    expect(done.parts).toHaveLength(2)
+    expect(state.after).toBe(done.rows)
+    const kept = await Promise.all(done.parts.map((p: { key: string }) => env.BACKUPS.head(p.key)))
+    await finishRun('backups/2026-10-12')
+    const log = (await readManifest('backups/2026-10-12')).tables.find((t) => t.name === 'change_log')!
+    expect(log.rows).toBe(total)
+    expect(log.parts.slice(0, 2)).toEqual(done.parts)
+    const after = await Promise.all(done.parts.map((p: { key: string }) => env.BACKUPS.head(p.key)))
+    expect(after.map((o) => o!.version)).toEqual(kept.map((o) => o!.version)) // not rewritten
+  })
+})
+
+describe('runs and dates', () => {
+  it('never overwrites a completed backup when the cron runs again on the same date', async () => {
     await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('app_title', 'Fern')").run()
-    const { bindings } = counted()
-    const failing = new Proxy(bindings.DB, {
-      get(target, prop) {
-        if (prop !== 'prepare') return Reflect.get(target, prop)
-        let reads = 0
-        return (query: string) => {
-          if (query.includes('group_concat') && ++reads === 1) throw new TypeError('boom zz-secret')
-          return target.prepare(query)
-        }
-      },
-    })
+    await runCron(BACKUP_CRON, sunday)
+    const before = await Promise.all((await backupKeys()).map(async (k) => [k, (await env.BACKUPS.head(k))!.version]))
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('about_contact', 'Sam')").run()
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
 
-    await expect(runCron(BACKUP_CRON, sunday, { ...bindings, DB: failing })).rejects.toThrow()
+    await runCron(BACKUP_CRON, sunday)
 
+    const after = await Promise.all((await backupKeys()).map(async (k) => [k, (await env.BACKUPS.head(k))!.version]))
+    expect(after).toEqual(before)
+    expect((await readManifest('backups/2026-10-12')).tables.find((t) => t.name === 'settings')?.rows).toBe(1)
+    expect(log.mock.calls.map((c) => String(c[0]))).toEqual(expect.arrayContaining([expect.stringContaining('backup.skipped')]))
+  })
+
+  it('carries on an unfinished run of the same date instead of starting another', async () => {
+    await seedChangeLog(30_000)
+    await runCron(BACKUP_CRON, sunday)
+    const partsBefore = (await savedState()).tables.find((t: { name: string }) => t.name === 'change_log').parts.length
+
+    await runCron(BACKUP_CRON, sunday)
+
+    const parts = (await savedState()).tables.find((t: { name: string }) => t.name === 'change_log').parts
+    expect(parts.length).toBeGreaterThan(partsBefore)
+    expect((await backupKeys()).every((k) => k.startsWith('backups/2026-10-12/') || k === BACKUP_STATE_KEY)).toBe(true)
+  })
+
+  it('records a run it abandons for a new week, in R2, in the logs and in the next manifest', async () => {
+    await seedChangeLog(30_000)
+    await runCron(BACKUP_CRON, sunday)
     expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).toBeNull()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    await runCron(BACKUP_CRON, nextSunday)
+
     const lines = log.mock.calls.map((c) => String(c[0]))
-    expect(lines.some((l) => l.includes('backup.failed') && l.includes('TypeError'))).toBe(true)
-    expect(lines.join('\n')).not.toContain('zz-secret')
-    await runCron(daily, new Date('2026-10-12T18:00:00Z')) // the next cron picks the run up
+    expect(lines.find((l) => l.includes('backup.abandoned'))).toMatch(/"count":\d+/)
+    const marker = await env.BACKUPS.get('backups/2026-10-12/incomplete.json')
+    expect(marker, 'the abandoned run is marked').not.toBeNull()
+    await finishRun('backups/2026-10-19')
+    expect((await readManifest('backups/2026-10-19')).previousIncomplete).toBe('backups/2026-10-12')
+    expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).toBeNull() // still not a backup anyone can restore
+  })
+
+  it('starts afresh when the saved cursor is not one it wrote', async () => {
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('app_title', 'Fern')").run()
+    await env.BACKUPS.put(BACKUP_STATE_KEY, JSON.stringify({ status: 'running', prefix: 5, tables: 'nope' }))
+
+    await runCron(daily, new Date('2026-10-13T18:00:00Z')) // a continuation finds nothing it can use
+    expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).toBeNull()
+    await runCron(BACKUP_CRON, sunday)
+
     expect((await readManifest('backups/2026-10-12')).tables.find((t) => t.name === 'settings')?.rows).toBe(1)
   })
+})
+
+describe('values that cannot round-trip', () => {
+  async function failsLoudly(setup: string) {
+    await env.DB.prepare('CREATE TABLE amounts (id INTEGER PRIMARY KEY, n NUMERIC)').run()
+    await env.DB.prepare(setup).run()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    await expect(runCron(BACKUP_CRON, sunday)).rejects.toThrow()
+
+    const lines = log.mock.calls.map((c) => String(c[0]))
+    expect(lines.find((l) => l.includes('backup.failed'))).toContain('BackupFormatError')
+    expect(lines.join('\n')).not.toMatch(/9007199254740993|9\.0e\+999|Inf/)
+    expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).toBeNull()
+  }
+
+  it('refuses a whole number above 2^53, which JSON would round', () => failsLoudly('INSERT INTO amounts (n) VALUES (9007199254740993)'))
+  it('refuses infinity', () => failsLoudly('INSERT INTO amounts (n) VALUES (1e999)'))
 })
 
 describe('restoring a backup', () => {
@@ -251,6 +425,18 @@ describe('restoring a backup', () => {
     expect((await dump(restoreTarget)).odd).toHaveLength(2)
   })
 
+  it('restores decimal values needing 17 significant digits exactly', async () => {
+    const values = [0.1 + 0.2, 1 / 3, Math.PI, 1e22, 5e-324, 123456789.12345678, -2.5e-7, 1.7976931348623157e308]
+    for (const db of [env.DB, restoreTarget]) await db.prepare('CREATE TABLE reals (id INTEGER PRIMARY KEY, x REAL)').run()
+    for (const x of values) await env.DB.prepare('INSERT INTO reals (x) VALUES (?1)').bind(x).run()
+    await runCron(BACKUP_CRON, sunday)
+
+    await restoreInto(restoreTarget, 'backups/2026-10-12')
+
+    const restored = (await restoreTarget.prepare('SELECT x FROM reals ORDER BY id').all<{ x: number }>()).results.map((r) => r.x)
+    expect(restored).toEqual(values)
+  })
+
   it('refuses a part that was changed after it was written', async () => {
     await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('app_title', 'Fern')").run()
     await runCron(BACKUP_CRON, sunday)
@@ -260,12 +446,30 @@ describe('restoring a backup', () => {
     const tampered = new TextEncoder().encode(original.replace('Fern', 'Fexn'))
 
     await expect(checkPart(part, tampered)).rejects.toBeInstanceOf(BackupFormatError)
-    await expect(checkPart(part, tampered)).rejects.not.toThrow(/Fern|Fexn/)
+    await expect(checkPart(part, tampered)).rejects.toThrow(/^(?!.*(Fern|Fexn))/)
   })
 
   it('refuses a number too large to restore exactly', () => {
     const table = { name: 't', createSql: '', columns: ['n'], rows: 1, parts: [] }
 
     expect(() => insertStatements(table, '{"n":9007199254740993}\n', 'p')).toThrow(BackupFormatError)
+  })
+
+  it('refuses a manifest whose part keys leave the backup it names', async () => {
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('app_title', 'Fern')").run()
+    await runCron(BACKUP_CRON, sunday)
+    const manifest = await readManifest('backups/2026-10-12')
+    const withKey = (key: string) => {
+      const copy = structuredClone(manifest)
+      copy.tables[0]!.parts = [{ ...copy.tables[0]!.parts[0]!, key }]
+      return JSON.stringify(copy)
+    }
+    const text = JSON.stringify(manifest)
+
+    expect(() => parseManifest(text, 'backups/2026-10-12')).not.toThrow()
+    expect(() => parseManifest(text, 'backups/2026-10-19')).toThrow(BackupFormatError) // a different backup's manifest
+    expect(() => parseManifest(withKey('backups/2026-10-05/settings.000001.ndjson'), 'backups/2026-10-12')).toThrow(BackupFormatError)
+    expect(() => parseManifest(withKey('backups/2026-10-12/../2026-10-05/x.ndjson'), 'backups/2026-10-12')).toThrow(BackupFormatError)
+    expect(() => parseManifest(withKey('backups/2026-10-12//x.ndjson'), 'backups/2026-10-12')).toThrow(BackupFormatError)
   })
 })

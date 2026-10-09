@@ -4,7 +4,7 @@
 // Nothing here touches Cloudflare. (worker/backup.test.ts covers the Worker against real local D1 and R2.)
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { after, test } from 'node:test'
@@ -62,6 +62,9 @@ const bucket = (dir) => ({
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, value)
   },
+  async head(key) {
+    return existsSync(join(dir, key)) ? { key } : null
+  },
   async get(key) {
     try {
       const bytes = readFileSync(join(dir, key))
@@ -114,6 +117,8 @@ async function scenario() {
     INSERT INTO change_log (actor, summary, before, after) VALUES ('a@example.com', 'Line one
 Line two; DROP TABLE settings; -- "quoted"', '{"a":1}', NULL);
     INSERT INTO odd (label, amount_cents, ratio, data) VALUES ('Tab	here', -12345, 0.25, x'00ff10'), (NULL, 0, NULL, NULL), ('', 9, 1.5, x'');
+    CREATE TABLE pairs (a TEXT, b TEXT, PRIMARY KEY (a, b)) WITHOUT ROWID;
+    INSERT INTO pairs VALUES ('x', 'y');
   `)
   // Enough change_log rows to need several parts, so the restore handles a table split over files.
   source.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2500)
@@ -159,16 +164,85 @@ test('seed, back up, restore, compare: the restored database holds exactly what 
   assert.ok(r.loads.length > 3, 'change_log should have needed more than one part')
 })
 
-test('restore --dry-run prints what it would do and runs nothing', async () => {
+test('restore --dry-run downloads and verifies the backup, prints the loads it would run, and writes nothing', async () => {
   const s = await scenario()
 
   const r = restore(s, ['2026-10-12', '--database', 'target', '--local', '--dry-run'])
 
   assert.equal(r.status, 0, r.out)
   assert.match(r.out, /\$ npx wrangler r2 object get fernledger-backups\/backups\/2026-10-12\/manifest\.json/)
+  assert.match(r.out, /Verified 5 parts/)
+  assert.match(r.out, /\$ npx wrangler d1 execute target --local --file /)
   assert.match(r.out, /Dry run only/)
-  assert.deepEqual(r.calls, [])
+  assert.ok(r.calls.some((c) => c[0] === 'r2'), 'a dry run downloads')
+  assert.deepEqual(r.loads, [], 'but loads nothing')
   assert.equal(dump(s.target).settings.length, 0)
+})
+
+test('restore --dry-run still refuses a damaged part', async () => {
+  const s = await scenario()
+  const partFile = join(s.bucketDir, 'backups/2026-10-12/settings.000001.ndjson')
+  writeFileSync(partFile, readFileSync(partFile, 'utf8').replace('Sam', 'Max'))
+
+  const r = restore(s, ['2026-10-12', '--database', 'target', '--local', '--dry-run'])
+
+  assert.equal(r.status, 1)
+  assert.match(r.out, /fails its checksum/)
+})
+
+test('restore says which tables the backup did not copy', async () => {
+  const s = await scenario()
+
+  const r = restore(s)
+
+  assert.match(r.out, /Not backed up, so not restored: pairs/)
+})
+
+test('restore refuses a database whose table lacks a column the backup has, and changes nothing', async () => {
+  const s = await scenario()
+  s.target.exec('DROP TABLE odd; CREATE TABLE odd (id INTEGER PRIMARY KEY, label TEXT)')
+
+  const r = restore(s)
+
+  assert.equal(r.status, 1)
+  assert.match(r.out, /lacks odd\.amount_cents, odd\.ratio, odd\.data/)
+  assert.deepEqual(r.loads, [])
+})
+
+test('restore accepts a database with extra columns (a newer schema)', async () => {
+  const s = await scenario()
+  s.target.exec('ALTER TABLE odd ADD COLUMN note TEXT')
+
+  const r = restore(s)
+
+  assert.equal(r.status, 0, r.out)
+})
+
+test('restore will not fetch a part outside the backup it was asked for', async () => {
+  const s = await scenario()
+  const file = join(s.bucketDir, 'backups/2026-10-12/manifest.json')
+  const manifest = JSON.parse(readFileSync(file, 'utf8'))
+  manifest.tables[0].parts[0].key = 'backups/2026-10-05/settings.000001.ndjson'
+  writeFileSync(file, JSON.stringify(manifest))
+
+  const r = restore(s)
+
+  assert.equal(r.status, 1)
+  assert.match(r.out, /outside the backup/)
+  assert.ok(!r.calls.some((c) => c.join(' ').includes('2026-10-05')))
+  assert.deepEqual(r.loads, [])
+})
+
+test('restore refuses another backup\'s manifest copied into place', async () => {
+  const s = await scenario()
+  mkdirSync(join(s.bucketDir, 'backups/2026-10-19'), { recursive: true })
+  writeFileSync(join(s.bucketDir, 'backups/2026-10-19/manifest.json'), readFileSync(join(s.bucketDir, 'backups/2026-10-12/manifest.json')))
+
+  const r = restore(s, ['2026-10-19', '--database', 'target', '--local'])
+
+  assert.equal(r.status, 1)
+  assert.match(r.out, /different backup/)
+  assert.deepEqual(r.loads, [])
 })
 
 test('restore refuses a part whose bytes changed, before writing anything', async () => {

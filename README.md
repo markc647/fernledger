@@ -191,7 +191,7 @@ Fernledger aims to keep your data **correct, current and recoverable**.
 - **Weekly full backups** go to your own R2 bucket and are all kept. They're a few MB each, so years of them fit in the free allowance. Each backup includes a manifest of row counts and checksums.
 - **Point-in-time restore:** Cloudflare D1 can restore your database to any point in the last **7 days** on the free plan, or 30 days on paid plans.
 - **Restore is tested:** CI tests the restore script, and the docs describe a restore practice run to do twice a year.
-- **Safe upgrades:** before a release changes the database, the deploy script records a restore point, and will also take a backup once backups ship. If an upgrade goes wrong, roll back by restoring that point and redeploying the previous release.
+- **Safe upgrades:** before a release changes the database, the deploy script records a restore point and will also take a backup. If an upgrade goes wrong, roll back by restoring that point and redeploying the previous release.
 
 ### If the Admin becomes unavailable
 
@@ -260,7 +260,7 @@ For anything older, export CSVs from your internet banking and **import** them. 
 Only the latest release receives fixes. Please stay current.
 
 **Your data during an upgrade:**
-- Before any database change, the deploy script records a restore point, and will also take a backup once backups ship.
+- Before any database change, the deploy script records a restore point and will also take a backup.
 - Database changes only ever **add** at first. Anything is removed only in a later release, once nothing uses it, so **rolling back to the previous version always works** (ADR 0009).
 - You can skip versions: CI upgrades sample databases from every earlier minor release to the latest and checks the data is intact.
 - Large data changes run in chunks and resume where they left off, so they stay within the free plan's daily limits.
