@@ -93,7 +93,9 @@ describe('outbound calls', () => {
     expect(hostsContacted().filter((host) => !ALLOWED_HOSTS.includes(host))).toEqual(['github.com'])
   })
 
-  it('makes none from any route, signed in as the Admin', async () => {
+  // One request per route (about 0.5 s alone), but the full suite runs many workerd instances at once and this test has
+  // taken over 5 s on a busy machine, so it has a longer limit than the 5 s default. It is a load allowance, not a slow route.
+  it('makes none from any route, signed in as the Admin', { timeout: 30_000 }, async () => {
     let accountId = 0
     for (const { route, path, opts } of EXERCISES) {
       const res = await call(path(accountId), typeof opts === 'function' ? opts(accountId) : opts)

@@ -3,7 +3,7 @@ import { formatBalance, formatDate } from './format'
 
 export type BalanceCheckOutcome = ImportOutcome
 
-/** "Balance differs from bank by $12.34 since Thu 8 Oct 2026": the size of the difference (no sign) and the date the bank and the Transactions last agreed. */
+/** "Balance differs from bank by $12.34 since Thu 8 Oct 2026": the size of the difference (no sign) and the date of the previous bank balance it was compared with. */
 export const balanceDiffersMessage = (differenceCents: number, since: string) =>
   `Balance differs from bank by ${formatBalance(Math.abs(differenceCents))} since ${formatDate(since)}`
 

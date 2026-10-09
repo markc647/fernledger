@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { balanceDiffersMessage, describeBalanceCheck } from './balance-check'
 
 describe('balanceDiffersMessage', () => {
-  it('names the amount and the date the bank and the Transactions last agreed', () => {
+  it('names the amount and the date of the previous bank balance', () => {
     expect(balanceDiffersMessage(1234, '2026-10-08')).toBe('Balance differs from bank by $12.34 since Thu 8 Oct 2026')
   })
 

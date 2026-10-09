@@ -54,9 +54,7 @@ _Avoid_: Mapping, connection
 
 **Balance Check**:
 The comparison, after each Import, between an Account's balance as reported by the bank and the balance calculated from its Transactions; it will also run after each Sync.
-An Import's reported balance is the ledger balance in the file's header, compared with the Account's earlier ledger balance plus the Transactions since.
-A difference reads "Balance differs from bank by $X since <date>", where the date is when the bank and the Transactions last agreed.
-The detailed rules are in README [Correct](README.md#correct).
+The rules are in README [Correct](README.md#correct).
 _Avoid_: Reconciliation, audit
 
 **Cutover Date**:

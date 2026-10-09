@@ -40,7 +40,7 @@ export type BalanceRow = {
 export type CheckResult = {
   asOfDate: string
   status: BalanceStatus
-  /** The date of the earlier balance this one was compared with: the last date the bank and the Transactions agreed. */
+  /** The date of the earlier balance this one was compared with: the previous counted balance, even if that one also differed. */
   checkedAgainst: string | null
   /** The bank's balance on `asOfDate` as the earlier balance and the Transactions since give it. */
   calculatedCents: number | null
@@ -76,7 +76,7 @@ export type ImportOutcome = {
   status: BalanceStatus
   /** The date the checked span ends. */
   asOfDate: string
-  /** The date it starts: when the bank and the Transactions last agreed. Null when nothing was compared. */
+  /** The date it starts: the date of the previous bank balance it was compared with. Null when nothing was compared. */
   since: string | null
   differenceCents: number | null
 }

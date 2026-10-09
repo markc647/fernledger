@@ -95,7 +95,7 @@ const LATEST_CHECKS = `
 
 export const balanceChecks = new Hono<AppEnv>()
   // The warnings: every span where the bank and the Transactions disagree, newest first within each Account. `since` is
-  // the date they last agreed. `accounts` gives each Account's latest check, so the page can say when all is well.
+  // the date of the previous bank balance it was compared with. `accounts` gives each Account's latest check, so the page can say when all is well.
   .get('/', async (c) => {
     const db = c.env.DB
     const [differences, accounts] = await db.batch([db.prepare(DIFFERENCES), db.prepare(LATEST_CHECKS)])
