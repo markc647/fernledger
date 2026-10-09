@@ -23,6 +23,7 @@ export const accounts = new Hono<AppEnv>()
 
     await recordChange(db, db.prepare('UPDATE accounts SET name = ? WHERE id = ?').bind(name, id), {
       actor: c.var.member,
+      type: 'account',
       summary: `Renamed Account ${account.name} to ${name}`,
       before: { name: account.name },
       after: { name },

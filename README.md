@@ -48,7 +48,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Dashboard:** balances, net worth over time, spending by category, budget vs actual, searchable transactions.
 - **Printable reports:** spending by category, budget vs actual, income vs spending, balances over time, full transaction listing with notes. Print them or save as PDF from your browser.
 - **CSV export** for any date range.
-- **Change Log** of every edit the Admin makes, visible to everyone.
+- **Change Log** of every edit the Admin makes, visible to everyone: who changed what and when, with the values before and after, newest first. Filter it by type of change and by date.
 - **Light and dark themes.**
 - **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and reports will.
 - **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications.
@@ -118,7 +118,7 @@ We're as clear about the limits as about the protections. The full threat model 
 - **It lives in your own Cloudflare account.** There's no Fernledger server. The authors can't see your data, lose it, or be breached for it.
 - **No passwords in the app.** Sign-in is handled by [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) with email one-time codes, or Google/Microsoft with MFA. The app checks Access's signed token (signature, issuer, audience) on **every** request. If configuration is missing, it refuses all requests rather than allowing them (ADR 0002).
 - **Only people you list can reach the app at all.** Anyone else stops at Cloudflare's login page. The example policy also limits sign-in to New Zealand.
-- **Read-only by default.** Only the Admin can change anything, and every change goes in a Change Log that all Members can see.
+- **Read-only by default.** Only the Admin can change anything, and every change goes in a Change Log that all Members can see, including the Admin's email address (see [docs/privacy.md](docs/privacy.md#what-a-deployment-holds)).
 - **Read-only bank access.** If you use Akahu Sync, its personal-app tokens can't make payments. A leaked token exposes history, not money.
 - **Encrypted** in transit (TLS) and at rest (D1, R2). If you use Akahu Sync, its tokens are stored as encrypted Worker secrets, never in code or the database.
 - **Protection against cross-site attacks:** changes must come from the app's own address with a JSON body. Strict security headers are set: a Content Security Policy, no framing, no referrer.
@@ -303,6 +303,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Design, decisions, glossary | Done |
 | Skeleton, CI, sign-in and roles, guardrails, setup and deploy scripts | Done |
 | Settings screen and "Setup needed" | Done |
+| Change Log page | Done |
 | Database, CSV import (ASB) | In progress |
 | Akahu sync | Planned |
 | Categories, rules, transfers, budgets | Planned |
