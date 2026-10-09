@@ -1,3 +1,4 @@
+// Layout reference: docs/bank-formats/asb.md
 import { BankCsvError, type BankCsvAdapter, type BankCsvResult, type BankCsvRow, type BankCsvRowError } from './types'
 
 const COLUMN_HEADER = 'Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount'
