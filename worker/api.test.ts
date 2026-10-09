@@ -1,5 +1,5 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
-import { env } from 'cloudflare:workers'
+import { env, exports } from 'cloudflare:workers'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import worker from './index'
@@ -20,25 +20,30 @@ beforeAll(async () => {
 })
 afterAll(() => vi.unstubAllGlobals())
 
-const sign = (claims: Record<string, unknown>, opts: { aud?: string; key?: CryptoKey } = {}) =>
+type SignOptions = { aud?: string; iss?: string; exp?: number; key?: CryptoKey }
+
+const sign = (claims: Record<string, unknown>, opts: SignOptions = {}) =>
   new SignJWT(claims)
     .setProtectedHeader({ alg: 'RS256', kid: 'k1' })
-    .setIssuer(issuer)
+    .setIssuer(opts.iss ?? issuer)
     .setAudience(opts.aud ?? env.ACCESS_AUD!)
     .setIssuedAt()
-    .setExpirationTime('5m')
+    .setExpirationTime(opts.exp ?? '5m')
     .sign(opts.key ?? signingKey)
 
-type CallOptions = { token?: string; method?: string; origin?: string; envOverride?: Partial<Env> }
+type CallOptions = { token?: string; method?: string; headers?: Record<string, string> }
 
-/** Sends a real request through the Worker's fetch handler. `envOverride` changes Worker settings for that call only. */
+/** The real request path: routing and the configured env, as `wrangler dev` would serve them. */
 async function call(path: string, opts: CallOptions = {}) {
-  const request = new Request(`${opts.origin ?? 'https://app.test'}${path}`, {
-    method: opts.method ?? 'GET',
-    headers: opts.token ? { 'Cf-Access-Jwt-Assertion': opts.token } : {},
-  })
+  const headers = { ...opts.headers, ...(opts.token ? { 'Cf-Access-Jwt-Assertion': opts.token } : {}) }
+  return exports.default.fetch(new Request(`https://app.test${path}`, { method: opts.method ?? 'GET', headers }))
+}
+
+/** Calls the Worker's fetch handler directly, only for cases that change the Worker's settings or origin. */
+async function callWith(url: string, envOverride: Partial<Env>, opts: CallOptions = {}) {
+  const headers = { ...opts.headers, ...(opts.token ? { 'Cf-Access-Jwt-Assertion': opts.token } : {}) }
   const ctx = createExecutionContext()
-  const response = await worker.fetch!(request as never, { ...env, ...opts.envOverride }, ctx)
+  const response = await worker.fetch!(new Request(url, { method: opts.method ?? 'GET', headers }) as never, { ...env, ...envOverride }, ctx)
   await waitOnExecutionContext(ctx)
   return response
 }
@@ -50,10 +55,16 @@ describe('GET /api/me', () => {
     expect(await res.json()).toEqual({ email: 'admin@example.com', role: 'admin' })
   })
 
-  it('treats any other signed-in email as a read-only Member', async () => {
+  it('treats any other signed-in Member as read-only', async () => {
     const res = await call('/api/me', { token: await sign({ email: 'sib@example.com' }) })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ email: 'sib@example.com', role: 'member' })
+  })
+
+  it('accepts unusual but valid email addresses', async () => {
+    const res = await call('/api/me', { token: await sign({ email: "o'brien+family@intranet" }) })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ email: "o'brien+family@intranet", role: 'member' })
   })
 })
 
@@ -73,13 +84,23 @@ describe('Access verification on /api', () => {
     expect((await call('/api/me', { token })).status).toBe(401)
   })
 
-  it('rejects a token whose email claim is not an email address', async () => {
-    expect((await call('/api/me', { token: await sign({ email: 'not-an-email' }) })).status).toBe(401)
+  it('rejects a token from another issuer', async () => {
+    const token = await sign({ email: 'admin@example.com' }, { iss: 'https://other.cloudflareaccess.com' })
+    expect((await call('/api/me', { token })).status).toBe(401)
+  })
+
+  it('rejects an expired token', async () => {
+    const token = await sign({ email: 'admin@example.com' }, { exp: Math.floor(Date.now() / 1000) - 60 })
+    expect((await call('/api/me', { token })).status).toBe(401)
+  })
+
+  it.each([{ email: 123 }, { email: '' }, {}])('rejects a token without a usable email claim (%j)', async (claims) => {
+    expect((await call('/api/me', { token: await sign(claims) })).status).toBe(401)
   })
 
   it.each(['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'ADMIN_EMAIL'] as const)('fails closed when %s is missing', async (name) => {
     const token = await sign({ email: 'admin@example.com' })
-    expect((await call('/api/me', { token, envOverride: { [name]: undefined } })).status).toBe(401)
+    expect((await callWith('https://app.test/api/me', { [name]: undefined }, { token })).status).toBe(401)
   })
 
   it('checks the token before routing, so unknown routes do not reveal themselves', async () => {
@@ -108,19 +129,24 @@ describe('read-only Members', () => {
 describe('local development identity', () => {
   const dev = { DEV_USER_EMAIL: 'Dev@example.com' }
 
-  it('stands in for a signed-in user on localhost, without a token', async () => {
-    const res = await call('/api/me', { origin: 'http://localhost:5173', envOverride: dev })
+  it('stands in for a signed-in Member on localhost, without a token', async () => {
+    const res = await callWith('http://localhost:5173/api/me', dev)
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ email: 'dev@example.com', role: 'member' })
   })
 
   it('can be the Admin', async () => {
-    const res = await call('/api/me', { origin: 'http://127.0.0.1:5173', envOverride: { DEV_USER_EMAIL: 'ADMIN@example.com' } })
+    const res = await callWith('http://127.0.0.1:5173/api/me', { DEV_USER_EMAIL: 'ADMIN@example.com' })
+    expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ email: 'admin@example.com', role: 'admin' })
   })
 
   it('is ignored on any other host', async () => {
-    expect((await call('/api/me', { envOverride: dev })).status).toBe(401)
+    expect((await callWith('https://app.test/api/me', dev)).status).toBe(401)
+  })
+
+  it('cannot be spoofed with a Host header on a non-localhost URL', async () => {
+    expect((await callWith('https://app.test/api/me', dev, { headers: { Host: 'localhost' } })).status).toBe(401)
   })
 })
 
