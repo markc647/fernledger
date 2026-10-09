@@ -19,13 +19,13 @@ Run these from a checkout of the release you want. Why the region matters is in 
 3. **Deploy:**
 
    ```bash
-   npm run deploy -- --dry-run    # prints the build, restore point, migration and deploy commands
+   npm run deploy -- --dry-run    # prints the build, backup, restore point, migration and deploy commands
    npm run deploy                 # confirms the account, then runs them
    ```
 
-   In order, `npm run deploy` confirms the account, confirms the workers.dev subdomain (below), checks the database and bucket exist (it stops and points you at `npm run setup` rather than let Wrangler create them with no location), builds, records a D1 bookmark (restore point), applies remote migrations from `migrations/`, and deploys. It ends by printing the bookmark with rollback instructions, and prints them too if a migration or the deploy fails. The printed commands start with `CLOUDFLARE_ACCOUNT_ID=<id>` so they run as printed. In PowerShell, set `$env:CLOUDFLARE_ACCOUNT_ID` first and drop the prefix. Rolling back code is `wrangler rollback`. Restoring data is `wrangler d1 time-travel restore <database> --bookmark=<bookmark>`, a last resort that discards everything written since. The free plan keeps bookmarks for 7 days, and migrations are add-only so rolling back code is normally enough (ADR 0009).
+   In order, `npm run deploy` confirms the account, confirms the workers.dev subdomain (below), checks the database and bucket exist (it stops and points you at `npm run setup` rather than let Wrangler create them with no location), builds, takes a complete backup ([below](#the-backup-before-a-deploy)), records a D1 bookmark (restore point), applies remote migrations from `migrations/`, and deploys. **If the backup fails it stops there, with nothing changed.** It ends by printing the bookmark with rollback instructions, and prints them too if a migration or the deploy fails. The printed commands start with `CLOUDFLARE_ACCOUNT_ID=<id>` so they run as printed. In PowerShell, set `$env:CLOUDFLARE_ACCOUNT_ID` first and drop the prefix. [Rolling back](#rolling-back) covers what to do with them.
 
-Both scripts take `--yes` to skip the account prompt (needed when there's no terminal). `npm run deploy` also takes `--workers-dev-registered` (below) and `--skip-build` if `dist/` is already built. If a script fails, it names the Wrangler command and its exit code and nothing more, because Wrangler's own output can contain your account email. Run the printed command by hand to see it.
+Every script takes `--yes` to skip the account prompt (needed when there's no terminal). `npm run deploy` also takes `--workers-dev-registered` (below), `--skip-build` if `dist/` is already built, and `--skip-backup` (only after you've made a copy by hand). If a script fails, it names the Wrangler command and its exit code and nothing more, because Wrangler's own output can contain your account email. Run the printed command by hand to see it.
 
 ### The workers.dev subdomain
 
@@ -59,7 +59,8 @@ With `CI=true` (which the scripts set) Wrangler answers its own yes/no prompts i
 | Provision a missing D1 database or R2 bucket during deploy | Creates it, with no location hint | Checks both exist first |
 | Write resource IDs back into `wrangler.jsonc` | Skipped | Relies on `CI=true`; check `git diff wrangler.jsonc` after a manual deploy |
 | "Your last deployment has multiple versions… continue?" (a gradual rollout is in progress) | Yes, replacing the rollout. `--strict` does not stop this | Nothing yet. Finish or roll back any gradual rollout in the dashboard before deploying |
-| "About to apply N migration(s)… continue?" (`d1 migrations apply`) | Yes | Your account confirmation and the earlier restore point are the safeguard. The migrations applied are printed |
+| "About to apply N migration(s)… continue?" (`d1 migrations apply`) | Yes | Your account confirmation, the backup and the restore point before it are the safeguard. The migrations applied are printed |
+| "Delete this database?" (`d1 delete`) | Yes | `npm run teardown` passes `--skip-confirmation` itself, and only after you type the database name ([Leaving Fernledger](#leaving-fernledger-teardown)) |
 
 ### Test-only environment variables
 
@@ -81,6 +82,32 @@ Past that, a run can't finish before the next Sunday. The next Sunday then marks
 
 A run longer than one invocation is a rolling copy, not a single point in time: a row edited while it is under way may be captured either side of the edit. For a point-in-time copy use the D1 restore point that `npm run deploy` records.
 
+### The backup before a deploy
+
+`npm run deploy` doesn't wait for the Sunday cron. It runs the Worker's own backup code (`worker/backup.ts`) on your machine, with the database and bucket reached through Wrangler, so the backup has the same layout and manifest as a cron one and `npm run restore` reads it the same way. It then waits for the manifest, which is what makes a backup exist.
+
+- **It stops the deploy if it can't finish.** Nothing has been changed at that point. Run `npm run deploy` again: an unfinished run carries on from where it stopped.
+- **A first deploy has nothing to back up.** A database with no tables is skipped, and the script says so.
+- **A complete backup for today's NZ date is reused**, never overwritten, so deploying twice in a day backs up once.
+- **`--skip-backup`** deploys without one. Make a copy first: `npx wrangler d1 export <database> --remote --output backup.sql`.
+- It calls Wrangler many times for a large database, so it can take a few minutes. It prints progress, and keeps your data only in a temporary folder that it removes at the end.
+
+### Rolling back
+
+README ("Recoverable") says what each layer protects. In order of how much each costs you:
+
+1. **Code only (the usual fix).** Migrations only add (ADR 0009), so the previous release still runs on the newer schema. Redeploy it: check out the previous release's tag (`git checkout <tag>`, then `npm install`) and run `npm run deploy`, or run `npx wrangler rollback` to put back the previous deployed version. Either leaves your data as it is. `npm run deploy` prints the commands, with your account ID in them.
+2. **Data, within 7 days: the restore point.** If the migration or the release damaged data, restore the D1 bookmark that `npm run deploy` printed (just before the migrations):
+
+   ```bash
+   CLOUDFLARE_ACCOUNT_ID=<account id> npx wrangler d1 time-travel restore <database> --bookmark=<bookmark>
+   ```
+
+   In PowerShell, set `$env:CLOUDFLARE_ACCOUNT_ID` first and drop the prefix. This puts the database back as it was at the bookmark and **discards everything written since**, so redeploy the previous release as well (step 1) rather than leave new code on old data. The free plan keeps restore points for 7 days. If you lost the bookmark, `npx wrangler d1 time-travel info <database>` shows the current one, and `--timestamp=<time>` restores to a moment instead.
+3. **Data, older than that: the backup.** The deploy's backup is in the bucket under `backups/<NZ date>/`. Restore it into an empty database that has the schema ([Restoring](#restoring)), and rehearse that first ([practice run](#restore-practice-run-twice-a-year)).
+
+After any rollback, check the row counts and open the app before you call it fixed.
+
 ### Restoring
 
 Restore into an **empty** database that has the schema. A restore adds rows and never overwrites, and it refuses a database that already has rows in any backed-up table or lacks a backed-up column (a database with extra columns, from a newer schema, is fine).
@@ -94,7 +121,9 @@ It downloads the manifest and every part (only the manifest and parts under that
 
 If a load fails part-way, the database holds some of the rows: empty it (or create a fresh one and apply the migrations) and run the restore again.
 
-**Practice run, twice a year.** Create a scratch database, give it the schema, restore into it, check the row counts the script prints, then delete the scratch database:
+### Restore practice run, twice a year
+
+A backup you have never restored is a guess. Twice a year (say April and October), restore the latest backup into a scratch database, check the row counts the script prints against the manifest, then delete the scratch database. It touches nothing live:
 
 ```bash
 npx wrangler d1 create fernledger-practice --location oc
@@ -102,7 +131,37 @@ npx wrangler d1 execute fernledger-practice --remote --file migrations/<file>.sq
 npm run restore -- <backup date> --database fernledger-practice
 ```
 
+```bash
+npx wrangler d1 delete fernledger-practice   # the scratch database; Wrangler asks you to confirm
+```
+
+The run passes if the restore ends with every count matching the manifest, and a table's `.ndjson` shows real rows. If it fails, treat your backups as unproven: take a manual copy (`npx wrangler d1 export`) and open an issue, without any of your data in it.
+
 CI runs the round trip (seed, back up with the Worker's own code, restore with this script, compare) on a local SQLite database, and never touches a Cloudflare account.
+
+## Leaving Fernledger (teardown)
+
+README ("Leaving Fernledger") says what this does and why. It is deliberate on purpose.
+
+```bash
+npm run teardown -- --dry-run            # prints every step and command, runs none
+npm run teardown -- --out ~/fernledger-final-export
+```
+
+In order, `npm run teardown`:
+
+1. **Confirms the account**, as the other scripts do.
+2. **Takes a final export.** It runs a complete backup (reusing today's if one is complete), downloads the manifest and every part, and checks each against the manifest's size and checksum. It saves them in the `--out` folder (default `fernledger-final-export-<date>` in your home folder), which must be new or empty and **outside this repository, which is public**. Keep the folder somewhere private: it holds every Transaction.
+3. **Stops if the export failed or didn't verify.** Nothing has been deleted at that point, and the message says how to make a copy by hand instead.
+4. **Asks you to type the database name.** Anything else, an empty line, or no input at all, deletes nothing. `--yes` skips only the account prompt, and `CI=true` does not answer this for you (see "What Wrangler answers for itself").
+5. **Deletes the D1 database, then the R2 bucket.** Wrangler can't list or bulk-delete a bucket's objects, so a bucket that still holds backups (it will) isn't deleted. The script says so, exits non-zero and prints the two ways to empty it (the dashboard, or a lifecycle rule that expires everything). Then delete the bucket with `npx wrangler r2 bucket delete <bucket>`, or re-run `npm run teardown`, which finishes the job.
+
+What you do by hand afterwards:
+
+- **Delete the Worker**, which also deletes the secrets it holds: `npx wrangler delete`.
+- **Delete the Access application:** Zero Trust → Access → Applications → Fernledger.
+- **Revoke Akahu access, only if you used Akahu Sync** (ADR 0008). In your Akahu account, remove the personal app Fernledger used, or disconnect the bank connections it synced, so its tokens stop working. Deleting the Worker removes Fernledger's copy of the token but doesn't revoke it. If you only imported CSVs, skip this step.
+- **Decide what to do with the final export folder.**
 
 ## Cloudflare Access (one-time, by hand)
 

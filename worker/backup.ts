@@ -53,6 +53,9 @@ type RunState = z.infer<typeof runState>
 
 const nzDate = (at: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(at)
 
+/** Where the backup run for a moment in time lives in the bucket: the NZ date of that moment. Shared with the scripts that wait for a run. */
+export const backupPrefix = (time: number) => `backups/${nzDate(new Date(time))}`
+
 /** The saved cursor, or null when there is none or it isn't one this code wrote (then the next weekly run starts afresh). */
 async function readState(env: Env): Promise<RunState | null> {
   const saved = await env.BACKUPS.get(BACKUP_STATE_KEY)
@@ -209,7 +212,7 @@ async function advance(env: Env, state: RunState, opsUsed: number, budget: numbe
 
 /** The weekly cron: starts a new run under the NZ date of the scheduled time, unless that date is already backed up. */
 export async function startBackup(env: Env, scheduledTime: number): Promise<void> {
-  const prefix = `backups/${nzDate(new Date(scheduledTime))}`
+  const prefix = backupPrefix(scheduledTime)
   const earlier = await readState(env)
   let ops = 1
   // Only a manifest makes a backup complete, so a finished backup of this date is never overwritten.
