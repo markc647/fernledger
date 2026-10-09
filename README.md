@@ -111,7 +111,7 @@ R2 may ask for a payment method on file even within the free allowance (unconfir
 
 ## Security and privacy
 
-We're as clear about the limits as about the protections. A full threat model will be in [docs/security.md](docs/security.md).
+We're as clear about the limits as about the protections. The full threat model is in [docs/security.md](docs/security.md).
 
 ### What protects your data
 
@@ -128,7 +128,7 @@ We're as clear about the limits as about the protections. A full threat model wi
 
 ### If something goes wrong
 
-[docs/security.md](docs/security.md) will include a breach checklist:
+[docs/security.md](docs/security.md) includes a breach checklist:
 1. Revoke the Akahu token.
 2. Change the app's secrets.
 3. Review Cloudflare Access sign-in logs.
