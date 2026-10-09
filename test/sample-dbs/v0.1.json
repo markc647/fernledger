@@ -1,0 +1,165 @@
+{
+  "migrations": {
+    "0201_settings.sql": "77391fbdae4d94cad4212d94525e8e3705bfa26c0b5ebf6561b2bbb409f7ee10",
+    "0202_change_log.sql": "e490583c524aca611caa18272958ca6575ba1928e4ca03b17d0e6ae07f2ad1e8",
+    "0801_accounts.sql": "98cbf166be237683571125eb5bf853c3f1934dd81b4ea9a056697192e936a5d0",
+    "0802_transactions.sql": "3685d5dba23935569a825b0f7ba734dd56c4e4bc067c2aed526f0c1d68471b68"
+  },
+  "tables": {
+    "settings": {
+      "columns": [
+        "key",
+        "value"
+      ],
+      "rows": [
+        [
+          "about_contact",
+          "Sam Example, sam@example.com"
+        ],
+        [
+          "about_retention",
+          "Kept until the Admin deletes it"
+        ],
+        [
+          "app_title",
+          "Example family finances"
+        ]
+      ]
+    },
+    "change_log": {
+      "columns": [
+        "id",
+        "at",
+        "actor",
+        "summary",
+        "before",
+        "after"
+      ],
+      "rows": [
+        [
+          1,
+          "2026-09-01T02:00:00.000Z",
+          "admin@example.com",
+          "Changed the app title",
+          "{\"app_title\":\"Fernledger\"}",
+          "{\"app_title\":\"Example family finances\"}"
+        ],
+        [
+          2,
+          "2026-09-02T03:30:00.000Z",
+          "admin@example.com",
+          "Renamed an Account",
+          "{\"name\":\"Savings\"}",
+          "{\"name\":\"Savings Example\"}"
+        ]
+      ]
+    },
+    "accounts": {
+      "columns": [
+        "id",
+        "account_number",
+        "name"
+      ],
+      "rows": [
+        [
+          1,
+          "99-9999-9999999-99",
+          "Savings Example"
+        ],
+        [
+          2,
+          "99-9999-9999999-98",
+          "Everyday Example"
+        ]
+      ]
+    },
+    "transactions": {
+      "columns": [
+        "id",
+        "account_id",
+        "date",
+        "amount_cents",
+        "description",
+        "bank_memo",
+        "bank_type",
+        "bank_reference",
+        "source",
+        "bank_unique_id"
+      ],
+      "rows": [
+        [
+          1,
+          1,
+          "2026-08-31",
+          120,
+          "EXAMPLE BANK - INTEREST",
+          "CR.INT TO 31/08/2026",
+          "INT",
+          null,
+          "import",
+          "2026083101"
+        ],
+        [
+          2,
+          1,
+          "2026-09-04",
+          -820,
+          "EXAMPLE CAFE TOWN",
+          "EFTPOS",
+          "EFTPOS",
+          null,
+          "import",
+          "2026090401"
+        ],
+        [
+          3,
+          1,
+          "2026-09-12",
+          250000,
+          "EXAMPLE PENSION",
+          "PENSION",
+          "D/C",
+          null,
+          "import",
+          "2026091201"
+        ],
+        [
+          4,
+          1,
+          "2026-09-18",
+          -5000,
+          "J BLOGGS",
+          "GIFT",
+          "CHQ",
+          "000123",
+          "import",
+          "2026091801"
+        ],
+        [
+          5,
+          2,
+          "2026-09-04",
+          -4599,
+          "EXAMPLE SUPERMARKET",
+          "EFTPOS",
+          "EFTPOS",
+          null,
+          "import",
+          "2026090401"
+        ],
+        [
+          6,
+          2,
+          "2026-09-20",
+          -12000,
+          "EXAMPLE ELECTRICITY",
+          "DIRECT DEBIT",
+          "D/D",
+          null,
+          "import",
+          "2026092001"
+        ]
+      ]
+    }
+  }
+}

@@ -60,7 +60,7 @@ These are deliberate choices. Each is recorded as an [architecture decision](doc
 - **It can't move money.** Akahu personal apps are read-only, with no payments.
 - **No shared hosting.** There's no "Fernledger cloud". You host it yourself (ADR 0006).
 - **NZD and NZ banks only.** It's NZ English only, too (ADR 0006).
-- **No emails, no analytics, no telemetry.** The app contacts no one but Akahu.
+- **No emails, no analytics, no telemetry.** The app contacts no one but Akahu (only if you use Sync) and, to check a sign-in, your own Cloudflare Access (ADR 0010). A test fails if any other outbound call appears.
 - **No native mobile app.** The web app works in a phone browser.
 - **No investment tracking or manually entered assets** in v1.
 
@@ -106,7 +106,8 @@ R2 may ask for a payment method on file even within the free allowance (unconfir
 
 - **Admin and Members.** One Admin, set by email, can edit categories, rules, budgets, overrides and notes. Everyone else is a read-only Member who can view, print and export.
 - **Sync** runs once a day, after Akahu's own daily refresh. A banner shows when data was last synced and turns red after 2 days, for example when a bank connection needs reconnecting.
-- **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu covers it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003).
+- **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu covers it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003). The Admin sets it in Settings, or accepts the last date in the file when importing; an Import then skips rows dated on or after it and says how many. Until accounts can be linked to Akahu, any account can have one; limiting it to linked accounts will ship with that feature.
+- **A bad import can be replaced.** On the Import screen, "Replace imported history" removes an account's imported Transactions, never the ones from Sync, and imports the new file in their place, after the Admin confirms and is told how many will go. The Change Log records it. A history of more than 5,000 imported rows is removed in final steps of 5,000. Each removed or imported row costs 3 of the free plan's 100,000 database writes a day, so one day covers about 33,000 rows removed and imported together. Beyond that Fernledger stops with "Daily limit reached" and says part of the old history has been removed; choose the same file again the next day to finish.
 - **Category precedence:** a hand-set override beats a rule, which beats Akahu's suggestion. Rules apply to all history but never replace an override.
 
 ## Security and privacy
@@ -249,9 +250,12 @@ For anything older, export CSVs from your internet banking and **import** them. 
 ## Updating
 
 **How you hear about updates:**
-- If you used the Deploy button, a small GitHub Action in your copy checks weekly for a new Fernledger release. When it finds one, it opens a pull request with the release notes. Review it, click **Merge**, and Cloudflare deploys it.
+- If you used the Deploy button (still Planned, see Status), a small GitHub Action in your copy checks weekly for a new Fernledger release. When it finds one, it opens a pull request with the release notes. Review it and click **Merge**, then run `npm run deploy` from the merged commit: that is the step that takes the pre-deploy backup, records the restore point and applies database migrations. If your Cloudflare build already deploys on merge, it skips those, so run `npm run deploy` as well (or instead). The action needs one setting turned on in your copy ([docs/setup.md](docs/setup.md#update-pull-requests)).
+- **You are trusting upstream.** A merged update runs upstream's code in your build and deploy (package scripts, `.githooks`, `scripts/`), so read the pull request as you would any dependency update. The setting above lets Actions approve pull requests as well as create them, and pull requests opened with `GITHUB_TOKEN` don't trigger `pull_request` checks, so no CI runs on them.
 - You can also **Watch → Releases** on this repo, and subscribe to its security advisories.
-- The app itself never checks for updates. That would mean contacting GitHub, and Fernledger contacts no one but Akahu.
+- The app itself never checks for updates. That would mean contacting GitHub, and Fernledger contacts no one but Akahu (only if you use Sync) and, to check a sign-in, your own Cloudflare Access (ADR 0010).
+
+How releases are made and tested is in [docs/releasing.md](docs/releasing.md).
 
 **Command-line deployments:** check out the new release tag, then run `npm run deploy`. It needs `npm run setup` to have been run once for this Cloudflare account. Add `--yes` to skip the confirmation prompt when there is no terminal ([docs/setup.md](docs/setup.md)).
 
@@ -259,7 +263,7 @@ For anything older, export CSVs from your internet banking and **import** them. 
 
 | Release | Example | What to expect |
 |---|---|---|
-| Patch | 1.2.**3** | Fixes only. Security fixes ship this way immediately, with a GitHub Security Advisory |
+| Patch | 1.2.**3** | Fixes only, and an add-only migration if the fix needs one. Security fixes ship this way immediately, with a GitHub Security Advisory |
 | Minor | 1.**3**.0 | New features, no manual steps |
 | Major | **2**.0.0 | Manual steps, explained in the upgrade notes |
 
@@ -268,7 +272,7 @@ Only the latest release receives fixes. Please stay current.
 **Your data during an upgrade:**
 - Before any database change, the deploy script takes a complete backup and records a restore point. If the backup fails, nothing changes.
 - Database changes only ever **add** at first. Anything is removed only in a later release, once nothing uses it, so **rolling back to the previous version always works** (ADR 0009).
-- You can skip versions: CI upgrades sample databases from every earlier minor release to the latest and checks the data is intact.
+- You can skip versions: CI upgrades a sample database from each earlier minor release to the latest and checks the data is intact ([docs/releasing.md](docs/releasing.md#sample-databases)). No minor release has shipped yet, so the one sample is a placeholder that is replaced when v0.1.0 is released.
 - Large data changes run in chunks and resume where they left off, so they stay within the free plan's daily limits.
 - If a release needs a new setting, the Settings screen shows the Admin **"Setup needed"** and switches off just that feature until it's done. A feature you don't use, such as Akahu Sync, can stay off. Everything else keeps working.
 
@@ -311,6 +315,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Dashboard | Planned |
 | Reports and export | Planned |
 | Backups and teardown | Done |
+| Release process, update pull requests, upgrade tests | Done |
 | Security audit, Deploy button, v1.0 | Planned |
 | Receipt attachments, more bank CSV formats | After v1 |
 

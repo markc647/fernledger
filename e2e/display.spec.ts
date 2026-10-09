@@ -100,6 +100,9 @@ test.describe('zoom', () => {
           await page.goto(path)
           await sizeButton(page, size).click()
           await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+          // Measure only once the size is applied and the buttons have finished their width transition.
+          await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
           const { scrollWidth, clientWidth } = await page.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
@@ -107,6 +110,64 @@ test.describe('zoom', () => {
           expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
         })
       }
+    }
+  }
+
+  // The Admin's full navigation is the widest header. The per-page test above covers it only incidentally,
+  // so this one names the case: nothing in the header may push the page wider than the 320px viewport.
+  for (const path of ['/', '/settings']) {
+    test(`the header with the Admin's full navigation fits 320px at text size A++ on ${path}`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.setViewportSize({ width: 320, height: 256 })
+      await page.goto(path)
+      await sizeButton(page, 'A++').click()
+      // Measure only once the larger size is applied and the buttons have finished their width transition.
+      await expect(page.locator('html')).toHaveAttribute('data-text-size', 'a-plus-plus')
+      await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+      const nav = page.getByRole('navigation', { name: 'Main' })
+      await expect(nav.getByRole('link', { name: 'Settings' })).toBeVisible()
+      await expect(nav.getByRole('link', { name: 'Change Log' })).toBeVisible()
+      const { scrollWidth, innerWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth: window.innerWidth,
+      }))
+      expect(scrollWidth).toBeLessThanOrEqual(innerWidth)
+    })
+  }
+
+  // The Import screen with a file chosen and the "Replace imported history" question open: the longest text it shows.
+  // The Account and its imported-row count are stubbed, so this needs no data in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/import with the replace question open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example savings', accountNumber: '99-9999-9999999-97', cutoverDate: '2026-10-01' }] }))
+        await page.route('**/api/imports/imported/1', (route) => route.fulfill({ json: { imported: 6000 } }))
+        await page.setViewportSize({ width, height })
+        await page.goto('/import')
+        await sizeButton(page, size).click()
+        const csv = [
+          'Created date / time : 2 October 2026 / 18:55:26',
+          'Bank 99; Branch 9999; Account 9999999-97 (Zoom Example)',
+          'From date 20260901',
+          'To date 20261001',
+          'Avail Bal : 10.00 as of 20260930',
+          'Ledger Balance : 10.00 as of 20261002',
+          'Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount',
+          '',
+          '2026/09/10,202609100,EFTPOS,,"EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN","EFTPOS",-1234567.00',
+        ].join('\n')
+        await page.getByLabel('Bank export file').setInputFiles({ name: 'zoom.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
+        await page.getByRole('button', { name: 'Replace imported history…' }).click()
+        await expect(page.getByRole('alertdialog')).toContainText('removed in steps of 5,000')
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
     }
   }
 

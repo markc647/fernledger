@@ -5,5 +5,5 @@ Every release's migrations are additive only: new tables, new nullable columns, 
 ## Consequences
 
 - A rename takes two releases: add the new column and write to both, then stop using the old one and drop it later.
-- CI applies every migration to sample databases taken from each earlier minor release, then runs the previous release's tests against the migrated schema.
+- CI applies every migration to sample databases taken from each earlier minor release and checks that every table, column and row survives. Running the previous release's own tests against the migrated schema is still to do: it needs a first release to run them from (docs/releasing.md).
 - Large data backfills are chunked and resumable, to stay within D1 Free's 100k row writes per day (ADR 0004).

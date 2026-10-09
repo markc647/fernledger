@@ -58,6 +58,7 @@ _Avoid_: Reconciliation, audit
 
 **Cutover Date**:
 For an Account linked to Akahu, the date before which Transactions come only from Imports and on or after which they come only from Sync.
+Today any Account can have one; limiting it to linked Accounts will ship with the Account Link ticket, because no link exists yet to check (ADR 0008).
 _Avoid_: Switchover, boundary
 
 ## Organising
