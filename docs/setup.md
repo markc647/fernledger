@@ -116,7 +116,7 @@ After any rollback, check the row counts and open the app before you call it fix
 
 ### Restoring
 
-Restore into an **empty** database that has the schema. A restore adds rows and never overwrites, and it refuses a database that already has rows in any backed-up table or lacks a backed-up column (a database with extra columns, from a newer schema, is fine).
+Restore into an **empty** database that has the schema. A restore adds rows and never overwrites, and it refuses a database that already has rows in any backed-up table or lacks a backed-up column (a database with extra columns, from a newer schema, is fine). The one exception is the starter Categories that the migrations add: if nothing else has rows, the restore replaces them with the backup's Categories (it deletes the starter rows first, which is safe only because every other table is empty, so nothing can refer to them).
 
 **Finding the `<backup date>`:** open the Cloudflare dashboard, R2, your backup bucket, `backups/`. Each folder is an NZ date, `YYYY-MM-DD`, and counts only if it holds a `manifest.json`. The weekly backup runs on Sundays, and `npm run deploy` prints the folder of the one it took. The newest date with a manifest is the latest backup. A folder ending `-final-<time>` is the final backup `npm run teardown` took. It restores like any other: pass its whole folder name, e.g. `2026-10-12-final-20261012T031500123Z`. (Wrangler can't list a bucket, so the script can't list them for you.)
 

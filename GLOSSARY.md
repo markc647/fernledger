@@ -67,6 +67,10 @@ _Avoid_: Switchover, boundary
 A label grouping Transactions by purpose, such as Groceries or Care Fees.
 _Avoid_: Tag, type, bucket
 
+**Uncategorised**:
+What a Transaction is when no Override, Rule or Akahu suggestion gives it a Category in use, so a removed Category counts as none; the Admin has a list of them. Removing a Category takes away its Overrides, and those Transactions fall back to their Rule or Akahu category, or are Uncategorised if neither applies.
+_Avoid_: Unassigned, unknown
+
 **Rule**:
 An Admin-defined pattern that assigns a Category to matching Transactions; it overrides Akahu's suggested category.
 _Avoid_: Filter, mapping
@@ -90,7 +94,7 @@ The record of every change the Admin makes: who, what and when; visible to all M
 _Avoid_: Audit trail, history
 
 **Change type**:
-The kind of thing a Change Log entry changed, such as Settings, Import or Account; Members can filter the Change Log by it. Not a Category.
+The kind of thing a Change Log entry changed, such as Settings, Import, Account, Category or Transaction; Members can filter the Change Log by it. Not a Category.
 _Avoid_: Type, kind
 
 **Report**:

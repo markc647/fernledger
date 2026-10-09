@@ -42,7 +42,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Imports your bank's CSV exports:** years of history older than Akahu can provide, or as your regular source if you'd rather not use Akahu at all. Fernledger works without Akahu: you import a CSV each month instead of syncing.
 - **Bank Time:** a transaction's time of day is shown only when the bank actually supplied one, which is rare, because most banks give a date only. Fernledger never invents a time. It also records when Akahu first saw each transaction.
 - **Full transaction detail for record-keeping:** the counterparty's account number, card suffix, and payment particulars, code and reference. That way you can show exactly where money went.
-- **Your own categories**, with a starter list, and **rules** that categorise automatically. The Admin can override any single transaction and add a note.
+- **Your own categories**, from a starter list the Admin can add to, rename and remove. The Admin can override any single transaction's category and add a note, and a list of uncategorised transactions shows what's left. **Rules** that categorise automatically are planned.
 - **Transfers between your own accounts** are detected and left out of spending.
 - **Monthly budgets** per category. Unspent amounts don't carry over, and changing a budget doesn't rewrite past months.
 - **Dashboard:** balances, net worth over time, spending by category, budget vs actual, searchable transactions.
@@ -310,7 +310,8 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Change Log page | Done |
 | Database, CSV import (ASB) | In progress |
 | Akahu sync | Planned |
-| Categories, rules, transfers, budgets | Planned |
+| Categories, overrides and notes | Done |
+| Rules, transfers, budgets | Planned |
 | Dashboard | Planned |
 | Reports and export | Planned |
 | Backups and teardown | Done |
