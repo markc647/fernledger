@@ -1,23 +1,20 @@
 # Agent guide: Fernledger
 
-Self-hosted NZ bank-account tracker on Cloudflare Workers (free plan) + D1 + R2, behind Cloudflare Access. Read README.md for what and why.
+Self-hosted NZ bank-account tracker on Cloudflare Workers (free plan) + D1 + R2, behind Cloudflare Access. `README.md` says what and why. The spec is issue #1.
 
-## Before you change anything
-- Use the terms in `GLOSSARY.md` in code, tests, issues and PRs. Don't use the synonyms it marks _Avoid_.
-- Read the ADRs in `docs/adr/` that touch your area. If your change contradicts one, say so explicitly.
+## Where things are
+- `GLOSSARY.md`: domain terms. Name things with these.
+- `docs/adr/`: decisions. Read the ones touching your area before changing it.
+- `CODING_STANDARDS.md`: what reviewers enforce. Read it when you're unsure how to do something.
+- `docs/bank-formats/`: bank CSV layouts, with made-up examples. Real exports never enter this repo.
 
-## Conventions
-- Money is integer NZD cents. Dates are NZ dates (Pacific/Auckland). Show a Bank Time only if the bank supplied one.
-- Business logic lives in pure functions with Vitest tests. Worker handlers stay thin.
-- Plain D1 SQL, no ORM (ADR 0005). Migrations only add things; drops and renames come in a later release (ADR 0009).
-- Stay inside the Workers Free plan: 10 ms CPU, 50 queries/subrequests per invocation, batched writes (ADR 0004).
-- Every /api request is authenticated via the Access JWT. Members are read-only. Fail closed.
-- Never log transactions, tokens or emails, only IDs, counts and error types.
-- UI: shadcn/ui, WCAG 2.2 AA, plain NZ English, amounts signed and right-aligned with fixed-width digits.
+## Before reporting work done
+- Run `npm run check` (lint, typecheck, tests, script tests, secret scan and its self-test). It's green when it exits 0. The first scan downloads a pinned, checksum-verified gitleaks into your user cache.
+- `npm install` points git at `.githooks/`, whose pre-commit hook runs lint, typecheck and a staged-files secret scan.
 
-## Never
-- Commit real bank data, names, emails, account numbers or Cloudflare resource IDs. This repo is public. Use the made-up fixtures in `test/fixtures/`.
-- Add a dependency for something a few lines can do.
+## Hard rules
+- This repo is public. Data in it is made up (bank code 99 fixtures). Cloudflare resource IDs, names, emails and real account numbers stay out of it.
+- Money is integer NZD cents. Dates are NZ dates (Pacific/Auckland).
 
 ## Agent skills
 

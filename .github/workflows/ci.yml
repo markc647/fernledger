@@ -17,9 +17,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      - run: npm run check
 
+  # gitleaks runs twice on purpose: `check` scans the working tree, this job scans git history.
   secrets-scan:
     runs-on: ubuntu-latest
     steps:
@@ -29,3 +29,4 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.24.3 # keep equal to VERSION in scripts/gitleaks.mjs
