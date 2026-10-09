@@ -1,14 +1,7 @@
-/** One Transaction row from a bank CSV. Dates are ISO `YYYY-MM-DD` NZ dates; money is integer NZD cents. */
-export interface BankCsvRow {
-  date: string
-  /** The bank's own unique ID for the row. */
-  uniqueId: string
-  tranType: string
-  chequeNumber: string | null
-  payee: string
-  bankMemo: string
-  amountCents: number
-}
+import type { ImportRow } from '@/generated/api/import-rows'
+
+/** One Transaction row from a bank CSV, exactly as the Worker takes it (worker/import-rows.ts). */
+export type BankCsvRow = ImportRow
 
 /** A row that could not be parsed. Never carries field values (they are transaction data). `line` is 1-based in the original file text. */
 export interface BankCsvRowError {

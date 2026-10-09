@@ -118,7 +118,8 @@ function parse(text: string): BankCsvResult {
 
   return {
     adapterId: 'asb',
-    accountNumber: `${account[1]}-${account[2]}-${account[3]}-${account[4]}`,
+    // A suffix like 099 is the same account as 99; the Worker normalises the same way, so the preview matches Accounts.
+    accountNumber: `${account[1]}-${account[2]}-${account[3]}-${account[4]!.replace(/^0(\d{2})$/, '$1')}`,
     ledgerBalance: { cents: parseCents(balance[1]!)!, date: balanceDate },
     dateRange: { from, to },
     rows,
