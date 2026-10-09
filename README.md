@@ -120,7 +120,7 @@ We're as clear about the limits as about the protections. The full threat model 
 - **Only people you list can reach the app at all.** Anyone else stops at Cloudflare's login page. The example policy also limits sign-in to New Zealand.
 - **Read-only by default.** Only the Admin can change anything, and every change goes in a Change Log that all Members can see.
 - **Read-only bank access.** If you use Akahu Sync, its personal-app tokens can't make payments. A leaked token exposes history, not money.
-- **Encrypted** in transit (TLS) and at rest (D1, R2). Akahu tokens are stored as encrypted Worker secrets, never in code or the database.
+- **Encrypted** in transit (TLS) and at rest (D1, R2). If you use Akahu Sync, its tokens are stored as encrypted Worker secrets, never in code or the database.
 - **Protection against cross-site attacks:** changes must come from the app's own address with a JSON body. Strict security headers are set: a Content Security Policy, no framing, no referrer.
 - **Safe exports:** CSV cells that would run as spreadsheet formulas, such as a payee named `=HYPERLINK(…)`, are escaped.
 - **Quiet logs:** logs contain only IDs, counts and error types, never transactions, tokens or emails. A test enforces this.

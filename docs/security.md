@@ -1,6 +1,6 @@
 # Security
 
-This page sets out what Fernledger protects, what it doesn't, and what to do if something goes wrong. It matches the [README](../README.md#security-and-privacy). For the law and Akahu's terms, see [privacy.md](privacy.md). To report a vulnerability, see [SECURITY.md](../SECURITY.md).
+This page sets out what Fernledger protects, what it doesn't, and what to do if something goes wrong. For the law and Akahu's terms, see [privacy.md](privacy.md). To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 
 ## Contents
 
@@ -29,11 +29,7 @@ Each Deployer runs their own copy in their own Cloudflare account. There is no F
 
 ### What is not protected
 
-- **Your Cloudflare account is the master key.** Anyone who controls it controls your data. The setup guide requires two-factor authentication on it, and as few account members as possible.
-- **Each Member's email is their key.** If someone's inbox is compromised, so is their access. Use Google or Microsoft sign-in with MFA for stronger protection.
-- **There is no app-level encryption.** We rely on Cloudflare's encryption at rest. Encrypting inside the app wouldn't add real protection, because the key would live in the same Worker as the data, and it would make search and reports much harder.
-- **Oceania is a location hint, not a residency guarantee.** Your database and backups are created in Oceania by default, but Cloudflare offers guaranteed jurisdictions only for the EU and FedRAMP (ADR 0007).
-- **Cloudflare can technically access data in your account,** as with any cloud host. See Cloudflare's [privacy policy](https://www.cloudflare.com/privacypolicy/).
+See [What it can't protect against](../README.md#what-it-cant-protect-against) in the README.
 
 ## If something goes wrong
 
