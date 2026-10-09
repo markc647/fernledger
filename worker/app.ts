@@ -3,6 +3,7 @@ import { authConfigFromEnv, authenticate, devMember, type Member } from './auth'
 import { logEvent } from './log'
 import { isJson, isWrite } from './request-format'
 import { SECURITY_HEADERS } from './security-headers'
+import { appTitleOrDefault, getSetting } from './settings'
 
 type AppEnv = { Bindings: Env; Variables: { member: Member } }
 
@@ -31,6 +32,8 @@ export const app = new Hono<AppEnv>()
     await next()
   })
   .get('/api/me', (c) => c.json(c.var.member))
+  // Every Member sees the title in the page header; changing it is the Settings screen's job (ticket 05).
+  .get('/api/app-title', async (c) => c.json({ title: appTitleOrDefault(await getSetting(c.env.DB, 'app_title')) }))
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404))
 

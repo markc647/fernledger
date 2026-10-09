@@ -10,6 +10,7 @@ const pages = [
   { role: 'admin', path: '/', heading: 'Summary' },
   { role: 'admin', path: '/settings', heading: 'Settings' },
   { role: 'member', path: '/', heading: 'Summary' },
+  { role: 'member', path: '/styleguide', heading: 'Display examples' },
 ] as const
 
 const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)

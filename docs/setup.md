@@ -118,4 +118,4 @@ The dev server shows a "Development only" bar to switch between the Admin and a 
 - Each file is safe to run again: `insert or replace`, or delete then insert.
 - Data is made up, following the hard rules in `AGENTS.md` (bank code 99, no real names or numbers). The secret scan checks these files too.
 
-**Browser tests:** `npm run test:e2e` builds the app and runs Playwright with axe checks in light and dark, against the production build with the real security headers. It fails on any console error or Content-Security-Policy violation. Run `npx playwright install chromium` once first, or set `PLAYWRIGHT_CHANNEL=msedge` (or `chrome`) to use a browser you already have.
+**Browser tests:** `npm run test:e2e` builds the app, applies the local migrations, and runs Playwright with axe checks in light and dark, against the production build with the real security headers. It fails on any console error or Content-Security-Policy violation. Run `npx playwright install chromium` once first, or set `PLAYWRIGHT_CHANNEL=msedge` (or `chrome`) to use a browser you already have.

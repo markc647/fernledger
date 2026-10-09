@@ -4,6 +4,7 @@ import { defineConfig } from '@playwright/test'
 // which these tests select with a cookie (the dev-only switcher bar is not in a production build).
 // Run with `npm run test:e2e`. They are kept out of `npm run check` because they need a browser and are slower;
 // CI runs them as their own job. The first run needs `npx playwright install chromium`.
+// The server step also applies the local migrations (`npm run seed`), because the header reads the app title from D1.
 const port = 5199
 
 export default defineConfig({
@@ -20,7 +21,7 @@ export default defineConfig({
   ],
   webServer: {
     // The production build, served by the Worker runtime with the real headers (public/_headers and worker/security-headers.ts).
-    command: `npm run build && npx vite preview --port ${port} --strictPort`,
+    command: `npm run build && npm run seed && npx vite preview --port ${port} --strictPort`,
     timeout: 180_000,
     url: `http://localhost:${port}`,
     reuseExistingServer: !process.env.CI,
