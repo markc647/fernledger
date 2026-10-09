@@ -161,7 +161,13 @@ Read **[docs/privacy.md](docs/privacy.md)** for the details: what the Privacy Ac
 
 ### Leaving Fernledger
 
-A documented teardown exports everything, deletes your database and backups, and revokes your Akahu token. Your data is yours, and you can take it with you or destroy it at any time.
+The teardown (`npm run teardown`) takes a new final backup of everything and downloads it to a folder you choose, then deletes your database. Your data is yours, and you can take it with you or destroy it at any time.
+
+- **The final backup comes first, and is checked.** It is always a new backup, never an older one, and the script checks that every table in the database is in it with the same row count, once after the backup and again right after you confirm, before deleting anything. If it can't be made, downloaded and verified, or the database changed meanwhile, nothing is deleted. Row counts can't see a row edited in place, so don't use the app during teardown. A table the backup can't hold (the manifest lists these) is deleted only if you type its name as well.
+- **Deleting needs you to type the database's name.** It is never done on a default answer, and `CI=true` doesn't skip it.
+- **You empty the backup bucket yourself, last.** Wrangler can't empty an R2 bucket, so the script deletes the database, then prints how to empty and delete the bucket. Emptying it destroys every backup in it, not only the final one, so download any older backup you want first.
+- **If you used Akahu Sync, revoke your Akahu access yourself** (ADR 0008): remove the personal app Fernledger used, or disconnect the bank connections it syncs, in your Akahu account. Deleting the Worker removes Fernledger's copy of the token but doesn't revoke it. With CSV Imports only, there is nothing to revoke.
+- [docs/setup.md](docs/setup.md#leaving-fernledger-teardown) has the steps, including the few things only you can delete (the Worker and the Access application).
 
 ## Where your data is stored
 
@@ -190,8 +196,8 @@ Fernledger aims to keep your data **correct, current and recoverable**.
 
 - **Weekly full backups** go to your own R2 bucket and are all kept. They're a few MB each, so years of them fit in the free allowance. Each backup includes a manifest of row counts and checksums.
 - **Point-in-time restore:** Cloudflare D1 can restore your database to any point in the last **7 days** on the free plan, or 30 days on paid plans.
-- **Restore is tested:** CI tests the restore script, and the docs describe a restore practice run to do twice a year.
-- **Safe upgrades:** before a release changes the database, the deploy script records a restore point and will also take a backup. If an upgrade goes wrong, roll back by restoring that point and redeploying the previous release.
+- **Restore is tested:** CI tests the restore script, and you should do a restore practice run twice a year ([docs/setup.md](docs/setup.md#restore-practice-run-twice-a-year)).
+- **Safe upgrades:** before a release changes the database, the deploy script takes a complete backup, then records a restore point. If the backup fails, it stops before changing anything. If an upgrade goes wrong, roll back by redeploying the previous release, and restore the restore point only if the data needs it ([docs/setup.md](docs/setup.md#rolling-back)).
 
 ### If the Admin becomes unavailable
 
@@ -260,7 +266,7 @@ For anything older, export CSVs from your internet banking and **import** them. 
 Only the latest release receives fixes. Please stay current.
 
 **Your data during an upgrade:**
-- Before any database change, the deploy script records a restore point and will also take a backup.
+- Before any database change, the deploy script takes a complete backup and records a restore point. If the backup fails, nothing changes.
 - Database changes only ever **add** at first. Anything is removed only in a later release, once nothing uses it, so **rolling back to the previous version always works** (ADR 0009).
 - You can skip versions: CI upgrades sample databases from every earlier minor release to the latest and checks the data is intact.
 - Large data changes run in chunks and resume where they left off, so they stay within the free plan's daily limits.
@@ -302,7 +308,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Categories, rules, transfers, budgets | Planned |
 | Dashboard | Planned |
 | Reports and export | Planned |
-| Backups and teardown | In progress |
+| Backups and teardown | Done |
 | Security audit, Deploy button, v1.0 | Planned |
 | Receipt attachments, more bank CSV formats | After v1 |
 

@@ -21,6 +21,7 @@
     "setup": "node scripts/setup.mjs",
     "deploy": "node scripts/deploy.mjs",
     "restore": "node scripts/restore.mjs",
+    "teardown": "node scripts/teardown.mjs",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
