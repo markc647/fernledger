@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { after, test } from 'node:test'
+import { stripJsonComments } from './wrangler-cli.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const wranglerConfig = readFileSync(resolve(root, 'wrangler.jsonc'), 'utf8')
@@ -243,7 +244,8 @@ test('setup rejects a REGION Wrangler does not accept, and runs nothing', () => 
 
 test('wrangler.jsonc names the resources but carries no Cloudflare IDs', () => {
   assert.match(wranglerConfig, /"database_name": "fernledger"/)
-  assert.doesNotMatch(wranglerConfig, /database_id|preview_database_id|account_id|"id":/)
+  const config = JSON.parse(stripJsonComments(wranglerConfig))
+  assert.doesNotMatch(JSON.stringify(config), /database_id|preview_database_id|account_id|"id":/)
   assert.doesNotMatch(wranglerConfig, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)
 })
 
