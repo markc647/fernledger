@@ -1,8 +1,10 @@
 {
   "files": [],
+  "compilerOptions": { "paths": { "@/*": ["./src/*"] } },
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.e2e.json" },
     { "path": "./tsconfig.worker.json" },
     { "path": "./tsconfig.worker-test.json" }
   ]
