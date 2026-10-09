@@ -42,3 +42,9 @@ npm run dev
 ```
 
 Access isn't in front of the local dev server, so `DEV_USER_EMAIL` stands in for the signed-in Member. It's honoured only on `localhost`. Set it to something other than `ADMIN_EMAIL` to see the read-only view.
+
+The dev server shows a "Development only" bar to switch between the Admin and a read-only Member. It works by a cookie that the Worker honours only on `localhost`, and only when `DEV_USER_EMAIL` is set. Production builds don't include the bar.
+
+**Sample data:** `npm run seed` applies the local migrations and loads made-up data into the local database. Each feature that adds tables adds its own `seed/NN-name.sql` file (numbered after the tables it needs), safe to run again, with made-up values only.
+
+**Browser tests:** `npm run test:e2e` runs Playwright with axe checks in both themes. Run `npx playwright install chromium` once first, or set `PLAYWRIGHT_CHANNEL=msedge` (or `chrome`) to use a browser you already have.

@@ -9,3 +9,6 @@ dist/
 .wrangler/
 *.local
 .claude/worktrees/
+src/routeTree.gen.ts
+test-results/
+playwright-report/
