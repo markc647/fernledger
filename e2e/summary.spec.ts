@@ -6,7 +6,7 @@ import { expect, signInAs, test } from './fixtures'
 // the API, a second through the Import screen) and then read the Summary as a Member. The light and dark projects share
 // one local database, so each has an Account of its own. Dates are in 2031 so these are the newest Transactions.
 
-const suffix = (testInfo: { project: { name: string } }) => (testInfo.project.name === 'dark' ? '89' : '88')
+const suffix = (testInfo: { project: { name: string } }) => (testInfo.project.name === 'dark' ? '86' : '87')
 const accountNumber = (testInfo: { project: { name: string } }) => `99-9999-9999999-${suffix(testInfo)}`
 const accountName = (testInfo: { project: { name: string } }) => `Summary Example ${testInfo.project.name}`
 
