@@ -68,17 +68,19 @@ test.describe('About your data', () => {
     const held = section(page, 'What is held')
     await expect(held.getByRole('listitem').locator('strong')).toHaveText(['Accounts:', 'Transactions:', 'Balances:', 'Categories:', 'The Change Log:', 'Who may sign in:', 'Settings:'])
     await expect(held.getByRole('listitem').filter({ hasText: 'Balances:' })).toContainText('balance a bank reported')
-    // The Change Log keeps values, Notes included, and the Admin's email is held outside the database.
-    await expect(held.getByRole('listitem').filter({ hasText: 'The Change Log:' })).toContainText('before and after')
+    // The Change Log keeps values, Notes included, and is where the Admin's email address is held.
+    await expect(held.getByRole('listitem').filter({ hasText: 'The Change Log:' })).toContainText('often with the values from before and after')
     await expect(held.getByRole('listitem').filter({ hasText: 'The Change Log:' })).toContainText('any Note')
-    await expect(held.getByRole('listitem').filter({ hasText: 'Who may sign in:' })).toContainText("the Admin's email address, outside the database")
+    await expect(held.getByRole('listitem').filter({ hasText: 'Who may sign in:' })).toContainText("It writes the Admin's email address into each Change Log entry")
+    await expect(held).not.toContainText(/Admin's email address, outside the database/)
   })
 
   test('says what the weekly backup holds, and that earlier backups keep what was later removed', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/about-your-data')
     await expect(section(page, 'What is held')).toContainText('A copy of the database is saved every week')
-    await expect(section(page, 'What is held')).toContainText("kept outside the database, so the backups don't hold them")
+    await expect(section(page, 'What is held')).toContainText("The sign-in list and any Akahu keys are kept outside the database, so the backups don't hold them")
+    await expect(section(page, 'What is held')).toContainText("The Admin's email address is in the Change Log, so it is in the backups")
     await expect(section(page, 'How long it is kept')).toContainText('earlier backups still hold their copy')
   })
 
@@ -172,7 +174,7 @@ test.describe('About your data', () => {
 // How to sign in
 
 test.describe('How to sign in', () => {
-  test('gives the Cloudflare Access email-code steps in plain English, with the 24-hour session', async ({ page, context, baseURL }) => {
+  test('gives the Cloudflare Access email-code steps in plain English, and that the session lasts a while', async ({ page, context, baseURL }) => {
     await signInAs(context, 'member')
     await page.goto('/how-to-sign-in')
     const steps = page.getByRole('list', { name: 'Steps' }).getByRole('listitem')
@@ -181,7 +183,7 @@ test.describe('How to sign in', () => {
     await expect(steps.nth(1)).toContainText('email address')
     await expect(steps.nth(2)).toContainText('junk or spam')
     await expect(steps.nth(3)).toContainText('code')
-    await expect(steps.nth(4)).toContainText('24 hours')
+    await expect(steps.nth(4)).toContainText('for a while (usually 24 hours')
     // The app's own address, filled in at runtime from where the page is open: no address is written into the guide.
     await expect(steps.nth(0)).toContainText(new URL(baseURL!).host)
     await expect(page.getByRole('heading', { level: 2, name: 'If something goes wrong' })).toBeVisible()

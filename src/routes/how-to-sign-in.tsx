@@ -53,7 +53,7 @@ function HowToSignIn() {
           <strong className="font-semibold">Type the code in.</strong> Type the code from the email into the Cloudflare page and press "Sign in". The code works for 10 minutes, and only once. If it has run out, press "Request new code".
         </li>
         <li className="break-inside-avoid ps-1">
-          <strong className="font-semibold">You're in.</strong> Fernledger opens. You stay signed in on this device for 24 hours. After that, do these steps again.
+          <strong className="font-semibold">You're in.</strong> Fernledger opens. You stay signed in on this device for a while (usually 24 hours, as your family set it up). After that, do these steps again.
         </li>
       </ol>
 

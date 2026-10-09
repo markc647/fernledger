@@ -51,10 +51,10 @@ function AboutYourData() {
             <strong className="font-semibold">Categories:</strong> the Admin's list of them, and the Category or Note the Admin has put on a Transaction.
           </li>
           <li>
-            <strong className="font-semibold">The Change Log:</strong> every change the Admin makes, with the time and the Admin's email address, and the values from before and after the change. That includes the words of any Note, so a Note the Admin changes or removes can still be read there.
+            <strong className="font-semibold">The Change Log:</strong> every change the Admin makes, with the time and the Admin's email address, and what changed, often with the values from before and after. That includes the words of any Note, so a Note the Admin changes or removes can still be read there.
           </li>
           <li>
-            <strong className="font-semibold">Who may sign in:</strong> Cloudflare Access keeps the list of Members' email addresses. Fernledger doesn't keep a list of its own, but it does keep the Admin's email address, outside the database, to know who may make changes.
+            <strong className="font-semibold">Who may sign in:</strong> Cloudflare Access keeps the list of Members' email addresses. Fernledger doesn't keep a list of its own. It writes the Admin's email address into each Change Log entry.
           </li>
           <li>
             <strong className="font-semibold">Settings:</strong> the app title and the text on this page.
@@ -71,7 +71,7 @@ function AboutYourData() {
             <p>Akahu Sync isn't set up here, so Transactions come only from bank files the Admin imports.</p>
           ))}
         <p>
-          A copy of the database is saved every week, as a backup. The sign-in list, the Admin's email address and any Akahu keys are kept outside the database, so the backups don't hold them.
+          A copy of the database is saved every week, as a backup. The sign-in list and any Akahu keys are kept outside the database, so the backups don't hold them. The Admin's email address is in the Change Log, so it is in the backups.
         </p>
       </Section>
 
