@@ -111,7 +111,7 @@ R2 may ask for a payment method on file even within the free allowance (unconfir
 
 ## Security and privacy
 
-We're as clear about the limits as about the protections. A full threat model will be in [docs/security.md](docs/security.md).
+We're as clear about the limits as about the protections. The full threat model is in [docs/security.md](docs/security.md).
 
 ### What protects your data
 
@@ -119,8 +119,8 @@ We're as clear about the limits as about the protections. A full threat model wi
 - **No passwords in the app.** Sign-in is handled by [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) with email one-time codes, or Google/Microsoft with MFA. The app checks Access's signed token (signature, issuer, audience) on **every** request. If configuration is missing, it refuses all requests rather than allowing them (ADR 0002).
 - **Only people you list can reach the app at all.** Anyone else stops at Cloudflare's login page. The example policy also limits sign-in to New Zealand.
 - **Read-only by default.** Only the Admin can change anything, and every change goes in a Change Log that all Members can see.
-- **Read-only bank access.** Akahu personal-app tokens can't make payments. A leaked token exposes history, not money.
-- **Encrypted** in transit (TLS) and at rest (D1, R2). Akahu tokens are stored as encrypted Worker secrets, never in code or the database.
+- **Read-only bank access.** If you use Akahu Sync, its personal-app tokens can't make payments. A leaked token exposes history, not money.
+- **Encrypted** in transit (TLS) and at rest (D1, R2). If you use Akahu Sync, its tokens are stored as encrypted Worker secrets, never in code or the database.
 - **Protection against cross-site attacks:** changes must come from the app's own address with a JSON body. Strict security headers are set: a Content Security Policy, no framing, no referrer.
 - **Safe exports:** CSV cells that would run as spreadsheet formulas, such as a payee named `=HYPERLINK(…)`, are escaped.
 - **Quiet logs:** logs contain only IDs, counts and error types, never transactions, tokens or emails. A test enforces this.
@@ -128,12 +128,7 @@ We're as clear about the limits as about the protections. A full threat model wi
 
 ### If something goes wrong
 
-[docs/security.md](docs/security.md) will include a breach checklist:
-1. Revoke the Akahu token.
-2. Change the app's secrets.
-3. Review Cloudflare Access sign-in logs.
-4. Tell Akahu, as its terms require.
-5. Check whether you must notify the Privacy Commissioner and the people affected.
+The breach checklist is in [docs/security.md](docs/security.md#if-something-goes-wrong).
 
 ### What it can't protect against
 
