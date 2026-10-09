@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose'
+import { z } from 'zod'
 
 export type Role = 'admin' | 'member'
 export type Member = { email: string; role: Role }
@@ -10,6 +11,8 @@ export type AuthConfig = {
   adminEmail: string
 }
 
+const emailClaim = z.email()
+
 /** Verifies the Cloudflare Access JWT. Returns null for anything that isn't a valid, signed, in-date token for this app. */
 export async function authenticate(request: Request, config: AuthConfig): Promise<Member | null> {
   const token = request.headers.get('Cf-Access-Jwt-Assertion')
@@ -19,8 +22,9 @@ export async function authenticate(request: Request, config: AuthConfig): Promis
       issuer: config.issuer,
       audience: config.audience,
     })
-    if (typeof payload.email !== 'string' || !payload.email) return null
-    const email = payload.email.toLowerCase()
+    const parsed = emailClaim.safeParse(payload.email)
+    if (!parsed.success) return null
+    const email = parsed.data.toLowerCase()
     return { email, role: email === config.adminEmail.toLowerCase() ? 'admin' : 'member' }
   } catch {
     return null
