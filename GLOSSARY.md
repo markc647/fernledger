@@ -12,6 +12,10 @@ _Avoid_: Super user, owner, editor
 A person granted access to the dashboard; read-only unless they are the Admin.
 _Avoid_: User, viewer, household
 
+**Deployer**:
+The person who deploys and operates a Fernledger instance in their own Cloudflare account; responsible for its data, upgrades and backups. Often, but not always, the Admin.
+_Avoid_: Host, operator, owner
+
 ## Money
 
 **Account**:
