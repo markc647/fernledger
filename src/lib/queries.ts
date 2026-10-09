@@ -64,3 +64,35 @@ export const importedRowsQuery = (accountId: number) =>
       return res.json()
     },
   })
+
+/** Every Account's balance now, from its latest bank balance. */
+export const balancesQuery = queryOptions({
+  queryKey: ['balances'],
+  queryFn: async () => {
+    const res = await api.balances.$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return (await res.json()).accounts
+  },
+})
+
+/** Balance Check warnings (where the bank and the Transactions disagree), and each Account's latest check. */
+export const balanceChecksQuery = queryOptions({
+  queryKey: ['balance-checks'],
+  queryFn: async () => {
+    const res = await api['balance-checks'].$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+export const RECENT_TRANSACTIONS = 5
+
+/** The newest few Transactions, for the Summary. */
+export const recentTransactionsQuery = queryOptions({
+  queryKey: ['transactions', 'recent'],
+  queryFn: async () => {
+    const res = await api.transactions.$get({ query: { limit: String(RECENT_TRANSACTIONS) } })
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})

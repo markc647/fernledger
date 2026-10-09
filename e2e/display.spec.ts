@@ -172,6 +172,56 @@ test.describe('zoom', () => {
     }
   }
 
+  // The Summary with its longest content: long Account names, big amounts, a warning with its explanation, and a
+  // Transaction with a long description. The data is stubbed, so the test needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/ with a Balance Check warning at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        const longName = 'Example everyday account for the household bills and groceries'
+        await page.route('**/api/balances', (route) =>
+          route.fulfill({
+            json: {
+              accounts: [
+                { accountId: 1, accountName: longName, balanceCents: -123456789, asOfDate: '2026-10-08' },
+                { accountId: 2, accountName: 'Example savings', balanceCents: null, asOfDate: null },
+              ],
+            },
+          }),
+        )
+        await page.route('**/api/balance-checks', (route) =>
+          route.fulfill({
+            json: {
+              differences: [{ accountId: 1, accountName: longName, asOfDate: '2026-10-08', since: '2026-09-30', differenceCents: -123456789 }],
+              accounts: [{ accountId: 1, accountName: longName, asOfDate: '2026-10-08', status: 'differs' }],
+            },
+          }),
+        )
+        await page.route(/\/api\/transactions\?/, (route) =>
+          route.fulfill({
+            json: {
+              total: 1234,
+              transactions: [{ id: 1, accountId: 1, accountName: longName, date: '2026-10-08', description: 'EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN', bankType: 'EFTPOS', amountCents: -123456789 }],
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/')
+        await sizeButton(page, size).click()
+        await expect(page.getByRole('region', { name: 'Balance checks' })).toContainText('Balance differs from bank by $1,234,567.89 since Wed 30 Sept 2026')
+        await expect(page.getByRole('region', { name: 'Recent transactions' })).toContainText('EXAMPLE SHOP WITH A LONG ENOUGH NAME')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
   test('a very long app title wraps instead of scrolling sideways', async ({ page }) => {
     await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(120, 'x'), about_contact: '', about_retention: '' } }))
     await page.setViewportSize({ width: 320, height: 256 })

@@ -179,6 +179,7 @@ function CutoverForm({ id, name, cutoverDate }: { id: number; name: string; cuto
     onSuccess: async (date) => {
       setValue(date ?? '')
       await queryClient.invalidateQueries({ queryKey: ['accounts'] })
+      await queryClient.invalidateQueries({ queryKey: ['balances'] }) // the Summary explains a missing balance by the Cutover Date
     },
   })
   const inputId = `cutover-${id}`
