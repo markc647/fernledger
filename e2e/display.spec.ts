@@ -1,9 +1,6 @@
-import type { BrowserContext, Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
 import { AxeBuilder } from '@axe-core/playwright'
-import { expect, test } from './fixtures'
-
-const signInAsAdmin = (context: BrowserContext) =>
-  context.addCookies([{ name: 'fernledger_dev_as', value: 'admin', url: 'http://localhost:5199' }])
+import { expect, signInAs, test } from './fixtures'
 
 const fontSize = (page: Page, selector: string) =>
   page.locator(selector).first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
@@ -65,10 +62,16 @@ test.describe('text size', () => {
     expect(await fontSize(page, 'body')).toBe(16)
   })
 
-  test('has touch targets of at least 44px', async ({ page }) => {
+  test('has touch targets of at least 44px', async ({ page, context }) => {
+    await signInAs(context, 'admin')
     await page.goto('/styleguide')
-    for (const name of ['A', 'A+', 'A++'] as const) {
-      const box = await sizeButton(page, name).boundingBox()
+    const targets = [
+      ...(['A', 'A+', 'A++'] as const).map((name) => sizeButton(page, name)),
+      ...(await page.getByRole('navigation', { name: 'Main' }).getByRole('link').all()),
+    ]
+    expect(targets.length).toBeGreaterThan(3)
+    for (const target of targets) {
+      const box = await target.boundingBox()
       expect(box?.height).toBeGreaterThanOrEqual(44)
       expect(box?.width).toBeGreaterThanOrEqual(44)
     }
@@ -84,13 +87,13 @@ test.describe('zoom', () => {
     { name: '200% zoom', width: 640, height: 360 },
     { name: '400% zoom (320px wide)', width: 320, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide']
+  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
       for (const size of ['A', 'A++'] as const) {
         test(`${path} at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
-          await signInAsAdmin(context)
+          await signInAs(context, 'admin')
           await page.setViewportSize({ width, height })
           await page.goto(path)
           await sizeButton(page, size).click()
@@ -194,6 +197,16 @@ test.describe('responsive table', () => {
     await page.goto('/styleguide')
     expect(await fontSize(page, 'ul[aria-label="Sample transactions"] li')).toBeGreaterThanOrEqual(15)
     expect(await fontSize(page, 'ul[aria-label="Sample transactions"] dt')).toBeGreaterThanOrEqual(15)
+  })
+
+  test('prints as a table even from a phone-width page', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.emulateMedia({ media: 'print' })
+    await page.goto('/styleguide')
+    const table = page.getByRole('table', { name: 'Sample transactions' })
+    await expect(table).toBeVisible()
+    await expect(table.getByRole('row')).toHaveCount(4) // header + 3 rows
+    await expect(page.getByRole('list', { name: 'Sample transactions' })).toBeHidden()
   })
 })
 

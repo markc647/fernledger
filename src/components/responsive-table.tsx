@@ -11,7 +11,8 @@ export type Column<Row> = {
 }
 
 // Tailwind's `md` breakpoint. In rem, like the CSS, so a page zoomed to 200% switches layout exactly as it did.
-const WIDE = '(min-width: 48rem)'
+// Print is always the table, so a Report printed from a phone is still a table.
+const WIDE = '(min-width: 48rem), print'
 
 function useIsWide() {
   return useSyncExternalStore(
