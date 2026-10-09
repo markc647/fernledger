@@ -191,7 +191,7 @@ Fernledger aims to keep your data **correct, current and recoverable**.
 - **Weekly full backups** go to your own R2 bucket and are all kept. They're a few MB each, so years of them fit in the free allowance. Each backup includes a manifest of row counts and checksums.
 - **Point-in-time restore:** Cloudflare D1 can restore your database to any point in the last **7 days** on the free plan, or 30 days on paid plans.
 - **Restore is tested:** CI tests the restore script, and the docs describe a restore practice run to do twice a year.
-- **Safe upgrades:** before a release changes the database, the deploy script records a restore point and takes a backup. If an upgrade goes wrong, roll back by restoring that point and redeploying the previous release.
+- **Safe upgrades:** before a release changes the database, the deploy script records a restore point, and will also take a backup once backups ship. If an upgrade goes wrong, roll back by restoring that point and redeploying the previous release.
 
 ### If the Admin becomes unavailable
 
@@ -234,7 +234,7 @@ For anything older, export CSVs from your internet banking and **import** them. 
 *The full guide arrives with the first release.* In outline:
 
 1. **Before you start:** create an Akahu personal app and note its two tokens. Create a new Cloudflare account and turn on two-factor authentication.
-2. **Deploy:** run the setup script, which creates the database and backup bucket in your chosen region, or use the **Deploy to Cloudflare** button (coming before the public release).
+2. **Deploy:** run `npm run setup`, which creates the database and backup bucket in your chosen region, then `npm run deploy`. Both ask you to confirm the Cloudflare account first, and take `--yes` to skip that prompt when there is no terminal. [docs/setup.md](docs/setup.md) has the steps. Or use the **Deploy to Cloudflare** button (coming before the public release).
 3. **Lock it down:** turn on Cloudflare Access for the app's address, add your Members' emails, and paste the two Access values into the app's secrets. Until you do, the app refuses every request.
 4. **Load your data:** import your CSV history, link each account to Akahu, and let the first sync run.
 
@@ -247,7 +247,7 @@ For anything older, export CSVs from your internet banking and **import** them. 
 - You can also **Watch → Releases** on this repo, and subscribe to its security advisories.
 - The app itself never checks for updates. That would mean contacting GitHub, and Fernledger contacts no one but Akahu.
 
-**Command-line deployments:** check out the new release tag, then run `npm run deploy`.
+**Command-line deployments:** check out the new release tag, then run `npm run deploy`. It needs `npm run setup` to have been run once for this Cloudflare account. Add `--yes` to skip the confirmation prompt when there is no terminal ([docs/setup.md](docs/setup.md)).
 
 **What version numbers mean** ([semver](https://semver.org)):
 
@@ -260,7 +260,7 @@ For anything older, export CSVs from your internet banking and **import** them. 
 Only the latest release receives fixes. Please stay current.
 
 **Your data during an upgrade:**
-- Before any database change, the deploy script records a restore point and takes a backup.
+- Before any database change, the deploy script records a restore point, and will also take a backup once backups ship.
 - Database changes only ever **add** at first. Anything is removed only in a later release, once nothing uses it, so **rolling back to the previous version always works** (ADR 0009).
 - You can skip versions: CI upgrades sample databases from every earlier minor release to the latest and checks the data is intact.
 - Large data changes run in chunks and resume where they left off, so they stay within the free plan's daily limits.

@@ -13,7 +13,9 @@ Run these from a checkout of the release you want. Why the region matters is in 
    REGION=apac npm run setup      # another region: oc (default), apac, weur, eeur, wnam, enam
    ```
 
-   Both resources are created with `--location ${REGION:-oc}`. Re-running is safe: it creates only what is missing. It also checks that D1 read replication is off, and stops if it is not (ADR 0007).
+   In PowerShell, set the variable first: `$env:REGION = "apac"; npm run setup`.
+
+   Both resources are created with the location hint `${REGION:-oc}` (ADR 0007). Re-running is safe: it creates only what is missing, and anything that already exists keeps the location it was created with. It then checks that D1 read replication is off, and stops if Wrangler says it is on or reports nothing.
 3. **Deploy:**
 
    ```bash
@@ -21,9 +23,18 @@ Run these from a checkout of the release you want. Why the region matters is in 
    npm run deploy                 # confirms the account, then runs them
    ```
 
-   In order, `npm run deploy` confirms the account, checks the database and bucket exist (it stops and points you at `npm run setup` rather than let Wrangler create them with no location), builds, records a D1 bookmark (restore point), applies remote migrations from `migrations/`, and deploys. It ends by printing the bookmark with rollback instructions, and prints them too if a migration or the deploy fails. Rolling back code is `npx wrangler rollback`. Restoring data is `npx wrangler d1 time-travel restore <database> --bookmark=<bookmark>`, a last resort that discards everything written since. The free plan keeps bookmarks for 7 days, and migrations are add-only so rolling back code is normally enough (ADR 0009).
+   In order, `npm run deploy` confirms the account, confirms the workers.dev subdomain (below), checks the database and bucket exist (it stops and points you at `npm run setup` rather than let Wrangler create them with no location), builds, records a D1 bookmark (restore point), applies remote migrations from `migrations/`, and deploys. It ends by printing the bookmark with rollback instructions, and prints them too if a migration or the deploy fails. The printed commands start with `CLOUDFLARE_ACCOUNT_ID=<id>` so they run as printed. In PowerShell, set `$env:CLOUDFLARE_ACCOUNT_ID` first and drop the prefix. Rolling back code is `wrangler rollback`. Restoring data is `wrangler d1 time-travel restore <database> --bookmark=<bookmark>`, a last resort that discards everything written since. The free plan keeps bookmarks for 7 days, and migrations are add-only so rolling back code is normally enough (ADR 0009).
 
-Both scripts take `--yes` to skip the confirmation prompt (needed when there's no terminal). `npm run deploy` also takes `--skip-build` if `dist/` is already built.
+Both scripts take `--yes` to skip the account prompt (needed when there's no terminal). `npm run deploy` also takes `--workers-dev-registered` (below) and `--skip-build` if `dist/` is already built. If a script fails, it names the Wrangler command and its exit code and nothing more, because Wrangler's own output can contain your account email. Run the printed command by hand to see it.
+
+### The workers.dev subdomain
+
+If an account has no workers.dev subdomain, Wrangler registers one during the first deploy. In CI mode, and when it detects an AI coding agent (for example through the `CLAUDECODE` environment variable), it does so **without asking you**. Choosing the subdomain is your decision, and it's public (README: "Choosing public names"), so `npm run deploy` won't run until you've said the account has one:
+
+- At a terminal it asks "Does this account already have a workers.dev subdomain?" and stops on anything but yes.
+- With `--yes` and no terminal it stops unless you also pass `--workers-dev-registered`.
+
+To check, open `https://dash.cloudflare.com/<account id>/workers/subdomain` (the deploy script prints the link). If none is registered, register one there first, then deploy.
 
 ### How resource IDs stay out of the repo
 
@@ -35,6 +46,23 @@ Two Wrangler behaviours the scripts guard against, because either could put IDs 
 - **Config write-back:** after provisioning, an interactive `wrangler deploy` may write resource IDs into `wrangler.jsonc`. The scripts run Wrangler with `CI=true`, which turns write-back off. If you run `wrangler deploy` by hand, check `git diff wrangler.jsonc` before you commit.
 
 The script tests fail if `wrangler.jsonc` gains a `database_id` or account ID.
+
+### What Wrangler answers for itself
+
+With `CI=true` (which the scripts set) Wrangler answers its own yes/no prompts instead of asking. Checked in Wrangler 4.148's source, these are the ones that matter for the commands the scripts run, and what the scripts do about each:
+
+| Wrangler prompt | Answer in CI mode | What the scripts do |
+|---|---|---|
+| "Creating a workers.dev subdomain… Ok to proceed?" | Yes, with no prompt at all when an AI coding agent is detected | Won't deploy until you've said a subdomain exists (above) |
+| "Would you like to register a workers.dev subdomain now?" | No | Nothing needed |
+| Deploy conflicts: Worker edited in the dashboard, uploaded by API, a secret that overrides config, a Workflows conflict | Yes, overwriting the remote | `wrangler deploy --strict`, which aborts instead |
+| Provision a missing D1 database or R2 bucket during deploy | Creates it, with no location hint | Checks both exist first |
+| Write resource IDs back into `wrangler.jsonc` | Skipped | Relies on `CI=true`; check `git diff wrangler.jsonc` after a manual deploy |
+| "About to apply N migration(s)… continue?" (`d1 migrations apply`) | Yes | Your account confirmation and the earlier restore point are the safeguard. The migrations applied are printed |
+
+### Test-only environment variables
+
+`FERNLEDGER_WRANGLER` (a stand-in for the Wrangler binary) and `FERNLEDGER_MIGRATIONS_DIR` (a stand-in for `migrations/`) exist so the script tests can run without touching Cloudflare. Don't set them for a real run.
 
 ## Cloudflare Access (one-time, by hand)
 
