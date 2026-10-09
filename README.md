@@ -52,7 +52,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Change Log** of every edit the Admin makes, visible to everyone: who changed what and when, with the values before and after, newest first. Filter it by type of change and by date.
 - **Light and dark themes.**
 - **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and reports will.
-- **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications. The icon is labelled "Fernledger" whatever title the Admin sets, because its name comes from a fixed file; you can rename it when you add it.
+- **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications. The icon's label comes from a fixed file, so it is normally "Fernledger" whatever title the Admin sets, though some iOS versions use the page title instead. You can rename it when you add it.
 
 ## What it doesn't do
 

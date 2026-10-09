@@ -191,8 +191,9 @@
 }
 
 /* Paper is white. Printed from the dark theme, light text would come out pale on white paper (and browsers leave
-   backgrounds out of a printout), so print always uses the light theme's colours. Only the tokens the dark theme
-   changes are listed; scripts/theme-contrast.test.mjs keeps them equal to the light theme's. */
+   backgrounds out of a printout), so print always uses the light theme's colours. Every token `.dark` overrides is
+   restated here with its light value, so nothing from the dark theme survives into print. A token added to `.dark`
+   must be added here too: scripts/theme-contrast.test.mjs fails otherwise, and checks each value equals the light one. */
 @media print {
   :root,
   .dark {
@@ -201,14 +202,37 @@
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.145 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.505 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
     --primary: oklch(0.205 0 0);
     --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.505 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: oklch(0.985 0 0);
     --success: oklch(0.45 0.12 155);
     --warning: oklch(0.47 0.1 70);
     --danger: oklch(0.5 0.19 27);
     --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.45 0 0);
+    --chart-1: oklch(0.646 0.222 41.116);
+    --chart-2: oklch(0.6 0.118 184.704);
+    --chart-3: oklch(0.398 0.07 227.392);
+    --chart-4: oklch(0.828 0.189 84.429);
+    --chart-5: oklch(0.769 0.188 70.08);
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: var(--ring);
   }
 }
 

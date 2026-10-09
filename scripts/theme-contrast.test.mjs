@@ -43,18 +43,21 @@ const pairs = [
   ...['success', 'warning', 'danger'].flatMap((fg) => [[fg, 'background', 4.5], [fg, 'card', 4.5], [fg, 'muted', 4.5]]),
 ]
 // Print is always the light theme (src/index.css), so a page printed from the dark theme is not pale text on white paper.
-// The print block restates the light theme's text, paper and status colours, and each must equal the light value.
-test('print: the colours that carry text, paper and status are the light theme\'s', () => {
+// The print block restates every token `.dark` overrides, and each must equal the light value. Values are compared as
+// written, so translucent colours and `var()` references count too. A token added to `.dark` alone fails here.
+const declarations = (text) => Object.fromEntries([...text.matchAll(/--([\w-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]))
+test("print: every token the dark theme overrides is restated with the light theme's value", () => {
   const start = css.indexOf('@media print {')
   assert.notEqual(start, -1, 'no print block')
-  const print = Object.fromEntries(
-    [...css.slice(start, css.indexOf('\n}', start)).matchAll(/--([\w-]+):\s*oklch\(([\d.]+) ([\d.]+) ([\d.]+)\);/g)].map((m) => [m[1], m.slice(2).map(Number)]),
-  )
-  const light = tokens(':root')
-  for (const name of ['background', 'foreground', 'card', 'card-foreground', 'muted', 'muted-foreground', 'success', 'warning', 'danger']) {
-    assert.deepEqual(print[name], light[name], `--${name} is missing from the print block or differs from the light theme`)
+  const print = declarations(css.slice(start, css.indexOf('\n}', start)))
+  const light = declarations(block(':root'))
+  const dark = declarations(block('.dark'))
+  assert.ok(Object.keys(dark).length > 30, 'the .dark block should list the whole theme')
+  for (const name of Object.keys(dark)) {
+    assert.ok(name in light, `--${name} is in .dark but not :root, so print has no light value to restate`)
+    assert.equal(print[name], light[name], `--${name} is missing from the print block or differs from the light theme`)
   }
-  for (const [name, value] of Object.entries(print)) assert.deepEqual(value, light[name], `--${name} differs from the light theme`)
+  for (const [name, value] of Object.entries(print)) assert.equal(value, light[name], `--${name} differs from the light theme`)
 })
 
 for (const [selector, theme] of [[':root', 'light'], ['.dark', 'dark']]) {

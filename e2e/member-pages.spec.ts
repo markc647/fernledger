@@ -62,6 +62,26 @@ test.describe('About your data', () => {
     await expect(section(page, 'Who can see it')).toContainText('Cloudflare Access')
   })
 
+  test('lists everything the database holds: Accounts, Transactions, Balances, Categories, the Change Log, sign-in, Settings', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/about-your-data')
+    const held = section(page, 'What is held')
+    await expect(held.getByRole('listitem').locator('strong')).toHaveText(['Accounts:', 'Transactions:', 'Balances:', 'Categories:', 'The Change Log:', 'Who may sign in:', 'Settings:'])
+    await expect(held.getByRole('listitem').filter({ hasText: 'Balances:' })).toContainText('balance a bank reported')
+    // The Change Log keeps values, Notes included, and the Admin's email is held outside the database.
+    await expect(held.getByRole('listitem').filter({ hasText: 'The Change Log:' })).toContainText('before and after')
+    await expect(held.getByRole('listitem').filter({ hasText: 'The Change Log:' })).toContainText('any Note')
+    await expect(held.getByRole('listitem').filter({ hasText: 'Who may sign in:' })).toContainText("the Admin's email address, outside the database")
+  })
+
+  test('says what the weekly backup holds, and that earlier backups keep what was later removed', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/about-your-data')
+    await expect(section(page, 'What is held')).toContainText('A copy of the database is saved every week')
+    await expect(section(page, 'What is held')).toContainText("kept outside the database, so the backups don't hold them")
+    await expect(section(page, 'How long it is kept')).toContainText('earlier backups still hold their copy')
+  })
+
   test('gives a Member neutral lines, not setup instructions, until the Admin fills the fields in', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/about-your-data')
@@ -114,8 +134,11 @@ test.describe('About your data', () => {
 
     await page.route('**/api/features', (route) => route.fulfill({ json: { features: [{ id: 'akahu-sync', name: 'Akahu Sync', enabled: true }] } }))
     await page.reload()
-    await expect(section(page, 'What is held')).toContainText('Akahu Sync is on.')
+    // Sync hasn't shipped, so only the keys can be claimed, not that Transactions arrive from Akahu.
+    await expect(section(page, 'What is held')).toContainText('Akahu access keys are set up here.')
     await expect(section(page, 'What is held')).not.toContainText("isn't set up")
+    await expect(section(page, 'What is held')).not.toContainText(/Sync is on|can also arrive/)
+    await expect(section(page, 'What is held')).not.toContainText('Worker secrets')
   })
 
   test('says so, rather than showing neutral lines, when the Settings cannot be loaded', async ({ page, context }) => {
@@ -164,6 +187,43 @@ test.describe('How to sign in', () => {
     await expect(page.getByRole('heading', { level: 2, name: 'If something goes wrong' })).toBeVisible()
   })
 
+  test('names the Cloudflare buttons and promises no delivery time', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/how-to-sign-in')
+    const main = page.getByRole('main')
+    await expect(main).toContainText('"Send login code"')
+    await expect(main).toContainText('"Sign in"')
+    await expect(main).toContainText('"Request new code"')
+    await expect(main).toContainText('10 minutes')
+    await expect(main).not.toContainText(/within a minute|minute or two/i)
+  })
+
+  test('tells the Admin, and only the Admin, to print it for each Member', async ({ page, context }) => {
+    const note = 'Print this and give it to each Member before their first sign-in.'
+    await signInAs(context, 'member')
+    await page.goto('/how-to-sign-in')
+    await expect(page.getByRole('heading', { level: 1, name: 'How to sign in' })).toBeVisible()
+    await expect(page.getByText(note)).toHaveCount(0)
+
+    await signInAs(context, 'admin')
+    await page.goto('/how-to-sign-in')
+    await expect(page.getByText(note)).toBeVisible()
+    await page.emulateMedia({ media: 'print' })
+    await expect(page.getByText(note)).toBeHidden()
+  })
+
+  test("shows the Admin's contact under \"Still stuck?\" once it is set, and not before", async ({ page, context, request, baseURL }) => {
+    await signInAs(context, 'member')
+    await page.goto('/how-to-sign-in')
+    const stuck = page.getByRole('listitem').filter({ hasText: 'Still stuck?' })
+    await expect(stuck).toContainText('Ask the Admin.')
+    await expect(stuck).not.toContainText('Sam')
+
+    await adminSets(request, baseURL, { about_contact: 'Sam, 021 000 0000' })
+    await page.reload()
+    await expect(stuck).toContainText('Sam, 021 000 0000')
+  })
+
   test('has no real email address and no link to another site', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/how-to-sign-in')
@@ -203,6 +263,12 @@ test.describe('How to sign in', () => {
       await expect(page.getByRole('navigation', { name: 'Main' })).toBeHidden()
       await expect(page.getByRole('button')).toHaveCount(0) // hidden elements are not in the accessibility tree
       await expect(page.getByRole('list', { name: 'Steps' }).getByRole('listitem')).toHaveCount(5)
+    })
+
+    test("leaves a blank line for the Admin's name and phone, on paper only", async ({ page }) => {
+      await expect(page.getByText("Admin's name and phone:")).toBeVisible()
+      await page.emulateMedia({ media: 'screen' })
+      await expect(page.getByText("Admin's name and phone:")).toBeHidden()
     })
 
     test('uses large print: steps at 12pt (16px) or more', async ({ page }) => {

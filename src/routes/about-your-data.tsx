@@ -19,13 +19,16 @@ export const Route = createFileRoute('/about-your-data')({
  * Oceania is a location hint, never a residency guarantee (ADR 0007).
  */
 function AboutYourData() {
-  const { data: me } = useQuery(meQuery)
+  const { data: me, isError: meFailed } = useQuery(meQuery)
   const { data: settings, isError: settingsFailed } = useQuery(settingsQuery)
   const { data: features } = useQuery(featuresQuery)
   const akahu = features?.find((feature) => feature.id === 'akahu-sync')
   // Until both have arrived there is nothing to show for the two Settings: a Member must not read the neutral line
   // for a moment before the Admin's own words replace it, and the Admin's guidance needs the role.
   const ready = me && settings
+  // The role decides which words the Settings lines use, so a failure of either query stops them being shown. (The root
+  // layout already replaces the page when `/api/me` fails; this keeps the page honest if that ever changes.)
+  const failed = settingsFailed || meFailed
   return (
     <article className="max-w-2xl text-lg leading-relaxed">
       <h1 className="text-2xl font-semibold">About your data</h1>
@@ -42,28 +45,34 @@ function AboutYourData() {
             <strong className="font-semibold">Transactions:</strong> the date, amount and description of each one, and the bank's own type, memo and reference. Whatever the bank puts in those, such as another person's name or account number, is kept exactly as the bank gave it.
           </li>
           <li>
-            <strong className="font-semibold">Categories,</strong> and the Category or Note the Admin has put on a Transaction.
+            <strong className="font-semibold">Balances:</strong> the balance a bank reported for an Account on a date, the balance worked out from the Transactions, and the difference between them.
           </li>
           <li>
-            <strong className="font-semibold">The Change Log:</strong> every change the Admin makes, with the time and the Admin's email address.
+            <strong className="font-semibold">Categories:</strong> the Admin's list of them, and the Category or Note the Admin has put on a Transaction.
           </li>
           <li>
-            <strong className="font-semibold">Who may sign in:</strong> Cloudflare Access keeps the list of Members' email addresses. Fernledger doesn't keep a list of its own.
+            <strong className="font-semibold">The Change Log:</strong> every change the Admin makes, with the time and the Admin's email address, and the values from before and after the change. That includes the words of any Note, so a Note the Admin changes or removes can still be read there.
+          </li>
+          <li>
+            <strong className="font-semibold">Who may sign in:</strong> Cloudflare Access keeps the list of Members' email addresses. Fernledger doesn't keep a list of its own, but it does keep the Admin's email address, outside the database, to know who may make changes.
           </li>
           <li>
             <strong className="font-semibold">Settings:</strong> the app title and the text on this page.
           </li>
         </ul>
         <p>Fernledger holds no passwords, either yours or your bank's. Cloudflare Access handles signing in.</p>
+        {/* Sync hasn't shipped, so "enabled" only means the access keys are set. Say just that until it does (CODING_STANDARDS, Docs). */}
         {akahu &&
           (akahu.enabled ? (
             <p>
-              Akahu Sync is on. Transactions can also arrive from Akahu, a service that reads bank data with the account holder's permission. Fernledger keeps its Akahu access keys as protected Worker secrets, outside the database. They can read Transactions but cannot make payments.
+              Akahu access keys are set up here. Akahu is a service that reads bank data with the account holder's permission. Fernledger keeps the keys safely outside the database. They can read bank data but cannot make payments.
             </p>
           ) : (
             <p>Akahu Sync isn't set up here, so Transactions come only from bank files the Admin imports.</p>
           ))}
-        <p>A full copy of all of this is saved every week, as a backup.</p>
+        <p>
+          A copy of the database is saved every week, as a backup. The sign-in list, the Admin's email address and any Akahu keys are kept outside the database, so the backups don't hold them.
+        </p>
       </Section>
 
       <Section id="seen" title="Who can see it">
@@ -97,12 +106,15 @@ function AboutYourData() {
       </Section>
 
       <Section id="kept" title="How long it is kept">
-        <SettingText line={ready ? retentionLine(settings.about_retention, me.role) : undefined} failed={settingsFailed} />
+        <SettingText line={ready ? retentionLine(settings.about_retention, me.role) : undefined} failed={failed} />
         <p>Fernledger never deletes your data by itself. It stays until the Admin, or whoever runs Fernledger, chooses to remove it.</p>
+        <p>
+          The weekly backups are all kept. If something is removed in Fernledger, the earlier backups still hold their copy of it until whoever runs Fernledger empties the backup storage.
+        </p>
       </Section>
 
       <Section id="ask" title="Who to ask">
-        <SettingText line={ready ? contactLine(settings.about_contact, me.role) : undefined} failed={settingsFailed} />
+        <SettingText line={ready ? contactLine(settings.about_contact, me.role) : undefined} failed={failed} />
       </Section>
     </article>
   )

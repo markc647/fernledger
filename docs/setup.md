@@ -201,7 +201,9 @@ If your Cloudflare account already has a wildcard or account-wide Access policy,
 
    Until all three are set, every API request returns 401. The app fails closed.
 
-**Adding or removing a Member:** edit the "Fernledger Members" policy. The app needs no changes. Give a new Member the app's address. Its **How to sign in** page prints as a one-page guide for anyone who finds the email code hard, and **About your data** shows what you write in Settings under "About your data", so fill those in too.
+**Adding or removing a Member:** edit the "Fernledger Members" policy. The app needs no changes. Give a new Member the app's address. Its **How to sign in** page prints as a one-page guide for anyone who finds the email code hard, and **About your data** shows what you write in Settings under "About your data", so fill those in too. As the Admin, print **How to sign in** and give it to each Member before their first sign-in: the page says so to you alone, and the printout has a line to write your name and phone on, as well as the contact you set in Settings.
+
+**Home Screen icon (optional):** Members can add Fernledger to an iPad or phone's Home Screen (README [What it does](../README.md#what-it-does)). iOS may fetch the icon, `/apple-touch-icon.png`, without the Access sign-in cookie. Access then answers with its login page instead of the image, and the Home Screen shows a plain tile. Nothing else is affected, so you can leave it. To fix it, add one more self-hosted Access application for the same hostname with the path `apple-touch-icon.png`, and give it a single policy: **Action: Bypass**, **Include: Everyone**. Do the same for `icon-192.png`, `icon-512.png` and `icon-maskable-512.png` if you want the manifest's icons to load without a session too. Bypass turns off Access checks and logging for those paths only, and each one is just the app's icon, which holds no data. Bypass nothing else.
 
 **Changing the Admin:** run `wrangler secret put ADMIN_EMAIL` again.
 
