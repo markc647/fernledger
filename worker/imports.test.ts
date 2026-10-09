@@ -38,7 +38,7 @@ const rowsFrom = (first: number, last: number) => Array.from({ length: last - fi
 const chunkBody = (rows: unknown[], extra: { number?: string; name?: string; index?: number; count?: number; skipped?: number; fileRows?: number } = {}) => ({
   account: { number: extra.number ?? savings, ...(extra.name ? { name: extra.name } : {}) },
   chunk: { index: extra.index ?? 0, count: extra.count ?? 1 },
-  file: { adapterId: 'asb', rowCount: extra.fileRows ?? rows.length, skipped: extra.skipped ?? 0, from: '2026-10-01', to: '2026-10-31' },
+  file: { adapterId: 'asb', rowCount: extra.fileRows ?? rows.length, skipped: extra.skipped ?? 0, from: '2026-10-01', to: '2026-10-31', ledgerBalance: { cents: 0, date: '2026-10-31' } },
   rows,
 })
 
@@ -278,6 +278,7 @@ describe('the Change Log entry for an Import', () => {
       skipped: 2,
       from: '2026-10-01',
       to: '2026-10-31',
+      ledgerBalance: { cents: 0, date: '2026-10-31' },
       newAccount: true,
     })
   })

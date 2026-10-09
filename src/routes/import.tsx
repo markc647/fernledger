@@ -6,8 +6,9 @@ import { ResponsiveTable } from '@/components/responsive-table'
 import { Status } from '@/components/status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { describeBalanceCheck, type BalanceCheckOutcome } from '@/lib/balance-check'
 import { adapters, BankCsvError, parseBankCsv, type BankCsvResult } from '@/lib/bank-csv'
-import { formatDate } from '@/lib/format'
+import { formatBalance, formatDate } from '@/lib/format'
 import { countOnOrAfter, DAILY_ROW_WRITES, MAX_IMPORT_ROWS, REPLACE_SLICE, replaceWrites, WRITES_PER_ROW } from '@/lib/import-chunks'
 import { describeStop } from '@/lib/import-stop'
 import { meQuery } from '@/lib/me'
@@ -89,6 +90,8 @@ function ImportFlow() {
       await queryClient.invalidateQueries({ queryKey: ['accounts'] })
       await queryClient.invalidateQueries({ queryKey: ['transactions'] })
       await queryClient.invalidateQueries({ queryKey: ['imported-rows'] })
+      await queryClient.invalidateQueries({ queryKey: ['balances'] })
+      await queryClient.invalidateQueries({ queryKey: ['balance-checks'] })
     }
   }
 
@@ -182,6 +185,7 @@ function ImportFlow() {
           </>
         )}
       </dl>
+      {step.summary.balanceCheck && <BalanceCheckResult outcome={step.summary.balanceCheck} />}
       <div className="flex flex-wrap gap-2">
         <Link to="/transactions" className="inline-flex min-h-11 items-center rounded-lg bg-primary px-4 text-primary-foreground hover:bg-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
           See the transactions
@@ -191,6 +195,19 @@ function ImportFlow() {
         </Button>
       </div>
     </section>
+  )
+}
+
+/** What the Balance Check made of the file's ledger balance. A difference is a warning with the direction in words, never colour alone. */
+function BalanceCheckResult({ outcome }: { outcome: BalanceCheckOutcome }) {
+  const { tone, headline, detail } = describeBalanceCheck(outcome)
+  return (
+    <div role="status" className="max-w-xl space-y-1">
+      <p>
+        <Status tone={tone}>{headline}</Status>
+      </p>
+      {detail && <p>{detail}</p>}
+    </div>
   )
 }
 
@@ -234,6 +251,10 @@ function Preview(props: {
         </dd>
         <dt>Rows</dt>
         <dd>{count} transactions to import</dd>
+        <dt>Bank balance</dt>
+        <dd>
+          <span className="tabular-nums">{formatBalance(file.ledgerBalance.cents)}</span> as of {formatDate(file.ledgerBalance.date)}
+        </dd>
       </dl>
 
       {existingName !== undefined ? (

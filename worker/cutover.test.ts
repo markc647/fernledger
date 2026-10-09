@@ -23,7 +23,7 @@ type Extra = { number?: string; index?: number; count?: number; cutoverDate?: st
 const chunkBody = (rows: unknown[], extra: Extra = {}) => ({
   account: { number: extra.number ?? savings },
   chunk: { index: extra.index ?? 0, count: extra.count ?? 1 },
-  file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: '2026-09-01', to: '2026-10-03' },
+  file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: '2026-09-01', to: '2026-10-03', ledgerBalance: { cents: 0, date: '2026-10-03' } },
   rows,
   ...(extra.cutoverDate !== undefined ? { cutoverDate: extra.cutoverDate } : {}),
   ...(extra.replace !== undefined ? { replace: extra.replace } : {}),
