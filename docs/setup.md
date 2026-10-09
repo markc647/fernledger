@@ -19,7 +19,7 @@ Run these from a checkout of the release you want. Why the region matters is in 
 3. **Deploy:**
 
    ```bash
-   npm run deploy -- --dry-run    # prints the build, backup, restore point, migration and deploy commands
+   npm run deploy -- --dry-run    # prints the build, restore point, migration and deploy commands, and describes the backup
    npm run deploy                 # confirms the account, then runs them
    ```
 
@@ -88,7 +88,8 @@ A run longer than one invocation is a rolling copy, not a single point in time: 
 
 - **It stops the deploy if it can't finish.** Nothing has been changed at that point. Run `npm run deploy` again: an unfinished run carries on from where it stopped.
 - **A first deploy has nothing to back up.** A database with no tables is skipped, and the script says so.
-- **A complete backup for today's NZ date is reused**, never overwritten, so deploying twice in a day backs up once.
+- **A complete backup for today's NZ date is reused**, never overwritten, so deploying twice in a day backs up once. Rows written since that backup aren't in it, and the script says so. The restore point recorded right after covers them. (The teardown never reuses a backup: [below](#leaving-fernledger-teardown).)
+- **`--dry-run` doesn't list the backup's commands.** A backup is hundreds of Wrangler calls, so a dry run describes it in one line and prints the rest.
 - **`--skip-backup`** deploys without one. Make a copy first: `npx wrangler d1 export <database> --remote --output backup.sql`.
 - It calls Wrangler many times for a large database, so it can take a few minutes. It prints progress, and keeps your data only in a temporary folder that it removes at the end.
 
@@ -104,13 +105,20 @@ README ("Recoverable") says what each layer protects. In order of how much each 
    ```
 
    In PowerShell, set `$env:CLOUDFLARE_ACCOUNT_ID` first and drop the prefix. This puts the database back as it was at the bookmark and **discards everything written since**, so redeploy the previous release as well (step 1) rather than leave new code on old data. The free plan keeps restore points for 7 days. If you lost the bookmark, `npx wrangler d1 time-travel info <database>` shows the current one, and `--timestamp=<time>` restores to a moment instead.
-3. **Data, older than that: the backup.** The deploy's backup is in the bucket under `backups/<NZ date>/`. Restore it into an empty database that has the schema ([Restoring](#restoring)), and rehearse that first ([practice run](#restore-practice-run-twice-a-year)).
+3. **Data, older than that: the backup.** The deploy's backup is in the bucket under `backups/<NZ date>/` (the deploy printed its folder; [Restoring](#restoring) says where else to find dates). A restore only adds rows to an **empty** database that already has the schema, so it can't be loaded into the live one. Restore into a new database and point the app at it. Rehearse that first ([practice run](#restore-practice-run-twice-a-year)).
+   1. In `wrangler.jsonc`, change the D1 binding's `database_name` to a new name, for example `fernledger-restored`. Keep this edit in your checkout and don't commit it: the repo is public, and every later `npm run deploy` needs the same name.
+   2. `npm run setup` creates the new empty database, with the location hint (it leaves the bucket alone).
+   3. `npx wrangler d1 migrations apply <new name> --remote` gives it the schema.
+   4. `npm run restore -- <backup date> --dry-run`, then `npm run restore -- <backup date>`, loads the backup into it (it restores into the database named in `wrangler.jsonc`) and compares the row counts with the manifest.
+   5. `npm run deploy` redeploys the Worker bound to the new database. Delete the old one with `npx wrangler d1 delete <old name>` once you are satisfied.
 
 After any rollback, check the row counts and open the app before you call it fixed.
 
 ### Restoring
 
 Restore into an **empty** database that has the schema. A restore adds rows and never overwrites, and it refuses a database that already has rows in any backed-up table or lacks a backed-up column (a database with extra columns, from a newer schema, is fine).
+
+**Finding the `<backup date>`:** open the Cloudflare dashboard, R2, your backup bucket, `backups/`. Each folder is an NZ date, `YYYY-MM-DD`, and counts only if it holds a `manifest.json`. The weekly backup runs on Sundays, and `npm run deploy` prints the folder of the one it took. The newest date with a manifest is the latest backup. Ignore a folder ending `-final-<time>`: the teardown wrote it. (Wrangler can't list a bucket, so the script can't list them for you.)
 
 ```bash
 npm run restore -- 2026-10-12 --dry-run   # downloads and verifies the backup, checks the target, prints the loads; writes nothing
@@ -123,7 +131,7 @@ If a load fails part-way, the database holds some of the rows: empty it (or crea
 
 ### Restore practice run, twice a year
 
-A backup you have never restored is a guess. Twice a year (say April and October), restore the latest backup into a scratch database, check the row counts the script prints against the manifest, then delete the scratch database. It touches nothing live:
+A backup you have never restored is a guess. Twice a year (say April and October), restore the latest backup (find its date as above) into a scratch database, check the row counts the script prints against the manifest, then delete the scratch database. It touches nothing live:
 
 ```bash
 npx wrangler d1 create fernledger-practice --location oc
@@ -141,27 +149,29 @@ CI runs the round trip (seed, back up with the Worker's own code, restore with t
 
 ## Leaving Fernledger (teardown)
 
-README ("Leaving Fernledger") says what this does and why. It is deliberate on purpose.
+README ("Leaving Fernledger") says what this does and why. It is deliberately hard to do by accident.
 
 ```bash
 npm run teardown -- --dry-run            # prints every step and command, runs none
-npm run teardown -- --out ~/fernledger-final-export
+npm run teardown -- --out ~/fernledger-final-backup
 ```
 
 In order, `npm run teardown`:
 
 1. **Confirms the account**, as the other scripts do.
-2. **Takes a final export.** It runs a complete backup (reusing today's if one is complete), downloads the manifest and every part, and checks each against the manifest's size and checksum. It saves them in the `--out` folder (default `fernledger-final-export-<date>` in your home folder), which must be new or empty and **outside this repository, which is public**. Keep the folder somewhere private: it holds every Transaction.
-3. **Stops if the export failed or didn't verify.** Nothing has been deleted at that point, and the message says how to make a copy by hand instead.
-4. **Asks you to type the database name.** Anything else, an empty line, or no input at all, deletes nothing. `--yes` skips only the account prompt, and `CI=true` does not answer this for you (see "What Wrangler answers for itself").
-5. **Deletes the D1 database, then the R2 bucket.** Wrangler can't list or bulk-delete a bucket's objects, so a bucket that still holds backups (it will) isn't deleted. The script says so, exits non-zero and prints the two ways to empty it (the dashboard, or a lifecycle rule that expires everything). Then delete the bucket with `npx wrangler r2 bucket delete <bucket>`, or re-run `npm run teardown`, which finishes the job.
+2. **Takes a final backup.** It runs a new complete backup of the database with the Worker's backup code, **never reusing** one already in the bucket (an older one would miss later writes). It goes in a folder of its own, `backups/<NZ date>-final-<time>/`, and is not a restore date. It then downloads the manifest and every part, and checks each against the manifest's size and checksum. They are saved in the `--out` folder (default `fernledger-final-backup-<date>` in your home folder), which must be new or empty and **outside this repository, which is public**. Keep the folder somewhere private: it holds every Transaction.
+3. **Checks the backup is all of the database.** It counts the rows in each table now and compares them with the manifest, and looks for tables the manifest doesn't list. If anything differs (Sync or an Import wrote while the backup ran), it deletes nothing. Stop whatever writes to the database and run it again.
+4. **Stops if any of that failed.** Nothing has been deleted at that point, and the message says how to make a copy by hand instead.
+5. **Asks you to type the database name.** Anything else, an empty line, or no input at all, deletes nothing. `--yes` skips only the account prompt, and `CI=true` does not answer this for you (see "What Wrangler answers for itself"). If the manifest's `skipped` list names tables the backup could not hold ([Backups and restore](#backups-and-restore)), you must type `<database name> without <those tables>` instead, so you know they are lost.
+6. **Deletes the D1 database.** If that fails, the bucket is left alone.
+7. **Tries to delete the R2 bucket.** Wrangler can't list or bulk-delete a bucket's objects, and a bucket holding any can't be deleted, so this fails on a bucket that has backups in it, which is the normal case. The script treats that as the expected end and exits 0, with the bucket as its last printed step: empty it in the dashboard (or with a lifecycle rule that expires everything), then `npx wrangler r2 bucket delete <bucket>`, or re-run `npm run teardown`, which finishes the job without asking for a backup folder. **Emptying the bucket destroys every backup in it**, including the weekly ones. The final backup folder holds only the latest data, so download any older backup you want first. Any other bucket error exits 1 and says the database is already deleted.
 
 What you do by hand afterwards:
 
 - **Delete the Worker**, which also deletes the secrets it holds: `npx wrangler delete`.
 - **Delete the Access application:** Zero Trust → Access → Applications → Fernledger.
-- **Revoke Akahu access, only if you used Akahu Sync** (ADR 0008). In your Akahu account, remove the personal app Fernledger used, or disconnect the bank connections it synced, so its tokens stop working. Deleting the Worker removes Fernledger's copy of the token but doesn't revoke it. If you only imported CSVs, skip this step.
-- **Decide what to do with the final export folder.**
+- **Revoke Akahu access, only if you used Akahu Sync.** README ("Leaving Fernledger") says how.
+- **Decide what to do with the final backup folder.**
 
 ## Cloudflare Access (one-time, by hand)
 

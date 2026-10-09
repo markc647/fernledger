@@ -161,11 +161,12 @@ Read **[docs/privacy.md](docs/privacy.md)** for the details: what the Privacy Ac
 
 ### Leaving Fernledger
 
-The teardown (`npm run teardown`) exports everything, then deletes your database and backups. Your data is yours, and you can take it with you or destroy it at any time.
+The teardown (`npm run teardown`) takes a new final backup of everything and downloads it to a folder you choose, then deletes your database. Your data is yours, and you can take it with you or destroy it at any time.
 
-- **The export comes first, and is checked.** If it can't be made and verified, nothing is deleted.
+- **The final backup comes first, and is checked.** It is always a new backup, never an older one, and the script compares it with the database row for row before deleting anything. If it can't be made, downloaded and verified, or the database changed while it was taken, nothing is deleted. A table the backup can't hold (the manifest lists these) is deleted only if you type its name as well.
 - **Deleting needs you to type the database's name.** It is never done on a default answer, and `CI=true` doesn't skip it.
-- **If you used Akahu Sync, revoke your Akahu access yourself** (ADR 0008). Deleting the Worker removes Fernledger's copy of the token but doesn't revoke it. With CSV Imports only, there is nothing to revoke.
+- **You empty the backup bucket yourself, last.** Wrangler can't empty an R2 bucket, so the script deletes the database, then prints how to empty and delete the bucket. Emptying it destroys every backup in it, not only the final one, so download any older backup you want first.
+- **If you used Akahu Sync, revoke your Akahu access yourself** (ADR 0008): remove the personal app Fernledger used, or disconnect the bank connections it syncs, in your Akahu account. Deleting the Worker removes Fernledger's copy of the token but doesn't revoke it. With CSV Imports only, there is nothing to revoke.
 - [docs/setup.md](docs/setup.md#leaving-fernledger-teardown) has the steps, including the few things only you can delete (the Worker and the Access application).
 
 ## Where your data is stored

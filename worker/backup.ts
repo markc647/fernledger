@@ -210,9 +210,11 @@ async function advance(env: Env, state: RunState, opsUsed: number, budget: numbe
   }
 }
 
-/** The weekly cron: starts a new run under the NZ date of the scheduled time, unless that date is already backed up. */
-export async function startBackup(env: Env, scheduledTime: number): Promise<void> {
-  const prefix = backupPrefix(scheduledTime)
+/**
+ * The weekly cron: starts a new run under the NZ date of the scheduled time, unless that date is already backed up.
+ * `prefix` is for scripts/backup-run.mjs only, which asks for a folder of its own so a final backup is never an older one reused.
+ */
+export async function startBackup(env: Env, scheduledTime: number, prefix = backupPrefix(scheduledTime)): Promise<void> {
   const earlier = await readState(env)
   let ops = 1
   // Only a manifest makes a backup complete, so a finished backup of this date is never overwritten.

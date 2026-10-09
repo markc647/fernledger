@@ -1,4 +1,4 @@
-// Takes a complete backup on demand, for `npm run deploy` (before migrations) and `npm run teardown` (the final export).
+// Takes a complete backup on demand, for `npm run deploy` (before migrations) and `npm run teardown` (the final backup).
 //
 // The Worker can't be asked for a backup: it starts one only from its weekly cron, and its /api is behind
 // Cloudflare Access. So this runs the Worker's own backup code (worker/backup.ts) here, and gives it a D1 and an
@@ -7,8 +7,8 @@
 // Nothing here knows how a backup is laid out; it only hands the code its database and bucket and waits.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { BackupFormatError, checkPart, parseManifest } from '../worker/backup-format.ts'
+import { isAbsolute, join } from 'node:path'
+import { BackupFormatError, checkPart, parseManifest, quote } from '../worker/backup-format.ts'
 import { backupPrefix, continueBackup, startBackup } from '../worker/backup.ts'
 import { ScriptError } from './wrangler-cli.mjs'
 
@@ -68,39 +68,49 @@ function remoteEnv(runner, { database, bucket }, work) {
   }
 }
 
+// The tables the backup looks at: the ones worker/backup.ts reads, plus those it skips.
+const OWN_TABLES = "type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name <> 'd1_migrations'"
+
+const queryRows = (runner, database, sql) => {
+  const result = runner.json(['d1', 'execute', database, '--remote', '--json', '--command', sql], { quiet: true })
+  return Array.isArray(result) ? (result[0]?.results ?? []) : []
+}
+
 /** Does the database hold any table of its own? False on a first deploy, when there is nothing to lose. undefined in a dry run. */
 export function databaseHasTables(runner, database) {
-  const result = runner.json(
-    [
-      'd1', 'execute', database, '--remote', '--json', '--command',
-      "SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name <> 'd1_migrations'",
-    ],
-    { note: 'looks for tables to back up' },
-  )
+  const result = runner.json(['d1', 'execute', database, '--remote', '--json', '--command', `SELECT count(*) AS n FROM sqlite_master WHERE ${OWN_TABLES}`], {
+    note: 'looks for tables to back up',
+  })
   if (!result) return undefined
   const n = result[0]?.results?.[0]?.n
   if (typeof n !== 'number') throw new ScriptError(`Could not tell whether D1 database "${database}" has any tables.`)
   return n > 0
 }
 
+/** A folder of its own for one final backup, so it can't be an older backup that happens to share the NZ date. */
+export const finalBackupPrefix = (at) => `${backupPrefix(at)}-final-${new Date(at).toISOString().replace(/[-:.]/g, '')}`
+
 /**
  * Backs the database up to the bucket with the Worker's backup code and waits until the manifest is written.
- * Resumes an unfinished run of the same NZ date, and leaves a finished backup of that date alone (a backup of
- * today already exists, so it isn't repeated). Throws a ScriptError if it can't finish.
- * Returns { prefix, manifest, existed }.
+ * By default it resumes an unfinished run of the same NZ date and leaves a finished backup of that date alone
+ * (a backup of today already exists, so it isn't repeated). That suits a deploy, where the restore point covers
+ * anything written since. With `fresh` it always takes a new backup in a folder of its own, which the
+ * teardown needs: it deletes the database, and an older backup would miss later writes.
+ * Throws a ScriptError if it can't finish. Returns { prefix, manifest, existed }.
  */
-export async function takeBackup(runner, { database, bucket, log = console.log, now = Date.now }) {
+export async function takeBackup(runner, { database, bucket, fresh = false, log = console.log, now = Date.now }) {
   const work = mkdtempSync(join(tmpdir(), 'fernledger-backup-')) // holds copies of your data until the end
   try {
     const env = remoteEnv(runner, { database, bucket }, work)
-    const prefix = backupPrefix(now())
+    const at = now()
+    const prefix = fresh ? finalBackupPrefix(at) : backupPrefix(at)
     const manifestKey = `${prefix}/manifest.json`
-    const existed = Boolean(await env.BACKUPS.head(manifestKey))
+    const existed = !fresh && Boolean(await env.BACKUPS.head(manifestKey))
     if (existed) {
-      log(`A complete backup for ${prefix.slice('backups/'.length)} already exists in the bucket, so it is used as it is.`)
+      log(`A complete backup for ${prefix.slice('backups/'.length)} already exists in the bucket, so it is used as it is. Rows written since it was taken are not in it; the restore point recorded next covers them.`)
     } else {
       log(`Backing up "${database}" to the R2 bucket "${bucket}" (${prefix}) with the Worker's backup code. This can take a few minutes.`)
-      await startBackup(env, now())
+      await startBackup(env, at, prefix)
       for (let round = 1; !(await env.BACKUPS.head(manifestKey)); round++) {
         if (round >= MAX_ROUNDS) throw new ScriptError(`The backup did not finish after ${MAX_ROUNDS} rounds.`)
         log(`  still backing up (round ${round})`)
@@ -123,6 +133,41 @@ export async function takeBackup(runner, { database, bucket, log = console.log, 
 }
 
 /**
+ * Where a part is saved: its key under the backup's folder, inside `outDir`. The manifest came from the bucket, so a
+ * key that climbs out (..), is absolute or uses a backslash is refused before any path is built from it.
+ */
+export function localPath(outDir, prefix, key) {
+  const rest = key.startsWith(`${prefix}/`) ? key.slice(prefix.length + 1) : ''
+  const segments = rest.split('/')
+  if (!rest || rest.includes('\\') || isAbsolute(rest) || segments.some((s) => s === '' || s === '.' || s === '..' || /^[a-zA-Z]:/.test(s))) {
+    throw new ScriptError(`Part ${key} is outside the backup, so nothing was downloaded from it.`)
+  }
+  return join(outDir, ...segments)
+}
+
+/**
+ * Compares a finished backup with the database as it is now. Returns what differs (empty means the backup holds
+ * every row the database holds): a table whose row count isn't the manifest's, or a table the manifest doesn't
+ * list at all. Names and counts only, never values.
+ */
+export function liveDifferences(runner, database, manifest) {
+  const problems = []
+  if (manifest.tables.length) {
+    const literal = (name) => `'${name.replaceAll("'", "''")}'`
+    const sql = manifest.tables.map((t) => `SELECT ${literal(t.name)} AS name, count(*) AS n FROM ${quote(t.name)}`).join(' UNION ALL ')
+    const live = new Map(queryRows(runner, database, sql).map((r) => [r.name, r.n]))
+    for (const t of manifest.tables) {
+      if (live.get(t.name) !== t.rows) problems.push(`${t.name} (backup ${t.rows} rows, database ${live.get(t.name) ?? 'unreadable'})`)
+    }
+  }
+  const known = new Set([...manifest.tables, ...manifest.skipped].map((t) => t.name))
+  for (const { name } of queryRows(runner, database, `SELECT name FROM sqlite_master WHERE ${OWN_TABLES}`)) {
+    if (!known.has(name)) problems.push(`${name} (a table the backup doesn't have)`)
+  }
+  return problems
+}
+
+/**
  * Downloads a finished backup into `outDir` (manifest.json and one file per part, named as in the bucket, minus the
  * date folder) and checks every part against the manifest. Removes the folder again if anything fails to verify.
  */
@@ -136,7 +181,7 @@ export async function downloadBackup(runner, { bucket, prefix, outDir, log = con
     let parts = 0
     for (const table of manifest.tables) {
       for (const part of table.parts) {
-        const file = join(outDir, part.key.slice(prefix.length + 1))
+        const file = localPath(outDir, prefix, part.key)
         get(part.key, file)
         await checkPart(part, readFileSync(file))
         parts++
@@ -145,7 +190,7 @@ export async function downloadBackup(runner, { bucket, prefix, outDir, log = con
     log(`Downloaded the manifest and ${parts} parts, and checked each against the manifest.`)
     return manifest
   } catch (e) {
-    rmSync(outDir, { recursive: true, force: true }) // an export that didn't verify is not one to keep
+    rmSync(outDir, { recursive: true, force: true }) // a backup that didn't verify is not one to keep
     if (e instanceof BackupFormatError) throw new ScriptError(e.message)
     throw e
   }

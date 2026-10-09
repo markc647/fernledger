@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { after, test } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
+import { downloadBackup, localPath } from './backup-run.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const cleanup = []
@@ -227,6 +228,8 @@ test('a second deploy the same day reuses the complete backup instead of taking 
   assert.equal(r.status, 0, r.out)
   assert.equal(account.order().filter((o) => o.startsWith('r2 object put')).length, puts)
   assert.match(r.out, /already/i)
+  assert.match(r.out, /written since it was taken are not in it/i, 'it says what reusing means')
+  assert.match(r.out, /restore point/i, 'and what covers the gap')
 })
 
 test('deploy --skip-backup deploys without one, and says it did', () => {
@@ -258,17 +261,18 @@ test('teardown --dry-run prints what it would do and touches nothing', () => {
   assert.equal(r.status, 0, r.out)
   assert.match(r.out, /\$ npx wrangler d1 delete fernledger/)
   assert.match(r.out, /\$ npx wrangler r2 bucket delete fernledger-backups/)
+  assert.match(r.out, /new complete backup/)
   assert.match(r.out, /Dry run only/)
   assert.deepEqual(account.calls(), [], 'a dry run makes no Wrangler call at all')
   assert.ok(!existsSync(join(account.dir, 'export')))
 })
 
-test('teardown exports a verified backup, then deletes the database only after the database name is typed', () => {
+test('teardown downloads a verified final backup, then deletes the database only after the database name is typed', () => {
   const account = fakeAccount()
 
   const r = teardown(account, 'fernledger\n')
 
-  assert.equal(r.status, 1, 'the bucket still holds backups, which Wrangler cannot list, so the teardown is not finished')
+  assert.equal(r.status, 0, `the bucket step is left to the Deployer and is the expected end, not a failure: ${r.out}`)
   assert.deepEqual(account.state().databases, [])
   const exported = readdirSync(join(account.dir, 'export'))
   assert.ok(exported.includes('manifest.json'))
@@ -276,7 +280,8 @@ test('teardown exports a verified backup, then deletes the database only after t
   assert.match(readFileSync(join(account.dir, 'export', settings), 'utf8'), /Fern's money/)
   const order = account.order()
   assert.ok(lastIndex(order, 'r2 object') < index(order, 'd1 delete'), 'the export is finished before anything is deleted')
-  assert.match(r.out, /Fern's money|final export/i)
+  assert.match(r.out, /final backup/i)
+  assert.match(readFileSync(join(account.dir, 'export', 'manifest.json'), 'utf8'), /backups\/\d{4}-\d{2}-\d{2}-final-/, 'the final backup has a folder of its own')
 })
 
 test('teardown deletes nothing when what is typed is not the database name', () => {
@@ -307,7 +312,7 @@ test('teardown under CI=true still needs the typed name: auto-answered Wrangler 
   }
 })
 
-test('teardown deletes nothing when the export fails', () => {
+test('teardown deletes nothing when the final backup fails', () => {
   const account = fakeAccount()
 
   const r = teardown(account, 'fernledger\n', [], { FAKE_FAIL: 'r2 object put' })
@@ -318,7 +323,7 @@ test('teardown deletes nothing when the export fails', () => {
   assert.doesNotMatch(r.out, /owner@example\.com|SECRET123/)
 })
 
-test('teardown deletes nothing when the downloaded export fails its checksum', () => {
+test('teardown deletes nothing when the downloaded backup fails its checksum', () => {
   const account = fakeAccount()
   // The bucket serves a damaged part: flip the stored bytes after the backup is written but before the download.
   const damaged = `
@@ -355,15 +360,30 @@ test('teardown deletes the bucket too once it is empty, and finishes cleanly', (
   assert.ok(!existsSync(join(account.dir, 'export')))
 })
 
-test('teardown with a non-empty bucket tells the Deployer how to empty and delete it', () => {
+test('teardown with a non-empty bucket ends with how to empty and delete it, and warns that emptying destroys every backup', () => {
   const account = fakeAccount()
 
   const r = teardown(account, 'fernledger\n')
 
+  assert.equal(r.status, 0, r.out)
+  assert.deepEqual(account.state().databases, [])
   assert.deepEqual(account.state().buckets, ['fernledger-backups'])
+  assert.match(r.out, /Last step, by hand/)
   assert.match(r.out, /R2/)
   assert.match(r.out, /empty/i)
   assert.match(r.out, /r2 bucket delete fernledger-backups/)
+  assert.match(r.out, /destroys every backup/i, 'emptying the bucket loses all of them, not only the final one')
+  assert.match(r.out, /Download anything you want to keep first/)
+  assert.ok(r.out.lastIndexOf('Last step, by hand') > r.out.lastIndexOf('By hand\n'), 'the bucket step is the last thing printed')
+})
+
+test('teardown warns before the typed confirmation that emptying the bucket destroys every backup', () => {
+  const account = fakeAccount()
+
+  const r = teardown(account, 'nope\n')
+
+  assert.equal(r.status, 1)
+  assert.match(r.out, /destroys every backup in it/i)
 })
 
 test('teardown with nothing left says so and exits cleanly', () => {
@@ -384,7 +404,7 @@ test('teardown refuses an export folder inside the repo, which is public', () =>
   assert.ok(!existsSync(join(root, 'my-export')))
 })
 
-test('teardown refuses an export folder that already holds files', () => {
+test('teardown refuses a final backup folder that already holds files', () => {
   const account = fakeAccount()
   mkdirSync(join(account.dir, 'export'))
   writeFileSync(join(account.dir, 'export', 'old.txt'), 'x')
@@ -396,7 +416,7 @@ test('teardown refuses an export folder that already holds files', () => {
   assert.deepEqual(account.state().databases, ['fernledger'])
 })
 
-test('teardown revokes the Akahu token by instructions only, and only if Akahu Sync was used (ADR 0008)', () => {
+test('teardown revokes Akahu access by instructions only, and only if Akahu Sync was used (ADR 0008)', () => {
   const account = fakeAccount()
 
   const r = teardown(account, 'fernledger\n')
@@ -414,4 +434,195 @@ test('teardown needs the account confirmed, and fails closed without a terminal 
   assert.equal(r.status, 1)
   assert.match(r.out, /--yes/)
   assert.deepEqual(account.state().databases, ['fernledger'])
+})
+
+// ---- teardown: the guards ----
+
+const deletes = (account) => account.order().filter((o) => o.startsWith('d1 delete') || o.startsWith('r2 bucket delete'))
+const settingsFile = (account) => readdirSync(join(account.dir, 'export')).find((f) => f.startsWith('settings.') && f.endsWith('.ndjson'))
+
+test('teardown never reuses a backup taken earlier today: the final backup has the rows written since', () => {
+  const account = fakeAccount()
+  assert.equal(deploy(account).status, 0)
+  const [today] = Object.keys(account.backups())
+  const db = new DatabaseSync(join(account.dir, 'fernledger.sqlite'))
+  db.exec("INSERT INTO settings (key, value) VALUES ('later', 'written after the deploy backup')")
+  db.close()
+  const puts = () => account.order().filter((o) => o.startsWith('r2 object put')).length
+  const before = puts()
+
+  const r = teardown(account, 'fernledger\n')
+
+  assert.equal(r.status, 0, r.out)
+  assert.doesNotMatch(r.out, /already exists/, 'it did not reuse the backup of the same date')
+  assert.ok(puts() > before, 'it wrote a whole new backup')
+  assert.match(readFileSync(join(account.dir, 'export', settingsFile(account)), 'utf8'), /written after the deploy backup/)
+  const dates = Object.keys(account.backups())
+  assert.equal(dates.length, 2, 'the new backup is in a folder of its own, beside the earlier one')
+  assert.ok(dates.includes(today))
+  assert.equal(account.backups()[today].tables.find((t) => t.name === 'settings').rows, 2, 'the earlier backup is untouched')
+})
+
+test('teardown refuses to delete when the database changed after the backup was taken', () => {
+  const account = fakeAccount()
+  // A write lands in the database right after the backup's manifest is saved, as a Sync or an Import could.
+  const writer = `
+    const fs = require('node:fs'), path = require('node:path')
+    const real = path.join(process.env.FAKE_DIR, 'real-wrangler.cjs')
+    const r = require('node:child_process').spawnSync(process.execPath, [real, ...process.argv.slice(2)], { stdio: 'inherit', env: process.env })
+    const args = process.argv.slice(2)
+    if (r.status === 0 && args[0] === 'r2' && args[2] === 'put' && args[3].endsWith('/manifest.json')) {
+      const { DatabaseSync } = require('node:sqlite')
+      const db = new DatabaseSync(path.join(process.env.FAKE_DIR, 'fernledger.sqlite'))
+      db.exec("INSERT INTO settings (key, value) VALUES ('late', 'secret-late-value')")
+      db.close()
+    }
+    process.exit(r.status)
+  `
+  writeFileSync(join(account.dir, 'real-wrangler.cjs'), fakeWrangler)
+  writeFileSync(join(account.dir, 'wrangler.cjs'), writer)
+
+  const r = teardown(account, 'fernledger\n')
+
+  assert.equal(r.status, 1, r.out)
+  assert.match(r.out, /changed while the backup was being taken/)
+  assert.match(r.out, /settings \(backup 2 rows, database 3\)/)
+  assert.match(r.out, /Nothing was deleted/)
+  assert.doesNotMatch(r.out, /secret-late-value/)
+  assert.deepEqual(deletes(account), [])
+  assert.deepEqual(account.state().databases, ['fernledger'])
+  assert.deepEqual(account.state().buckets, ['fernledger-backups'])
+})
+
+test('teardown refuses a table the backup could not hold unless its name is typed with the database name', () => {
+  for (const [typed, goes] of [['fernledger\n', false], ['yes\n', false], ['fernledger without lookup\n', true]]) {
+    const account = fakeAccount()
+    const db = new DatabaseSync(join(account.dir, 'fernledger.sqlite'))
+    db.exec('CREATE TABLE lookup (code TEXT PRIMARY KEY, label TEXT) WITHOUT ROWID')
+    db.close()
+
+    const r = teardown(account, typed)
+
+    assert.deepEqual(account.state().databases, goes ? [] : ['fernledger'], `typed ${JSON.stringify(typed)}: ${r.out}`)
+    assert.match(r.out, /NOT in the final backup[^]*lookup/)
+    if (goes) assert.equal(r.status, 0, r.out)
+    else {
+      assert.equal(r.status, 1, r.out)
+      assert.match(r.out, /Nothing was deleted/)
+      assert.deepEqual(deletes(account), [])
+    }
+  }
+})
+
+test('teardown with a database but no bucket refuses: there is nowhere to put the backup', () => {
+  const account = fakeAccount({ bucket: false })
+
+  const r = teardown(account, 'fernledger\n')
+
+  assert.equal(r.status, 1, r.out)
+  assert.match(r.out, /no R2 bucket/i)
+  assert.match(r.out, /Nothing was deleted/)
+  assert.deepEqual(deletes(account), [])
+  assert.deepEqual(account.state().databases, ['fernledger'])
+  assert.ok(!existsSync(join(account.dir, 'export')))
+})
+
+test('teardown of an empty database takes no backup, deletes both, and finishes cleanly', () => {
+  const account = fakeAccount({ data: false })
+
+  const r = teardown(account, 'fernledger\n')
+
+  assert.equal(r.status, 0, r.out)
+  assert.match(r.out, /no tables/i)
+  assert.ok(!account.order().some((o) => o.startsWith('r2 object')), 'nothing was backed up')
+  assert.ok(!existsSync(join(account.dir, 'export')))
+  assert.deepEqual(account.state().databases, [])
+  assert.deepEqual(account.state().buckets, [])
+  assert.doesNotMatch(r.out, /Last step, by hand/)
+})
+
+test('teardown leaves the bucket alone when deleting the database fails', () => {
+  const account = fakeAccount()
+
+  const r = teardown(account, 'fernledger\n', [], { FAKE_FAIL: 'd1 delete' })
+
+  assert.equal(r.status, 1, r.out)
+  assert.ok(!account.order().some((o) => o.startsWith('r2 bucket delete')), 'the bucket holds the backup, so it is not touched')
+  assert.deepEqual(account.state().buckets, ['fernledger-backups'])
+  assert.match(r.out, /bucket was not touched/)
+  assert.match(r.out, /final backup is in/)
+  assert.doesNotMatch(r.out, /owner@example\.com|SECRET123/)
+  assert.ok(existsSync(join(account.dir, 'export', 'manifest.json')))
+})
+
+test('teardown reports the database as deleted when the bucket delete fails for another reason', () => {
+  const account = fakeAccount()
+
+  const r = teardown(account, 'fernledger\n', [], { FAKE_FAIL: 'r2 bucket delete' })
+
+  assert.equal(r.status, 1, r.out)
+  assert.deepEqual(account.state().databases, [])
+  assert.match(r.out, /D1 database "fernledger" is deleted/)
+  assert.match(r.out, /r2 bucket delete/)
+  assert.doesNotMatch(r.out, /owner@example\.com|SECRET123/)
+})
+
+test('teardown re-run to finish the bucket needs no backup folder, even if the earlier one is full', () => {
+  const account = fakeAccount({ database: false })
+  mkdirSync(join(account.dir, 'export'))
+  writeFileSync(join(account.dir, 'export', 'manifest.json'), '{}')
+
+  const r = teardown(account, 'fernledger\n')
+
+  assert.equal(r.status, 0, r.out)
+  assert.deepEqual(account.state().buckets, [])
+  assert.match(r.out, /already gone/)
+})
+
+test('teardown --out refuses a value that is another flag', () => {
+  const account = fakeAccount()
+
+  const r = run('teardown.mjs', ['--yes', '--out', '--dry-run'], account.env)
+
+  assert.equal(r.status, 1, r.out)
+  assert.match(r.out, /--out needs a folder/)
+  assert.deepEqual(account.calls(), [])
+})
+
+// ---- the downloaded folder ----
+
+test('a part key that climbs out of the backup folder, or is absolute, is refused before a path is built', () => {
+  const out = join(tempDir('out'), 'export')
+  const prefix = 'backups/2026-10-12'
+  assert.equal(localPath(out, prefix, `${prefix}/settings.000001.ndjson`), join(out, 'settings.000001.ndjson'))
+  for (const key of [`${prefix}/../escape.ndjson`, `${prefix}/a/../../escape`, `${prefix}/..`, `${prefix}//x`, `${prefix}/./x`, `${prefix}/`, `${prefix}\\..\\x`, `${prefix}/C:/x`, '/etc/passwd', 'backups/2026-10-13/x.ndjson']) {
+    assert.throws(() => localPath(out, prefix, key), /outside the backup/, key)
+  }
+})
+
+test('downloading a backup whose manifest has a part key outside it fetches no part and writes nothing there', async () => {
+  const dir = tempDir('doctored')
+  const out = join(dir, 'x', 'y', 'export')
+  const prefix = 'backups/2026-10-12'
+  const manifest = {
+    version: 1,
+    createdAt: '2026-10-12T00:00:00.000Z',
+    prefix,
+    migrations: [],
+    skipped: [],
+    tables: [{ name: 't', createSql: '', columns: ['a'], rows: 1, parts: [{ key: `${prefix}/../../escaped.ndjson`, rows: 1, bytes: 2, sha256: 'x' }] }],
+  }
+  const fetched = []
+  const runner = {
+    run(args) {
+      fetched.push(args[3])
+      writeFileSync(args[args.indexOf('--file') + 1], args[3].endsWith('/manifest.json') ? JSON.stringify(manifest) : 'x\n')
+    },
+  }
+
+  await assert.rejects(downloadBackup(runner, { bucket: 'b', prefix, outDir: out, log: () => {} }), /outside the backup/)
+
+  assert.deepEqual(fetched, [`b/${prefix}/manifest.json`], 'only the manifest was fetched')
+  assert.ok(!existsSync(join(dir, 'x', 'escaped.ndjson')) && !existsSync(join(dir, 'escaped.ndjson')))
+  assert.ok(!existsSync(out), 'what did not verify is not kept')
 })
