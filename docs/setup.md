@@ -201,7 +201,7 @@ If your Cloudflare account already has a wildcard or account-wide Access policy,
 
    Until all three are set, every API request returns 401. The app fails closed.
 
-**Adding or removing a Member:** edit the "Fernledger Members" policy. The app needs no changes.
+**Adding or removing a Member:** edit the "Fernledger Members" policy. The app needs no changes. Give a new Member the app's address. Its **How to sign in** page prints as a one-page guide for anyone who finds the email code hard, and **About your data** shows what you write in Settings under "About your data", so fill those in too.
 
 **Changing the Admin:** run `wrangler secret put ADMIN_EMAIL` again.
 

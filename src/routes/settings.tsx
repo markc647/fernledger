@@ -105,7 +105,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
       </div>
       <fieldset className="space-y-6">
         <legend className="text-lg font-semibold">About your data</legend>
-        <p className="text-sm text-muted-foreground">Every Member will see these on the About your data page.</p>
+        <p className="text-sm text-muted-foreground">Every Member sees these on the About your data page.</p>
         <div>
           <label htmlFor="about_contact" className="font-medium">
             {FIELD_LABELS.about_contact}

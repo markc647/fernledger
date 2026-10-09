@@ -42,6 +42,21 @@ const pairs = [
   // Money in/out and statuses are text on the page or a card (the Amount and Status components).
   ...['success', 'warning', 'danger'].flatMap((fg) => [[fg, 'background', 4.5], [fg, 'card', 4.5], [fg, 'muted', 4.5]]),
 ]
+// Print is always the light theme (src/index.css), so a page printed from the dark theme is not pale text on white paper.
+// The print block restates the light theme's text, paper and status colours, and each must equal the light value.
+test('print: the colours that carry text, paper and status are the light theme\'s', () => {
+  const start = css.indexOf('@media print {')
+  assert.notEqual(start, -1, 'no print block')
+  const print = Object.fromEntries(
+    [...css.slice(start, css.indexOf('\n}', start)).matchAll(/--([\w-]+):\s*oklch\(([\d.]+) ([\d.]+) ([\d.]+)\);/g)].map((m) => [m[1], m.slice(2).map(Number)]),
+  )
+  const light = tokens(':root')
+  for (const name of ['background', 'foreground', 'card', 'card-foreground', 'muted', 'muted-foreground', 'success', 'warning', 'danger']) {
+    assert.deepEqual(print[name], light[name], `--${name} is missing from the print block or differs from the light theme`)
+  }
+  for (const [name, value] of Object.entries(print)) assert.deepEqual(value, light[name], `--${name} differs from the light theme`)
+})
+
 for (const [selector, theme] of [[':root', 'light'], ['.dark', 'dark']]) {
   const t = tokens(selector)
   for (const [fg, bg, min] of pairs) {
