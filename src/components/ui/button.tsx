@@ -15,7 +15,8 @@ const buttonVariants = cva(
       },
       size: {
         default: 'h-8 gap-1.5 px-2.5',
-        touch: 'min-h-11 min-w-11 gap-1.5 px-4',
+        // 44px target, and body-size (16px) text since it is for people who find small controls hard.
+        touch: 'min-h-11 min-w-11 gap-1.5 px-4 text-base',
       },
     },
     defaultVariants: {

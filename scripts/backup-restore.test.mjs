@@ -129,13 +129,13 @@ Line two; DROP TABLE settings; -- "quoted"', '{"a":1}', NULL);
   return { dir, bucketDir, source, target }
 }
 
-function restore(s, args = ['2026-10-12', '--database', 'target', '--local']) {
+function restore(s, args = ['2026-10-12', '--database', 'target', '--local'], env = {}) {
   const base = { ...process.env }
   delete base.CLOUDFLARE_ACCOUNT_ID
   const r = spawnSync(process.execPath, [resolve(root, 'scripts/restore.mjs'), ...args], {
     cwd: root,
     encoding: 'utf8',
-    env: { ...base, FERNLEDGER_WRANGLER: join(s.dir, 'fake-wrangler.cjs'), FAKE_DIR: s.dir },
+    env: { ...base, FERNLEDGER_WRANGLER: join(s.dir, 'fake-wrangler.cjs'), FAKE_DIR: s.dir, ...env },
   })
   const out = r.stdout + r.stderr
   let calls = []
@@ -301,9 +301,12 @@ test('restore needs a date', async () => {
 
 test('restore does not keep the downloaded data around', async () => {
   const s = await scenario()
-  const before = readdirSync(tmpdir()).filter((f) => f.startsWith('fernledger-restore-'))
+  // A private temp folder, so restores run by other tests or checkouts at the same time can't show up here.
+  const temp = join(s.dir, 'temp')
+  mkdirSync(temp)
 
-  restore(s)
+  const r = restore(s, undefined, { TEMP: temp, TMP: temp, TMPDIR: temp })
 
-  assert.deepEqual(readdirSync(tmpdir()).filter((f) => f.startsWith('fernledger-restore-')), before)
+  assert.equal(r.status, 0, r.out)
+  assert.deepEqual(readdirSync(temp), [])
 })
