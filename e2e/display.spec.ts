@@ -106,7 +106,7 @@ test.describe('zoom', () => {
   }
 
   test('a very long app title wraps instead of scrolling sideways', async ({ page }) => {
-    await page.route('**/api/app-title', (route) => route.fulfill({ json: { title: 'The'.padEnd(120, 'x') } }))
+    await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(120, 'x'), about_contact: '', about_retention: '' } }))
     await page.setViewportSize({ width: 320, height: 256 })
     await page.goto('/')
     await expect(page.getByRole('banner')).toContainText('Thexxx')
@@ -253,7 +253,7 @@ test.describe('forced colours (Windows high contrast)', () => {
 
 test.describe('header', () => {
   test('shows the app title from Settings, and uses it as the page title', async ({ page }) => {
-    await page.route('**/api/app-title', (route) => route.fulfill({ json: { title: "Mum's finances" } }))
+    await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: "Mum's finances", about_contact: '', about_retention: '' } }))
     await page.goto('/')
     await expect(page.getByRole('banner').getByText("Mum's finances")).toBeVisible()
     await expect(page).toHaveTitle("Mum's finances")

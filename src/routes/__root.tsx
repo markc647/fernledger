@@ -4,9 +4,9 @@ import { useEffect } from 'react'
 import { DevIdentitySwitcher } from '@/components/dev-identity-switcher'
 import { TextSizeControl } from '@/components/text-size-control'
 import { ThemeToggle } from '@/components/theme-toggle'
-import { appTitleQuery, FALLBACK_APP_TITLE } from '@/lib/app-title'
 import { isNotSignedIn, meQuery } from '@/lib/me'
 import { navFor } from '@/lib/nav'
+import { FALLBACK_APP_TITLE, settingsQuery } from '@/lib/settings'
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: Layout,
@@ -17,8 +17,9 @@ const focusStyle = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus
 function Layout() {
   const { data: me, error: meError } = useQuery(meQuery)
   // Until the title arrives the header is blank rather than flashing "Fernledger" over the Admin's own title.
-  const { data: loadedTitle, isPending: titlePending } = useQuery(appTitleQuery)
-  const appTitle = loadedTitle ?? (titlePending ? '' : FALLBACK_APP_TITLE)
+  // The Settings screen writes its saved Settings into this same query, so the header changes without a reload.
+  const { data: settings, isPending: titlePending } = useQuery(settingsQuery)
+  const appTitle = settings?.app_title ?? (titlePending ? '' : FALLBACK_APP_TITLE)
   useEffect(() => {
     if (appTitle) document.title = appTitle
   }, [appTitle])

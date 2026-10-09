@@ -3,7 +3,6 @@ import { env, exports } from 'cloudflare:workers'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import worker from './index'
-import { putSetting } from './settings'
 
 const issuer = `https://${env.ACCESS_TEAM_DOMAIN}`
 let signingKey: CryptoKey
@@ -70,46 +69,6 @@ describe('GET /api/me', () => {
     const res = await call('/api/me', { token: await sign({ email: "o'brien+family@intranet" }) })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ email: "o'brien+family@intranet", role: 'member' })
-  })
-})
-
-describe('GET /api/app-title', () => {
-  const asMember = async () => ({ token: await sign({ email: 'sib@example.com' }) })
-  const setTitle = (value: string | null) =>
-    env.DB.batch([env.DB.prepare('DELETE FROM settings WHERE key = ?').bind('app_title'), ...(value === null ? [] : [putSetting(env.DB, 'app_title', value)])])
-
-  it("gives a Member the title the Admin set, for the page header", async () => {
-    await setTitle("Mum's finances")
-    const res = await call('/api/app-title', await asMember())
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ title: "Mum's finances" })
-  })
-
-  it('says "Fernledger" until a title is set', async () => {
-    await setTitle(null)
-    expect(await (await call('/api/app-title', await asMember())).json()).toEqual({ title: 'Fernledger' })
-  })
-
-  it.each(['', '   \n'])('says "Fernledger" when the stored title is blank (%j)', async (blank) => {
-    await setTitle(blank)
-    expect(await (await call('/api/app-title', await asMember())).json()).toEqual({ title: 'Fernledger' })
-  })
-
-  it('trims the title', async () => {
-    await setTitle('  Dad finances  ')
-    expect(await (await call('/api/app-title', await asMember())).json()).toEqual({ title: 'Dad finances' })
-  })
-
-  it('is refused without a valid Access token, and reveals no title', async () => {
-    await setTitle('Private family name')
-    const res = await call('/api/app-title')
-    expect(res.status).toBe(401)
-    expect(await res.text()).not.toContain('Private family name')
-  })
-
-  it('is read-only: a Member cannot change it', async () => {
-    const res = await call('/api/app-title', { ...(await asMember()), method: 'PUT', body: '{}', headers: { Origin: 'https://app.test', 'Content-Type': 'application/json' } })
-    expect(res.status).toBe(403)
   })
 })
 
