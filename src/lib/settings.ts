@@ -2,6 +2,9 @@ import { queryOptions } from '@tanstack/react-query'
 import { api } from './api'
 import { HttpError } from './me'
 
+/** What the header says if the app title can't be loaded. The Worker's default (`DEFAULT_SETTINGS`) is the same word. */
+export const FALLBACK_APP_TITLE = 'Fernledger'
+
 /** The app title and the About-your-data fields. Anyone signed in can read them; only the Admin can change them. */
 export const settingsQuery = queryOptions({
   queryKey: ['settings'],

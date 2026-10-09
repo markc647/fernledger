@@ -1,9 +1,12 @@
 import { useQuery, type QueryClient } from '@tanstack/react-query'
 import { createRootRouteWithContext, Link, Outlet, useRouter } from '@tanstack/react-router'
+import { useEffect } from 'react'
 import { DevIdentitySwitcher } from '@/components/dev-identity-switcher'
+import { TextSizeControl } from '@/components/text-size-control'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { isNotSignedIn, meQuery } from '@/lib/me'
 import { navFor } from '@/lib/nav'
+import { FALLBACK_APP_TITLE, settingsQuery } from '@/lib/settings'
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: Layout,
@@ -13,6 +16,13 @@ const focusStyle = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus
 
 function Layout() {
   const { data: me, error: meError } = useQuery(meQuery)
+  // Until the title arrives the header is blank rather than flashing "Fernledger" over the Admin's own title.
+  // The Settings screen writes its saved Settings into this same query, so the header changes without a reload.
+  const { data: settings, isPending: titlePending } = useQuery(settingsQuery)
+  const appTitle = settings?.app_title ?? (titlePending ? '' : FALLBACK_APP_TITLE)
+  useEffect(() => {
+    if (appTitle) document.title = appTitle
+  }, [appTitle])
   const router = useRouter()
   // Each route file declares its own navigation entry in `staticData.nav`.
   const entries = Object.values(router.routesByPath).flatMap((route) =>
@@ -30,7 +40,7 @@ function Layout() {
       {import.meta.env.DEV && <DevIdentitySwitcher />}
       <header className="border-b">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <span className="text-lg font-semibold">Fernledger</span>
+          <span className="min-h-7 min-w-0 text-lg font-semibold">{appTitle}</span>
           <nav aria-label="Main">
             <ul className="flex flex-wrap gap-1">
               {navFor(entries, me?.role).map((item) => (
@@ -45,7 +55,8 @@ function Layout() {
               ))}
             </ul>
           </nav>
-          <div className="ms-auto">
+          <div className="ms-auto flex flex-wrap gap-x-4 gap-y-2">
+            <TextSizeControl />
             <ThemeToggle />
           </div>
         </div>

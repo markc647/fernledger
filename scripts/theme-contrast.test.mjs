@@ -39,6 +39,8 @@ const pairs = [
   ['muted-foreground', 'background', 4.5],
   ['muted-foreground', 'muted', 4.5],
   ['ring', 'background', 3],
+  // Money in/out and statuses are text on the page or a card (the Amount and Status components).
+  ...['success', 'warning', 'danger'].flatMap((fg) => [[fg, 'background', 4.5], [fg, 'card', 4.5], [fg, 'muted', 4.5]]),
 ]
 for (const [selector, theme] of [[':root', 'light'], ['.dark', 'dark']]) {
   const t = tokens(selector)

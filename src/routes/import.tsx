@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { adapters, BankCsvError, parseBankCsv, type BankCsvResult } from '@/lib/bank-csv'
-import { formatDate, formatSignedNzd } from '@/lib/format'
+import { formatDate, formatAmount } from '@/lib/format'
 import { countOnOrAfter, MAX_IMPORT_ROWS } from '@/lib/import-chunks'
 import { meQuery } from '@/lib/me'
 import { accountsQuery } from '@/lib/queries'
@@ -276,7 +276,7 @@ function Preview(props: {
                 <tr key={row.uniqueId} className="border-b">
                   <td className="py-2 pe-4 whitespace-nowrap">{formatDate(row.date)}</td>
                   <td className="py-2 pe-4">{row.payee || row.bankMemo}</td>
-                  <td className="py-2 text-right tabular-nums whitespace-nowrap">{formatSignedNzd(row.amountCents)}</td>
+                  <td className="py-2 text-right tabular-nums whitespace-nowrap">{formatAmount(row.amountCents)}</td>
                 </tr>
               ))}
             </tbody>
