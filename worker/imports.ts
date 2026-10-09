@@ -7,6 +7,7 @@ import { statusOnRecord } from './balance-rules'
 import { recordChange } from './changelog'
 import { chunkDetail, chunkStatements, chunkSummary, replaceWouldLeaveNothing } from './import-chunk'
 import { badRowField, MAX_CHUNKS, REPLACE_SLICE, serialiseRows, type ImportRow } from './import-rows'
+import { applyRulesStatement } from './rule-apply'
 import { afterTransactionsChanged, lastTransactionId } from './transactions-changed'
 import { validate } from './validate'
 
@@ -19,11 +20,11 @@ import { validate } from './validate'
 // - A bound string may be 2 MB. Row fields are length-capped (import-rows.ts); 500 worst-case rows measured 335 KB.
 // - 10 ms of CPU: reading, checking and re-serialising 500 typical rows (86 KB) measured about 1-2 ms in Node.
 // - A chunk request costs at most 13 D1 queries (find the Account, count the Import-sourced rows to replace, count the
-//   rows it already holds, find the highest Transaction ID, then one batch of at most 6 statements: set the Cutover Date
-//   (or create the Account), remove the old balances, remove the old rows, insert the rows, record the file's ledger
-//   balance (last chunk only), write the Change Log entry; then one statement to apply the Rules to the rows just
-//   added, and the last chunk's Balance Check reads and saves in 2 more), well under 50. A statement in a batch counts
-//   as one query; balances.test.ts pins the worst case.
+//   rows it already holds, find the highest Transaction ID, then one batch of at most 7 statements: set the Cutover Date
+//   (or create the Account), remove the old balances, remove the old rows, insert the rows, apply the Rules to the rows
+//   just added, record the file's ledger balance (last chunk only), write the Change Log entry; then the last chunk's
+//   Balance Check reads and saves in 2 more), well under 50. A statement in a batch counts as one query; balances.test.ts
+//   pins the worst case.
 // - MAX_CHUNKS (import-rows.ts) keeps one Import within the free plan's 100k D1 row writes a day.
 // - Rows dated on or after the Account's Cutover Date are filtered out in SQL (`json_each` rows are compared there),
 //   so the Worker never loops over them.
@@ -146,13 +147,16 @@ export const imports = new Hono<AppEnv>()
     )
     // Read before the rows are written: every Transaction above it afterwards is one this chunk added, which is all the Rules apply to.
     const afterId = await lastTransactionId(db)
+    // The Rules are applied in the same batch as the rows, so a chunk and its Rule results commit together or not at all.
+    // Applied after the commit, a failure would leave rows no retry gives Rules to: the retry reads the new highest ID.
+    const withRules = [...planned, applyRulesStatement(db, { accountNumber: number, afterId })]
     // The file's ledger balance is recorded with its last chunk, once every row is in, so an Import that stops part way
     // doesn't claim a balance. It goes after the insert, which it follows in the batch.
     const lastChunk = chunk.index === chunk.count - 1
     const ledger = file.ledgerBalance
     const statements = lastChunk
-      ? [...planned, recordBalance(db, { accountNumber: number, asOfDate: ledger.date, bankCents: ledger.cents, source: 'import', status: statusOnRecord({ asOfDate: ledger.date, fileTo: file.to, cutoverDate: effectiveCutover }) })]
-      : planned
+      ? [...withRules, recordBalance(db, { accountNumber: number, asOfDate: ledger.date, bankCents: ledger.cents, source: 'import', status: statusOnRecord({ asOfDate: ledger.date, fileTo: file.to, cutoverDate: effectiveCutover }) })]
+      : withRules
     const insertAt = planned.length - 1
     // Every chunk is its own Change Log entry, written in the same batch as its rows.
     const outcome = { accountName: name, replace: replace === true, removed: toRemove, added, dropped, index: chunk.index, count: chunk.count }

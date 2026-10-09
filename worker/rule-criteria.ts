@@ -15,9 +15,9 @@ const cents = z.int().check(z.minimum(0), z.maximum(MAX_AMOUNT_CENTS))
 const optionally = <T extends z.ZodMiniType>(schema: T) => z.optional(z.nullable(schema))
 
 const criteriaFields = {
-  /** Found anywhere in the description or the bank memo, ignoring capitals. */
+  /** Found anywhere in the description or the bank memo, ignoring capitals A to Z (not accented letters). */
   textContains: optionally(text(100)),
-  /** The bank's own transaction type, such as EFTPOS. Equal, ignoring capitals. */
+  /** The bank's own transaction type (Tran Type in the bank's export), such as EFTPOS. Equal, ignoring capitals A to Z. */
   bankType: optionally(text(40)),
   /** Which way the money went: 'in' is an amount above zero, 'out' below zero. Left out means either. */
   direction: optionally(z.enum(['in', 'out'])),

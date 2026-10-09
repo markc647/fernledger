@@ -1,8 +1,11 @@
+import type { MAX_AMOUNT_CENTS as WORKER_MAX_AMOUNT_CENTS } from '@/generated/api/rule-criteria'
+import { formatBalance } from './format'
+
 // How the Rules page reads and writes a Rule: dollar amounts typed by the Admin, and a Rule described in words.
 // Money on the wire is integer cents (the Worker's rule-criteria.ts); the dollars here are only what the Admin types and reads.
 
-/** The Worker's limit on an amount a Rule can name, $1,000,000,000.00 (worker/rule-criteria.ts). */
-export const MAX_AMOUNT_CENTS = 100_000_000_000
+/** The Worker's limit on an amount a Rule can name, $1,000,000,000.00 (worker/rule-criteria.ts). Typed as the Worker's literal, so the build fails if the two drift apart. */
+export const MAX_AMOUNT_CENTS: typeof WORKER_MAX_AMOUNT_CENTS = 100_000_000_000
 
 /** A Rule as the API lists it. */
 export type RuleView = {
@@ -43,8 +46,8 @@ export function dollarsForInput(cents: number | null): string {
   return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, '0')}`
 }
 
-const wholeDollars = new Intl.NumberFormat('en-NZ')
-const dollars = (cents: number) => `$${wholeDollars.format(Math.floor(cents / 100))}.${String(cents % 100).padStart(2, '0')}`
+// An amount a Rule names is never negative, so the shared formatter reads it as "$1,234.50".
+const dollars = formatBalance
 
 /** What a Rule looks for, one phrase per condition it uses, in the order the form asks for them. */
 export function ruleConditions(rule: Pick<RuleView, 'textContains' | 'bankType' | 'direction' | 'minCents' | 'maxCents'>): string[] {

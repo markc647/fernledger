@@ -127,10 +127,10 @@ function AdminRules() {
           <RemoveConfirm item={item} onDone={(message) => closed(message)} onCancel={() => closed('', `rule-${item.rule.id}-remove`)} />
         ) : (
           <div className="flex flex-wrap justify-end gap-2">
-            <Button id={`rule-${item.rule.id}-up`} size="touch" variant="outline" aria-label={`Move Rule ${item.number} up`} disabled={item.first || move.isPending} onClick={() => moveRule(item, -1)}>
+            <Button id={`rule-${item.rule.id}-up`} size="touch" variant="outline" aria-label={`Move up, Rule ${item.number}`} disabled={item.first || move.isPending} onClick={() => moveRule(item, -1)}>
               Move up
             </Button>
-            <Button id={`rule-${item.rule.id}-down`} size="touch" variant="outline" aria-label={`Move Rule ${item.number} down`} disabled={item.last || move.isPending} onClick={() => moveRule(item, 1)}>
+            <Button id={`rule-${item.rule.id}-down`} size="touch" variant="outline" aria-label={`Move down, Rule ${item.number}`} disabled={item.last || move.isPending} onClick={() => moveRule(item, 1)}>
               Move down
             </Button>
             <Button id={`rule-${item.rule.id}-edit`} size="touch" variant="outline" aria-label={`Edit Rule ${item.number}`} onClick={() => { setNotice(''); setProblem(''); setEditing({ kind: 'edit', rule: item.rule }) }}>
@@ -255,7 +255,10 @@ function readCriteria(values: FormValues): { criteria: Criteria; problems: Parti
   return { criteria, problems }
 }
 
-type Sample = { id: number; date: string; description: string; amountCents: number }
+type Sample = { id: number; date: string; description: string; bankType: string; amountCents: number }
+
+/** Which criteria a result belongs to. Two sets of criteria are the same when they read the same. */
+const criteriaKey = (criteria: Criteria) => JSON.stringify(criteria)
 
 /** Adds a Rule, or changes `rule`. The Admin has to see how many Transactions the criteria match before saving them. */
 function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (message: string) => void; onCancel: () => void }) {
@@ -266,9 +269,9 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
   const [checked, setChecked] = useState<{ key: string; matches: number; samples: Sample[] } | null>(null)
 
   const { criteria, problems } = readCriteria(values)
-  const key = JSON.stringify(criteria)
+  const key = criteriaKey(criteria)
   // Saving a Rule as it is stored needs no check; any change to what it looks for does.
-  const savedKey = rule ? JSON.stringify(readCriteria(initialValues(rule)).criteria) : null
+  const savedKey = rule ? criteriaKey(readCriteria(initialValues(rule)).criteria) : null
   const hasBeenChecked = Object.keys(problems).length === 0 && (checked?.key === key || key === savedKey)
   const shown = checked?.key === key ? checked : null
 
@@ -282,13 +285,16 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
     if (first) document.getElementById(FIELD_ELEMENT[first])?.focus()
   }
 
+  // The criteria asked about travel as the mutation's variables, and the result is filed under them. A callback that read
+  // `key` instead would get the latest render's, since TanStack Query hands a pending mutation its newest options: boxes
+  // edited while the check was out would then take the result for the old criteria as their own and enable Save.
   const check = useMutation({
-    mutationFn: async () => {
-      const res = await api.rules.preview.$post({ json: criteria })
+    mutationFn: async (asked: Criteria) => {
+      const res = await api.rules.preview.$post({ json: asked })
       if (!res.ok) throw new HttpError(res.status)
       return res.json()
     },
-    onSuccess: (data) => setChecked({ key, matches: data.matches, samples: data.samples }),
+    onSuccess: (data, asked) => setChecked({ key: criteriaKey(asked), matches: data.matches, samples: data.samples }),
   })
 
   const save = useMutation({
@@ -306,7 +312,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
   const onCheck = () => {
     setTried('check')
     if (Object.keys(problems).length > 0) return focusFirst(false)
-    check.mutate()
+    check.mutate(criteria)
   }
   const onSave = () => {
     setTried('save')
@@ -349,7 +355,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
             onChange={(event) => set({ text: event.target.value })}
           />
           <p id="rule-text-hint" className="mt-1 text-muted-foreground">
-            Looked for in the description and the bank's memo, ignoring capitals. For example, Woolworths.
+            Looked for in the description and the bank's memo, ignoring capital letters A to Z. A letter with an accent or macron, such as Ā, has to match as typed. For example, Woolworths.
           </p>
           {error('criteria') && <p id="rule-criteria-error" role="alert" className="mt-1 font-medium text-destructive">{error('criteria')}</p>}
         </div>
@@ -359,7 +365,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
           </label>
           <Input id="rule-type" value={values.type} maxLength={40} aria-describedby="rule-type-hint" onChange={(event) => set({ type: event.target.value })} />
           <p id="rule-type-hint" className="mt-1 text-muted-foreground">
-            The bank's own type, as the Transactions list shows it, such as EFTPOS. It has to match all of it, ignoring capitals.
+            The bank's own type, as the bank's export shows it (Tran Type), such as EFTPOS. It has to match all of it, ignoring capital letters A to Z.
           </p>
         </div>
         <div>
@@ -416,7 +422,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
             className={selectStyle}
             value={values.target}
             aria-invalid={error('target') ? true : undefined}
-            aria-describedby={error('target') ? 'rule-target-error' : undefined}
+            aria-describedby={error('target') ? 'rule-target-error' : values.target === 'transfer' ? 'rule-transfer-note' : undefined}
             onChange={(event) => set({ target: event.target.value })}
           >
             <option value="">Choose…</option>
@@ -428,6 +434,11 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
             <option value="transfer">Mark as a Transfer</option>
           </select>
           {error('target') && <p id="rule-target-error" role="alert" className="mt-1 font-medium text-destructive">{error('target')}</p>}
+          {values.target === 'transfer' && (
+            <p id="rule-transfer-note" className="mt-1 text-muted-foreground">
+              The mark is stored on new Transactions now. It takes effect when Transfer pairing ships; until then they have no Category.
+            </p>
+          )}
           {categoriesFailed && <p role="alert" className="mt-1 font-medium text-destructive">The Categories could not be loaded. Reload the page to try again.</p>}
           {rule?.categoryRemoved && <p className="mt-1 text-muted-foreground">This Rule's Category, {rule.categoryName}, was removed. Choose another to make the Rule work again.</p>}
         </div>
@@ -442,8 +453,8 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
               <>
                 <p className="font-medium">
                   {shown.matches === 0
-                    ? 'No Transactions you have now match.'
-                    : `${count.format(shown.matches)} ${shown.matches === 1 ? 'Transaction' : 'Transactions'} you have now ${shown.matches === 1 ? 'matches' : 'match'}.`}
+                    ? 'No Transactions you already have match.'
+                    : `${count.format(shown.matches)} ${shown.matches === 1 ? 'Transaction' : 'Transactions'} you already have ${shown.matches === 1 ? 'matches' : 'match'}.`}
                 </p>
                 <p className="mt-1">Saving the Rule won't change {shown.matches === 1 ? 'it' : 'them'}. It is used for new Transactions as they are imported.</p>
                 {shown.samples.length > 0 && (
@@ -454,6 +465,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
                         <li key={sample.id} className="flex flex-wrap items-start justify-between gap-x-4">
                           <span className="min-w-0 break-words">
                             {formatDate(sample.date)}, {sample.description}
+                            {sample.bankType && <>, type {sample.bankType}</>}
                           </span>
                           <Amount cents={sample.amountCents} />
                         </li>

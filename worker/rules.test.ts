@@ -1,7 +1,8 @@
 import { env, exports } from 'cloudflare:workers'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { MAX_RULES } from './rule-criteria'
-import { afterTransactionsChanged } from './transactions-changed'
+import { applyRulesStatement } from './rule-apply'
+import { MAX_RULES, toCriteria } from './rule-criteria'
+import { previewStatements } from './rule-preview'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -28,7 +29,7 @@ type Rule = {
   transfer: boolean
 }
 type Row = { id: number; description: string; categoryId: number | null; categoryName: string | null; categorySource: string | null }
-type Preview = { matches: number; samples: { id: number; date: string; description: string; amountCents: number }[] }
+type Preview = { matches: number; samples: { id: number; date: string; description: string; bankType: string; amountCents: number }[] }
 
 const rules = async (who: Who = 'member'): Promise<Rule[]> => (await call('/api/rules', { who })).json()
 const categoryId = async (name: string) => (await env.DB.prepare('SELECT id FROM categories WHERE name = ? AND removed_at IS NULL').bind(name).first<{ id: number }>())!.id
@@ -46,7 +47,9 @@ async function addRule(body: Record<string, unknown>) {
 
 let accountId = 0
 let uniqueId = 0
-type Made = { description: string; memo?: string; type?: string; cents?: number; date?: string }
+/** `id` is the bank's unique ID; a new one each time when left out. */
+type Made = { description: string; memo?: string; type?: string; cents?: number; date?: string; id?: string }
+const ACCOUNT_NUMBER = '99-9999-9999999-99'
 
 /** Adds a made-up Transaction straight to the database, so the Rules have never seen it. Returns its ID. */
 async function history(t: Made) {
@@ -56,18 +59,23 @@ async function history(t: Made) {
   return meta.last_row_id
 }
 
-/** Imports made-up Transactions through the real Import route, which applies the Rules to the rows it adds. */
-async function importRows(rows: Made[]) {
-  const res = await call('/api/imports/chunks', {
+/** Sends made-up Transactions as one chunk of the real Import route, which applies the Rules to the rows it adds. */
+const sendRows = (rows: Made[], extra: { replace?: boolean; account?: string } = {}) =>
+  call('/api/imports/chunks', {
     method: 'POST',
     body: {
-      account: { number: '99-9999-9999999-99' },
+      account: { number: extra.account ?? ACCOUNT_NUMBER },
       chunk: { index: 0, count: 1 },
       file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: '2026-10-01', to: '2026-10-31', ledgerBalance: { cents: 0, date: '2026-10-31' } },
-      rows: rows.map((t) => ({ date: t.date ?? '2026-10-05', uniqueId: `RULE${++uniqueId}`, tranType: t.type ?? 'EFTPOS', chequeNumber: null, payee: t.description, bankMemo: t.memo ?? '', amountCents: t.cents ?? -1000 })),
+      rows: rows.map((t) => ({ date: t.date ?? '2026-10-05', uniqueId: t.id ?? `RULE${++uniqueId}`, tranType: t.type ?? 'EFTPOS', chequeNumber: null, payee: t.description, bankMemo: t.memo ?? '', amountCents: t.cents ?? -1000 })),
+      ...(extra.replace ? { replace: true } : {}),
     },
   })
-  expect(res.status).toBe(200)
+
+/** Like `sendRows`, and expects the Import to be accepted. */
+async function importRows(rows: Made[], extra: Parameters<typeof sendRows>[1] = {}) {
+  const res = await sendRows(rows, extra)
+  expect(res.status, JSON.stringify(await res.clone().json())).toBe(200)
 }
 
 type CategoryRecord = { id: number; name: string }
@@ -80,7 +88,7 @@ beforeEach(async () => {
   await env.DB.batch(['transactions', 'rules', 'accounts', 'change_log', 'categories'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
   // Back to the starter list as migrated, so no test depends on what an earlier one added, renamed or removed.
   await env.DB.batch(starters.map((c) => env.DB.prepare('INSERT INTO categories (id, name) VALUES (?, ?)').bind(c.id, c.name)))
-  accountId = (await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-99', 'Example') RETURNING id").first<{ id: number }>())!.id
+  accountId = (await env.DB.prepare('INSERT INTO accounts (account_number, name) VALUES (?, ?) RETURNING id').bind(ACCOUNT_NUMBER, 'Example').first<{ id: number }>())!.id
   uniqueId = 0
 })
 
@@ -289,8 +297,9 @@ describe('the priority order', () => {
     expect((await rules()).map((r) => r.id)).toEqual([c, a, b])
     const [entry] = await changeLog()
     expect(entry).toMatchObject({ summary: 'Changed the order of Rules', type: 'rule', actor: 'admin@example.com' })
-    expect(JSON.parse(entry!.before as string)).toEqual({ order: ['text contains "a", category Groceries', 'text contains "b", category Fuel', 'text contains "c", category Tax'] })
-    expect(JSON.parse(entry!.after as string)).toEqual({ order: ['text contains "c", category Tax', 'text contains "a", category Groceries', 'text contains "b", category Fuel'] })
+    // Numbered, because the Change Log page joins a list with commas and each Rule's words have commas of their own.
+    expect(JSON.parse(entry!.before as string)).toEqual({ order: ['1. text contains "a", category Groceries', '2. text contains "b", category Fuel', '3. text contains "c", category Tax'] })
+    expect(JSON.parse(entry!.after as string)).toEqual({ order: ['1. text contains "c", category Tax', '2. text contains "a", category Groceries', '3. text contains "b", category Fuel'] })
   })
 
   it('gives a new Rule the last place, even after others were removed or moved', async () => {
@@ -393,6 +402,17 @@ describe('what a Rule matches', () => {
     it('matches nothing that is not there', async () => {
       expect(await matches({ textContains: 'no such shop' })).toBe(0)
     })
+
+    // SQLite's lower() folds A to Z only. The Rules page and the README say so: a letter with a macron has to match as typed.
+    it('ignores capitals A to Z only: a letter with a macron has to match as typed', async () => {
+      await history({ description: 'Māori Market', memo: 'ĀKAU shop' })
+
+      expect(await matches({ textContains: 'MāORI MARKET' })).toBe(1)
+      expect(await matches({ textContains: 'māori' })).toBe(1)
+      expect(await matches({ textContains: 'MĀORI' })).toBe(0)
+      expect(await matches({ textContains: 'ĀKAU' })).toBe(1)
+      expect(await matches({ textContains: 'ākau' })).toBe(0)
+    })
   })
 
   describe('transaction type', () => {
@@ -460,7 +480,7 @@ describe('the preview', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as Preview
     expect(body.matches).toBe(8)
-    expect(body.samples).toEqual([8, 7, 6, 5, 4].map((n) => ({ id: expect.any(Number), date: dated(n), description: `EXAMPLE SHOP ${n}`, amountCents: -100 * n })))
+    expect(body.samples).toEqual([8, 7, 6, 5, 4].map((n) => ({ id: expect.any(Number), date: dated(n), description: `EXAMPLE SHOP ${n}`, bankType: 'EFTPOS', amountCents: -100 * n })))
     expect(await rules()).toEqual([])
     expect(await changeLog()).toEqual([])
     expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE rule_id IS NOT NULL').first<{ n: number }>())!.n).toBe(0)
@@ -490,7 +510,7 @@ describe('the preview', () => {
     }
   })
 
-  it('is for the Admin: a Member is refused, and nothing is read or written', async () => {
+  it('is for the Admin: a Member is refused with Read-only', async () => {
     await history({ description: 'EXAMPLE SHOP' })
     const res = await preview({ textContains: 'example' }, 'member')
     expect(res.status).toBe(403)
@@ -553,7 +573,7 @@ describe('new Transactions', () => {
     const res = await call('/api/imports/chunks', {
       method: 'POST',
       body: {
-        account: { number: '99-9999-9999999-99' },
+        account: { number: ACCOUNT_NUMBER },
         chunk: { index: 0, count: 1 },
         file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-01', to: '2026-10-31', ledgerBalance: { cents: 0, date: '2026-10-31' } },
         rows: [{ date: '2026-10-05', uniqueId: 'RULE1', tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SUPER 1', bankMemo: '', amountCents: -1000 }],
@@ -594,8 +614,182 @@ describe('new Transactions', () => {
   })
 })
 
-describe('the hook that runs after Transactions change', () => {
-  it('applies Rules to the Account\'s Transactions after the given ID, and to no others', async () => {
+describe('Transactions and their Rule results', () => {
+  it('are saved together: when applying the Rules fails nothing is saved, and sending the chunk again gives its rows their Rules', async () => {
+    const groceries = await categoryId('Groceries')
+    await addRule({ textContains: 'EXAMPLE SUPER', categoryId: groceries })
+    const rows = [
+      { description: 'EXAMPLE SUPER 1', id: 'RETRY1' },
+      { description: 'EXAMPLE OTHER', id: 'RETRY2' },
+    ]
+    // Fails the statement that stores a Rule result, the way a D1 error or the daily write limit would part way through.
+    await env.DB.prepare("CREATE TRIGGER fail_rule_apply BEFORE UPDATE OF rule_id ON transactions BEGIN SELECT RAISE(ABORT, 'forced'); END").run()
+    try {
+      expect((await sendRows(rows)).status).toBe(500)
+    } finally {
+      await env.DB.prepare('DROP TRIGGER fail_rule_apply').run()
+    }
+
+    // Were the Rules applied after the chunk committed, these rows would be saved without them, and the retry would find only duplicates.
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions').first<{ n: number }>())!.n).toBe(0)
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM change_log WHERE type = 'import'").first<{ n: number }>())!.n).toBe(0)
+
+    const retry = await sendRows(rows)
+    expect(await retry.json()).toMatchObject({ added: 2, duplicates: 0 })
+    expect(await rowFor('EXAMPLE SUPER 1')).toMatchObject({ categoryName: 'Groceries', categorySource: 'rule' })
+    expect(await rowFor('EXAMPLE OTHER')).toMatchObject({ categoryName: null })
+  })
+
+  it('get Rules in the same step that creates their Account', async () => {
+    const groceries = await categoryId('Groceries')
+    await addRule({ textContains: 'EXAMPLE SUPER', categoryId: groceries })
+
+    await importRows([{ description: 'EXAMPLE SUPER 1' }, { description: 'EXAMPLE OTHER' }], { account: '99-9999-9999999-97' })
+
+    expect(await rowFor('EXAMPLE SUPER 1')).toMatchObject({ categoryName: 'Groceries', categorySource: 'rule' })
+    expect(await rowFor('EXAMPLE OTHER')).toMatchObject({ categoryName: null })
+  })
+
+  it('get Rules when a replace brings the rows back, and the rows it replaced go with their results', async () => {
+    const groceries = await categoryId('Groceries')
+    await importRows([{ description: 'EXAMPLE SUPER 1' }]) // before there was a Rule
+    await addRule({ textContains: 'EXAMPLE SUPER', categoryId: groceries })
+    expect(await rowFor('EXAMPLE SUPER 1')).toMatchObject({ categoryName: null })
+
+    await importRows([{ description: 'EXAMPLE SUPER 1' }, { description: 'EXAMPLE OTHER' }], { replace: true })
+
+    expect((await list()).total).toBe(2)
+    expect(await rowFor('EXAMPLE SUPER 1')).toMatchObject({ categoryName: 'Groceries', categorySource: 'rule' })
+    expect(await rowFor('EXAMPLE OTHER')).toMatchObject({ categoryName: null })
+  })
+})
+
+describe('the preview and the Rules a chunk gets', () => {
+  const day = (n: number) => `2026-09-${String(n).padStart(2, '0')}`
+  const fixtures: Made[] = [
+    { description: 'EXAMPLE WOOLWORTHS METRO', memo: 'Card 1234', type: 'EFTPOS', cents: -4550, date: day(1) },
+    { description: 'Example Pak n Save', memo: 'Shopping for woolen goods', type: 'EFTPOS', cents: -12000, date: day(2) },
+    { description: 'EXAMPLE EMPLOYER', memo: 'Pay', type: 'DIRECT CREDIT', cents: 250000, date: day(3) },
+    { description: 'EXAMPLE REFUND', memo: '', type: 'EFTPOS', cents: 4550, date: day(4) },
+    { description: '50% off_sale', memo: '', type: 'AUTO PAYMENT', cents: -500, date: day(5) },
+    { description: 'EXAMPLE NOTHING', memo: '', type: 'eftpos', cents: 0, date: day(6) },
+    { description: 'Māori Market', memo: 'ĀKAU', type: 'EFTPOS', cents: -900, date: day(7) },
+    ...Array.from({ length: 6 }, (_, n) => ({ description: `EXAMPLE CAFE ${n}`, memo: '', type: 'EFTPOS', cents: -500 - n, date: day(10 + n) })),
+  ]
+  const criteriaSets: Record<string, unknown>[] = [
+    { textContains: 'woolworths' },
+    { textContains: 'WOOLEN' },
+    { textContains: 'card 1234' },
+    { textContains: '%' },
+    { textContains: '_' },
+    { textContains: 'example', direction: 'out' },
+    { textContains: 'MĀORI' },
+    { textContains: 'māori' },
+    { bankType: 'EFTPOS' },
+    { bankType: 'EFT' },
+    { direction: 'in' },
+    { direction: 'out', minCents: 4550, maxCents: 4550 },
+    { minCents: 4550 },
+    { maxCents: 0 },
+    { maxCents: 4550 },
+    { textContains: 'example', bankType: 'EFTPOS', direction: 'out', minCents: 500, maxCents: 505 },
+    { textContains: 'example cafe' },
+    { textContains: 'nothing matches this' },
+  ]
+
+  it.each(criteriaSets.map((criteria) => [JSON.stringify(criteria), criteria] as const))('agree on what %s matches, and the examples are the newest of those', async (_name, criteria) => {
+    for (const t of fixtures) await history(t)
+    const { matches, samples } = (await (await preview(criteria)).json()) as Preview
+
+    const ruleId = await addRule({ ...criteria, categoryId: await categoryId('Groceries') })
+    await applyRulesStatement(env.DB, { accountNumber: ACCOUNT_NUMBER, afterId: 0 }).run()
+
+    const got = (await env.DB.prepare('SELECT id FROM transactions WHERE rule_id = ? ORDER BY date DESC, id DESC').bind(ruleId).all<{ id: number }>()).results.map((r) => r.id)
+    expect(got.length).toBe(matches)
+    expect(samples.map((sample) => sample.id)).toEqual(got.slice(0, 5))
+  })
+
+  it('shows each example with the bank type a Rule would match on', async () => {
+    await history({ description: 'EXAMPLE SHOP', type: 'DIRECT DEBIT', cents: -2500, date: day(9) })
+
+    expect(((await (await preview({ textContains: 'example' })).json()) as Preview).samples).toEqual([
+      { id: expect.any(Number), date: day(9), description: 'EXAMPLE SHOP', bankType: 'DIRECT DEBIT', amountCents: -2500 },
+    ])
+  })
+})
+
+describe('what applying Rules and previewing read (ADR 0004: the free plan allows 5 million rows read a day)', () => {
+  const CHUNK = 500
+  const RULES = 10
+
+  /** `count` made-up Transactions in the Account, in one statement. */
+  const insertMany = (count: number, name: string) =>
+    env.DB.prepare(
+      "INSERT INTO transactions (account_id, date, amount_cents, description, bank_memo, bank_type, source) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?3) SELECT ?1, '2026-10-01', -1000, ?2 || i, '', 'EFTPOS', 'import' FROM n",
+    )
+      .bind(accountId, name, count)
+      .run()
+  const lastId = async () => (await env.DB.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM transactions').first<{ id: number }>())!.id
+  /** Saves Rules for these texts, in this order, straight to the database (a hundred through the API is slow). */
+  const saveRules = async (texts: string[]) => {
+    const groceries = await categoryId('Groceries')
+    await env.DB.batch(texts.map((text, i) => env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(i + 1, text, groceries)))
+  }
+
+  /**
+   * What applying the Rules to a chunk of CHUNK Transactions reads when the Account already holds `older` Transactions.
+   * Only the last of the Rules matches, so every row of the chunk walks past the other nine.
+   */
+  async function applyReads(older: number) {
+    await env.DB.prepare('DELETE FROM transactions').run()
+    await env.DB.prepare('DELETE FROM rules').run()
+    await saveRules(Array.from({ length: RULES }, (_, i) => (i === RULES - 1 ? 'EXAMPLE SHOP' : `NO SUCH SHOP ${i + 1}`)))
+    if (older > 0) await insertMany(older, 'EXAMPLE OLD ')
+    const afterId = await lastId()
+    await insertMany(CHUNK, 'EXAMPLE SHOP ')
+    const { meta } = await applyRulesStatement(env.DB, { accountNumber: ACCOUNT_NUMBER, afterId }).run()
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE rule_id IS NOT NULL').first<{ n: number }>())!.n).toBe(CHUNK)
+    return meta
+  }
+
+  it("reads about a row per Rule for each Transaction in the chunk, and none of the Account's history", async () => {
+    const fresh = await applyReads(0)
+    const old = await applyReads(3000)
+
+    // A walk through the Account's history on its index would add the 3,000 older rows to every chunk.
+    expect(old.rows_read).toBeLessThanOrEqual(fresh.rows_read + 50)
+    expect(fresh.rows_read).toBeLessThanOrEqual(CHUNK * (RULES + 12))
+    // Only the rows a Rule matched are written.
+    expect(old.rows_written).toBe(CHUNK)
+  })
+
+  it('stops at the first Rule that matches, so the Rules below it cost nothing', async () => {
+    await saveRules(['EXAMPLE SHOP', ...Array.from({ length: MAX_RULES - 1 }, (_, i) => `NO SUCH SHOP ${i + 1}`)])
+    await insertMany(CHUNK, 'EXAMPLE SHOP ')
+
+    const { meta } = await applyRulesStatement(env.DB, { accountNumber: ACCOUNT_NUMBER, afterId: 0 }).run()
+
+    expect(meta.rows_read).toBeLessThanOrEqual(CHUNK * 12)
+  })
+
+  it('previews by reading the Transactions once, and a few more for the examples when matches are common', async () => {
+    const N = 400
+    await insertMany(N, 'EXAMPLE SHOP ')
+    const reads = async (criteria: Record<string, unknown>) => {
+      const [count, samples] = await env.DB.batch(previewStatements(env.DB, toCriteria(criteria)))
+      return count!.meta.rows_read + samples!.meta.rows_read
+    }
+
+    expect(await reads({ textContains: 'example shop' })).toBeLessThanOrEqual(N + 20)
+    // When matches are rare the examples have to look through everything, which is as bad as it gets: twice over.
+    expect(await reads({ textContains: 'SHOP 399' })).toBeLessThanOrEqual(2 * N + 20)
+  })
+})
+
+describe('the statement that applies Rules to a chunk', () => {
+  const apply = (afterId: number, accountNumber = ACCOUNT_NUMBER) => applyRulesStatement(env.DB, { accountNumber, afterId }).run()
+
+  it("applies Rules to the Account's Transactions after the given ID, and to no others", async () => {
     const groceries = await categoryId('Groceries')
     await addRule({ textContains: 'EXAMPLE', categoryId: groceries })
     const other = (await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-98', 'Other') RETURNING id").first<{ id: number }>())!.id
@@ -603,7 +797,7 @@ describe('the hook that runs after Transactions change', () => {
     const mine = await history({ description: 'EXAMPLE mine' })
     await env.DB.prepare('INSERT INTO transactions (account_id, date, amount_cents, description, source) VALUES (?, ?, ?, ?, ?)').bind(other, '2026-10-01', -100, 'EXAMPLE other account', 'import').run()
 
-    await afterTransactionsChanged(env.DB, { accountId, afterId: before })
+    await apply(before)
 
     const stored = await env.DB.prepare('SELECT description, rule_category FROM transactions ORDER BY id').all()
     expect(stored.results).toEqual([
@@ -614,16 +808,16 @@ describe('the hook that runs after Transactions change', () => {
     expect(mine).toBeGreaterThan(before)
   })
 
-  it('applies nothing when told no Transactions were added', async () => {
+  it('applies to nothing for an Account that does not exist', async () => {
     await addRule({ textContains: 'EXAMPLE', categoryId: await categoryId('Groceries') })
     await history({ description: 'EXAMPLE one' })
 
-    await afterTransactionsChanged(env.DB, { accountId })
+    await apply(0, '99-9999-9999999-00')
 
     expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE rule_id IS NOT NULL').first<{ n: number }>())!.n).toBe(0)
   })
 
-  it('never touches an Override, a Note or a Transaction\'s other columns, only the Rule result', async () => {
+  it("never touches an Override, a Note or a Transaction's other columns, only the Rule result", async () => {
     const groceries = await categoryId('Groceries')
     const fuel = await categoryId('Fuel')
     await addRule({ textContains: 'EXAMPLE', categoryId: groceries })
@@ -632,7 +826,7 @@ describe('the hook that runs after Transactions change', () => {
     const snapshot = async () => env.DB.prepare('SELECT id, account_id, date, amount_cents, description, bank_memo, bank_type, override_category, note FROM transactions WHERE id = ?').bind(t).first()
     const was = await snapshot()
 
-    await afterTransactionsChanged(env.DB, { accountId, afterId: 0 })
+    await apply(0)
 
     expect(await snapshot()).toEqual(was)
     expect(await env.DB.prepare('SELECT rule_category FROM transactions WHERE id = ?').bind(t).first()).toEqual({ rule_category: groceries })

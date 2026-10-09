@@ -588,8 +588,8 @@ describe('the cost of a request (ADR 0004)', () => {
 
     expect(res.status).toBe(200)
     // find the Account, count the rows to replace, count the new rows, find the highest Transaction ID, then in one batch:
-    // set the Cutover Date, remove the balances, remove the rows, insert, record the balance, the Change Log entry; then
-    // apply the Rules to the rows just added, and read and save the check.
+    // set the Cutover Date, remove the balances, remove the rows, insert, apply the Rules, record the balance, the Change
+    // Log entry; then read and save the check.
     expect(prepared).toHaveLength(13)
   })
 })

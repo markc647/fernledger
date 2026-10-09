@@ -52,8 +52,8 @@ export const transactions = new Hono<AppEnv>()
     const from = `FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}`
     const where = query.uncategorised ? `WHERE ${category.id} IS NULL` : ''
     // The COUNT re-evaluates the effective Category for every Transaction when `?uncategorised=true` filters on it, so the
-    // scan grows with the history (ADR 0004: 10 ms CPU, and D1 rows read are billed). Fine while only Overrides exist, since the
-    // rest of the joins have no column yet; the Rules ticket should revisit it (a cached count, or a column kept up to date).
+    // scan grows with the history (ADR 0004: 10 ms CPU, and D1 rows read are billed). The Override and Rule slots each add a
+    // join per row now, and Akahu's will too; a cached count, or a column kept up to date, is a later ticket's call.
     const [count, page] = await db.batch([
       db.prepare(`SELECT COUNT(*) AS total ${from} ${where}`),
       db

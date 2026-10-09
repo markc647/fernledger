@@ -1,5 +1,3 @@
-import { applyRules } from './rule-apply'
-
 export type TransactionsChange = {
   accountId: number
   /**
@@ -14,10 +12,8 @@ export const lastTransactionId = async (db: D1Database) => (await db.prepare('SE
 
 /**
  * Called after each committed change to an Account's Transactions (every Import chunk, so it may run more than once
- * per Import). Applies the Rules to the Transactions the change added, and only those. Transfer pairing will be called
- * from here when it lands. The Balance Check is not: it needs the whole Import, so it runs after the last chunk
- * (balance-check.ts).
+ * per Import). Nothing yet: Transfer pairing will be called from here when it lands. The Balance Check is not: it needs
+ * the whole Import, so it runs after the last chunk (balance-check.ts). Nor are the Rules: they are applied inside the
+ * change's own batch (rule-apply.ts), so a Transaction and its Rule result commit together.
  */
-export async function afterTransactionsChanged(db: D1Database, change: TransactionsChange): Promise<void> {
-  if (change.afterId !== undefined) await applyRules(db, { accountId: change.accountId, afterId: change.afterId })
-}
+export async function afterTransactionsChanged(_db: D1Database, _change: TransactionsChange): Promise<void> {}

@@ -7,8 +7,9 @@ const noAxeViolations = async (page: Page) => {
   expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
 }
 
-// The light and dark projects share one local database, so each test uses text and an Account of its own, no earlier run used.
-const accountFor = (projectName: string) => (projectName === 'dark' ? '99-9999-9999999-86' : '99-9999-9999999-87')
+// The light and dark projects share one local database, so each test uses text and an Account of its own, no earlier run used
+// and no other spec uses (the Summary spec has 86 and 87, Categories 88 and 89, the Change Log 90 and 91).
+const accountFor = (projectName: string) => (projectName === 'dark' ? '99-9999-9999999-92' : '99-9999-9999999-93')
 
 async function importTransaction(context: BrowserContext, baseURL: string, projectName: string, description: string, uniqueId: string) {
   const res = await context.request.post('/api/imports/chunks', {
@@ -59,10 +60,11 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
   await page.getByLabel('Text contains').fill(shop.toLowerCase())
   await expect(page.getByRole('button', { name: 'Save Rule' })).toBeDisabled()
   await page.getByRole('button', { name: 'Check how many match' }).click()
-  const result = page.getByRole('status').filter({ hasText: 'you have now' })
-  await expect(result).toContainText('1 Transaction you have now matches.')
+  const result = page.getByRole('status').filter({ hasText: 'you already have' })
+  await expect(result).toContainText('1 Transaction you already have matches.')
   await expect(result).toContainText("Saving the Rule won't change it")
   await expect(result).toContainText(`${shop} OLD`)
+  await expect(result).toContainText('type EFTPOS') // the bank's type, which a Rule can match on and the Transactions list does not show
 
   // Changing what it looks for takes the result away, and the Rule has to be checked again.
   await page.getByLabel('Text contains').fill(`${shop} OLD`)
@@ -70,7 +72,7 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
   await expect(page.getByText('You have changed what the Rule looks for')).toBeVisible()
   await page.getByLabel('Text contains').fill(shop.toLowerCase())
   await page.getByRole('button', { name: 'Check how many match' }).click()
-  await expect(result).toContainText('1 Transaction you have now matches.')
+  await expect(result).toContainText('1 Transaction you already have matches.')
 
   await page.getByLabel('What the Rule does').selectOption({ label: 'Put in the Category Groceries' })
   await noAxeViolations(page)
@@ -117,6 +119,12 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
     await page.goto('/rules')
     await expect(rowFor(page, `EXAMPLE TWO ${stamp}`)).toContainText(`Text contains “EXAMPLE TWO ${stamp}” and type is EFTPOS and money out and amount from $10.00 to $250.00`)
 
+    // WCAG 2.5.3: each button's accessible name contains the text it shows, so voice control can say what it sees.
+    for (const action of ['up', 'down', 'edit', 'remove']) {
+      const button = page.locator(`#rule-${second}-${action}`)
+      expect(await button.getAttribute('aria-label')).toContain((await button.innerText()).trim())
+    }
+
     // Move the first Rule down: it lands after the second, so Move down is no longer possible and focus stays on its other button.
     const moveDown = page.locator(`#rule-${first}-down`)
     await moveDown.focus()
@@ -130,6 +138,7 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
     await expect(page.getByLabel('Text contains')).toHaveValue(`EXAMPLE TWO ${stamp}`)
     await expect(page.getByLabel('Amount from ($)')).toHaveValue('10.00')
     await page.getByLabel('What the Rule does').selectOption({ label: 'Mark as a Transfer' })
+    await expect(page.getByText('It takes effect when Transfer pairing ships')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save Rule' })).toBeEnabled()
     await noAxeViolations(page)
     await page.getByRole('button', { name: 'Save Rule' }).click()
@@ -141,6 +150,32 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
     await removeRule(context, baseURL!, first)
     await removeRule(context, baseURL!, second)
   }
+})
+
+test('boxes changed while a check is out do not take its result, so Save stays off until they are checked', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route('**/api/rules/preview', async (route) => {
+    await held
+    await route.fulfill({ json: { matches: 3, samples: [] } })
+  })
+  await page.goto('/rules')
+  await page.getByRole('button', { name: 'Add a Rule' }).click()
+  await page.getByLabel('Text contains').fill('first')
+  await page.getByLabel('What the Rule does').selectOption({ label: 'Mark as a Transfer' })
+  const check = page.getByRole('button', { name: 'Check how many match' })
+  await check.click()
+  await expect(check).toBeDisabled() // the check is out
+
+  await page.getByLabel('Text contains').fill('second')
+  release()
+
+  // The answer was about "first". It is not an answer about "second", so nothing is shown and Save is still off.
+  await expect(check).toBeEnabled()
+  await expect(page.getByText('You have changed what the Rule looks for')).toBeVisible()
+  await expect(page.getByText('3 Transactions you already have match.')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Save Rule' })).toBeDisabled()
 })
 
 test('the Admin is told what is wrong with a box, and taken to it', async ({ page, context }) => {

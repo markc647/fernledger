@@ -2,7 +2,8 @@ import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
-import { criteriaBody, describeRule, MAX_RULES, ruleBody, ruleMatches, ruleRecord, toCriteria, type Criteria } from './rule-criteria'
+import { criteriaBody, describeRule, MAX_RULES, ruleBody, ruleRecord, toCriteria, type Criteria } from './rule-criteria'
+import { previewStatements, type PreviewSample } from './rule-preview'
 import { validate } from './validate'
 
 // Rules are applied to Transactions an Import adds (rule-apply.ts); saving, changing or removing a Rule here never
@@ -10,9 +11,6 @@ import { validate } from './validate'
 
 const orderBody = z.object({ ids: z.array(z.int().check(z.positive())).check(z.maxLength(MAX_RULES)) })
 const nothing = z.object({})
-
-/** How many Transactions a preview shows as examples. */
-const PREVIEW_SAMPLES = 5
 
 type RuleView = Criteria & { id: number; categoryId: number | null; categoryName: string | null; categoryRemoved: boolean; transfer: boolean }
 type RuleRow = Omit<RuleView, 'categoryRemoved' | 'transfer'> & { categoryRemoved: number; transfer: number }
@@ -36,6 +34,8 @@ const findRule = async (db: D1Database, id: number) => {
 
 const criteriaOf = (rule: Criteria): Criteria => ({ textContains: rule.textContains, bankType: rule.bankType, direction: rule.direction, minCents: rule.minCents, maxCents: rule.maxCents })
 const describe = (rule: RuleView) => describeRule(criteriaOf(rule), { category: rule.categoryName, transfer: rule.transfer })
+// The Change Log page joins a list with commas and a Rule's own words have commas, so each place in an order is numbered.
+const numbered = (rule: RuleView, i: number) => `${i + 1}. ${describe(rule)}`
 const record = (rule: RuleView) => ruleRecord(criteriaOf(rule), { category: rule.categoryName, transfer: rule.transfer })
 
 const sameRule = (a: RuleView, b: RuleView) =>
@@ -51,22 +51,10 @@ const badCategory = { error: 'Invalid request', field: 'categoryId' }
 
 export const rules = new Hono<AppEnv>()
   .get('/', async (c) => c.json(await listRules(c.env.DB)))
-  // How many Transactions on file a set of criteria matches, and the newest few, before the Admin saves anything. It
-  // reads the Transactions once for the count and once, stopping early, for the examples; it writes nothing.
+  // How many Transactions on file a set of criteria matches, and the newest few, before the Admin saves anything (rule-preview.ts).
   .post('/preview', validate('json', criteriaBody), async (c) => {
-    const criteria = toCriteria(c.req.valid('json'))
-    const db = c.env.DB
-    const bound = [criteria.textContains, criteria.bankType, criteria.direction, criteria.minCents, criteria.maxCents]
-    // The criteria are not saved, so they stand in for a `rules` row under the same column names.
-    const from = `FROM transactions t, (SELECT ?1 AS text_contains, ?2 AS bank_type, ?3 AS direction, ?4 AS min_cents, ?5 AS max_cents) r WHERE ${ruleMatches('r', 't')}`
-    const [count, samples] = await db.batch([
-      db.prepare(`SELECT COUNT(*) AS matches ${from}`).bind(...bound),
-      db.prepare(`SELECT t.id, t.date, t.description, t.amount_cents AS amountCents ${from} ORDER BY t.date DESC, t.id DESC LIMIT ${PREVIEW_SAMPLES}`).bind(...bound),
-    ])
-    return c.json({
-      matches: (count!.results[0] as { matches: number }).matches,
-      samples: samples!.results as { id: number; date: string; description: string; amountCents: number }[],
-    })
+    const [count, samples] = await c.env.DB.batch(previewStatements(c.env.DB, toCriteria(c.req.valid('json'))))
+    return c.json({ matches: (count!.results[0] as { matches: number }).matches, samples: samples!.results as PreviewSample[] })
   })
   // The new Rule goes last in priority; the Admin moves it up with PUT /order.
   .post('/', validate('json', ruleBody), async (c) => {
@@ -106,8 +94,8 @@ export const rules = new Hono<AppEnv>()
       actor: c.var.member,
       type: 'rule',
       summary: 'Changed the order of Rules',
-      before: { order: current.map(describe) },
-      after: { order: ids.map((id) => describe(byId.get(id)!)) },
+      before: { order: current.map(numbered) },
+      after: { order: ids.map((id, i) => numbered(byId.get(id)!, i)) },
     })
     return c.json({ ids })
   })

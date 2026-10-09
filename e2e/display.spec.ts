@@ -186,14 +186,14 @@ test.describe('zoom', () => {
               })
             : route.fallback(),
         )
-        await page.route('**/api/rules/preview', (route) => route.fulfill({ json: { matches: 1234, samples: [{ id: 1, date: '2026-09-10', description, amountCents: -123456789 }] } }))
+        await page.route('**/api/rules/preview', (route) => route.fulfill({ json: { matches: 1234, samples: [{ id: 1, date: '2026-09-10', description, bankType: 'EFTPOS', amountCents: -123456789 }] } }))
         await page.setViewportSize({ width, height })
         await page.goto('/rules')
         await sizeButton(page, size).click()
         await page.getByRole('button', { name: 'Add a Rule' }).click()
         await page.getByLabel('Text contains').fill('example')
         await page.getByRole('button', { name: 'Check how many match' }).click()
-        await expect(page.getByText('1,234 Transactions you have now match.')).toBeVisible()
+        await expect(page.getByText('1,234 Transactions you already have match.')).toBeVisible()
         await expect(page.getByText(/Category: Health and medical \(removed/)).toBeVisible()
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
