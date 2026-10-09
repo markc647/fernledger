@@ -106,6 +106,8 @@ cp .dev.vars.example .dev.vars
 npm run dev
 ```
 
+On a fresh clone, run `npm run gen` once (or any of `npm run check`, `typecheck` or `build`, which run it for you) before opening the project in an editor. It generates the route tree and the API types the browser code imports.
+
 Access isn't in front of the local dev server, so `DEV_USER_EMAIL` stands in for the signed-in Member. It's honoured only on `localhost`. Set it to something other than `ADMIN_EMAIL` to see the read-only view.
 
 The dev server shows a "Development only" bar to switch between the Admin and a read-only Member. It works by a cookie that the Worker honours only on `localhost`, and only when `DEV_USER_EMAIL` is set. Production builds don't include the bar.
