@@ -17,7 +17,7 @@ export function DevIdentitySwitcher() {
   }
 
   return (
-    <div role="region" aria-label="Development identity" className="border-b bg-muted">
+    <div role="region" aria-label="Development identity" className="border-b bg-muted print:hidden">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2 px-4 py-2 text-sm">
         <span>Development only. Viewing as:</span>
         {(['admin', 'member'] satisfies Role[]).map((who) => (
