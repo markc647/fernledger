@@ -23,7 +23,7 @@ async function seed(context: BrowserContext, baseURL: string, projectName: strin
     data: {
       account: { number: account },
       chunk: { index: 0, count: 1 },
-      file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2017-01-01', to: '2017-01-01' },
+      file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2017-01-01', to: '2017-01-01', ledgerBalance: { cents: 0, date: '2017-01-01' } },
       rows: [{ date: '2017-01-01', uniqueId: `CL${stamp.replaceAll(' ', '')}`, tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SHOP', bankMemo: 'EFTPOS', amountCents: -1000 }],
     },
   })

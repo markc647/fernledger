@@ -345,7 +345,8 @@ describe('runs and dates', () => {
     expect((await backupKeys()).every((k) => k.startsWith('backups/2026-10-12/') || k === BACKUP_STATE_KEY)).toBe(true)
   })
 
-  it('records a run it abandons for a new week, in R2, in the logs and in the next manifest', async () => {
+  // Seeds 30,000 Change Log rows: about 3 s alone, over the 5 s default when the suite runs on a busy machine.
+  it('records a run it abandons for a new week, in R2, in the logs and in the next manifest', { timeout: 30_000 }, async () => {
     await seedChangeLog(30_000)
     await runCron(BACKUP_CRON, sunday)
     expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).toBeNull()

@@ -78,6 +78,8 @@ function RenameForm({ id, name, onDone }: { id: number; name: string; onDone: ()
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['accounts'] })
       await queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      await queryClient.invalidateQueries({ queryKey: ['balances'] })
+      await queryClient.invalidateQueries({ queryKey: ['balance-checks'] })
       onDone()
     },
   })

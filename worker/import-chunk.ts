@@ -28,7 +28,7 @@ export function chunkSummary(outcome: ChunkOutcome): string {
 /** The Change Log entry's `after`: what the chunk did and what the whole file looked like. */
 export function chunkDetail(
   outcome: ChunkOutcome,
-  context: { file: { adapterId: string; rowCount: number; skipped: number; from: string; to: string }; rowsInChunk: number; cutoverDate: string | null; newAccount: boolean },
+  context: { file: { adapterId: string; rowCount: number; skipped: number; from: string; to: string; ledgerBalance: { cents: number; date: string } }; rowsInChunk: number; cutoverDate: string | null; newAccount: boolean },
 ) {
   const { file } = context
   return {
@@ -45,30 +45,31 @@ export function chunkDetail(
     skipped: file.skipped,
     from: file.from,
     to: file.to,
+    ledgerBalance: file.ledgerBalance,
     newAccount: context.newAccount,
   }
 }
 
-/** The statements of one chunk, in the order they run in the batch. */
+/** The statements of one chunk, in the order they run in the batch (the last chunk's balance is recorded after them, by the handler). */
 export type ChunkPlan = {
   /** The Account is created by the first statement when it doesn't exist yet. */
   newAccount: boolean
   /** The Cutover Date is written by a statement of its own when an existing Account's is being set. */
   setsCutover: boolean
-  /** Import-sourced rows are deleted before the insert. */
+  /** Import-sourced rows, and the balances recorded with them, are deleted before the insert. */
   replace: boolean
 }
 
 /**
  * The statements of a chunk, built from `prepare` (one per kind, in this order): create the Account, set its Cutover
- * Date, remove the old imported rows, insert the rows. The insert is always last, and the removal, when there is one,
- * is just before it, which is how the handler finds their results.
+ * Date, remove the old balances, remove the old imported rows, insert the rows. The insert is always last, and the
+ * removal of rows, when there is one, is just before it, which is how the handler finds their results.
  */
-export function chunkStatements<Statement>(plan: ChunkPlan, prepare: { createAccount: () => Statement; setCutover: () => Statement; removeImported: () => Statement; insertRows: () => Statement }): Statement[] {
+export function chunkStatements<Statement>(plan: ChunkPlan, prepare: { createAccount: () => Statement; setCutover: () => Statement; clearBalances: () => Statement; removeImported: () => Statement; insertRows: () => Statement }): Statement[] {
   return [
     ...(plan.newAccount ? [prepare.createAccount()] : []),
     ...(plan.setsCutover && !plan.newAccount ? [prepare.setCutover()] : []),
-    ...(plan.replace && !plan.newAccount ? [prepare.removeImported()] : []),
+    ...(plan.replace && !plan.newAccount ? [prepare.clearBalances(), prepare.removeImported()] : []),
     prepare.insertRows(),
   ]
 }

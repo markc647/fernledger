@@ -17,7 +17,7 @@ async function seedTransaction(context: BrowserContext, baseURL: string, project
     data: {
       account: { number: projectName === 'dark' ? '99-9999-9999999-88' : '99-9999-9999999-89' },
       chunk: { index: 0, count: 1 },
-      file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-09', to: '2026-10-09' },
+      file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-09', to: '2026-10-09', ledgerBalance: { cents: 0, date: '2026-10-09' } },
       rows: [{ date: '2026-10-09', uniqueId: `CT${stamp}`, tranType: 'EFTPOS', chequeNumber: null, payee: description, bankMemo: 'EFTPOS', amountCents: -2345 }],
     },
   })

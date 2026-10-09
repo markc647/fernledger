@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import { accountName, bankAccountNumber, isoDate, normaliseAccountNumber } from './account-fields'
 import type { AppEnv } from './app-env'
+import { checkAfterRecording, DELETE_IMPORT_BALANCES, recordBalance } from './balance-check'
+import { statusOnRecord } from './balance-rules'
 import { recordChange } from './changelog'
 import { chunkDetail, chunkStatements, chunkSummary, replaceWouldLeaveNothing } from './import-chunk'
 import { badRowField, MAX_CHUNKS, REPLACE_SLICE, serialiseRows, type ImportRow } from './import-rows'
@@ -16,9 +18,11 @@ import { validate } from './validate'
 //   one INSERT statement with one bound parameter.
 // - A bound string may be 2 MB. Row fields are length-capped (import-rows.ts); 500 worst-case rows measured 335 KB.
 // - 10 ms of CPU: reading, checking and re-serialising 500 typical rows (86 KB) measured about 1-2 ms in Node.
-// - A chunk request costs at most 7 D1 queries (find the Account, count the Import-sourced rows to replace, count the
-//   rows it already holds, then one batch of at most 4 statements: create the Account or set its Cutover Date, remove
-//   the old rows, insert the rows, write the Change Log entry), well under 50.
+// - A chunk request costs at most 11 D1 queries (find the Account, count the Import-sourced rows to replace, count the
+//   rows it already holds, then one batch of at most 6 statements: set the Cutover Date (or create the Account), remove
+//   the old balances, remove the old rows, insert the rows, record the file's ledger balance (last chunk only), write
+//   the Change Log entry; then the last chunk's Balance Check reads and saves in 2 more), well under 50. A statement in
+//   a batch counts as one query; balances.test.ts pins the worst case.
 // - MAX_CHUNKS (import-rows.ts) keeps one Import within the free plan's 100k D1 row writes a day.
 // - Rows dated on or after the Account's Cutover Date are filtered out in SQL (`json_each` rows are compared there),
 //   so the Worker never loops over them.
@@ -39,6 +43,8 @@ const chunkRequest = z.object({
     skipped: z.int().check(z.minimum(0)),
     from: isoDate,
     to: isoDate,
+    /** The balance in the file's header and the date it is as of; recorded with the last chunk (balance-check.ts). */
+    ledgerBalance: z.object({ cents: z.int(), date: isoDate }),
   }),
   // Checked by badRowField: a schema is too slow for 500 rows within 10 ms of CPU (CODING_STANDARDS.md#structure).
   // The custom type only carries the type.
@@ -127,15 +133,24 @@ export const imports = new Hono<AppEnv>()
     const name = existing?.name ?? account.name ?? number
     const setsCutover = cutoverDate !== undefined
 
-    const statements = chunkStatements(
+    const planned = chunkStatements(
       { newAccount: !existing, setsCutover, replace: replace === true },
       {
         createAccount: () => db.prepare('INSERT INTO accounts (account_number, name, cutover_date) VALUES (?, ?, ?)').bind(number, name, effectiveCutover),
         setCutover: () => db.prepare('UPDATE accounts SET cutover_date = ? WHERE id = ?').bind(cutoverDate, existing!.id),
+        clearBalances: () => db.prepare(DELETE_IMPORT_BALANCES).bind(existing!.id),
         removeImported: () => db.prepare(DELETE_IMPORTED).bind(existing!.id, REPLACE_SLICE),
         insertRows: () => db.prepare(INSERT_ROWS).bind(number, rowsJson, effectiveCutover),
       },
     )
+    // The file's ledger balance is recorded with its last chunk, once every row is in, so an Import that stops part way
+    // doesn't claim a balance. It goes after the insert, which it follows in the batch.
+    const lastChunk = chunk.index === chunk.count - 1
+    const ledger = file.ledgerBalance
+    const statements = lastChunk
+      ? [...planned, recordBalance(db, { accountNumber: number, asOfDate: ledger.date, bankCents: ledger.cents, source: 'import', status: statusOnRecord({ asOfDate: ledger.date, fileTo: file.to, cutoverDate: effectiveCutover }) })]
+      : planned
+    const insertAt = planned.length - 1
     // Every chunk is its own Change Log entry, written in the same batch as its rows.
     const outcome = { accountName: name, replace: replace === true, removed: toRemove, added, dropped, index: chunk.index, count: chunk.count }
     const results = await recordChange(db, statements, {
@@ -147,8 +162,17 @@ export const imports = new Hono<AppEnv>()
     })
     const accountId = existing?.id ?? results[0]!.meta.last_row_id
     await afterTransactionsChanged(db, { accountId })
-    const inserted = results.at(-1)!.meta.changes
-    return c.json({ accountId, added: inserted, duplicates: rows.length - dropped - inserted, dropped, removed: replace && existing ? results.at(-2)!.meta.changes : 0 })
+    const inserted = results[insertAt]!.meta.changes
+    // After the last chunk, every balance of the Account is checked again: this file's, and the neighbours it changes.
+    const balanceCheck = lastChunk ? await checkAfterRecording(db, accountId, ledger.date) : null
+    return c.json({
+      accountId,
+      added: inserted,
+      duplicates: rows.length - dropped - inserted,
+      dropped,
+      removed: replace && existing ? results[insertAt - 1]!.meta.changes : 0,
+      balanceCheck,
+    })
   })
   // How many Import-sourced rows an Account holds, and how many of those carry the Admin's own work (an Override to a
   // Category in use, or a Note), so the Admin is told what a replace will remove before confirming. A removed
@@ -173,7 +197,8 @@ export const imports = new Hono<AppEnv>()
     const total = (await db.prepare(COUNT_IMPORTED).bind(accountId).first<{ n: number }>())?.n ?? 0
     if (total <= REPLACE_SLICE) return c.json({ error: 'The imported history is small enough to replace in one go', remaining: total }, 409)
     const remaining = total - REPLACE_SLICE
-    await recordChange(db, db.prepare(DELETE_IMPORTED).bind(accountId, REPLACE_SLICE), {
+    // The balances of the history being replaced go with its first step: they describe Transactions that are going.
+    await recordChange(db, [db.prepare(DELETE_IMPORT_BALANCES).bind(accountId), db.prepare(DELETE_IMPORTED).bind(accountId, REPLACE_SLICE)], {
       actor: c.var.member,
       type: 'import',
       summary: `Removed ${REPLACE_SLICE} imported rows from ${account.name} to replace its imported history (${remaining} left)`,
