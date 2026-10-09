@@ -31,6 +31,6 @@ export async function recordChange(db: D1Database, mutation: D1PreparedStatement
   const statements = Array.isArray(mutation) ? mutation : [mutation]
   const log = db
     .prepare('INSERT INTO change_log (actor, summary, before, after) VALUES (?, ?, ?, ?)')
-    .bind(entry.actor.email,entry.summary, json(entry.before), json(entry.after))
+    .bind(entry.actor.email, entry.summary, json(entry.before), json(entry.after))
   await db.batch([...statements, log])
 }
