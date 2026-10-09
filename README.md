@@ -40,12 +40,13 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 
 - **Daily sync** of transactions from your NZ bank accounts through Akahu, including **pending transactions**, which are shown as pending until they settle.
 - **Imports your bank's CSV exports:** years of history older than Akahu can provide, or as your regular source if you'd rather not use Akahu at all. Fernledger works without Akahu: you import a CSV each month instead of syncing.
-- **Bank Time:** a transaction's time of day is shown only when the bank actually supplied one, which is rare, because most banks give a date only. Fernledger never invents a time. It also records when Akahu first saw each transaction.
-- **Full transaction detail for record-keeping:** the counterparty's account number, card suffix, and payment particulars, code and reference. That way you can show exactly where money went.
+- **Bank Time:** a transaction's time of day is shown only when the bank actually supplied one, which is rare, because most banks give a date only. Fernledger never invents a time. It also records when Akahu first saw each transaction, and a transaction's details show it.
+- **Full transaction detail for record-keeping:** open any transaction to see the counterparty's account number, card suffix, and payment particulars, code and reference, with its note and category. That way you can show exactly where money went. A bank file carries few of these, so most appear for transactions that come through Akahu Sync.
+- **Search and filter:** the Transactions page finds any transaction by text (in the description, the bank's memo or the note), account, category (or Uncategorised) and date range, sorts by any column, and pages through years of history. The search is kept in the page's address, so it survives a reload and the Back button.
 - **Your own categories**, from a starter list the Admin can add to, rename and remove. The Admin can override any single transaction's category and add a note, and a list of uncategorised transactions shows what's left. **Rules** that categorise automatically are planned.
 - **Transfers between your own accounts** are detected and left out of spending.
 - **Monthly budgets** per category. Unspent amounts don't carry over, and changing a budget doesn't rewrite past months.
-- **Dashboard:** balances, net worth over time, spending by category, budget vs actual, searchable transactions.
+- **Dashboard:** balances, net worth over time, spending by category, budget vs actual.
 - **Printable reports:** spending by category, budget vs actual, income vs spending, balances over time, full transaction listing with notes. Print them or save as PDF from your browser.
 - **CSV export** for any date range.
 - **Change Log** of every edit the Admin makes, visible to everyone: who changed what and when, with the values before and after, newest first. Filter it by type of change and by date.
@@ -311,6 +312,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Database, CSV import (ASB) | In progress |
 | Akahu sync | Planned |
 | Categories, overrides and notes | Done |
+| Transaction search and details | Done |
 | Rules, transfers, budgets | Planned |
 | Dashboard | Planned |
 | Reports and export | Planned |

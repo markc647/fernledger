@@ -172,6 +172,56 @@ test.describe('zoom', () => {
     }
   }
 
+  // A Transaction's details with every field filled in and long values, and the Admin's edit panel open: the longest text
+  // that page shows. The Transaction is stubbed, so this needs no data in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/transactions/4242 with every detail filled and the edit panel open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        const long = 'EXAMPLE'.padEnd(80, 'x')
+        await page.route('**/api/transactions/4242', (route) =>
+          route.fulfill({
+            json: {
+              id: 4242,
+              accountId: 1,
+              accountName: 'Example savings account with a long name',
+              date: '2026-10-08',
+              amountCents: -123456789,
+              description: `${long} shop with a long enough name to wrap on a narrow screen`,
+              bankMemo: long,
+              bankType: 'EFTPOS',
+              bankReference: long,
+              bankCounterpartyAccount: '99-9999-9999999-97',
+              bankCardSuffix: '1234',
+              bankParticulars: long,
+              bankPaymentCode: long,
+              source: 'sync',
+              categoryId: 3,
+              categoryName: 'Eating out',
+              categorySource: 'override',
+              note: `${long} note that goes on and on`,
+              bankTime: '2026-10-07T20:15:00.000Z',
+              firstSeenAt: '2026-10-08T06:30:00.000Z',
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/transactions/4242')
+        await sizeButton(page, size).click()
+        await page.getByRole('button', { name: 'Edit Category and Note' }).click()
+        await expect(page.getByRole('region', { name: 'Edit Category and Note' })).toBeVisible()
+        await expect(page.getByRole('region', { name: 'From the bank' })).toContainText('First seen by Akahu')
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
   test('a very long app title wraps instead of scrolling sideways', async ({ page }) => {
     await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(120, 'x'), about_contact: '', about_retention: '' } }))
     await page.setViewportSize({ width: 320, height: 256 })
