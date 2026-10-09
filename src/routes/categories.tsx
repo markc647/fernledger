@@ -19,6 +19,12 @@ type Editing = { kind: 'rename' | 'remove'; id: number } | null
 const NAME_TAKEN = 'A Category with that name already exists.'
 const NAME_HINT = 'Names are 1 to 40 characters, and each Category needs a different one.'
 
+/**
+ * Folds case the way the Worker's unique index does (SQLite NOCASE, which covers A to Z only), so this check and the
+ * server agree on which names clash: "Café" and "CAFÉ" are different names to both.
+ */
+const asciiFold = (name: string) => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
 /** Why a save failed, in words for the reader. */
 const whyNot = (error: unknown) =>
   error instanceof HttpError && error.status === 409 ? NAME_TAKEN : error instanceof HttpError && error.status === 400 ? NAME_HINT : 'That did not work. Try again.'
@@ -45,7 +51,7 @@ function Categories() {
     setNotice(message)
     setEditing(null)
   }
-  const sameName = (name: string, exceptId?: number) => categories?.some((c) => c.id !== exceptId && c.name.toLowerCase() === name.trim().toLowerCase()) ?? false
+  const sameName = (name: string, exceptId?: number) => categories?.some((c) => c.id !== exceptId && asciiFold(c.name) === asciiFold(name.trim())) ?? false
 
   const columns: Column<Category>[] = [{ key: 'name', header: 'Category', cell: (c) => c.name }]
   if (isAdmin)
@@ -181,6 +187,9 @@ function RenameForm({ category, taken, onDone, onCancel }: { category: Category;
 
 function RemoveConfirm({ category, onDone, onCancel }: { category: Category; onDone: (message: string) => void; onCancel: () => void }) {
   const queryClient = useQueryClient()
+  // Opens on the safe answer. Cancelling puts focus back on the Remove button (Categories' `done`), and a removal on the message.
+  const keep = useRef<HTMLButtonElement>(null)
+  useEffect(() => keep.current?.focus(), [])
   const remove = useMutation({
     mutationFn: async () => {
       const res = await api.categories[':id'].$delete({ param: { id: String(category.id) }, json: {} })
@@ -192,19 +201,19 @@ function RemoveConfirm({ category, onDone, onCancel }: { category: Category; onD
       onDone(
         overrides === 0
           ? `Removed ${category.name}.`
-          : `Removed ${category.name}. ${overrides} ${overrides === 1 ? 'Transaction' : 'Transactions'} had it as an Override and ${overrides === 1 ? 'is' : 'are'} now Uncategorised.`,
+          : `Removed ${category.name}. It was the Override on ${overrides} ${overrides === 1 ? 'Transaction' : 'Transactions'}. Each uses its Rule or Akahu category if it has one, and is Uncategorised if not.`,
       )
     },
   })
 
   return (
     <div role="group" aria-label={`Remove ${category.name}`} className="space-y-2 text-start">
-      <p>Remove {category.name}? Transactions with it as their Override will become Uncategorised.</p>
+      <p>Remove {category.name}? Transactions with it as their Override lose that Override and fall back to their Rule or Akahu category, or Uncategorised if neither applies.</p>
       <div className="flex flex-wrap gap-2">
         <Button size="touch" aria-label={`Yes, remove ${category.name}`} disabled={remove.isPending} onClick={() => remove.mutate()}>
           Yes, remove
         </Button>
-        <Button size="touch" variant="outline" onClick={onCancel}>
+        <Button ref={keep} size="touch" variant="outline" onClick={onCancel}>
           Keep it
         </Button>
       </div>

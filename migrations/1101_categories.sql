@@ -2,8 +2,8 @@
 --
 -- A Category is never deleted. Removing one sets `removed_at`: that is one row written however many Transactions
 -- point at it (ADR 0004: D1 Free allows 100k row writes a day), and the Override stays on record for the Change Log.
--- Anything that reads a Category ignores a removed one, so those Transactions fall through to the next source
--- of a Category, or to Uncategorised. See worker/effective-category.ts.
+-- Anything that reads a Category ignores a removed one, so those Transactions lose that Override and fall back to
+-- their Rule or Akahu category, or to Uncategorised if neither applies. See worker/effective-category.ts.
 CREATE TABLE categories (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL,

@@ -337,7 +337,9 @@ const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en
  * too big for a day's database writes (ADR 0004) can't finish today, so the Admin is told that before confirming.
  */
 function ReplaceDialog(props: { account: { id: number; name: string }; incomingRows: number; onReplace: () => void; onCancel: () => void }) {
-  const { data: imported, isError } = useQuery(importedRowsQuery(props.account.id))
+  const { data, isError } = useQuery(importedRowsQuery(props.account.id))
+  const imported = data?.imported
+  const withOwnWork = data?.withOverrideOrNote ?? 0
   const keepButton = useRef<HTMLButtonElement>(null)
   useEffect(() => keepButton.current?.focus(), [])
   const inSteps = imported !== undefined && imported > REPLACE_SLICE
@@ -366,6 +368,11 @@ function ReplaceDialog(props: { account: { id: number; name: string }; incomingR
               ? 'There are no imported Transactions to remove, so this just imports the file. '
               : `This removes the ${plural(imported, 'Transaction', 'Transactions')} that ${imported === 1 ? 'was' : 'were'} imported into this Account, then imports this file in its place. `}
             Transactions that came from Sync are not touched. It can't be undone, except by importing the old files again. The Change Log records it.
+          </p>
+        )}
+        {withOwnWork > 0 && (
+          <p className="font-semibold">
+            {plural(withOwnWork, 'Transaction', 'Transactions')} {withOwnWork === 1 ? 'has' : 'have'} your own Category or a Note; {withOwnWork === 1 ? 'this' : 'these'} will be lost. The replacement rows start without them.
           </p>
         )}
         {inSteps && (

@@ -51,6 +51,9 @@ export const transactions = new Hono<AppEnv>()
     const category = effectiveCategory()
     const from = `FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}`
     const where = query.uncategorised ? `WHERE ${category.id} IS NULL` : ''
+    // The COUNT re-evaluates the effective Category for every Transaction when `?uncategorised=true` filters on it, so the
+    // scan grows with the history (ADR 0004: 10 ms CPU, and D1 rows read are billed). Fine while only Overrides exist, since the
+    // rest of the joins have no column yet; the Rules ticket should revisit it (a cached count, or a column kept up to date).
     const [count, page] = await db.batch([
       db.prepare(`SELECT COUNT(*) AS total ${from} ${where}`),
       db
@@ -82,13 +85,19 @@ export const transactions = new Hono<AppEnv>()
         : await db.prepare('SELECT id, name FROM categories WHERE id = ? AND removed_at IS NULL').bind(transaction.overrideCategory).first<{ id: number; name: string }>()
     if ((was?.id ?? null) === (category?.id ?? null)) return c.json({ id, categoryId: category?.id ?? null })
 
-    await recordChange(db, db.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(category?.id ?? null, id), {
+    // The Category could be removed between the check above and this write, so the UPDATE only stores one that is in use.
+    const set = db
+      .prepare('UPDATE transactions SET override_category = ?1 WHERE id = ?2 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM categories WHERE id = ?1 AND removed_at IS NULL))')
+      .bind(category?.id ?? null, id)
+    const [update] = await recordChange(db, set, {
       actor: c.var.member,
       type: 'transaction',
       summary: category ? `Set Override on ${describe(transaction)} to ${category.name}` : `Cleared Override on ${describe(transaction)}`,
       before: { override: was?.name ?? null },
       after: { override: category?.name ?? null },
     })
+    // Only if the Category was removed in that instant: the Change Log entry above then records an attempt that changed nothing.
+    if (update!.meta.changes === 0) return c.json({ error: 'Invalid request', field: 'categoryId' }, 400)
     return c.json({ id, categoryId: category?.id ?? null })
   })
   .put('/:id/note', validate('json', noteBody), async (c) => {

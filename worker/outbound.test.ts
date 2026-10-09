@@ -46,6 +46,8 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
 // here fails 'exercises every route the app declares' below, so a new route can't escape this test.
 type Opts = { method?: string; body?: unknown }
 type Exercise = { route: string; path: (accountId: number) => string; opts?: Opts | ((accountId: number) => Opts) }
+// IDs made by earlier exercises, for the later ones that need them (the Category and Transaction are read lazily, after they exist).
+const made = { categoryId: 0, transactionId: 0 }
 const EXERCISES: Exercise[] = [
   // First: it creates the Account that the PATCH below renames.
   { route: 'POST /api/imports/chunks', path: () => '/api/imports/chunks', opts: { method: 'POST', body: {
@@ -54,6 +56,13 @@ const EXERCISES: Exercise[] = [
       file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-01', to: '2026-10-31' },
       rows: [{ date: '2026-10-01', uniqueId: 'ID1', tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SHOP', bankMemo: 'EFTPOS', amountCents: -1000 }],
     } } },
+  // Then a Category and the Transaction that chunk made, for the Category routes and the Override and Note on that Transaction.
+  { route: 'POST /api/categories', path: () => '/api/categories', opts: { method: 'POST', body: { name: 'Example category' } } },
+  { route: 'GET /api/categories', path: () => '/api/categories' },
+  { route: 'PATCH /api/categories/:id', path: () => `/api/categories/${made.categoryId}`, opts: () => ({ method: 'PATCH', body: { name: 'Example renamed' } }) },
+  { route: 'PUT /api/transactions/:id/override', path: () => `/api/transactions/${made.transactionId}/override`, opts: () => ({ method: 'PUT', body: { categoryId: made.categoryId } }) },
+  { route: 'PUT /api/transactions/:id/note', path: () => `/api/transactions/${made.transactionId}/note`, opts: () => ({ method: 'PUT', body: { note: 'Example note' } }) },
+  { route: 'DELETE /api/categories/:id', path: () => `/api/categories/${made.categoryId}`, opts: { method: 'DELETE', body: {} } },
   { route: 'GET /api/imports/imported/:accountId', path: (id) => `/api/imports/imported/${id}` },
   { route: 'PUT /api/accounts/:id/cutover-date', path: (id) => `/api/accounts/${id}/cutover-date`, opts: { method: 'PUT', body: { cutoverDate: '2026-11-01' } } },
   { route: 'POST /api/imports/clear-history', path: () => '/api/imports/clear-history', opts: (id) => ({ method: 'POST', body: { accountId: id } }) },
@@ -87,7 +96,14 @@ describe('outbound calls', () => {
       if (route === 'POST /api/imports/chunks') {
         expect(res.status).toBe(200)
         accountId = ((await (await call('/api/accounts')).json()) as { id: number }[])[0].id
+        made.transactionId = ((await (await call('/api/transactions')).json()) as { transactions: { id: number }[] }).transactions[0].id
       }
+      if (route === 'POST /api/categories') {
+        expect(res.status).toBe(201)
+        made.categoryId = ((await res.json()) as { id: number }).id
+      }
+      // Each exercise must reach its handler's success path, or it proves nothing about that route. (Clear-history refuses a small history.)
+      if (route !== 'POST /api/imports/clear-history') expect(res.status, route).toBeLessThan(400)
     }
     for (const path of OTHER_PATHS) await call(path)
 

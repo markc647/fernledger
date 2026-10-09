@@ -6,7 +6,10 @@
 export const CATEGORY_SOURCES = ['override', 'rule', 'akahu'] as const
 export type CategorySource = (typeof CATEGORY_SOURCES)[number]
 
-/** `column` holds a Category ID on the Transaction's row, or is null while nothing can supply one yet. */
+/**
+ * `column` holds a Category ID on the Transaction's row, or is null while nothing can supply one yet. It is interpolated
+ * into SQL, so it must be a constant written in this file, never anything that came from a request.
+ */
 export type CategorySlot = { source: CategorySource; column: string | null }
 
 /**

@@ -66,7 +66,7 @@ export function TransactionList({ uncategorised = false, emptyMessage, intro }: 
           </>
         ),
     },
-    { key: 'amount', header: 'Amount', align: 'end', cell: (t) => <Amount cents={t.amountCents} /> },
+    { key: 'amount', header: 'Amount', align: 'end', cell: (t) => <Amount cents={t.amountCents} showLabel /> },
   ]
   if (isAdmin)
     columns.push({

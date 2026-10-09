@@ -112,10 +112,12 @@ test('the Admin adds, renames and removes a Category', async ({ page, context },
   await expect(page.getByRole('button', { name: `Rename ${renamed}` })).toBeFocused()
 
   await page.getByRole('button', { name: `Remove ${renamed}` }).click()
-  await expect(page.getByText(`Remove ${renamed}? Transactions with it as their Override will become Uncategorised.`)).toBeVisible()
+  await expect(page.getByText(`Remove ${renamed}? Transactions with it as their Override lose that Override and fall back to their Rule or Akahu category, or Uncategorised if neither applies.`)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Keep it' })).toBeFocused()
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Keep it' }).click()
   await expect(page.getByRole('cell', { name: renamed, exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: `Remove ${renamed}` })).toBeFocused()
 
   await page.getByRole('button', { name: `Remove ${renamed}` }).click()
   await page.getByRole('button', { name: `Yes, remove ${renamed}` }).click()

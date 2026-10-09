@@ -10,7 +10,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { BackupFormatError, checkPart, insertStatements, parseManifest, quote } from '../worker/backup-format.ts'
+import { BackupFormatError, checkPart, insertStatements, loadOrder, parseManifest, quote } from '../worker/backup-format.ts'
 import { ScriptError, confirmAccount, createRunner, main, readResourceNames } from './wrangler-cli.mjs'
 
 const args = process.argv.slice(2)
@@ -80,16 +80,34 @@ await main(async () => {
     const counts = () => new Map(query(countSql).map((r) => [r.name, r.n]))
     // A migration may seed a table (the starter Categories), so a freshly migrated database isn't quite empty. If every other
     // table is empty, nothing the Admin did can be in the seeded ones (any Admin change leaves a Change Log row), so they hold
-    // only the seed and the restore replaces them with the backup's own rows.
+    // only the seed and the restore replaces them with the backup's own rows. A backup that predates the seeded table leaves
+    // the seed alone. Deleting seed rows can't break a foreign key: a table that refers to them must be empty too, even when
+    // the backup doesn't include it.
+    const references = query("SELECT m.name AS tbl, f.\"table\" AS ref FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE m.type = 'table'").map((r) => [r.tbl, r.ref])
     const notEmpty = [...counts()].filter(([name, n]) => n !== 0 && !SEEDED_TABLES.includes(name)).map(([name]) => name)
     const clearSeeded = manifest.tables.filter((t) => SEEDED_TABLES.includes(t.name) && counts().get(t.name) !== 0).map((t) => t.name)
+    const referrers = new Set(references.filter(([table, ref]) => table !== ref && clearSeeded.includes(ref)).map(([table]) => table))
+    for (const table of referrers) {
+      if (!notEmpty.includes(table) && query(`SELECT 1 AS found FROM ${quote(table)} LIMIT 1`).length) notEmpty.push(table)
+    }
     if (notEmpty.length) {
       throw new ScriptError(`Database "${database}" already has rows in ${notEmpty.join(', ')}. Restore into an empty database; nothing was changed.`)
     }
 
+    // Tables load in foreign-key order, read from the target (which enforces the keys), not in the backup's table order:
+    // sqlite_master lists tables in the order they were created, and a later migration can add a table that an earlier one
+    // refers to (transactions.override_category -> categories). Doing it here also covers backups made before this existed.
+    let loadTables
+    try {
+      loadTables = loadOrder(manifest.tables, references)
+    } catch (e) {
+      if (e instanceof BackupFormatError) throw new ScriptError(`${e.message} Nothing was changed.`)
+      throw e
+    }
+
     // Everything is downloaded and verified first, so a damaged backup stops before the database is touched.
     const files = []
-    for (const table of manifest.tables) {
+    for (const table of loadTables) {
       for (const part of table.parts) {
         const partFile = join(work, `part-${files.length + 1}.ndjson`)
         download(part.key, partFile)

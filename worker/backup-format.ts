@@ -128,3 +128,30 @@ export function insertStatements(entry: ManifestTable, ndjson: string, partKey: 
     return `INSERT INTO ${quote(entry.name)} (${columns}) VALUES (${values.join(', ')});`
   })
 }
+
+/**
+ * The order to load a backup's tables in: a table comes after every table it has a foreign key to, so no row
+ * is inserted before the row it refers to. `references` are [table, referenced table] pairs read from the
+ * database being restored into, because that database is the one enforcing the keys. Tables with no
+ * dependency between them keep the manifest's order. Pairs that name a table outside the backup, and a
+ * table's reference to itself, are ignored.
+ */
+export function loadOrder(tables: ManifestTable[], references: Array<[string, string]>): ManifestTable[] {
+  const byName = new Map(tables.map((t) => [t.name, t]))
+  const needs = new Map<string, Set<string>>(tables.map((t) => [t.name, new Set()]))
+  for (const [table, referenced] of references) {
+    if (table !== referenced && byName.has(table) && byName.has(referenced)) needs.get(table)!.add(referenced)
+  }
+  const ordered: ManifestTable[] = []
+  const placed = new Set<string>()
+  while (ordered.length < tables.length) {
+    const next = tables.find((t) => !placed.has(t.name) && [...needs.get(t.name)!].every((n) => placed.has(n)))
+    if (!next) {
+      const stuck = tables.filter((t) => !placed.has(t.name)).map((t) => t.name)
+      throw new BackupFormatError(`Tables ${stuck.join(', ')} refer to each other, so there is no order to load them in.`)
+    }
+    placed.add(next.name)
+    ordered.push(next)
+  }
+  return ordered
+}

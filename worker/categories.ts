@@ -63,6 +63,7 @@ export const categories = new Hono<AppEnv>()
     return c.json({ id, name })
   })
   // Removing keeps the row (see migrations/1101_categories.sql), so it is one write however many Transactions use the Category.
+  // Those Transactions lose that Override: each falls back to its Rule or Akahu category, or is Uncategorised if neither applies.
   .delete('/:id', validate('json', nothing), async (c) => {
     const id = Number(c.req.param('id'))
     const db = c.env.DB

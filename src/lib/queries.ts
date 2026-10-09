@@ -53,7 +53,7 @@ export const categoriesQuery = queryOptions({
   },
 })
 
-/** How many Import-sourced Transactions an Account holds, so a replace can say what it will remove. Read fresh each time it's asked. */
+/** How many Import-sourced Transactions an Account holds, and how many of them have an Override or a Note, so a replace can say what it will remove. Read fresh each time it's asked. */
 export const importedRowsQuery = (accountId: number) =>
   queryOptions({
     queryKey: ['imported-rows', accountId],
@@ -61,6 +61,6 @@ export const importedRowsQuery = (accountId: number) =>
     queryFn: async () => {
       const res = await api.imports.imported[':accountId'].$get({ param: { accountId: String(accountId) } })
       if (!res.ok) throw new HttpError(res.status)
-      return (await res.json()).imported
+      return res.json()
     },
   })

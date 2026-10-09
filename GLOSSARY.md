@@ -68,7 +68,7 @@ A label grouping Transactions by purpose, such as Groceries or Care Fees.
 _Avoid_: Tag, type, bucket
 
 **Uncategorised**:
-What a Transaction is when no Override, Rule or Akahu suggestion gives it a Category, or when its Category has been removed; the Admin has a list of them.
+What a Transaction is when no Override, Rule or Akahu suggestion gives it a Category in use, so a removed Category counts as none; the Admin has a list of them. Removing a Category takes away its Overrides, and those Transactions fall back to their Rule or Akahu category, or are Uncategorised if neither applies.
 _Avoid_: Unassigned, unknown
 
 **Rule**:
