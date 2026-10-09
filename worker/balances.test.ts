@@ -1,5 +1,9 @@
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { OPENINGS, recordBalance } from './balance-check'
+import { CURRENT, HISTORY } from './balances'
+import worker from './index'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -184,8 +188,8 @@ describe('current balances', () => {
     await importFile([tx('S4', '2026-10-02', -250)], { ledger: SEPT_30, to: '2026-10-02' })
 
     expect(await balances()).toEqual([
-      { accountId: await accountId(current), accountName: current, balanceCents: 4000, asOfDate: '2026-09-30' },
-      { accountId: await accountId(), accountName: savings, balanceCents: 10_250, asOfDate: '2026-10-02' },
+      { accountId: await accountId(current), accountName: current, balanceCents: 4000, asOfDate: '2026-09-30', cutoverDate: null, latestStatus: 'alone' },
+      { accountId: await accountId(), accountName: savings, balanceCents: 10_250, asOfDate: '2026-10-02', cutoverDate: null, latestStatus: 'alone' },
     ])
   })
 
@@ -499,5 +503,107 @@ describe('the ledger balance in an Import request', () => {
 
     expect(res.status).toBe(200)
     expect((await balances())[0]!.balanceCents).toBe(-2500)
+  })
+})
+
+describe('how a balance is recorded', () => {
+  const recorded = async () =>
+    (await env.DB.prepare('SELECT as_of_date AS date, bank_cents AS cents, source, status, difference_cents AS difference FROM balance_checks ORDER BY as_of_date').all<{ date: string; cents: number; source: string; status: string; difference: number | null }>()).results
+  const record = (asOfDate: string, bankCents: number, source: 'import' | 'sync') =>
+    recordBalance(env.DB, { accountNumber: savings, asOfDate, bankCents, source, status: 'alone' }).run()
+
+  it('does not let an Import replace the Sync balance for the same date', async () => {
+    await importFile(september, { ledger: SEPT_30 })
+    await record('2026-09-30', 99_999, 'sync')
+
+    const res = await importFile(september, { ledger: ['2026-09-30', 12_345] })
+
+    expect(res.status).toBe(200)
+    expect(await recorded()).toMatchObject([{ date: '2026-09-30', cents: 99_999, source: 'sync' }])
+  })
+
+  it('lets Sync replace the Import balance for the same date', async () => {
+    await importFile(september, { ledger: SEPT_30 })
+
+    await record('2026-09-30', 99_999, 'sync')
+
+    expect(await recorded()).toMatchObject([{ date: '2026-09-30', cents: 99_999, source: 'sync' }])
+  })
+
+  it('keeps the previous result until the Balance Check has run again, so a failed refresh cannot hide a difference', async () => {
+    await importFile(september, { ledger: SEPT_30 })
+    await importFile(october, { ledger: ['2026-10-07', OPENING + 800 + 500] })
+    expect(await recorded()).toMatchObject([{}, { status: 'differs', difference: 500 }])
+
+    // The same date is recorded again with a balance that agrees; the statement alone cannot know that.
+    await record('2026-10-07', OPENING + 800, 'import')
+
+    expect(await recorded()).toMatchObject([{}, { cents: OPENING + 800, status: 'differs', difference: 500 }])
+    expect((await checks()).differences).toHaveLength(1)
+    // The refresh that follows in an Import settles it.
+    await importFile(october, { ledger: OCT_7 })
+    expect((await checks()).differences).toEqual([])
+  })
+})
+
+describe('the cost of a request (ADR 0004)', () => {
+  const plan = async (sql: string, ...args: unknown[]) => (await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(...args).all<{ detail: string }>()).results.map((r) => r.detail)
+
+  it("reads one Account's Transactions through the account-and-date index for history, openings and the current balance", async () => {
+    for (const details of [await plan(HISTORY, 1, null, null), await plan(OPENINGS, 1), await plan(CURRENT)]) {
+      const reads = details.filter((d) => /^(SEARCH|SCAN) (t|transactions)\b/.test(d))
+      expect(reads.length).toBeGreaterThan(0)
+      for (const read of reads) expect(read).toMatch(/^SEARCH .* USING (COVERING )?INDEX transactions_account_date/)
+    }
+  })
+
+  // The worst last chunk: it replaces history and sets the Cutover Date on an existing Account. The comment on the
+  // limits in imports.ts says how many D1 queries that is; a statement in a batch counts as one query each.
+  it('prepares at most 11 D1 statements for the last chunk of a replacing Import', async () => {
+    await importFile(september, { ledger: SEPT_30 })
+    const prepared: string[] = []
+    const countingDb = new Proxy(env.DB, {
+      get(target, key) {
+        if (key === 'prepare') return (sql: string) => (prepared.push(sql), target.prepare(sql))
+        const value = Reflect.get(target, key, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    const ctx = createExecutionContext()
+    const request = new Request(`${origin}/api/imports/chunks`, {
+      method: 'POST',
+      headers: { Cookie: 'fernledger_dev_as=admin', Origin: origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        account: { number: savings },
+        chunk: { index: 0, count: 1 },
+        file: { adapterId: 'asb', rowCount: 3, skipped: 0, from: '2026-09-01', to: '2026-09-30', ledgerBalance: { cents: OPENING + 500, date: '2026-09-30' } },
+        rows: september,
+        cutoverDate: '2026-12-01',
+        replace: true,
+      }),
+    })
+
+    const res = await worker.fetch!(request as never, { ...env, DB: countingDb }, ctx)
+    await waitOnExecutionContext(ctx)
+
+    expect(res.status).toBe(200)
+    // find the Account, count the rows to replace, count the new rows, then in one batch: set the Cutover Date, remove
+    // the balances, remove the rows, insert, record the balance, the Change Log entry; then read and save the check.
+    expect(prepared).toHaveLength(11)
+  })
+})
+
+describe('why an Account has no balance', () => {
+  it('says the newest bank balance is after the Cutover Date, and gives the Cutover Date', async () => {
+    await importFile(september, { ledger: ['2026-10-05', OPENING], to: '2026-10-05', cutoverDate: '2026-10-01' })
+
+    expect((await balances())[0]).toMatchObject({ balanceCents: null, asOfDate: null, cutoverDate: '2026-10-01', latestStatus: 'after-cutover' })
+  })
+
+  it('has no status and no Cutover Date for an Account that has neither', async () => {
+    await importFile(september, { ledger: SEPT_30 })
+    await env.DB.prepare('DELETE FROM balance_checks').run()
+
+    expect((await balances())[0]).toMatchObject({ balanceCents: null, cutoverDate: null, latestStatus: null })
   })
 })

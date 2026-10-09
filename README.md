@@ -189,6 +189,9 @@ Fernledger aims to keep your data **correct, current and recoverable**.
   - The first balance an account has is not checked, because there is nothing to compare it with. The next import is checked against it.
   - A balance dated on or after the account's Cutover Date is not checked, because those days are meant to come from sync. Neither is a balance in a file that ends before that balance's date.
   - A transaction the bank adds late to the last day of an earlier export doesn't raise a false alarm. Pending transactions are never counted.
+  - A transaction backfilled with the same date as an older balance (from a file that was missing it) isn't counted by that balance until that date's file is imported again.
+  - By default an account's Cutover Date is the file's last date, so the file's own balance (dated then) falls on or after the Cutover Date and isn't checked. Set the Cutover Date later, or import a file that runs past it, for that balance to be checked.
+  - "Since" is the date of the earlier balance the difference was checked against, not the date it was first seen ([ADR 0011](docs/adr/0011-balance-check-since-date.md)).
 - **Syncs are safe to repeat.** Transactions are matched by Akahu's ID. Each sync also re-checks the last 30 days, because banks sometimes delete and re-issue a transaction.
 - **Transactions are never deleted because a bank link changed.** If your bank reconnects or changes systems and Akahu issues a new account ID, Fernledger flags "Account link broken". The Admin re-links it in one step.
 

@@ -14,17 +14,19 @@ import { validate } from './validate'
 // The newest balance of the Account (the outer query's `a`) that can anchor history.
 const ANCHOR_ID = `SELECT id FROM balance_checks WHERE account_id = a.id AND status NOT IN (${UNCOUNTED_SQL}) ORDER BY as_of_date DESC LIMIT 1`
 
-const CURRENT = `
+export const CURRENT = `
   SELECT a.id AS accountId, a.name AS accountName,
          b.bank_cents + COALESCE((SELECT SUM(t.amount_cents) FROM transactions t
                                   WHERE t.account_id = a.id AND t.date >= b.as_of_date AND (t.date > b.as_of_date OR t.id > b.through_transaction_id)), 0) AS balanceCents,
-         MAX(b.as_of_date, COALESCE((SELECT MAX(t.date) FROM transactions t WHERE t.account_id = a.id AND t.date >= b.as_of_date), b.as_of_date)) AS asOfDate
+         MAX(b.as_of_date, COALESCE((SELECT MAX(t.date) FROM transactions t WHERE t.account_id = a.id AND t.date >= b.as_of_date), b.as_of_date)) AS asOfDate,
+         a.cutover_date AS cutoverDate,
+         (SELECT status FROM balance_checks WHERE account_id = a.id ORDER BY as_of_date DESC LIMIT 1) AS latestStatus
   FROM accounts a LEFT JOIN balance_checks b ON b.id = (${ANCHOR_ID})
   ORDER BY a.name COLLATE NOCASE, a.id`
 
 // Balance at the end of each day with Transactions (and the anchor's day): the opening balance the anchor implies,
 // plus the running total of the days. Working backwards from the bank's balance is the same sum.
-const HISTORY = `
+export const HISTORY = `
   WITH anchor AS (
     SELECT as_of_date, bank_cents, through_transaction_id FROM balance_checks
     WHERE account_id = ?1 AND status NOT IN (${UNCOUNTED_SQL}) ORDER BY as_of_date DESC LIMIT 1),
@@ -46,11 +48,20 @@ const ANCHOR = `SELECT as_of_date AS asOfDate, bank_cents AS balanceCents FROM b
 
 const rangeQuery = z.object({ from: z.optional(isoDate), to: z.optional(isoDate) })
 
-type CurrentBalance = { accountId: number; accountName: string; balanceCents: number | null; asOfDate: string | null }
+// `latestStatus` is the status of the Account's newest bank balance, counted or not, so the Summary can say why there is
+// no balance (the newest is after the Cutover Date, or the file ended before it) rather than that there is none.
+type CurrentBalance = {
+  accountId: number
+  accountName: string
+  balanceCents: number | null
+  asOfDate: string | null
+  cutoverDate: string | null
+  latestStatus: BalanceStatus | null
+}
 type HistoryPoint = { date: string; balanceCents: number }
 
 export const balances = new Hono<AppEnv>()
-  // Every Account's balance now. Null for an Account with no bank balance yet to start from.
+  // Every Account's balance now. Null for an Account with no bank balance yet to start from (`latestStatus` says why).
   .get('/', async (c) => {
     const { results } = await c.env.DB.prepare(CURRENT).all<CurrentBalance>()
     return c.json({ accounts: results })

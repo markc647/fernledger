@@ -18,10 +18,11 @@ import { validate } from './validate'
 //   one INSERT statement with one bound parameter.
 // - A bound string may be 2 MB. Row fields are length-capped (import-rows.ts); 500 worst-case rows measured 335 KB.
 // - 10 ms of CPU: reading, checking and re-serialising 500 typical rows (86 KB) measured about 1-2 ms in Node.
-// - A chunk request costs at most 9 D1 queries (find the Account, count the Import-sourced rows to replace, count the
-//   rows it already holds, then one batch of at most 6 statements: create the Account or set its Cutover Date, remove
+// - A chunk request costs at most 11 D1 queries (find the Account, count the Import-sourced rows to replace, count the
+//   rows it already holds, then one batch of at most 6 statements: set the Cutover Date (or create the Account), remove
 //   the old balances, remove the old rows, insert the rows, record the file's ledger balance (last chunk only), write
-//   the Change Log entry; then the last chunk's Balance Check reads and saves in 2 more), well under 50.
+//   the Change Log entry; then the last chunk's Balance Check reads and saves in 2 more), well under 50. A statement in
+//   a batch counts as one query; balances.test.ts pins the worst case.
 // - MAX_CHUNKS (import-rows.ts) keeps one Import within the free plan's 100k D1 row writes a day.
 // - Rows dated on or after the Account's Cutover Date are filtered out in SQL (`json_each` rows are compared there),
 //   so the Worker never loops over them.
