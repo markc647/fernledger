@@ -66,7 +66,7 @@ export async function updateSettings(db: D1Database, actor: Member, patch: Setti
   await recordChange(
     db,
     changed.map((key) => putSetting(db, key, patch[key]!)),
-    { actor, summary, before, after },
+    { actor, type: 'settings', summary, before, after },
   )
   return { ...current, ...after }
 }

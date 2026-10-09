@@ -87,6 +87,7 @@ export const imports = new Hono<AppEnv>().post('/chunks', validate('json', chunk
   // was saved even if the Import stops part way.
   const results = await recordChange(db, [...create, db.prepare(INSERT_ROWS).bind(number, rowsJson)], {
     actor: c.var.member,
+    type: 'import',
     summary: `Imported ${added} rows into ${name}${chunk.count > 1 ? ` (part ${chunk.index + 1} of ${chunk.count})` : ''}`,
     after: {
       adapter: file.adapterId,

@@ -17,6 +17,7 @@ describe('recordChange', () => {
     const before = Date.now()
     await recordChange(env.DB, putSetting(env.DB, 'app_title', "Mum's finances"), {
       actor: admin,
+      type: 'settings',
       summary: 'Changed the app title',
       before: { app_title: 'Starting title' },
       after: { app_title: "Mum's finances" },
@@ -27,6 +28,7 @@ describe('recordChange', () => {
     expect(rest).toEqual([])
     expect(entry).toMatchObject({
       actor: 'admin@example.com',
+      type: 'settings',
       summary: 'Changed the app title',
       before: '{"app_title":"Starting title"}',
       after: '{"app_title":"Mum\'s finances"}',
@@ -38,6 +40,7 @@ describe('recordChange', () => {
   it('takes several statements, and stores a missing before or after as null', async () => {
     await recordChange(env.DB, [putSetting(env.DB, 'about_contact', 'Sam'), putSetting(env.DB, 'about_retention', 'Forever')], {
       actor: admin,
+      type: 'settings',
       summary: 'Filled in About your data',
     })
 
@@ -49,7 +52,7 @@ describe('recordChange', () => {
   it('leaves no entry, and no partial change, when a mutation fails', async () => {
     const failing = [putSetting(env.DB, 'app_title', 'Should not stick'), env.DB.prepare('INSERT INTO no_such_table (x) VALUES (1)')]
 
-    await expect(recordChange(env.DB, failing, { actor: admin, summary: 'Will fail' })).rejects.toThrow()
+    await expect(recordChange(env.DB, failing, { actor: admin, type: 'settings', summary: 'Will fail' })).rejects.toThrow()
 
     expect(await changeLog()).toEqual([])
     expect(await getSetting(env.DB, 'app_title')).toBe('Starting title')
@@ -57,7 +60,7 @@ describe('recordChange', () => {
 
   it('leaves no change behind when the entry cannot be written', async () => {
     // The entry's actor is NOT NULL, so the entry is refused after the mutation ran inside the same batch.
-    const noActor = { actor: { email: null } as unknown as Member, summary: 'Will fail' }
+    const noActor = { actor: { email: null } as unknown as Member, type: 'settings' as const, summary: 'Will fail' }
 
     await expect(recordChange(env.DB, putSetting(env.DB, 'app_title', 'Should not stick'), noActor)).rejects.toThrow()
 

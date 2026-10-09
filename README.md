@@ -48,7 +48,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Dashboard:** balances, net worth over time, spending by category, budget vs actual, searchable transactions.
 - **Printable reports:** spending by category, budget vs actual, income vs spending, balances over time, full transaction listing with notes. Print them or save as PDF from your browser.
 - **CSV export** for any date range.
-- **Change Log** of every edit the Admin makes, visible to everyone.
+- **Change Log** of every edit the Admin makes, visible to everyone: who changed what and when, with the values before and after, newest first. Filter it by type of change and by date.
 - **Light and dark themes.**
 - **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header and reports will show it.
 - **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications.
@@ -297,6 +297,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Design, decisions, glossary | Done |
 | Skeleton, CI, sign-in and roles, guardrails, setup and deploy scripts | Done |
 | Settings screen and "Setup needed" | Done |
+| Change Log page | Done |
 | Database, CSV import (ASB) | In progress |
 | Akahu sync | Planned |
 | Categories, rules, transfers, budgets | Planned |
