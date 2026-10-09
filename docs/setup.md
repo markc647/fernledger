@@ -1,5 +1,41 @@
 # Setup
 
+## Create the resources and deploy
+
+Run these from a checkout of the release you want. Why the region matters is in the README's [Where your data is stored](../README.md#where-your-data-is-stored).
+
+1. **Sign in once:** `npx wrangler login`. The scripts never log in for you. If the login reaches more than one Cloudflare account, set `CLOUDFLARE_ACCOUNT_ID` to the one you want.
+2. **Preview, then create** the D1 database and R2 bucket:
+
+   ```bash
+   npm run setup -- --dry-run     # prints the wrangler commands, runs none
+   npm run setup                  # asks you to confirm the account, then creates
+   REGION=apac npm run setup      # another region: oc (default), apac, weur, eeur, wnam, enam
+   ```
+
+   Both resources are created with `--location ${REGION:-oc}`. Re-running is safe: it creates only what is missing. It also checks that D1 read replication is off, and stops if it is not (ADR 0007).
+3. **Deploy:**
+
+   ```bash
+   npm run deploy -- --dry-run    # prints the build, restore point, migration and deploy commands
+   npm run deploy                 # confirms the account, then runs them
+   ```
+
+   In order, `npm run deploy` confirms the account, checks the database and bucket exist (it stops and points you at `npm run setup` rather than let Wrangler create them with no location), builds, records a D1 bookmark (restore point), applies remote migrations from `migrations/`, and deploys. It ends by printing the bookmark with rollback instructions, and prints them too if a migration or the deploy fails. Rolling back code is `npx wrangler rollback`. Restoring data is `npx wrangler d1 time-travel restore <database> --bookmark=<bookmark>`, a last resort that discards everything written since. The free plan keeps bookmarks for 7 days, and migrations are add-only so rolling back code is normally enough (ADR 0009).
+
+Both scripts take `--yes` to skip the confirmation prompt (needed when there's no terminal). `npm run deploy` also takes `--skip-build` if `dist/` is already built.
+
+### How resource IDs stay out of the repo
+
+`wrangler.jsonc` gives the D1 database a `database_name` and the R2 bucket a `bucket_name`, and no `database_id`. Wrangler looks the database up by that name in the signed-in account, both for `wrangler d1 …` commands and when it deploys, so nothing needs an ID and the file in git is the file you deploy with. (Checked against Wrangler 4.148: `wrangler d1 migrations apply fernledger --remote` resolves the name through the API, and `wrangler deploy` connects a binding that has a `database_name` and no `database_id` to the existing database of that name.)
+
+Two Wrangler behaviours the scripts guard against, because either could put IDs or the wrong location in your account:
+
+- **Auto-provisioning** creates a missing database or bucket during `wrangler deploy` with no location hint. The deploy script checks they exist first.
+- **Config write-back:** after provisioning, an interactive `wrangler deploy` may write resource IDs into `wrangler.jsonc`. The scripts run Wrangler with `CI=true`, which turns write-back off. If you run `wrangler deploy` by hand, check `git diff wrangler.jsonc` before you commit.
+
+The script tests fail if `wrangler.jsonc` gains a `database_id` or account ID.
+
 ## Cloudflare Access (one-time, by hand)
 
 The app has no login of its own. Cloudflare Access sits in front of it, and the Worker checks the Access token on every API request (ADR 0002).
