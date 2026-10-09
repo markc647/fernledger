@@ -2,7 +2,7 @@ import { createScheduledController } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BACKUP_CRON, BACKUP_STATE_KEY, CHUNK_BYTES, INVOCATION_BYTES } from './backup'
-import { BackupFormatError, checkPart, insertStatements, parseManifest, type Manifest } from './backup-format'
+import { BackupFormatError, checkPart, insertStatements, loadOrder, parseManifest, type Manifest } from './backup-format'
 import worker from './index'
 
 // Seam 1: a scheduled event into the Worker, with the real local D1 and R2 from wrangler.jsonc.
@@ -478,5 +478,23 @@ describe('restoring a backup', () => {
     expect(() => parseManifest(withKey('backups/2026-10-05/settings.000001.ndjson'), 'backups/2026-10-12')).toThrow(BackupFormatError)
     expect(() => parseManifest(withKey('backups/2026-10-12/../2026-10-05/x.ndjson'), 'backups/2026-10-12')).toThrow(BackupFormatError)
     expect(() => parseManifest(withKey('backups/2026-10-12//x.ndjson'), 'backups/2026-10-12')).toThrow(BackupFormatError)
+  })
+})
+
+describe('loadOrder', () => {
+  const table = (name: string) => ({ name, createSql: '', columns: [], rows: 0, parts: [] })
+  const names = (tables: ReturnType<typeof table>[], refs: Array<[string, string]>) => loadOrder(tables, refs).map((t) => t.name)
+
+  it('puts a table after the tables it refers to and otherwise keeps the backup order', () => {
+    const tables = ['accounts', 'transactions', 'settings', 'categories'].map(table)
+    expect(names(tables, [['transactions', 'accounts'], ['transactions', 'categories']])).toEqual(['accounts', 'settings', 'categories', 'transactions'])
+  })
+
+  it('ignores a table that refers to itself or to one outside the backup', () => {
+    expect(names(['a', 'b'].map(table), [['a', 'a'], ['a', 'elsewhere']])).toEqual(['a', 'b'])
+  })
+
+  it('refuses tables that refer to each other', () => {
+    expect(() => loadOrder(['a', 'b'].map(table), [['a', 'b'], ['b', 'a']])).toThrow(BackupFormatError)
   })
 })

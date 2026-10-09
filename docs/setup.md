@@ -116,7 +116,7 @@ After any rollback, check the row counts and open the app before you call it fix
 
 ### Restoring
 
-Restore into an **empty** database that has the schema. A restore adds rows and never overwrites, and it refuses a database that already has rows in any backed-up table or lacks a backed-up column (a database with extra columns, from a newer schema, is fine).
+Restore into an **empty** database that has the schema. A restore adds rows and never overwrites, and it refuses a database that already has rows in any backed-up table or lacks a backed-up column (a database with extra columns, from a newer schema, is fine). The one exception is the starter Categories that the migrations add: if nothing else has rows, the restore replaces them with the backup's Categories (it deletes the starter rows first, which is safe only because every other table is empty, so nothing can refer to them).
 
 **Finding the `<backup date>`:** open the Cloudflare dashboard, R2, your backup bucket, `backups/`. Each folder is an NZ date, `YYYY-MM-DD`, and counts only if it holds a `manifest.json`. The weekly backup runs on Sundays, and `npm run deploy` prints the folder of the one it took. The newest date with a manifest is the latest backup. A folder ending `-final-<time>` is the final backup `npm run teardown` took. It restores like any other: pass its whole folder name, e.g. `2026-10-12-final-20261012T031500123Z`. (Wrangler can't list a bucket, so the script can't list them for you.)
 
@@ -206,6 +206,19 @@ If your Cloudflare account already has a wildcard or account-wide Access policy,
 **Changing the Admin:** run `wrangler secret put ADMIN_EMAIL` again.
 
 `preview_urls` is off in `wrangler.jsonc`, because version preview hostnames wouldn't match this application and would fall back to whatever wildcard policy the account has.
+
+## Update pull requests
+
+For a copy made with the **Deploy button** (README [Updating](../README.md#updating)). `.github/workflows/upgrade-check.yml` runs weekly, and from the Actions tab whenever you choose **Run workflow**. It compares your `package.json` version with the latest published Fernledger release. If there is a newer one it opens a pull request, from the branch `fernledger-update/vX.Y.Z`, that carries the release notes and the changes.
+
+- **Once, in your copy:** Settings, Actions, General, Workflow permissions, tick **Allow GitHub Actions to create and approve pull requests**. Without it the workflow fails with a message saying so; once it is on, run the workflow again (it replaces its own branch, so a re-run is safe).
+- **Merging does not touch your database.** `npm run deploy`, run from the merged commit, is the step that takes the pre-deploy backup, records the restore point and applies migrations ([above](#create-the-resources-and-deploy)). If a Cloudflare build deploys on every merge, it skips those, so run `npm run deploy` as well (or instead). The Deploy button is still Planned, so this describes the intended setup. For a major release, read its upgrade notes first; the pull request says when it is one.
+- **You are trusting upstream.** A merged update runs upstream's code in your build and deploy (package scripts, `.githooks`, `scripts/`). The tick-box above lets Actions approve pull requests as well as create them. Pull requests opened with `GITHUB_TOKEN` don't trigger `pull_request` checks, so no CI runs on them: review the diff yourself.
+- **Closing a pull request without merging** skips that release. The next release opens a new one.
+- The pull request makes your tracked files match the release, so changes you made to them show up in its diff as removals. Files git doesn't track, such as `.dev.vars`, are left alone.
+- **Workflow files are never changed by it**: GitHub doesn't let an Actions run edit them. If a release changes one, the pull request lists it for you to compare and copy by hand.
+- It reads the public release list and nothing else, using the `GITHUB_TOKEN` GitHub provides to the run. It adds no secrets, and the Worker is not involved.
+- GitHub pauses scheduled workflows in a public repository with no activity for 60 days. If the weekly run stops, re-enable it in the Actions tab, or run it by hand.
 
 ## Local development
 

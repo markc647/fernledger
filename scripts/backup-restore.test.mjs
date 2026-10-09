@@ -27,13 +27,14 @@ const tempDir = () => {
 const migrations = readdirSync(join(root, 'migrations'))
   .filter((f) => f.endsWith('.sql'))
   .sort()
-  .map((f) => readFileSync(join(root, 'migrations', f), 'utf8'))
+  .map((f) => ({ name: f, sql: readFileSync(join(root, 'migrations', f), 'utf8') }))
 const extraTable = 'CREATE TABLE odd (id INTEGER PRIMARY KEY, label TEXT, amount_cents INTEGER, ratio REAL, data BLOB)'
 
-function newDatabase(file) {
+// `without` leaves out migrations by file name prefix, to stand in for a database from before they existed.
+function newDatabase(file, without = []) {
   const db = new DatabaseSync(file)
   opened.push(db)
-  for (const sql of migrations) db.exec(sql)
+  for (const { name, sql } of migrations) if (!without.some((w) => name.startsWith(w))) db.exec(sql)
   db.exec('CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY, name TEXT)')
   db.exec("INSERT INTO d1_migrations (name) VALUES ('0201_settings.sql'), ('0202_change_log.sql')")
   db.exec(extraTable)
@@ -108,10 +109,10 @@ if (words[0] === 'r2') {
 `
 
 // Makes a folder holding a backup of a freshly seeded database and an empty, migrated target database.
-async function scenario() {
+async function scenario(without = []) {
   const dir = tempDir()
   const bucketDir = join(dir, 'bucket')
-  const source = newDatabase(join(dir, 'source.sqlite'))
+  const source = newDatabase(join(dir, 'source.sqlite'), without)
   source.exec(`
     INSERT INTO settings (key, value) VALUES ('app_title', 'Fern''s money'), ('about_contact', 'Sam');
     INSERT INTO change_log (actor, summary, before, after) VALUES ('a@example.com', 'Line one
@@ -149,7 +150,7 @@ function restore(s, args = ['2026-10-12', '--database', 'target', '--local'], en
 
 const dump = (db) =>
   Object.fromEntries(
-    ['settings', 'change_log', 'odd'].map((t) => [t, db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all().map((r) => ({ ...r }))]),
+    ['settings', 'change_log', 'categories', 'odd'].map((t) => [t, db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all().map((r) => ({ ...r }))]),
   )
 
 test('seed, back up, restore, compare: the restored database holds exactly what was backed up', async () => {
@@ -158,9 +159,10 @@ test('seed, back up, restore, compare: the restored database holds exactly what 
   const r = restore(s)
 
   assert.equal(r.status, 0, r.out)
-  assert.match(r.out, /Restored 2506 rows in \d+ tables/)
+  assert.match(r.out, /Restored 2528 rows in \d+ tables/)
   assert.deepEqual(dump(s.target), dump(s.source))
   assert.equal(dump(s.target).change_log.length, 2501)
+  assert.equal(dump(s.target).categories.length, 22, 'the starter Categories are replaced by the backup rows, not added to')
   assert.ok(r.loads.length > 3, 'change_log should have needed more than one part')
 })
 
@@ -171,7 +173,7 @@ test('restore --dry-run downloads and verifies the backup, prints the loads it w
 
   assert.equal(r.status, 0, r.out)
   assert.match(r.out, /\$ npx wrangler r2 object get fernledger-backups\/backups\/2026-10-12\/manifest\.json/)
-  assert.match(r.out, /Verified 5 parts/)
+  assert.match(r.out, /Verified 6 parts/)
   assert.match(r.out, /\$ npx wrangler d1 execute target --local --file /)
   assert.match(r.out, /Dry run only/)
   assert.ok(r.calls.some((c) => c[0] === 'r2'), 'a dry run downloads')
@@ -331,4 +333,78 @@ test('restore does not keep the downloaded data around', async () => {
 
   assert.equal(r.status, 0, r.out)
   assert.deepEqual(readdirSync(temp), [])
+})
+
+const dumpTables = (db, tables) => Object.fromEntries(tables.map((t) => [t, db.prepare(`SELECT * FROM "${t}" ORDER BY id`).all().map((r) => ({ ...r }))]))
+const restoredTables = ['accounts', 'categories', 'transactions']
+
+test('restore loads a Category before the Transactions whose Override uses it, whatever order the backup lists them in', async () => {
+  const dir = tempDir()
+  const source = newDatabase(join(dir, 'source.sqlite'))
+  source.exec(`
+    INSERT INTO settings (key, value) VALUES ('app_title', 'Fern''s money');
+    UPDATE categories SET name = 'Food shop' WHERE name = 'Groceries';
+    INSERT INTO categories (name, removed_at) VALUES ('Pets', NULL), ('Old name', '2026-09-01T00:00:00Z');
+    INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-97', 'Everyday');
+    INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category, note)
+      VALUES (1, '2026-09-30', -4200, 'Vet', 'import', 23, 'Biscuit''s check-up'),
+             (1, '2026-10-01', -9000, 'Shop', 'import', 1, NULL),
+             (1, '2026-10-02', -500, 'Cafe', 'import', NULL, NULL);
+  `)
+  // The order the Worker's backup lists tables in is the order they were created: transactions before categories.
+  const created = source.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name)
+  assert.ok(created.indexOf('transactions') < created.indexOf('categories'))
+  const bucketDir = join(dir, 'bucket')
+  await backUp(source, bucketDir, Date.parse('2026-10-11T15:00:00Z'))
+  writeFileSync(join(dir, 'fake-wrangler.cjs'), fakeWrangler)
+  const s = { dir, bucketDir, source, target: newDatabase(join(dir, 'target.sqlite')) }
+
+  const r = restore(s)
+
+  assert.equal(r.status, 0, r.out)
+  assert.deepEqual(dumpTables(s.target, restoredTables), dumpTables(source, restoredTables))
+  assert.equal(s.target.prepare("SELECT name FROM categories WHERE id = 1").get().name, 'Food shop', 'a renamed starter Category keeps its new name')
+  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 24)
+})
+
+test('restore still refuses a database whose Change Log has rows, and leaves the starter Categories alone', async () => {
+  const s = await scenario()
+  s.target.exec("INSERT INTO change_log (actor, summary) VALUES ('a@example.com', 'Something the Admin did')")
+
+  const r = restore(s)
+
+  assert.equal(r.status, 1)
+  assert.match(r.out, /already has rows in change_log/)
+  assert.deepEqual(r.loads, [], 'nothing was loaded, so the starter rows were not cleared either')
+  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 22)
+})
+
+test('a backup from before Categories existed restores and keeps the starter Categories', async () => {
+  const s = await scenario(['1101', '2401'])
+
+  const r = restore(s)
+
+  assert.equal(r.status, 0, r.out)
+  assert.doesNotMatch(r.out, /starter rows/)
+  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 22)
+  assert.equal(s.target.prepare('SELECT count(*) AS n FROM settings').get().n, 2)
+})
+
+test('restore will not clear the starter Categories while a table that refers to them has rows, even one the backup lacks', async () => {
+  const dir = tempDir()
+  const source = newDatabase(join(dir, 'source.sqlite'))
+  source.exec('DROP TABLE transactions; DROP TABLE accounts') // a backup whose tables don't include the referring one
+  const bucketDir = join(dir, 'bucket')
+  await backUp(source, bucketDir, Date.parse('2026-10-11T15:00:00Z'))
+  writeFileSync(join(dir, 'fake-wrangler.cjs'), fakeWrangler)
+  const target = newDatabase(join(dir, 'target.sqlite'))
+  target.exec(`INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-97', 'Everyday');
+    INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category) VALUES (1, '2026-10-01', -100, 'Shop', 'import', 1)`)
+
+  const r = restore({ dir, bucketDir, target })
+
+  assert.equal(r.status, 1)
+  assert.match(r.out, /already has rows in transactions/)
+  assert.deepEqual(r.loads, [])
+  assert.equal(target.prepare('SELECT count(*) AS n FROM categories').get().n, 22)
 })

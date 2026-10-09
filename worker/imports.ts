@@ -89,6 +89,10 @@ const COUNT_NEW_ROWS = `
 
 const COUNT_IMPORTED = "SELECT COUNT(*) AS n FROM transactions WHERE account_id = ? AND source = 'import'"
 
+const COUNT_IMPORTED_AND_ANNOTATED = `SELECT COUNT(*) AS imported,
+         COUNT(CASE WHEN note IS NOT NULL OR override_category IN (SELECT id FROM categories WHERE removed_at IS NULL) THEN 1 END) AS annotated
+  FROM transactions WHERE account_id = ? AND source = 'import'`
+
 // Only ever Import-sourced rows: Sync-sourced Transactions are never removed here. At most ?2 (REPLACE_SLICE) rows go
 // in one statement, so rows added between the count and the delete can't push one replace past the write budget in
 // ADR 0004: a removed row costs 3 D1 writes (the row and its two indexes), so a slice is 15,000 of the day's 100,000.
@@ -170,13 +174,16 @@ export const imports = new Hono<AppEnv>()
       balanceCheck,
     })
   })
-  // How many Import-sourced rows an Account holds, so the Admin is told what a replace will remove before confirming.
+  // How many Import-sourced rows an Account holds, and how many of those carry the Admin's own work (an Override to a
+  // Category in use, or a Note), so the Admin is told what a replace will remove before confirming. A removed
+  // Category's Override doesn't count: the Admin was told when they removed it that the Transactions lose it.
   .get('/imported/:accountId', async (c) => {
     const accountId = Number(c.req.param('accountId'))
     const db = c.env.DB
     const account = Number.isSafeInteger(accountId) ? await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first() : null
     if (!account) return c.json({ error: 'Not found' }, 404)
-    return c.json({ imported: (await db.prepare(COUNT_IMPORTED).bind(accountId).first<{ n: number }>())?.n ?? 0 })
+    const counts = await db.prepare(COUNT_IMPORTED_AND_ANNOTATED).bind(accountId).first<{ imported: number; annotated: number }>()
+    return c.json({ imported: counts?.imported ?? 0, withOverrideOrNote: counts?.annotated ?? 0 })
   })
   // One step of clearing a history too big to replace in a single chunk (more than REPLACE_SLICE rows): the Admin's
   // browser calls it until the rest fits, then sends the first chunk with `replace`. Each step is logged. It refuses

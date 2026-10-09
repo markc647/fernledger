@@ -465,7 +465,24 @@ describe('GET /api/imports/imported/:accountId', () => {
     const id = await accountId()
     await addSyncRow(id, 'SYNC1')
 
-    expect(await (await imported(id)).json()).toEqual({ imported: 2 })
+    expect(await (await imported(id)).json()).toEqual({ imported: 2, withOverrideOrNote: 0 })
+  })
+
+  it('counts the Import-sourced rows that have an Override to a Category in use or a Note, which a replace would remove', async () => {
+    await sendChunk([row('A', '2026-09-01'), row('B', '2026-09-02'), row('C', '2026-09-03'), row('D', '2026-09-04'), row('E', '2026-09-05')])
+    const id = await accountId()
+    const category = (name: string) => env.DB.prepare('SELECT id FROM categories WHERE name = ?').bind(name).first<{ id: number }>().then((r) => r!.id)
+    const set = (bankId: string, column: 'override_category' | 'note', value: number | string) =>
+      env.DB.prepare(`UPDATE transactions SET ${column} = ? WHERE account_id = ? AND bank_unique_id = ?`).bind(value, id, bankId).run()
+    await set('A', 'override_category', await category('Groceries'))
+    await set('A', 'note', 'Both on one row counts once')
+    await set('B', 'note', 'Only a Note')
+    await set('C', 'override_category', await category('Fuel'))
+    await env.DB.prepare("UPDATE categories SET removed_at = '2026-10-01T00:00:00Z' WHERE name = 'Fuel'").run()
+    await addSyncRow(id, 'SYNC1')
+    await set('SYNC1', 'note', 'Sync rows are not removed by a replace')
+
+    expect(await (await imported(id)).json()).toEqual({ imported: 5, withOverrideOrNote: 2 })
   })
 
   it('answers 404 for an Account that does not exist', async () => {

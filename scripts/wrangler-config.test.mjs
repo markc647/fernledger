@@ -26,3 +26,13 @@ test('the weekly backup cron in worker/backup.ts is one of the crons in wrangler
   assert.ok(cron, 'BACKUP_CRON not found')
   assert.ok(config.triggers.crons.includes(cron))
 })
+
+// worker/outbound.test.ts runs the scheduled handler once per cron it lists, so the list has to be the real one.
+test('the cron list in worker/outbound.test.ts is the one in wrangler.jsonc', () => {
+  const backup = readFileSync(new URL('../worker/backup.ts', import.meta.url), 'utf8').match(/export const BACKUP_CRON = '([^']+)'/)?.[1]
+  const source = readFileSync(new URL('../worker/outbound.test.ts', import.meta.url), 'utf8')
+  const list = source.match(/^const CRONS = \[(.*)\]$/m)?.[1]
+  assert.ok(list, 'CRONS not found')
+  const crons = list.split(',').map((item) => (item.trim() === 'BACKUP_CRON' ? backup : item.trim().match(/^'([^']+)'$/)?.[1]))
+  assert.deepEqual(crons, config.triggers.crons)
+})
