@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import { api } from './api'
 import { HttpError } from './me'
+import { apiQuery, type TransactionSearch } from './transaction-search'
 
 export const PAGE_SIZE = 50
 
@@ -30,14 +31,24 @@ export const changeLogQuery = (filters: ChangeLogFilters, page: number) =>
     },
   })
 
-/** One page of Transactions, newest first; with `uncategorised`, only those with no Category. `page` is 0-based. */
-export const transactionsQuery = (page: number, uncategorised = false) =>
+/** One page of Transactions for a search (filters, sort and page), as the API returns it. Every key starts with 'transactions', so saving an Override or Note refreshes them all. */
+export const transactionsQuery = (search: TransactionSearch) =>
   queryOptions({
-    queryKey: ['transactions', { uncategorised }, page],
+    queryKey: ['transactions', 'list', search],
     queryFn: async () => {
-      const query: Record<string, string> = { limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) }
-      if (uncategorised) query.uncategorised = 'true'
-      const res = await api.transactions.$get({ query })
+      const res = await api.transactions.$get({ query: apiQuery(search, PAGE_SIZE) })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
+/** One Transaction in full. A 404 means there is no such Transaction. */
+export const transactionQuery = (id: string) =>
+  queryOptions({
+    queryKey: ['transactions', 'detail', id],
+    retry: (count, error) => !(error instanceof HttpError && error.status === 404) && count < 3,
+    queryFn: async () => {
+      const res = await api.transactions[':id'].$get({ param: { id } })
       if (!res.ok) throw new HttpError(res.status)
       return res.json()
     },
