@@ -11,6 +11,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',
+  // One at a time: the local D1 database is shared, and tests that change Settings must not overlap.
+  workers: 1,
   // PLAYWRIGHT_CHANNEL=msedge (or chrome) uses a browser already on your machine instead of the download.
   use: { baseURL: `http://localhost:${port}`, channel: process.env.PLAYWRIGHT_CHANNEL },
   // Every test runs in both themes; the dark project emulates a device set to dark.
@@ -20,7 +22,8 @@ export default defineConfig({
   ],
   webServer: {
     // The production build, served by the Worker runtime with the real headers (public/_headers and worker/security-headers.ts).
-    command: `npm run build && npx vite preview --port ${port} --strictPort`,
+    // The migrations go into the local D1 first, so the app has its tables.
+    command: `npx wrangler d1 migrations apply DB --local && npm run build && npx vite preview --port ${port} --strictPort`,
     timeout: 180_000,
     url: `http://localhost:${port}`,
     reuseExistingServer: !process.env.CI,

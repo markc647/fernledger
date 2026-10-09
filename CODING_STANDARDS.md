@@ -20,6 +20,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 - Every `/api` request is authenticated via the Access JWT and fails closed.
 - Every Admin change is written with `recordChange` (`worker/changelog.ts`), which batches it with its Change Log entry. Never write to the Change Log separately.
 - Log with `logEvent` (`worker/log.ts`), not `console`: it takes only an event name, an ID, a count and an error, which it reduces to its class.
+- A feature that needs optional configuration declares it in `worker/features.ts` and puts `requireFeature` in front of its routes, so it shows "Setup needed" rather than failing. Messages come from the declaration, never from a missing or present value.
 - Change requests need the Admin, a same-origin `Origin` and a JSON body; the guard runs before any handler, so handlers don't re-check. It checks the JSON content type only; each handler validates the body's shape with zod.
 
 ## Migrations
