@@ -559,7 +559,7 @@ describe('the cost of a request (ADR 0004)', () => {
 
   // The worst last chunk: it replaces history and sets the Cutover Date on an existing Account. The comment on the
   // limits in imports.ts says how many D1 queries that is; a statement in a batch counts as one query each.
-  it('prepares at most 11 D1 statements for the last chunk of a replacing Import', async () => {
+  it('prepares at most 16 D1 statements for the last chunk of a replacing Import', async () => {
     await importFile(september, { ledger: SEPT_30 })
     const prepared: string[] = []
     const countingDb = new Proxy(env.DB, {
@@ -587,9 +587,11 @@ describe('the cost of a request (ADR 0004)', () => {
     await waitOnExecutionContext(ctx)
 
     expect(res.status).toBe(200)
-    // find the Account, count the rows to replace, count the new rows, then in one batch: set the Cutover Date, remove
-    // the balances, remove the rows, insert, record the balance, the Change Log entry; then read and save the check.
-    expect(prepared).toHaveLength(11)
+    // find the Account, count the rows to replace, count the new rows (and what will be carried over), then in one batch:
+    // set the Cutover Date, remove the balances, forget what an earlier attempt gave out, hold the Overrides and Notes of
+    // the rows that go, remove the rows, insert, give the new rows what is held, mark it given, clear what is left, record
+    // the balance, the Change Log entry; then read and save the check. Carrying over (ticket 36) added five statements.
+    expect(prepared).toHaveLength(16)
   })
 })
 

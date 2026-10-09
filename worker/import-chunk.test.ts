@@ -15,6 +15,19 @@ describe('chunkSummary', () => {
   it('says how many rows a replace removed and imported', () => {
     expect(chunkSummary({ ...outcome, replace: true, removed: 7 })).toBe('Replaced imported history in Savings: removed 7 rows, imported 3 rows')
   })
+
+  it('says how many Overrides and Notes a replace carried over and lost, before the part it was', () => {
+    const carry = { carried: 2, carriedTotal: 5, lost: 1 }
+    expect(chunkSummary({ ...outcome, replace: true, removed: 7, carry })).toBe('Replaced imported history in Savings: removed 7 rows, imported 3 rows, Overrides and Notes carried over for 5 Transactions, lost for 1 Transaction')
+    expect(chunkSummary({ ...outcome, index: 2, count: 3, carry })).toBe('Imported 3 rows into Savings, Overrides and Notes carried over for 5 Transactions in all, lost for 1 Transaction (part 3 of 3)')
+  })
+
+  it('says only what a part carried when more parts follow, and nothing when it carried none', () => {
+    expect(chunkSummary({ ...outcome, index: 0, count: 2, replace: true, carry: { carried: 1, carriedTotal: null, lost: null } })).toBe(
+      'Replaced imported history in Savings: removed 0 rows, imported 3 rows, Overrides and Notes carried over for 1 Transaction (part 1 of 2)',
+    )
+    expect(chunkSummary({ ...outcome, index: 0, count: 2, carry: { carried: 0, carriedTotal: null, lost: null } })).toBe('Imported 3 rows into Savings (part 1 of 2)')
+  })
 })
 
 describe('chunkDetail', () => {
@@ -40,8 +53,23 @@ describe('chunkDetail', () => {
   })
 })
 
+describe('chunkDetail with carrying over', () => {
+  const file = { adapterId: 'asb', rowCount: 10, skipped: 0, from: '2026-09-01', to: '2026-10-01', ledgerBalance: { cents: 0, date: '2026-10-01' } }
+  const context = { file, rowsInChunk: 3, cutoverDate: null, newAccount: false }
+
+  it('records what the chunk carried, and on the last part the total and what was lost', () => {
+    expect(chunkDetail({ ...outcome, carry: { carried: 2, carriedTotal: 5, lost: 1 } }, context)).toMatchObject({ carried: 2, carriedTotal: 5, lost: 1 })
+    expect(chunkDetail({ ...outcome, carry: { carried: 2, carriedTotal: null, lost: null } }, context)).toMatchObject({ carried: 2 })
+  })
+
+  it('leaves the fields out for a chunk that took no part', () => {
+    expect(Object.keys(chunkDetail(outcome, context))).not.toContain('carried')
+    expect(Object.keys(chunkDetail({ ...outcome, carry: { carried: 2, carriedTotal: null, lost: null } }, context))).not.toContain('lost')
+  })
+})
+
 describe('chunkStatements', () => {
-  const prepare = { createAccount: () => 'create', setCutover: () => 'cutover', clearBalances: () => 'balances', removeImported: () => 'remove', insertRows: () => 'insert' }
+  const prepare = { createAccount: () => 'create', setCutover: () => 'cutover', clearBalances: () => 'balances', forgetApplied: () => 'forget', holdRemoved: () => 'hold', removeImported: () => 'remove', insertRows: () => 'insert' }
   const plan = { newAccount: false, setsCutover: false, replace: false }
 
   it('only inserts for a plain chunk of an existing Account', () => {
@@ -52,8 +80,8 @@ describe('chunkStatements', () => {
     expect(chunkStatements({ newAccount: true, setsCutover: true, replace: true }, prepare)).toEqual(['create', 'insert'])
   })
 
-  it('sets the Cutover Date, then removes the old balances and rows, then inserts, so the insert is last and the removal just before it', () => {
-    expect(chunkStatements({ ...plan, setsCutover: true, replace: true }, prepare)).toEqual(['cutover', 'balances', 'remove', 'insert'])
+  it('sets the Cutover Date, then removes the old balances, holds the Overrides and Notes of the rows that go, removes them, then inserts, so the insert is last and the removal just before it', () => {
+    expect(chunkStatements({ ...plan, setsCutover: true, replace: true }, prepare)).toEqual(['cutover', 'balances', 'forget', 'hold', 'remove', 'insert'])
   })
 })
 

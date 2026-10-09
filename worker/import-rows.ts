@@ -27,7 +27,8 @@ export const MAX_CHUNKS = 20
  * Most Import-sourced rows removed in one go when replacing imported history: 15,000 writes, leaving room in the day
  * for the new file (at most 10,000 rows, 30,000 writes). Larger histories are removed in steps of this size first
  * (`/api/imports/clear-history`). A replace writes about 3 x (rows removed + rows imported) in all, so the day's
- * allowance covers roughly 33,000 rows between them. An Account with more imported rows than that cannot be
+ * allowance covers roughly 33,000 rows between them, plus about 7 for each Override or Note carried over (held, given
+ * back, marked and cleared: carry-over.ts), which is few rows. An Account with more imported rows than that cannot be
  * replaced in one day: the Import stops at the limit ("Daily limit reached") and the Admin carries on the next day.
  */
 export const REPLACE_SLICE = 5000
