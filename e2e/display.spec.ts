@@ -89,7 +89,7 @@ test.describe('zoom', () => {
     { name: '200% zoom', width: 640, height: 360 },
     { name: '400% zoom (320px wide)', width: 320, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised']
+  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {

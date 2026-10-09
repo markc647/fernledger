@@ -1,6 +1,6 @@
 # Fernledger
 
-**A private, self-hosted tracker for New Zealand bank accounts.** It syncs daily from your bank through [Akahu](https://www.akahu.nz) and runs on your own Cloudflare account, on the free plan. One person manages it, and a small group of family members can view it read-only.
+**A private, self-hosted tracker for New Zealand bank accounts.** It will sync daily from your bank through [Akahu](https://www.akahu.nz) (until then you import your bank's CSV files), and runs on your own Cloudflare account, on the free plan. One person manages it, and a small group of family members can view it read-only.
 
 > **Status: early development.** The design is settled and the code is being built. Nothing here is ready for real data yet. This README records each decision as it is made, so you can judge whether Fernledger suits you before you use it.
 
@@ -38,7 +38,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 
 ## What it does
 
-- **Daily sync** of transactions from your NZ bank accounts through Akahu, including **pending transactions**, which are shown as pending until they settle.
+- **Daily sync** will bring in transactions from your NZ bank accounts through Akahu, including **pending transactions**, which will be shown as pending until they settle.
 - **Imports your bank's CSV exports:** years of history older than Akahu can provide, or as your regular source if you'd rather not use Akahu at all. Fernledger works without Akahu: you import a CSV each month instead of syncing.
 - **Bank Time:** a transaction's time of day is shown only when the bank actually supplied one, which is rare, because most banks give a date only. Fernledger never invents a time. It also records when Akahu first saw each transaction.
 - **Full transaction detail for record-keeping:** the counterparty's account number, card suffix, and payment particulars, code and reference. That way you can show exactly where money went.
@@ -52,7 +52,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Change Log** of every edit the Admin makes, visible to everyone: who changed what and when, with the values before and after, newest first. Filter it by type of change and by date.
 - **Light and dark themes.**
 - **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and reports will.
-- **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications.
+- **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications. The icon's label comes from a fixed file, so it is normally "Fernledger" whatever title the Admin sets, though some iOS versions use the page title instead. You can rename it when you add it.
 
 ## What it doesn't do
 
@@ -100,14 +100,14 @@ R2 may ask for a payment method on file even within the free allowance (unconfir
         │  signed identity token
         ▼
  Fernledger Worker ── checks the token on every request
-        │                  └─ daily: pulls new transactions from Akahu
+        │                  └─ once Sync ships, daily: pulls new transactions from Akahu
         ▼
  D1 database (your account, Oceania) ── weekly backup ──▶ R2 bucket
 ```
 
 - **Admin and Members.** One Admin, set by email, can edit categories, rules, budgets, overrides and notes. Everyone else is a read-only Member who can view, print and export.
-- **Sync** runs once a day, after Akahu's own daily refresh. A banner shows when data was last synced and turns red after 2 days, for example when a bank connection needs reconnecting.
-- **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu covers it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003). The Admin sets it in Settings, or takes up the offer of the last date in the file when importing (nothing is set unless the Admin ticks it); an Import then skips rows dated on or after it and says how many. Until accounts can be linked to Akahu, any account can have one; limiting it to linked accounts will ship with that feature.
+- **Sync** will run once a day, after Akahu's own daily refresh. A banner will show when data was last synced and turn red after 2 days, for example when a bank connection needs reconnecting.
+- **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu will cover it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003). The Admin sets it in Settings, or takes up the offer of the last date in the file when importing (nothing is set unless the Admin ticks it); an Import then skips rows dated on or after it and says how many. Until accounts can be linked to Akahu, any account can have one; limiting it to linked accounts will ship with that feature.
 - **A bad import can be replaced.** On the Import screen, "Replace imported history" removes an account's imported Transactions, never the ones from Sync, and imports the new file in their place, after the Admin confirms and is told how many will go. The Change Log records it. A history of more than 5,000 imported rows is removed in final steps of 5,000. Each removed or imported row costs 3 of the free plan's 100,000 database writes a day, so one day covers about 33,000 rows removed and imported together. Beyond that Fernledger stops with "Daily limit reached" and says part of the old history has been removed; choose the same file again the next day to finish.
 - **Category precedence:** a hand-set override beats a rule, which beats Akahu's suggestion. Rules apply to all history but never replace an override.
 
@@ -192,13 +192,13 @@ Fernledger aims to keep your data **correct, current and recoverable**.
   - A transaction backfilled with the same date as an older balance (from a file that was missing it) isn't counted by that balance until that date's file is imported again.
   - If the Admin ticks "set the Cutover Date to the last date in this file" when importing (it is offered, never set unless ticked), the file's own balance is dated on or after that Cutover Date and isn't checked. Choose a later Cutover Date, or import a file that runs past it, for that balance to be checked.
   - "Since" is the date of the earlier balance the difference was checked against, not the date it was first seen ([ADR 0011](docs/adr/0011-balance-check-since-date.md)).
-- **Syncs are safe to repeat.** Transactions are matched by Akahu's ID. Each sync also re-checks the last 30 days, because banks sometimes delete and re-issue a transaction.
-- **Transactions are never deleted because a bank link changed.** If your bank reconnects or changes systems and Akahu issues a new account ID, Fernledger flags "Account link broken". The Admin re-links it in one step.
+- **Syncs will be safe to repeat.** Transactions will be matched by Akahu's ID. Each sync will also re-check the last 30 days, because banks sometimes delete and re-issue a transaction.
+- **Transactions are never deleted because a bank link changed.** If your bank reconnects or changes systems and Akahu issues a new account ID, Fernledger will flag "Account link broken". The Admin will re-link it in one step.
 
 ### Current
 
-- **Sync runs daily, with an automatic retry** a few hours later if it failed. A sync only counts as successful when every account has finished.
-- **The status banner says what's wrong and what to do.** For example: "ASB needs reconnecting in Akahu (Admin)", "Akahu unavailable — retrying" or "Akahu token invalid (Admin)". Members see the status, and the Admin sees the action. It turns red after 2 days without a successful sync.
+- **Sync will run daily, with an automatic retry** a few hours later if it failed. A sync will only count as successful when every account has finished.
+- **The status banner will say what's wrong and what to do.** For example: "ASB needs reconnecting in Akahu (Admin)", "Akahu unavailable — retrying" or "Akahu token invalid (Admin)". Members will see the status, and the Admin will see the action. It will turn red after 2 days without a successful sync.
 
 ### Recoverable
 
@@ -315,6 +315,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Skeleton, CI, sign-in and roles, guardrails, setup and deploy scripts | Done |
 | Settings screen and "Setup needed" | Done |
 | Change Log page | Done |
+| Member pages (About your data, How to sign in) and Home Screen app | Done |
 | Database, CSV import (ASB) | In progress |
 | Balances, balance check after every import, the Summary | Done |
 | Akahu sync | Planned |
