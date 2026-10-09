@@ -42,6 +42,7 @@ describe('PATCH /api/settings', () => {
     expect(rest).toEqual([])
     expect(entry).toMatchObject({
       actor: 'admin@example.com',
+      type: 'settings',
       summary: 'Changed settings: app title, contact',
       before: JSON.stringify({ app_title: 'Fernledger', about_contact: '' }),
       after: JSON.stringify({ app_title: "Mum's finances", about_contact: 'Sam, 021 000 0000' }),

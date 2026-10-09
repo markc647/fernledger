@@ -48,7 +48,7 @@ const sendChunk = (rows: unknown[], extra: Parameters<typeof chunkBody>[1] = {},
 type TransactionsPage = { total: number; transactions: { date: string; description: string; bankType: string; amountCents: number; accountName: string }[] }
 const transactions = async (query = ''): Promise<TransactionsPage> => (await call(`/api/transactions${query}`)).json()
 const accounts = async (): Promise<{ id: number; name: string; accountNumber: string }[]> => (await call('/api/accounts')).json()
-const changeLog = async () => (await env.DB.prepare('SELECT summary, actor, before, after FROM change_log ORDER BY id').all()).results
+const changeLog = async () => (await env.DB.prepare('SELECT summary, actor, type, before, after FROM change_log ORDER BY id').all()).results
 
 beforeEach(async () => {
   await env.DB.batch(['transactions', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
@@ -263,7 +263,7 @@ describe('the Change Log entry for an Import', () => {
 
     const [entry, ...rest] = await changeLog()
     expect(rest).toEqual([])
-    expect(entry).toMatchObject({ actor: 'admin@example.com', summary: 'Imported 3 rows into Mum savings' })
+    expect(entry).toMatchObject({ actor: 'admin@example.com', type: 'import', summary: 'Imported 3 rows into Mum savings' })
     expect(JSON.parse(entry!.after as string)).toEqual({
       adapter: 'asb',
       part: 1,
@@ -325,7 +325,7 @@ describe('PATCH /api/accounts/:id', () => {
     expect(res.status).toBe(200)
     expect(await accounts()).toMatchObject([{ name: 'Mum savings', accountNumber: savings }])
     expect(await changeLog()).toMatchObject([
-      { actor: 'admin@example.com', summary: `Renamed Account ${savings} to Mum savings`, before: `{"name":"${savings}"}`, after: '{"name":"Mum savings"}' },
+      { actor: 'admin@example.com', type: 'account', summary: `Renamed Account ${savings} to Mum savings`, before: `{"name":"${savings}"}`, after: '{"name":"Mum savings"}' },
     ])
   })
 

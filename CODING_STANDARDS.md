@@ -18,7 +18,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 ## Structure
 - Business logic lives in pure functions with their own tests. Worker handlers stay thin: authenticate, validate, call the logic, respond.
 - Every `/api` request is authenticated via the Access JWT and fails closed.
-- Every Admin change is written with `recordChange` (`worker/changelog.ts`), which batches it with its Change Log entry. Never write to the Change Log separately.
+- Every Admin change is written with `recordChange` (`worker/changelog.ts`), which batches it with its Change Log entry. Never write to the Change Log separately. Each entry has a `type` from `CHANGE_TYPES`; a new kind of Admin change adds its type there so Members can filter by it.
 - Log with `logEvent` (`worker/log.ts`), not `console`: it takes only an event name, an ID, a count and an error, which it reduces to its class.
 - A feature that needs optional configuration declares it in `worker/features.ts` and puts `requireFeature` in front of its routes, so it shows "Setup needed" rather than failing. Messages come from the declaration, never from a missing or present value.
 - Change requests need the Admin, a same-origin `Origin` and a JSON body; the guard runs before any handler, so handlers don't re-check. It checks the JSON content type only; each handler validates the body's shape with zod. The one exception is Import rows (`worker/import-rows.ts`): 500 rows through a zod schema cost more than the 10 ms CPU budget (ADR 0004), so they are checked by hand and the request envelope around them still uses `zod/mini`. Don't hand-validate anything small.
