@@ -1,10 +1,12 @@
 import { Hono } from 'hono'
-import { authConfigFromEnv, authenticate, devMember, type Member } from './auth'
+import { accounts } from './accounts'
+import type { AppEnv } from './app-env'
+import { authConfigFromEnv, authenticate, devMember } from './auth'
+import { imports } from './imports'
 import { logEvent } from './log'
 import { isJson, isWrite } from './request-format'
 import { SECURITY_HEADERS } from './security-headers'
-
-type AppEnv = { Bindings: Env; Variables: { member: Member } }
+import { transactions } from './transactions'
 
 // Routes are chained (not `app.get(...)` on separate lines) so `AppType` carries them to the typed browser client.
 export const app = new Hono<AppEnv>()
@@ -31,6 +33,9 @@ export const app = new Hono<AppEnv>()
     await next()
   })
   .get('/api/me', (c) => c.json(c.var.member))
+  .route('/api/accounts', accounts)
+  .route('/api/imports', imports)
+  .route('/api/transactions', transactions)
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404))
 
