@@ -76,7 +76,7 @@ export async function ensureGitleaks() {
   try {
     writeFileSync(join(work, asset.name), bytes)
     // Windows ships bsdtar, which also reads zip. Call it by full path so Git Bash's GNU tar isn't picked up.
-    const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'tar.exe') : 'tar'
+    const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'tar.exe') : 'tar'
     const out = spawnSync(tar, ['-xf', asset.name], { cwd: work, encoding: 'utf8' })
     if (out.status !== 0) throw new Error(`Could not extract ${asset.name}: ${out.stderr || out.error}`)
     rmSync(dir, { recursive: true, force: true })
