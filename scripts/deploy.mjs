@@ -1,8 +1,9 @@
-// Deploys to the Cloudflare account you confirm: records a D1 restore point (bookmark), applies remote
-// migrations, deploys, then prints the bookmark with rollback instructions.
-// Usage: node scripts/deploy.mjs [--dry-run] [--yes] [--workers-dev-registered] [--skip-build]
+// Deploys to the Cloudflare account you confirm: takes a complete backup, records a D1 restore point (bookmark),
+// applies remote migrations, deploys, then prints the bookmark with rollback instructions.
+// Usage: node scripts/deploy.mjs [--dry-run] [--yes] [--workers-dev-registered] [--skip-build] [--skip-backup]
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { databaseHasTables, takeBackup } from './backup-run.mjs'
 import { ScriptError, askYesNo, bucketExists, confirmAccount, createRunner, databaseExists, main, readResourceNames, root } from './wrangler-cli.mjs'
 
 const args = process.argv.slice(2)
@@ -24,18 +25,49 @@ async function requireWorkersDevSubdomain(accountId, { alreadyStated }) {
 }
 
 // The account is in the commands so they run as printed even when the login reaches several accounts.
-function rollbackInstructions(database, bookmark, accountId) {
+function rollbackInstructions(database, bookmark, accountId, backup) {
   const wrangler = `CLOUDFLARE_ACCOUNT_ID=${accountId ?? '<account id>'} npx wrangler`
   return [
     '',
     'Rollback',
     `  Restore point (D1 bookmark): ${bookmark}`,
+    ...(backup ? [`  Backup taken first: ${backup.prefix} (docs/setup.md, "Rolling back")`] : []),
     `  1. Usual fix, code only: \`${wrangler} rollback\` (or redeploy the previous release).`,
     '     Migrations are add-only (ADR 0009), so the previous code still runs on the newer schema.',
     `  2. Last resort, data: \`${wrangler} d1 time-travel restore ${database} --bookmark=${bookmark}\``,
     '     This discards everything written since the bookmark. The free plan keeps restore points for 7 days.',
     '     In PowerShell, set the account first: $env:CLOUDFLARE_ACCOUNT_ID = "<account id>", then run the command without the prefix.',
   ].join('\n')
+}
+
+// The backup comes before the restore point and the migrations, and nothing has changed if it fails.
+// Returns the backup, or null when there is none to take.
+async function backupBeforeMigrations(runner, database, bucket) {
+  if (args.includes('--skip-backup')) {
+    console.log(`Skipping the backup (--skip-backup). Make sure you have a copy: npx wrangler d1 export ${database} --remote --output <file>.sql`)
+    return null
+  }
+  if (dryRun) {
+    console.log("Dry run: a complete backup would be taken here with the Worker's backup code, and deploy would wait for it to finish. It is skipped on a first deploy, when the database has no tables.")
+    return null
+  }
+  try {
+    if (!databaseHasTables(runner, database)) {
+      console.log(`First deploy: D1 database "${database}" has no tables yet, so there is nothing to back up. Skipping the backup.`)
+      return null
+    }
+    return await takeBackup(runner, { database, bucket })
+  } catch (e) {
+    if (!(e instanceof ScriptError)) throw e
+    throw new ScriptError(
+      [
+        `The backup before the migrations did not finish: ${e.message}`,
+        'Nothing was changed: no migrations were applied and nothing was deployed.',
+        'Run `npm run deploy` again. An unfinished backup carries on where it stopped.',
+        `To deploy without one, first make a copy by hand (npx wrangler d1 export ${database} --remote --output <file>.sql), then run \`npm run deploy -- --skip-backup\`.`,
+      ].join('\n'),
+    )
+  }
 }
 
 await main(async () => {
@@ -52,6 +84,8 @@ await main(async () => {
 
   if (!args.includes('--skip-build')) runner.npm(['run', 'build'])
 
+  const backup = await backupBeforeMigrations(runner, database, bucket)
+
   const info = runner.json(['d1', 'time-travel', 'info', database, '--json'], { note: 'records the restore point' })
   const bookmark = dryRun ? '<bookmark>' : info?.bookmark
   if (!bookmark) throw new ScriptError('Could not record a D1 restore point, so nothing was changed.')
@@ -67,10 +101,10 @@ await main(async () => {
   } catch (e) {
     if (!(e instanceof ScriptError)) throw e
     console.error(e.message)
-    console.error(rollbackInstructions(database, bookmark, accountId))
+    console.error(rollbackInstructions(database, bookmark, accountId, backup))
     process.exitCode = 1
     return
   }
   console.log(dryRun ? '\nDry run only. Nothing was changed.' : '\nDeployed.')
-  console.log(rollbackInstructions(database, bookmark, accountId))
+  console.log(rollbackInstructions(database, bookmark, accountId, backup))
 })

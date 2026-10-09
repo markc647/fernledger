@@ -72,25 +72,27 @@ const DRY_RESULT = { dry: true, status: 0, stdout: '', stderr: '' }
 // callers must not rely on a Wrangler prompt as a safeguard (see "What Wrangler answers for itself" in docs/setup.md).
 //
 // Options: note (comment shown in the printed line), allowFailure (return a non-zero result instead of
-// throwing), show (print stdout when the command succeeds). Failures never include Wrangler's own output,
-// which can contain the account email.
+// throwing), show (print stdout when the command succeeds), quiet (don't print the "$ ..." line: a backup
+// makes hundreds of calls). Failures never include Wrangler's own output, which can contain the account email.
 export function createRunner({ dryRun, accountId, log = console.log }) {
-  const echo = (args, note) => log(`$ npx wrangler ${args.join(' ')}${note ? `  # ${note}` : ''}`)
+  const echo = (args, note, quiet) => {
+    if (!quiet) log(`$ npx wrangler ${args.join(' ')}${note ? `  # ${note}` : ''}`)
+  }
   if (dryRun) {
     return {
       dry: true,
-      run: (args, { note } = {}) => (echo(args, note), DRY_RESULT),
-      json: (args, { note } = {}) => (echo(args, note), null),
+      run: (args, { note, quiet } = {}) => (echo(args, note, quiet), DRY_RESULT),
+      json: (args, { note, quiet } = {}) => (echo(args, note, quiet), null),
       npm: (args) => log(`$ npm ${args.join(' ')}`),
     }
   }
-  function run(args, { note, allowFailure = false, show = false } = {}) {
-    echo(args, note)
+  function run(args, { note, allowFailure = false, show = false, quiet = false } = {}) {
+    echo(args, note, quiet)
     const bin = wranglerBin()
     if (!existsSync(bin)) throw new ScriptError('Wrangler is not installed. Run `npm install`, then try again.')
     const env = { ...process.env, CI: 'true' }
     if (accountId) env.CLOUDFLARE_ACCOUNT_ID = accountId
-    const r = spawnSync(process.execPath, [bin, ...args], { cwd: root, encoding: 'utf8', env })
+    const r = spawnSync(process.execPath, [bin, ...args], { cwd: root, encoding: 'utf8', env, maxBuffer: 256 * 1024 * 1024 })
     if (r.error) throw new ScriptError(`Could not start Wrangler (${r.error.code ?? 'unknown error'}). Run \`npm install\`, then try again.`)
     if (r.status !== 0 && !allowFailure) {
       const what = args.filter((a) => !a.startsWith('-')).join(' ')
@@ -137,6 +139,19 @@ export async function askYesNo(question, ifNoTerminal) {
   const answer = await rl.question(`${question} [y/N] `)
   rl.close()
   return /^y(es)?$/i.test(answer.trim())
+}
+
+// Makes the Deployer type `expected` exactly, as a guard before something irreversible. Reads a line from
+// stdin whether or not it is a terminal; end of input counts as not confirmed. Returns true only on an exact match.
+export async function askTyped(prompt, expected) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  const closed = new Promise((done) => rl.once('close', () => done(null)))
+  try {
+    const answer = await Promise.race([rl.question(prompt), closed])
+    return answer === expected
+  } finally {
+    rl.close()
+  }
 }
 
 // Works out which Cloudflare account Wrangler is signed in to and has the Deployer confirm it; returns its ID

@@ -24,6 +24,7 @@ export const accounts = new Hono<AppEnv>()
 
     await recordChange(db, db.prepare('UPDATE accounts SET name = ? WHERE id = ?').bind(name, id), {
       actor: c.var.member,
+      type: 'account',
       summary: `Renamed Account ${account.name} to ${name}`,
       before: { name: account.name },
       after: { name },
@@ -40,6 +41,7 @@ export const accounts = new Hono<AppEnv>()
 
     await recordChange(db, db.prepare('UPDATE accounts SET cutover_date = ? WHERE id = ?').bind(cutoverDate, id), {
       actor: c.var.member,
+      type: 'account',
       summary: cutoverDate === null ? `Cleared the Cutover Date for ${account.name}` : `Set the Cutover Date for ${account.name} to ${cutoverDate}`,
       before: { cutoverDate: account.cutover_date },
       after: { cutoverDate },

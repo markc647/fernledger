@@ -76,9 +76,9 @@ const bucket = (dir) => ({
 })
 
 // Backs up with the Worker's code, as the weekly cron and the following crons would.
-async function backUp(db, bucketDir, time) {
+async function backUp(db, bucketDir, time, prefix) {
   const env = { DB: d1(db), BACKUPS: bucket(bucketDir) }
-  await startBackup(env, time)
+  await startBackup(env, time, prefix)
   for (let i = 0; i < 5; i++) await continueBackup(env)
 }
 
@@ -129,13 +129,13 @@ Line two; DROP TABLE settings; -- "quoted"', '{"a":1}', NULL);
   return { dir, bucketDir, source, target }
 }
 
-function restore(s, args = ['2026-10-12', '--database', 'target', '--local']) {
+function restore(s, args = ['2026-10-12', '--database', 'target', '--local'], env = {}) {
   const base = { ...process.env }
   delete base.CLOUDFLARE_ACCOUNT_ID
   const r = spawnSync(process.execPath, [resolve(root, 'scripts/restore.mjs'), ...args], {
     cwd: root,
     encoding: 'utf8',
-    env: { ...base, FERNLEDGER_WRANGLER: join(s.dir, 'fake-wrangler.cjs'), FAKE_DIR: s.dir },
+    env: { ...base, FERNLEDGER_WRANGLER: join(s.dir, 'fake-wrangler.cjs'), FAKE_DIR: s.dir, ...env },
   })
   const out = r.stdout + r.stderr
   let calls = []
@@ -233,6 +233,28 @@ test('restore will not fetch a part outside the backup it was asked for', async 
   assert.deepEqual(r.loads, [])
 })
 
+test('restore reads a final backup folder from teardown like any other backup', async () => {
+  const s = await scenario()
+  const finalFolder = '2026-10-13-final-20261012T150000123Z' // what backup-run.mjs finalBackupPrefix makes
+  await backUp(s.source, s.bucketDir, Date.parse('2026-10-12T15:00:00Z'), `backups/${finalFolder}`)
+
+  const r = restore(s, [finalFolder, '--database', 'target', '--local'])
+
+  assert.equal(r.status, 0, r.out)
+  assert.deepEqual(dump(s.target), dump(s.source))
+  assert.match(r.out, /Row counts match the manifest/)
+})
+
+test('restore accepts only a date or a final backup folder name, never a path', async () => {
+  const s = await scenario()
+  for (const bad of ['2026-10-12-final-x', '2026-10-12-final-20261012T150000123Z/../2026-10-12', '../2026-10-12', '2026-10-12/', '2026-10-12-final-20261012T150000123Z-extra']) {
+    const r = restore(s, [bad, '--database', 'target', '--local'])
+    assert.equal(r.status, 1, bad)
+    assert.match(r.out, /Usage/, bad)
+    assert.deepEqual(r.calls, [], `${bad} made no Wrangler call`)
+  }
+})
+
 test('restore refuses another backup\'s manifest copied into place', async () => {
   const s = await scenario()
   mkdirSync(join(s.bucketDir, 'backups/2026-10-19'), { recursive: true })
@@ -301,9 +323,12 @@ test('restore needs a date', async () => {
 
 test('restore does not keep the downloaded data around', async () => {
   const s = await scenario()
-  const before = readdirSync(tmpdir()).filter((f) => f.startsWith('fernledger-restore-'))
+  // A private temp folder, so restores run by other tests or checkouts at the same time can't show up here.
+  const temp = join(s.dir, 'temp')
+  mkdirSync(temp)
 
-  restore(s)
+  const r = restore(s, undefined, { TEMP: temp, TMP: temp, TMPDIR: temp })
 
-  assert.deepEqual(readdirSync(tmpdir()).filter((f) => f.startsWith('fernledger-restore-')), before)
+  assert.equal(r.status, 0, r.out)
+  assert.deepEqual(readdirSync(temp), [])
 })

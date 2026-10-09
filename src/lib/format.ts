@@ -56,6 +56,15 @@ export function formatInstantDate(instant: Date | number) {
   return readDay(inNewZealand, date)
 }
 
+const nzClock = new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', hour: 'numeric', minute: '2-digit', hour12: true })
+
+/** A moment (ISO 8601, UTC) as NZ day and time: "Thu 8 Oct 2026, 3:42 pm". Always Pacific/Auckland, whatever the device's time zone. */
+export function formatDateTime(instant: string) {
+  const moment = new Date(instant)
+  const part = Object.fromEntries(nzClock.formatToParts(moment).map(({ type, value }) => [type, value]))
+  return `${formatInstantDate(moment)}, ${part.hour}:${part.minute} ${part.dayPeriod.toLowerCase()}`
+}
+
 /** The plain-language direction of an amount; null for zero. Never "debit" or "credit". */
 export function moneyLabel(cents: number) {
   return cents > 0 ? 'Money in' : cents < 0 ? 'Money out' : null

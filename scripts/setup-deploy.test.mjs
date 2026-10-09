@@ -50,6 +50,7 @@ else if (cmd === 'd1 info') out(state.replication ? { name: words[2], read_repli
 else if (key === 'r2 bucket info') state.buckets.includes(words[3]) ? out({ name: words[3] }) : fail('The specified bucket does not exist. [code: 10006]')
 else if (key === 'r2 bucket create') { state.buckets.push(words[3]); save(); console.log('created') }
 else if (key === 'd1 time-travel info') out({ bookmark: state.bookmark })
+else if (cmd === 'd1 execute') out([{ results: [{ n: 0 }] }]) // no tables yet: a first deploy, so no backup (scripts/backup-teardown.test.mjs covers the rest)
 else if (key === 'd1 migrations apply') console.log('Applied 1 migration')
 else if (words[0] === 'deploy') console.log('Deployed fernledger to https://fernledger.example.workers.dev')
 else console.log('ok ' + cmd)

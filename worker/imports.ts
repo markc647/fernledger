@@ -136,6 +136,7 @@ export const imports = new Hono<AppEnv>()
     const outcome = { accountName: name, replace: replace === true, removed: toRemove, added, dropped, index: chunk.index, count: chunk.count }
     const results = await recordChange(db, statements, {
       actor: c.var.member,
+      type: 'import',
       summary: chunkSummary(outcome),
       ...(setsCutover ? { before: { cutoverDate: existing?.cutover_date ?? null } } : {}),
       after: chunkDetail(outcome, { file, rowsInChunk: rows.length, cutoverDate: effectiveCutover, newAccount: !existing }),
@@ -167,6 +168,7 @@ export const imports = new Hono<AppEnv>()
     const remaining = total - REPLACE_SLICE
     await recordChange(db, db.prepare(DELETE_IMPORTED).bind(accountId, REPLACE_SLICE), {
       actor: c.var.member,
+      type: 'import',
       summary: `Removed ${REPLACE_SLICE} imported rows from ${account.name} to replace its imported history (${remaining} left)`,
       after: { removed: REPLACE_SLICE, remaining },
     })
