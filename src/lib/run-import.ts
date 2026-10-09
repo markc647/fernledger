@@ -24,19 +24,28 @@ export type ImportOptions = {
   replaceAccountId?: number
 }
 
-/** The Import stopped part way: `sent` chunks of `total` were saved. Sending the same file again carries on, because rows already held are skipped. */
+/** The Import stopped part way: `sent` chunks of `total` were saved, and `removed` old rows had been removed when replacing. */
 export class ImportStopped extends Error {
   readonly sent: number
   readonly total: number
-  constructor(sent: number, total: number, cause: unknown) {
+  readonly removed: number
+  /** The free plan's daily database allowance ran out (the Worker answers 429). */
+  readonly dailyLimit: boolean
+  constructor(sent: number, total: number, cause: unknown, removed = 0) {
     super(`Import stopped after ${sent} of ${total} parts`, { cause })
     this.name = 'ImportStopped'
     this.sent = sent
     this.total = total
+    this.removed = removed
+    this.dailyLimit = cause instanceof HttpError && cause.status === 429
   }
 }
 
-/** Steps of clearing a very large history before the first chunk (5,000 rows each, so more than any Account will hold). */
+/**
+ * Steps of clearing a very large history before the first chunk (5,000 rows each, so more than any Account will hold).
+ * Each step is final, and uses 15,000 of the free plan's 100,000 D1 writes a day (a removed row costs 3), so a big
+ * history can hit the daily limit part way; the Worker then answers 429 and the Import stops with a daily-limit message.
+ */
 const MAX_CLEAR_STEPS = 40
 
 /** Sends a parsed file to the Worker one chunk at a time, in order, and adds up what each chunk reports. */
@@ -78,7 +87,7 @@ export async function runImport(file: BankCsvResult, options: ImportOptions, onP
       summary.dropped += result.dropped
       summary.removed += result.removed
     } catch (error) {
-      throw new ImportStopped(index, chunks.length, error)
+      throw new ImportStopped(index, chunks.length, error, summary.removed)
     }
   }
   onProgress(chunks.length, chunks.length)

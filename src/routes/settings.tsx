@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, type ChangeEvent } from 'react'
+import { Status } from '@/components/status'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { featuresQuery } from '@/lib/features'
@@ -145,7 +146,7 @@ function CutoverDates() {
         Cutover Dates
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        A Cutover Date is the day an Account stops taking Transactions from imported files. Imports cover the dates before it, Sync (the daily pull from Akahu) covers it and later, and an Import skips every row dated on or after it. Setting or clearing it deletes nothing already saved. Leave it blank if the Account is not synced with Akahu. When you import a file, Fernledger offers the file's last date as the Cutover Date.
+        A Cutover Date is the day an Account stops taking Transactions from imported files. Imports cover the dates before it, Sync (the daily pull from Akahu) covers it and later, and an Import skips every row dated on or after it. Setting or clearing it deletes nothing already saved: imported rows already saved on or after the date stay, to remove them, use "Replace imported history" on the Import screen. Leave it blank if the Account is not synced with Akahu. When you import a file, Fernledger offers the file's last date as the Cutover Date.
       </p>
       {isError ? (
         <p role="alert" className="mt-3">
@@ -215,8 +216,8 @@ function CutoverForm({ id, name, cutoverDate }: { id: number; name: string; cuto
       </div>
       <p role="status">{save.isSuccess ? 'Cutover Date saved.' : ''}</p>
       {save.isError && (
-        <p role="alert" className="font-medium text-destructive">
-          The Cutover Date could not be saved. Try again.
+        <p role="alert">
+          <Status tone="danger">The Cutover Date could not be saved. Try again.</Status>
         </p>
       )}
     </form>

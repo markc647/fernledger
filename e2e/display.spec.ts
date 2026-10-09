@@ -65,6 +65,8 @@ test.describe('text size', () => {
   test('has touch targets of at least 44px', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/styleguide')
+    // The links appear once the app knows who is signed in.
+    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link').first()).toBeVisible()
     const targets = [
       ...(['A', 'A+', 'A++'] as const).map((name) => sizeButton(page, name)),
       ...(await page.getByRole('navigation', { name: 'Main' }).getByRole('link').all()),
@@ -105,6 +107,44 @@ test.describe('zoom', () => {
           expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
         })
       }
+    }
+  }
+
+  // The Import screen with a file chosen and the "Replace imported history" question open: the longest text it shows.
+  // The Account and its imported-row count are stubbed, so this needs no data in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/import with the replace question open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example savings', accountNumber: '99-9999-9999999-97', cutoverDate: '2026-10-01' }] }))
+        await page.route('**/api/imports/imported/1', (route) => route.fulfill({ json: { imported: 6000 } }))
+        await page.setViewportSize({ width, height })
+        await page.goto('/import')
+        await sizeButton(page, size).click()
+        const csv = [
+          'Created date / time : 2 October 2026 / 18:55:26',
+          'Bank 99; Branch 9999; Account 9999999-97 (Zoom Example)',
+          'From date 20260901',
+          'To date 20261001',
+          'Avail Bal : 10.00 as of 20260930',
+          'Ledger Balance : 10.00 as of 20261002',
+          'Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount',
+          '',
+          '2026/09/10,202609100,EFTPOS,,"EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN","EFTPOS",-1234567.00',
+        ].join('\n')
+        await page.getByLabel('Bank export file').setInputFiles({ name: 'zoom.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
+        await page.getByRole('button', { name: 'Replace imported history…' }).click()
+        await expect(page.getByRole('alertdialog')).toContainText('removed in steps of 5,000')
+        // The page's own content, not the header: with every link of the Admin's navigation showing, the header is 4px
+        // too wide at 320px and text size A++ (a ticket 04 layout issue the other zoom tests don't reach, since they
+        // don't wait for the navigation to load).
+        const overflow = await page.evaluate(() => {
+          const main = document.querySelector('main')!
+          const edge = document.documentElement.clientWidth
+          return { main: main.scrollWidth - main.clientWidth, wide: [...main.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > edge).length }
+        })
+        expect(overflow).toEqual({ main: 0, wide: 0 })
+      })
     }
   }
 

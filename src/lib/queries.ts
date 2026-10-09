@@ -23,3 +23,15 @@ export const transactionsQuery = (page: number) =>
       return res.json()
     },
   })
+
+/** How many Import-sourced Transactions an Account holds, so a replace can say what it will remove. Read fresh each time it's asked. */
+export const importedRowsQuery = (accountId: number) =>
+  queryOptions({
+    queryKey: ['imported-rows', accountId],
+    gcTime: 0,
+    queryFn: async () => {
+      const res = await api.imports.imported[':accountId'].$get({ param: { accountId: String(accountId) } })
+      if (!res.ok) throw new HttpError(res.status)
+      return (await res.json()).imported
+    },
+  })

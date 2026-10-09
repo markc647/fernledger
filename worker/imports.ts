@@ -3,6 +3,7 @@ import * as z from 'zod/mini'
 import { accountName, bankAccountNumber, isoDate, normaliseAccountNumber } from './account-fields'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
+import { chunkDetail, chunkStatements, chunkSummary, replaceWouldLeaveNothing } from './import-chunk'
 import { badRowField, MAX_CHUNKS, REPLACE_SLICE, serialiseRows, type ImportRow } from './import-rows'
 import { afterTransactionsChanged } from './transactions-changed'
 import { validate } from './validate'
@@ -15,8 +16,9 @@ import { validate } from './validate'
 //   one INSERT statement with one bound parameter.
 // - A bound string may be 2 MB. Row fields are length-capped (import-rows.ts); 500 worst-case rows measured 335 KB.
 // - 10 ms of CPU: reading, checking and re-serialising 500 typical rows (86 KB) measured about 1-2 ms in Node.
-// - A chunk request costs at most 4 D1 queries (find the Account, count the Import-sourced rows to replace, count the
-//   rows it already holds, then one batch of at most 4 statements), well under 50.
+// - A chunk request costs at most 7 D1 queries (find the Account, count the Import-sourced rows to replace, count the
+//   rows it already holds, then one batch of at most 4 statements: create the Account or set its Cutover Date, remove
+//   the old rows, insert the rows, write the Change Log entry), well under 50.
 // - MAX_CHUNKS (import-rows.ts) keeps one Import within the free plan's 100k D1 row writes a day.
 // - Rows dated on or after the Account's Cutover Date are filtered out in SQL (`json_each` rows are compared there),
 //   so the Worker never loops over them.
@@ -81,13 +83,18 @@ const COUNT_NEW_ROWS = `
 
 const COUNT_IMPORTED = "SELECT COUNT(*) AS n FROM transactions WHERE account_id = ? AND source = 'import'"
 
-// Only ever Import-sourced rows: Sync-sourced Transactions are never removed here.
-const DELETE_IMPORTED = "DELETE FROM transactions WHERE account_id = ? AND source = 'import'"
-const DELETE_IMPORTED_SLICE = `DELETE FROM transactions WHERE id IN (SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT ?2)`
+// Only ever Import-sourced rows: Sync-sourced Transactions are never removed here. At most ?2 (REPLACE_SLICE) rows go
+// in one statement, so rows added between the count and the delete can't push one replace past the write budget in
+// ADR 0004: a removed row costs 3 D1 writes (the row and its two indexes), so a slice is 15,000 of the day's 100,000.
+const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT ?2)`
 
 type AccountRow = { id: number; name: string; cutover_date: string | null }
 
 export const imports = new Hono<AppEnv>()
+  // Saves one chunk of an Import. With `replace` (first chunk only) the Account's Import-sourced rows are removed in the
+  // same batch. That makes a replace safe to repeat as a whole (the Admin chooses the file again and replaces again),
+  // but not to replay: a stale or retried first chunk would also remove whatever later chunks had saved since. The
+  // browser never resends a saved chunk, and if a replace stops part way the Admin simply replaces again from the start.
   .post('/chunks', validate('json', chunkRequest), async (c) => {
     const { account, chunk, file, rows, cutoverDate, replace } = c.req.valid('json')
     const db = c.env.DB
@@ -109,49 +116,46 @@ export const imports = new Hono<AppEnv>()
     const counts = (await db.prepare(COUNT_NEW_ROWS).bind(replace ? null : (existing?.id ?? null), rowsJson, effectiveCutover).first<{ ids: number; held: number; dropped: number }>())!
     const { dropped } = counts
     const added = counts.ids - counts.held
+    // The browser sends rows oldest first, so a first chunk that is entirely on or after the Cutover Date means the whole file is.
+    if (replaceWouldLeaveNothing({ replace: replace === true, removed: toRemove, dropped, rowsInChunk: rows.length })) {
+      return c.json({ error: 'Every row in this file is dated on or after the Cutover Date, so replacing would remove the old history and import nothing' }, 400)
+    }
     const name = existing?.name ?? account.name ?? number
     const setsCutover = cutoverDate !== undefined
 
-    const statements = [
-      ...(existing ? [] : [db.prepare('INSERT INTO accounts (account_number, name, cutover_date) VALUES (?, ?, ?)').bind(number, name, effectiveCutover)]),
-      ...(existing && setsCutover ? [db.prepare('UPDATE accounts SET cutover_date = ? WHERE id = ?').bind(cutoverDate, existing.id)] : []),
-      ...(replace && existing ? [db.prepare(DELETE_IMPORTED).bind(existing.id)] : []),
-      db.prepare(INSERT_ROWS).bind(number, rowsJson, effectiveCutover),
-    ]
-    const part = chunk.count > 1 ? ` (part ${chunk.index + 1} of ${chunk.count})` : ''
-    const skipped = dropped > 0 ? `, skipped ${dropped} dated on or after the Cutover Date` : ''
-    // Every chunk is its own Change Log entry, written in the same batch as its rows, so the log says exactly what
-    // was saved even if the Import stops part way.
+    const statements = chunkStatements(
+      { newAccount: !existing, setsCutover, replace: replace === true },
+      {
+        createAccount: () => db.prepare('INSERT INTO accounts (account_number, name, cutover_date) VALUES (?, ?, ?)').bind(number, name, effectiveCutover),
+        setCutover: () => db.prepare('UPDATE accounts SET cutover_date = ? WHERE id = ?').bind(cutoverDate, existing!.id),
+        removeImported: () => db.prepare(DELETE_IMPORTED).bind(existing!.id, REPLACE_SLICE),
+        insertRows: () => db.prepare(INSERT_ROWS).bind(number, rowsJson, effectiveCutover),
+      },
+    )
+    // Every chunk is its own Change Log entry, written in the same batch as its rows.
+    const outcome = { accountName: name, replace: replace === true, removed: toRemove, added, dropped, index: chunk.index, count: chunk.count }
     const results = await recordChange(db, statements, {
       actor: c.var.member,
-      summary: replace
-        ? `Replaced imported history in ${name}: removed ${toRemove} rows, imported ${added} rows${skipped}${part}`
-        : `Imported ${added} rows into ${name}${skipped}${part}`,
+      summary: chunkSummary(outcome),
       ...(setsCutover ? { before: { cutoverDate: existing?.cutover_date ?? null } } : {}),
-      after: {
-        adapter: file.adapterId,
-        part: chunk.index + 1,
-        parts: chunk.count,
-        added,
-        duplicates: rows.length - dropped - added,
-        dropped,
-        cutoverDate: effectiveCutover,
-        replaced: replace === true,
-        removed: toRemove,
-        fileRows: file.rowCount,
-        skipped: file.skipped,
-        from: file.from,
-        to: file.to,
-        newAccount: !existing,
-      },
+      after: chunkDetail(outcome, { file, rowsInChunk: rows.length, cutoverDate: effectiveCutover, newAccount: !existing }),
     })
     const accountId = existing?.id ?? results[0]!.meta.last_row_id
     await afterTransactionsChanged(db, { accountId })
     const inserted = results.at(-1)!.meta.changes
     return c.json({ accountId, added: inserted, duplicates: rows.length - dropped - inserted, dropped, removed: replace && existing ? results.at(-2)!.meta.changes : 0 })
   })
-  // One step of clearing a history too big to replace in a single chunk (REPLACE_SLICE rows): the Admin's browser calls
-  // it until the rest fits, then sends the first chunk with `replace`. Each step is logged.
+  // How many Import-sourced rows an Account holds, so the Admin is told what a replace will remove before confirming.
+  .get('/imported/:accountId', async (c) => {
+    const accountId = Number(c.req.param('accountId'))
+    const db = c.env.DB
+    const account = Number.isSafeInteger(accountId) ? await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first() : null
+    if (!account) return c.json({ error: 'Not found' }, 404)
+    return c.json({ imported: (await db.prepare(COUNT_IMPORTED).bind(accountId).first<{ n: number }>())?.n ?? 0 })
+  })
+  // One step of clearing a history too big to replace in a single chunk (more than REPLACE_SLICE rows): the Admin's
+  // browser calls it until the rest fits, then sends the first chunk with `replace`. Each step is logged. It refuses
+  // (409) when the history already fits, so it can't be used to remove rows outside a replace.
   .post('/clear-history', validate('json', clearRequest), async (c) => {
     const { accountId } = c.req.valid('json')
     const db = c.env.DB
@@ -159,13 +163,13 @@ export const imports = new Hono<AppEnv>()
     if (!account) return c.json({ error: 'Not found' }, 404)
 
     const total = (await db.prepare(COUNT_IMPORTED).bind(accountId).first<{ n: number }>())?.n ?? 0
-    const removed = Math.min(total, REPLACE_SLICE)
-    const remaining = total - removed
-    await recordChange(db, db.prepare(DELETE_IMPORTED_SLICE).bind(accountId, REPLACE_SLICE), {
+    if (total <= REPLACE_SLICE) return c.json({ error: 'The imported history is small enough to replace in one go', remaining: total }, 409)
+    const remaining = total - REPLACE_SLICE
+    await recordChange(db, db.prepare(DELETE_IMPORTED).bind(accountId, REPLACE_SLICE), {
       actor: c.var.member,
-      summary: `Removed ${removed} imported rows from ${account.name} to replace its imported history (${remaining} left)`,
-      after: { removed, remaining },
+      summary: `Removed ${REPLACE_SLICE} imported rows from ${account.name} to replace its imported history (${remaining} left)`,
+      after: { removed: REPLACE_SLICE, remaining },
     })
     await afterTransactionsChanged(db, { accountId })
-    return c.json({ removed, remaining })
+    return c.json({ removed: REPLACE_SLICE, remaining })
   })

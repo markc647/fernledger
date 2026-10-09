@@ -1,5 +1,5 @@
 import * as z from 'zod/mini'
-import { isRealDate } from './import-rows'
+import { isRealDate } from './dates'
 
 /** An Account's display name, as the Admin types it (trimmed, 1 to 60 characters). */
 export const accountName = z.string().check(z.trim(), z.minLength(1), z.maxLength(60))

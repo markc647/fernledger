@@ -294,6 +294,60 @@ describe('Replace imported history', () => {
     expect(await storedIds()).toEqual(['NEW1'])
   })
 
+  it('refuses a replace whose rows are all on or after the Account’s Cutover Date, and keeps the old history', async () => {
+    await sendChunk([row('OLD1', '2026-09-01')])
+    await putCutover(await accountId(), '2026-09-03')
+    await env.DB.prepare('DELETE FROM change_log').run()
+
+    const res = await sendChunk([row('NEW1', '2026-09-03'), row('NEW2', '2026-09-04')], { replace: true })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: expect.stringContaining('dated on or after the Cutover Date') })
+    expect(await storedIds()).toEqual(['OLD1'])
+    expect(await changeLog()).toEqual([])
+  })
+
+  it('refuses a replace whose rows are all on or after the Cutover Date it sets, and keeps the old history and the old Cutover Date', async () => {
+    await sendChunk([row('OLD1', '2026-09-01')])
+
+    const res = await sendChunk([row('NEW1', '2026-09-03')], { replace: true, cutoverDate: '2026-09-03' })
+
+    expect(res.status).toBe(400)
+    expect(await storedIds()).toEqual(['OLD1'])
+    expect((await accounts())[0]!.cutoverDate).toBeNull()
+  })
+
+  it('still replaces when at least one row of the file is before the Cutover Date', async () => {
+    await sendChunk([row('OLD1', '2026-09-01')])
+    await putCutover(await accountId(), '2026-09-03')
+
+    const res = await sendChunk([row('NEW1', '2026-09-02'), row('NEW2', '2026-09-03')], { replace: true })
+
+    expect(res.status).toBe(200)
+    expect(await storedIds()).toEqual(['NEW1'])
+  })
+
+  it('replaces exactly 5,000 imported rows in one chunk, the most it removes at once', async () => {
+    await sendChunk([row('OLD1', '2026-09-01')])
+    await seedImportRows(await accountId(), 4999)
+
+    const res = await sendChunk([row('NEW1', '2026-09-03')], { replace: true })
+
+    expect(await res.json()).toMatchObject({ added: 1, removed: 5000 })
+    expect(await storedIds()).toEqual(['NEW1'])
+  })
+
+  it('answers 429 with a plain message when D1 says the daily allowance is used up, and saves nothing', async () => {
+    await sendChunk([row('OLD1', '2026-09-01')])
+    await env.DB.prepare("CREATE TRIGGER fail_insert BEFORE INSERT ON transactions WHEN NEW.bank_unique_id = 'NEW1' BEGIN SELECT RAISE(ABORT, 'exceeded the daily rows written limit'); END").run()
+
+    const res = await sendChunk([row('NEW1', '2026-09-03')], { replace: true })
+
+    expect(res.status).toBe(429)
+    expect(await res.json()).toEqual({ error: 'Daily limit reached' })
+    expect(await storedIds()).toEqual(['OLD1'])
+  })
+
   it('leaves the history alone and says how many remain when there are too many rows to remove with one chunk', async () => {
     await sendChunk([row('OLD1', '2026-09-01')])
     await seedImportRows(await accountId(), 5000) // 5,001 Import-sourced rows in all
@@ -333,17 +387,54 @@ describe('POST /api/imports/clear-history', () => {
   it('never removes Sync-sourced rows', async () => {
     await sendChunk([row('OLD1', '2026-09-01')])
     const id = await accountId()
+    await seedImportRows(id, 5000)
     await addSyncRow(id, 'SYNC1')
 
-    expect(await (await clear(id)).json()).toEqual({ removed: 1, remaining: 0 })
+    expect(await (await clear(id)).json()).toEqual({ removed: 5000, remaining: 1 })
 
-    expect(await stored()).toMatchObject([{ id: 'SYNC1', source: 'sync' }])
+    expect((await stored()).map((t) => t.source).sort()).toEqual(['import', 'sync'])
+  })
+
+  it('leaves the Import-sourced rows of other Accounts alone', async () => {
+    await sendChunk([row('OLD1', '2026-09-01')])
+    await sendChunk([row('OTHER1', '2026-09-01')], { number: current })
+    await seedImportRows(await accountId(), 5200)
+    await seedImportRows(await accountId(current), 5200)
+
+    await clear(await accountId())
+
+    expect(await storedIds(current)).toHaveLength(5201)
+  })
+
+  it('refuses (409) when the history is small enough to replace in one go, so it is only a step of a replace, and removes nothing', async () => {
+    await sendChunk([row('OLD1', '2026-09-01')])
+    const id = await accountId()
+    await seedImportRows(id, 4999) // 5,000 Import-sourced rows: exactly what one replace removes
+    await env.DB.prepare('DELETE FROM change_log').run()
+
+    const res = await clear(id)
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ remaining: 5000 })
+    expect(await storedIds()).toHaveLength(5000)
+    expect(await changeLog()).toEqual([])
+  })
+
+  it.each([0, -1, 'one', 1.5, null])('refuses accountId %j as an invalid request, and removes nothing', async (bad) => {
+    await sendChunk([row('OLD1', '2026-09-01')])
+    await seedImportRows(await accountId(), 5200)
+
+    const res = await call('/api/imports/clear-history', { method: 'POST', body: { accountId: bad } })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid request', field: 'accountId' })
+    expect(await storedIds()).toHaveLength(5201)
   })
 
   it('then lets the replacement go through in one chunk, so a large history is replaced in steps', async () => {
     await sendChunk([row('OLD1', '2026-09-01')])
     await seedImportRows(await accountId(), 5000)
-    await clear(await accountId())
+    expect((await clear(await accountId())).status).toBe(200)
 
     const res = await sendChunk([row('NEW1', '2026-09-03')], { replace: true })
 
@@ -362,5 +453,23 @@ describe('POST /api/imports/clear-history', () => {
   it('answers 404 for an Account that does not exist, with no Change Log entry', async () => {
     expect((await clear(9999)).status).toBe(404)
     expect(await changeLog()).toEqual([])
+  })
+})
+
+describe('GET /api/imports/imported/:accountId', () => {
+  const imported = (id: number | string, who: Who = 'admin') => call(`/api/imports/imported/${id}`, { who })
+
+  it('counts only the Import-sourced rows of the Account', async () => {
+    await sendChunk([row('OLD1', '2026-09-01'), row('OLD2', '2026-09-02')])
+    await sendChunk([row('OTHER1', '2026-09-01')], { number: current })
+    const id = await accountId()
+    await addSyncRow(id, 'SYNC1')
+
+    expect(await (await imported(id)).json()).toEqual({ imported: 2 })
+  })
+
+  it('answers 404 for an Account that does not exist', async () => {
+    expect((await imported(9999)).status).toBe(404)
+    expect((await imported('x')).status).toBe(404)
   })
 })

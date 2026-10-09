@@ -1,13 +1,17 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Amount } from '@/components/amount'
+import { ResponsiveTable } from '@/components/responsive-table'
+import { Status } from '@/components/status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { adapters, BankCsvError, parseBankCsv, type BankCsvResult } from '@/lib/bank-csv'
-import { formatDate, formatAmount } from '@/lib/format'
-import { countOnOrAfter, MAX_IMPORT_ROWS } from '@/lib/import-chunks'
+import { formatDate } from '@/lib/format'
+import { countOnOrAfter, DAILY_ROW_WRITES, MAX_IMPORT_ROWS, REPLACE_SLICE, replaceWrites, WRITES_PER_ROW } from '@/lib/import-chunks'
+import { describeStop } from '@/lib/import-stop'
 import { meQuery } from '@/lib/me'
-import { accountsQuery } from '@/lib/queries'
+import { accountsQuery, importedRowsQuery } from '@/lib/queries'
 import { ImportStopped, runImport, type ImportSummary } from '@/lib/run-import'
 
 export const Route = createFileRoute('/import')({
@@ -20,7 +24,7 @@ type Step =
   | { name: 'preview'; file: BankCsvResult }
   | { name: 'sending'; sent: number; total: number }
   | { name: 'done'; summary: ImportSummary }
-  | { name: 'stopped'; sent: number; total: number; replacing: boolean }
+  | { name: 'stopped'; sent: number; total: number; replacing: boolean; removed: number; dailyLimit: boolean }
 
 const PREVIEW_ROWS = 5
 const SHOWN_ERRORS = 10
@@ -76,10 +80,15 @@ function ImportFlow() {
       )
       setStep({ name: 'done', summary })
     } catch (error) {
-      setStep(error instanceof ImportStopped ? { name: 'stopped', sent: error.sent, total: error.total, replacing } : { name: 'stopped', sent: 0, total: 0, replacing })
+      setStep(
+        error instanceof ImportStopped
+          ? { name: 'stopped', sent: error.sent, total: error.total, replacing, removed: error.removed, dailyLimit: error.dailyLimit }
+          : { name: 'stopped', sent: 0, total: 0, replacing, removed: 0, dailyLimit: false },
+      )
     } finally {
       await queryClient.invalidateQueries({ queryKey: ['accounts'] })
       await queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      await queryClient.invalidateQueries({ queryKey: ['imported-rows'] })
     }
   }
 
@@ -137,16 +146,14 @@ function ImportFlow() {
   }
 
   if (step.name === 'stopped') {
+    const { headline, happened, next } = describeStop(step)
     return (
-      <div className="mt-4 space-y-4">
-        <p role="alert" className="font-medium text-destructive">
-          The Import stopped{step.total > 0 ? ` after ${step.sent} of ${step.total} parts were saved` : ''}.
+      <div className="mt-4 max-w-xl space-y-4">
+        <p role="alert">
+          <Status tone="danger">{headline}</Status>
         </p>
-        {step.replacing ? (
-          <p>The old imported history may already have been removed. Choose the same file again and use "Replace imported history" to finish: rows already saved are recognised and skipped.</p>
-        ) : (
-          <p>Nothing is lost. Choose the same file again and import it: rows already saved are recognised and skipped.</p>
-        )}
+        {happened && <p className="font-medium">{happened}</p>}
+        <p>{next}</p>
         <Button size="touch" onClick={reset}>
           Choose the file again
         </Button>
@@ -205,6 +212,12 @@ function Preview(props: {
   const adapter = adapters.find((a) => a.id === file.adapterId)
   const count = file.rows.length
   const tooMany = count > MAX_IMPORT_ROWS
+  const replaceButton = useRef<HTMLButtonElement>(null)
+  // The Cutover Date that will apply to this Import: the one being set, else the Account's own.
+  const effectiveCutover = props.setCutover ? file.dateRange.to : (existing?.cutoverDate ?? null)
+  // The Worker refuses a replace that would remove the old history and import nothing; the screen says so first.
+  const nothingToReplaceWith = count > 0 && countOnOrAfter(file.rows, effectiveCutover) === count
+  const firstRows = file.rows.slice(0, PREVIEW_ROWS)
   return (
     <section aria-labelledby="preview-heading" className="space-y-4">
       <h2 id="preview-heading" className="text-xl font-semibold">
@@ -236,7 +249,7 @@ function Preview(props: {
         </div>
       )}
 
-      <CutoverChoice file={file} accountCutover={existing?.cutoverDate ?? null} setCutover={props.setCutover} onSetCutover={props.onSetCutover} />
+      <CutoverChoice file={file} accountCutover={existing?.cutoverDate ?? null} effective={effectiveCutover} setCutover={props.setCutover} onSetCutover={props.onSetCutover} />
 
       {file.errors.length > 0 && (
         <div>
@@ -261,27 +274,16 @@ function Preview(props: {
       )}
 
       {count > 0 && (
-        <div className="overflow-x-auto" role="region" aria-label="First rows in this file" tabIndex={0}>
-          <table className="w-full text-left">
-            <caption className="pb-1 text-left text-sm text-muted-foreground">First {Math.min(PREVIEW_ROWS, count)} rows in the file</caption>
-            <thead>
-              <tr className="border-b">
-                <th scope="col" className="py-2 pe-4 font-medium">Date</th>
-                <th scope="col" className="py-2 pe-4 font-medium">Description</th>
-                <th scope="col" className="py-2 text-right font-medium">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {file.rows.slice(0, PREVIEW_ROWS).map((row) => (
-                <tr key={row.uniqueId} className="border-b">
-                  <td className="py-2 pe-4 whitespace-nowrap">{formatDate(row.date)}</td>
-                  <td className="py-2 pe-4">{row.payee || row.bankMemo}</td>
-                  <td className="py-2 text-right tabular-nums whitespace-nowrap">{formatAmount(row.amountCents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ResponsiveTable
+          caption={`First ${firstRows.length} rows in the file`}
+          rows={firstRows}
+          getRowKey={(row) => row.uniqueId}
+          columns={[
+            { key: 'date', header: 'Date', cell: (row) => formatDate(row.date) },
+            { key: 'description', header: 'Description', cell: (row) => row.payee || row.bankMemo },
+            { key: 'amount', header: 'Amount', align: 'end', cell: (row) => <Amount cents={row.amountCents} /> },
+          ]}
+        />
       )}
 
       <div className="flex flex-wrap gap-2">
@@ -289,7 +291,15 @@ function Preview(props: {
           Import {count} transactions
         </Button>
         {existing && (
-          <Button size="touch" variant="outline" disabled={count === 0 || tooMany || props.confirmingReplace} onClick={() => props.onConfirmingReplace(true)}>
+          <Button
+            ref={replaceButton}
+            size="touch"
+            variant="outline"
+            className="max-w-full py-2 whitespace-normal"
+            disabled={count === 0 || tooMany || nothingToReplaceWith}
+            aria-describedby={nothingToReplaceWith ? 'replace-blocked' : undefined}
+            onClick={() => props.onConfirmingReplace(true)}
+          >
             Replace imported history…
           </Button>
         )}
@@ -297,47 +307,110 @@ function Preview(props: {
           Cancel
         </Button>
       </div>
+      {existing && nothingToReplaceWith && (
+        <p id="replace-blocked" className="max-w-xl">
+          <Status tone="warning">Every row in this file is dated on or after the Cutover Date, so there is nothing to replace the old history with.</Status>
+        </p>
+      )}
 
       {existing && props.confirmingReplace && (
-        <section role="alertdialog" aria-labelledby="replace-heading" aria-describedby="replace-text" className="max-w-xl space-y-3 rounded-lg border-2 border-foreground p-4">
-          <h3 id="replace-heading" className="text-lg font-semibold">
-            Replace the imported history of {existing.name}?
-          </h3>
-          <p id="replace-text">
-            This removes every Transaction that was imported into this Account, then imports this file in its place. Transactions that came from Sync are not touched. It can't be undone, except by importing the old files again. The Change Log records it.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button size="touch" autoFocus onClick={props.onReplace}>
-              Yes, replace imported history
-            </Button>
-            <Button size="touch" variant="outline" onClick={() => props.onConfirmingReplace(false)}>
-              No, keep what is there
-            </Button>
-          </div>
-        </section>
+        <ReplaceDialog
+          account={existing}
+          incomingRows={count - countOnOrAfter(file.rows, effectiveCutover)}
+          onReplace={props.onReplace}
+          onCancel={() => {
+            props.onConfirmingReplace(false)
+            // The dialog's own button is about to unmount; put focus back where the Admin was rather than on the page.
+            replaceButton.current?.focus()
+          }}
+        />
       )}
     </section>
   )
 }
 
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-NZ')} ${n === 1 ? one : many}`
+
+/**
+ * Asks before replacing an Account's imported history. It opens with the safe answer focused, Escape says no, and it
+ * says how many imported Transactions will go. A history of more than REPLACE_SLICE rows goes in final steps, and one
+ * too big for a day's database writes (ADR 0004) can't finish today, so the Admin is told that before confirming.
+ */
+function ReplaceDialog(props: { account: { id: number; name: string }; incomingRows: number; onReplace: () => void; onCancel: () => void }) {
+  const { data: imported, isError } = useQuery(importedRowsQuery(props.account.id))
+  const keepButton = useRef<HTMLButtonElement>(null)
+  useEffect(() => keepButton.current?.focus(), [])
+  const inSteps = imported !== undefined && imported > REPLACE_SLICE
+  const overOneDay = imported !== undefined && replaceWrites(imported, props.incomingRows) > DAILY_ROW_WRITES
+  return (
+    <section
+      role="alertdialog"
+      aria-labelledby="replace-heading"
+      aria-describedby="replace-text"
+      className="max-w-xl space-y-3 rounded-lg border-2 border-foreground p-4"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') props.onCancel()
+      }}
+    >
+      <h3 id="replace-heading" className="text-lg font-semibold">
+        Replace the imported history of {props.account.name}?
+      </h3>
+      <div id="replace-text" className="space-y-2">
+        {isError ? (
+          <p>Fernledger couldn't count the imported Transactions, so it can't replace them now. Choose "No" and try again.</p>
+        ) : imported === undefined ? (
+          <p>Counting the imported Transactions.</p>
+        ) : (
+          <p>
+            {imported === 0
+              ? 'There are no imported Transactions to remove, so this just imports the file. '
+              : `This removes the ${plural(imported, 'Transaction', 'Transactions')} that ${imported === 1 ? 'was' : 'were'} imported into this Account, then imports this file in its place. `}
+            Transactions that came from Sync are not touched. It can't be undone, except by importing the old files again. The Change Log records it.
+          </p>
+        )}
+        {inSteps && (
+          <p>
+            That is more than {REPLACE_SLICE.toLocaleString('en-NZ')}, so the old Transactions are removed in steps of {REPLACE_SLICE.toLocaleString('en-NZ')} before the file is imported. Each step is final: if the
+            Import stops part way, the part of the old history already removed can't be put back.{' '}
+            {overOneDay
+              ? `Removing and importing this many Transactions takes more database writes than the free plan allows in a day (${DAILY_ROW_WRITES.toLocaleString('en-NZ')}). Fernledger stops when the limit is reached, and you choose the same file again tomorrow to finish.`
+              : `Each step uses about ${(REPLACE_SLICE * WRITES_PER_ROW).toLocaleString('en-NZ')} of the ${DAILY_ROW_WRITES.toLocaleString('en-NZ')} database writes the free plan allows each day.`}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button ref={keepButton} size="touch" className="max-w-full py-2 whitespace-normal" onClick={props.onCancel}>
+          No, keep what is there
+        </Button>
+        <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" disabled={imported === undefined} onClick={props.onReplace}>
+          Yes, replace imported history
+        </Button>
+      </div>
+    </section>
+  )
+}
+
 /** Tells the Admin what the Account's Cutover Date will do to this file, and offers the file's last date as the Cutover Date. */
-function CutoverChoice(props: { file: BankCsvResult; accountCutover: string | null; setCutover: boolean; onSetCutover: (set: boolean) => void }) {
-  const { file, accountCutover } = props
-  const effective = props.setCutover ? file.dateRange.to : accountCutover
+function CutoverChoice(props: { file: BankCsvResult; accountCutover: string | null; effective: string | null; setCutover: boolean; onSetCutover: (set: boolean) => void }) {
+  const { file, accountCutover, effective } = props
   const dropped = countOnOrAfter(file.rows, effective)
   return (
     <div className="max-w-xl space-y-2">
-      {accountCutover !== null && <p>This Account's Cutover Date is {formatDate(accountCutover)}. Rows dated on or after it are not imported, because they come from Sync.</p>}
-      <div className="flex items-start gap-2">
-        <input id="set-cutover" type="checkbox" className="mt-1 size-5" checked={props.setCutover} onChange={(event) => props.onSetCutover(event.target.checked)} />
-        <label htmlFor="set-cutover">
-          {accountCutover === null ? 'Set' : 'Change'} the Cutover Date to the last date in this file, {formatDate(file.dateRange.to)}. Rows dated on or after it are not imported, because they will come from Sync.
-        </label>
-      </div>
+      {accountCutover !== null && <p>This Account's Cutover Date is {formatDate(accountCutover)}. Rows dated on or after it are not imported.</p>}
+      {/* The label is the hit area: the box itself is 20px, but the whole padded row is at least 44px tall. */}
+      <label htmlFor="set-cutover" className="flex min-h-11 cursor-pointer items-start gap-3 py-2">
+        <input id="set-cutover" type="checkbox" className="mt-0.5 size-5 shrink-0" checked={props.setCutover} onChange={(event) => props.onSetCutover(event.target.checked)} />
+        <span>
+          {accountCutover === null ? 'Set' : 'Change'} the Cutover Date to the last date in this file, {formatDate(file.dateRange.to)}. Rows dated on or after it are not imported. This is for an Account you'll sync with Akahu; leave it
+          unticked otherwise.
+        </span>
+      </label>
       {effective !== null && (
-        <p role="status" className="font-medium">
-          {dropped} {dropped === 1 ? 'row' : 'rows'} in this file {dropped === 1 ? 'is' : 'are'} dated on or after {formatDate(effective)} and will not be imported.
-        </p>
+        <div role="status">
+          <Status tone={dropped > 0 ? 'warning' : 'neutral'}>
+            {dropped} {dropped === 1 ? 'row' : 'rows'} in this file {dropped === 1 ? 'is' : 'are'} dated on or after {formatDate(effective)} and will not be imported.
+          </Status>
+        </div>
       )}
     </div>
   )

@@ -54,7 +54,7 @@ test('the Admin changes and clears the Cutover Date in Settings, which explains 
   await signInAs(context, 'admin')
   await page.goto('/settings')
   await expect(page.getByRole('heading', { level: 2, name: 'Cutover Dates' })).toBeVisible()
-  await expect(page.getByText('Setting or clearing it deletes nothing already saved.')).toBeVisible()
+  await expect(page.getByText('Setting or clearing it deletes nothing already saved: imported rows already saved on or after the date stay')).toBeVisible()
   const field = page.getByLabel(`Cutover Date for ${name}`, { exact: true })
   await expect(field).toHaveValue('2026-10-01')
   await noAxeViolations(page)
@@ -77,13 +77,23 @@ test('the Admin replaces imported history after confirming, and the old rows go'
   await chooseFile(page, asbFile(suffix(testInfo), ['2026/09/10', '2026/09/11', '2026/09/12']))
   await expect(page.getByText(`Existing Account: ${accountName(testInfo)}`)).toBeVisible()
 
-  await page.getByRole('button', { name: 'Replace imported history…' }).click()
-  await expect(page.getByRole('alertdialog')).toContainText('removes every Transaction that was imported into this Account')
+  const trigger = page.getByRole('button', { name: 'Replace imported history…' })
+  const dialog = page.getByRole('alertdialog')
+  await trigger.click()
+  await expect(dialog).toContainText('removes the 2 Transactions that were imported into this Account')
+  // The safe answer has focus, so Enter or a stray tap doesn't remove anything.
+  await expect(page.getByRole('button', { name: 'No, keep what is there' })).toBeFocused()
   await noAxeViolations(page)
-  await page.getByRole('button', { name: 'No, keep what is there' }).click()
-  await expect(page.getByRole('alertdialog')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
 
-  await page.getByRole('button', { name: 'Replace imported history…' }).click()
+  await trigger.click()
+  await page.getByRole('button', { name: 'No, keep what is there' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+
+  await trigger.click()
   await page.getByRole('button', { name: 'Yes, replace imported history' }).click()
 
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
@@ -92,8 +102,27 @@ test('the Admin replaces imported history after confirming, and the old rows go'
 
   await page.getByRole('link', { name: 'See the transactions' }).click()
   const name = accountName(testInfo)
-  await expect(page.getByRole('row', { name: new RegExp(`Sat 12 Sep 2026 ${name} EXAMPLE SHOP 12`) })).toBeVisible()
+  await expect(page.getByRole('row', { name: new RegExp(`Sat 12 Sept 2026 ${name} EXAMPLE SHOP 12`) })).toBeVisible()
   await expect(page.getByRole('row', { name: new RegExp(`${name} EXAMPLE SHOP 29`) })).toHaveCount(0)
+})
+
+test('the Cutover Date checkbox has a touch target of at least 44px', async ({ page, context }, testInfo) => {
+  await signInAs(context, 'admin')
+  await page.goto('/import')
+  await chooseFile(page, asbFile(suffix(testInfo), ['2026/09/10']))
+
+  const box = await page.locator('label[for="set-cutover"]').boundingBox()
+  expect(box?.height).toBeGreaterThanOrEqual(44)
+})
+
+test('the Import refuses to offer a replace that would import nothing', async ({ page, context }, testInfo) => {
+  await signInAs(context, 'admin')
+  await page.goto('/import')
+  await chooseFile(page, asbFile(suffix(testInfo), ['2026/10/01']))
+  await page.getByLabel(/Set the Cutover Date to the last date in this file/).check() // the only row is dated on the file's last date
+
+  await expect(page.getByRole('button', { name: 'Replace imported history…' })).toBeDisabled()
+  await expect(page.getByText('there is nothing to replace the old history with')).toBeVisible()
 })
 
 test('a Member sees no Cutover Date controls', async ({ page, context }) => {

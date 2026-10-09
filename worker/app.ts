@@ -5,6 +5,7 @@ import * as z from 'zod/mini'
 import { accounts } from './accounts'
 import type { AppEnv } from './app-env'
 import { authConfigFromEnv, authenticate, devMember } from './auth'
+import { isDailyLimitError } from './d1-errors'
 import { FEATURES, featureStatuses } from './features'
 import { imports } from './imports'
 import { logEvent } from './log'
@@ -59,6 +60,10 @@ app.notFound((c) => c.json({ error: 'Not found' }, 404))
 app.onError((error, c) => {
   // Hono's own refusals, such as a body that isn't JSON, keep their status.
   if (error instanceof HTTPException) return c.json({ error: error.message }, error.status)
+  if (isDailyLimitError(error)) {
+    logEvent('request.daily-limit', { error })
+    return c.json({ error: 'Daily limit reached' }, 429)
+  }
   logEvent('request.failed', { error })
   return c.json({ error: 'Something went wrong' }, 500)
 })

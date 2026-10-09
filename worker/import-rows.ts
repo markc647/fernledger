@@ -1,3 +1,5 @@
+import { isRealDate } from './dates'
+
 /** One Transaction row from a bank CSV, as the browser sends it. The browser's `BankCsvRow` (src/lib/bank-csv/types.ts) is this type. Dates are ISO `YYYY-MM-DD` NZ dates; money is integer NZD cents. */
 export type ImportRow = {
   date: string
@@ -12,32 +14,23 @@ export type ImportRow = {
 
 export const MAX_ROWS_PER_CHUNK = 500
 
-/**
- * Chunks in one Import, so 10,000 rows. Free-plan D1 allows 100k rows written a day and a row costs 3 writes
- * (the row, its date index, its unique index), so one Import can use at most 30k of the day's writes.
- */
+/** D1 Free allows this many rows written a day (ADR 0004). Once it is used up, every write fails until the next day. */
+export const DAILY_ROW_WRITES = 100_000
+
+/** A row costs 3 writes: the row itself, its date index and its unique-ID index. Removing a row costs the same. */
+export const WRITES_PER_ROW = 3
+
+/** Chunks in one Import, so 10,000 rows: at most 30,000 of the day's writes. */
 export const MAX_CHUNKS = 20
 
 /**
- * Most Import-sourced rows removed in one go when replacing imported history. A removed row costs 3 D1 writes (the
- * row and its two indexes), so 5,000 is 15,000 of the free plan's 100k a day, leaving room for the new file (at most
- * 10,000 rows, 30,000 writes). Larger histories are removed in steps of this size first (`/api/imports/clear-history`).
+ * Most Import-sourced rows removed in one go when replacing imported history: 15,000 writes, leaving room in the day
+ * for the new file (at most 10,000 rows, 30,000 writes). Larger histories are removed in steps of this size first
+ * (`/api/imports/clear-history`). A replace writes about 3 x (rows removed + rows imported) in all, so the day's
+ * allowance covers roughly 33,000 rows between them. An Account with more imported rows than that cannot be
+ * replaced in one day: the Import stops at the limit ("Daily limit reached") and the Admin carries on the next day.
  */
 export const REPLACE_SLICE = 5000
-
-const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
-
-export const isRealDate = (value: unknown) => {
-  const parts = typeof value === 'string' ? ISO_DATE.exec(value) : null
-  if (!parts) return false
-  const month = Number(parts[2])
-  const day = Number(parts[3])
-  if (month < 1 || month > 12 || day < 1) return false
-  const year = Number(parts[1])
-  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
-  return day <= (month === 2 && !leap ? 28 : DAYS_IN_MONTH[month - 1]!)
-}
 
 const isText = (value: unknown, max: number) => typeof value === 'string' && value.length <= max
 
