@@ -58,6 +58,7 @@ With `CI=true` (which the scripts set) Wrangler answers its own yes/no prompts i
 | Deploy conflicts: Worker edited in the dashboard, uploaded by API, a secret that overrides config, a Workflows conflict | Yes, overwriting the remote | `wrangler deploy --strict`, which aborts instead |
 | Provision a missing D1 database or R2 bucket during deploy | Creates it, with no location hint | Checks both exist first |
 | Write resource IDs back into `wrangler.jsonc` | Skipped | Relies on `CI=true`; check `git diff wrangler.jsonc` after a manual deploy |
+| "Your last deployment has multiple versions… continue?" (a gradual rollout is in progress) | Yes, replacing the rollout. `--strict` does not stop this | Nothing yet. Finish or roll back any gradual rollout in the dashboard before deploying |
 | "About to apply N migration(s)… continue?" (`d1 migrations apply`) | Yes | Your account confirmation and the earlier restore point are the safeguard. The migrations applied are printed |
 
 ### Test-only environment variables
