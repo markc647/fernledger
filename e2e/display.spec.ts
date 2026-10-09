@@ -110,6 +110,28 @@ test.describe('zoom', () => {
     }
   }
 
+  // The Admin's full navigation is the widest header. The per-page test above covers it only incidentally,
+  // so this one names the case: nothing in the header may push the page wider than the 320px viewport.
+  for (const path of ['/', '/settings']) {
+    test(`the header with the Admin's full navigation fits 320px at text size A++ on ${path}`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.setViewportSize({ width: 320, height: 256 })
+      await page.goto(path)
+      await sizeButton(page, 'A++').click()
+      // Measure only once the larger size is applied and the buttons have finished their width transition.
+      await expect(page.locator('html')).toHaveAttribute('data-text-size', 'a-plus-plus')
+      await page.evaluate(() => Promise.all(document.getAnimations().map((animation) => animation.finished)))
+      const nav = page.getByRole('navigation', { name: 'Main' })
+      await expect(nav.getByRole('link', { name: 'Settings' })).toBeVisible()
+      await expect(nav.getByRole('link', { name: 'Change Log' })).toBeVisible()
+      const { scrollWidth, innerWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth: window.innerWidth,
+      }))
+      expect(scrollWidth).toBeLessThanOrEqual(innerWidth)
+    })
+  }
+
   test('a very long app title wraps instead of scrolling sideways', async ({ page }) => {
     await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(120, 'x'), about_contact: '', about_retention: '' } }))
     await page.setViewportSize({ width: 320, height: 256 })

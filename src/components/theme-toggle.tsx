@@ -40,7 +40,7 @@ export function ThemeToggle() {
   }
 
   return (
-    <div role="group" aria-label="Colour theme" className="flex gap-1">
+    <div role="group" aria-label="Colour theme" className="flex flex-wrap gap-1">
       {OPTIONS.map(({ value, label }) => (
         <Button
           key={value}
