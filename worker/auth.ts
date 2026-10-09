@@ -57,5 +57,3 @@ export function devMember(request: Request, env: Env): Member | null {
   const email = env.DEV_USER_EMAIL.toLowerCase()
   return { email, role: roleFor(email, env.ADMIN_EMAIL) }
 }
-
-export const isWrite = (method: string) => !['GET', 'HEAD', 'OPTIONS'].includes(method)

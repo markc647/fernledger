@@ -6,10 +6,11 @@ Self-hosted NZ bank-account tracker on Cloudflare Workers (free plan) + D1 + R2,
 - `GLOSSARY.md`: domain terms. Name things with these.
 - `docs/adr/`: decisions. Read the ones touching your area before changing it.
 - `CODING_STANDARDS.md`: what reviewers enforce. Read it when you're unsure how to do something.
+- `migrations/`: add-only SQL, `<ticket number × 100 + n>_<name>.sql`; each ticket owns its range. See CODING_STANDARDS.md#migrations.
 - `docs/bank-formats/`: bank CSV layouts, with made-up examples. Real exports never enter this repo.
 
 ## Before reporting work done
-- Run `npm run check` (lint, typecheck, tests, script tests, secret scan and its self-test). It's green when it exits 0. The first scan downloads a pinned, checksum-verified gitleaks into your user cache.
+- Run `npm run check` (lint, typecheck, tests, script tests, migration check, secret scan and its self-test). It's green when it exits 0. The first scan downloads a pinned, checksum-verified gitleaks into your user cache.
 - `npm install` points git at `.githooks/`, whose pre-commit hook runs lint, typecheck and a staged-files secret scan.
 
 ## Hard rules
