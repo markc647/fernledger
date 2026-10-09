@@ -19,7 +19,7 @@ describe('chunkSummary', () => {
 
 describe('chunkDetail', () => {
   it('records what the chunk did and what the file was, counting duplicates as the rows neither added nor dropped', () => {
-    const file = { adapterId: 'asb', rowCount: 10, skipped: 1, from: '2026-09-01', to: '2026-10-01' }
+    const file = { adapterId: 'asb', rowCount: 10, skipped: 1, from: '2026-09-01', to: '2026-10-01', ledgerBalance: { cents: 12_345, date: '2026-10-01' } }
     expect(chunkDetail({ ...outcome, index: 1, count: 2, dropped: 1 }, { file, rowsInChunk: 6, cutoverDate: '2026-10-01', newAccount: false })).toEqual({
       adapter: 'asb',
       part: 2,
@@ -34,13 +34,14 @@ describe('chunkDetail', () => {
       skipped: 1,
       from: '2026-09-01',
       to: '2026-10-01',
+      ledgerBalance: { cents: 12_345, date: '2026-10-01' },
       newAccount: false,
     })
   })
 })
 
 describe('chunkStatements', () => {
-  const prepare = { createAccount: () => 'create', setCutover: () => 'cutover', removeImported: () => 'remove', insertRows: () => 'insert' }
+  const prepare = { createAccount: () => 'create', setCutover: () => 'cutover', clearBalances: () => 'balances', removeImported: () => 'remove', insertRows: () => 'insert' }
   const plan = { newAccount: false, setsCutover: false, replace: false }
 
   it('only inserts for a plain chunk of an existing Account', () => {
@@ -51,8 +52,8 @@ describe('chunkStatements', () => {
     expect(chunkStatements({ newAccount: true, setsCutover: true, replace: true }, prepare)).toEqual(['create', 'insert'])
   })
 
-  it('sets the Cutover Date, then removes the old rows, then inserts, so the insert is last and the removal just before it', () => {
-    expect(chunkStatements({ ...plan, setsCutover: true, replace: true }, prepare)).toEqual(['cutover', 'remove', 'insert'])
+  it('sets the Cutover Date, then removes the old balances and rows, then inserts, so the insert is last and the removal just before it', () => {
+    expect(chunkStatements({ ...plan, setsCutover: true, replace: true }, prepare)).toEqual(['cutover', 'balances', 'remove', 'insert'])
   })
 })
 

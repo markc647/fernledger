@@ -63,7 +63,7 @@ async function importRows(rows: Made[]) {
     body: {
       account: { number: '99-9999-9999999-99' },
       chunk: { index: 0, count: 1 },
-      file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: '2026-10-01', to: '2026-10-31' },
+      file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: '2026-10-01', to: '2026-10-31', ledgerBalance: { cents: 0, date: '2026-10-31' } },
       rows: rows.map((t) => ({ date: t.date ?? '2026-10-05', uniqueId: `RULE${++uniqueId}`, tranType: t.type ?? 'EFTPOS', chequeNumber: null, payee: t.description, bankMemo: t.memo ?? '', amountCents: t.cents ?? -1000 })),
     },
   })
@@ -555,7 +555,7 @@ describe('new Transactions', () => {
       body: {
         account: { number: '99-9999-9999999-99' },
         chunk: { index: 0, count: 1 },
-        file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-01', to: '2026-10-31' },
+        file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-01', to: '2026-10-31', ledgerBalance: { cents: 0, date: '2026-10-31' } },
         rows: [{ date: '2026-10-05', uniqueId: 'RULE1', tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SUPER 1', bankMemo: '', amountCents: -1000 }],
       },
     })

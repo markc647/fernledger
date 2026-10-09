@@ -45,6 +45,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Your own categories**, from a starter list the Admin can add to, rename and remove. The Admin can override any single transaction's category and add a note, and a list of uncategorised transactions shows what's left. **Rules** categorise automatically: the Admin sets text to look for in the description or memo, a bank transaction type and an amount range, chooses a category (or marks the transaction as a transfer), puts the rules in order, and sees how many transactions a rule matches before saving it. Rules are used for new transactions as they're imported; applying them to existing history will ship later.
 - **Transfers between your own accounts** are detected and left out of spending.
 - **Monthly budgets** per category. Unspent amounts don't carry over, and changing a budget doesn't rewrite past months.
+- **A Summary for every Member:** the balance of each account, the newest transactions and any balance warnings, on the page Members land on.
 - **Dashboard:** balances, net worth over time, spending by category, budget vs actual, searchable transactions.
 - **Printable reports:** spending by category, budget vs actual, income vs spending, balances over time, full transaction listing with notes. Print them or save as PDF from your browser.
 - **CSV export** for any date range.
@@ -106,7 +107,7 @@ R2 may ask for a payment method on file even within the free allowance (unconfir
 
 - **Admin and Members.** One Admin, set by email, can edit categories, rules, budgets, overrides and notes. Everyone else is a read-only Member who can view, print and export.
 - **Sync** runs once a day, after Akahu's own daily refresh. A banner shows when data was last synced and turns red after 2 days, for example when a bank connection needs reconnecting.
-- **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu covers it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003). The Admin sets it in Settings, or accepts the last date in the file when importing; an Import then skips rows dated on or after it and says how many. Until accounts can be linked to Akahu, any account can have one; limiting it to linked accounts will ship with that feature.
+- **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu covers it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003). The Admin sets it in Settings, or takes up the offer of the last date in the file when importing (nothing is set unless the Admin ticks it); an Import then skips rows dated on or after it and says how many. Until accounts can be linked to Akahu, any account can have one; limiting it to linked accounts will ship with that feature.
 - **A bad import can be replaced.** On the Import screen, "Replace imported history" removes an account's imported Transactions, never the ones from Sync, and imports the new file in their place, after the Admin confirms and is told how many will go. The Change Log records it. A history of more than 5,000 imported rows is removed in final steps of 5,000. Each removed or imported row costs 3 of the free plan's 100,000 database writes a day (an imported row that a rule matches costs one more), so one day covers about 33,000 rows removed and imported together, a little fewer if many match a rule. Beyond that Fernledger stops with "Daily limit reached" and says part of the old history has been removed; choose the same file again the next day to finish.
 - **Category precedence:** a hand-set override beats a rule, which beats Akahu's suggestion. A rule never replaces an override.
 - **Rules:** the first rule in the Admin's order that matches a transaction wins, and a rule whose category has been removed is skipped. Text matching ignores capitals and looks in the description and the bank's memo. A transaction type matches in full (EFTPOS, not part of it). An amount range is on the size of the amount, so $50 covers $50 in and $50 out; the rule can also be limited to money in or money out. Saving, changing, reordering or removing a rule changes no stored transaction: a rule's result is stored on each new transaction as an Import adds it, and applying rules to existing history will ship later. A rule can mark transfers instead of choosing a category; transfer pairing will ship later and will use that mark.
@@ -185,7 +186,13 @@ Fernledger aims to keep your data **correct, current and recoverable**.
 
 ### Correct
 
-- **Balance check after every sync.** Fernledger compares each account's balance as reported by your bank, via Akahu, with the balance it calculates from its own transactions. If they differ, a warning shows the amount and the date it started, so missing or duplicated transactions can't go unnoticed.
+- **Balance check after every import.** Each bank CSV export states the account's balance at the top. Fernledger compares it with the balance it calculates from its own transactions since the previous export. If they differ, a warning reads, for example, "Balance differs from bank by $5.00 since Wed 30 Sept 2026": the amount, and the date of the previous bank balance it was compared with (that balance may itself have differed). Missing or duplicated transactions can't go unnoticed. The same check will run after every sync, against the balance Akahu reports.
+  - The first balance an account has is not checked, because there is nothing to compare it with. The next import is checked against it.
+  - A balance dated on or after the account's Cutover Date is not checked, because those days are meant to come from sync. Neither is a balance in a file that ends before that balance's date.
+  - A transaction the bank adds late to the last day of an earlier export doesn't raise a false alarm. Pending transactions are never counted.
+  - A transaction backfilled with the same date as an older balance (from a file that was missing it) isn't counted by that balance until that date's file is imported again.
+  - If the Admin ticks "set the Cutover Date to the last date in this file" when importing (it is offered, never set unless ticked), the file's own balance is dated on or after that Cutover Date and isn't checked. Choose a later Cutover Date, or import a file that runs past it, for that balance to be checked.
+  - "Since" is the date of the earlier balance the difference was checked against, not the date it was first seen ([ADR 0011](docs/adr/0011-balance-check-since-date.md)).
 - **Syncs are safe to repeat.** Transactions are matched by Akahu's ID. Each sync also re-checks the last 30 days, because banks sometimes delete and re-issue a transaction.
 - **Transactions are never deleted because a bank link changed.** If your bank reconnects or changes systems and Akahu issues a new account ID, Fernledger flags "Account link broken". The Admin re-links it in one step.
 
@@ -219,7 +226,7 @@ Fernledger is often used by families where some members are older, and by people
 - **Plain language:** "Money in" and "Money out", not debit and credit. Dates like "Thu 8 Oct 2026", amounts like "−$1,234.56". Technical settings, such as cutover dates and account links, appear only in the Admin's settings, each with a one-line explanation.
 - **Colour is never the only signal.** Amounts carry a sign, and statuses carry an icon and words. Red and green are chosen to stay distinguishable for colour-blind users. Contrast meets AA in both light and dark themes.
 - **Respects your device:** follows your light/dark setting, reduced-motion preference and Windows high-contrast mode.
-- **A calm home page for Members:** read-only Members land on a simple Summary. It shows each account's balance, this month's spending against budget, recent transactions and when the data was last updated. Charts and filters are one click away.
+- **A calm home page for Members:** read-only Members land on a simple Summary. It shows each account's balance, recent transactions and any balance warnings; this month's spending against budget and when the data was last updated will join them. Charts and filters are one click away.
 - **Phones and tablets:** large touch targets (at least 44px), and tables become cards on narrow screens. Tested on iPad Safari and Android.
 - **Printed reports for any reader:** at least 12pt text, page numbers ("Page 2 of 5"), table headings repeated on every page, and a header showing the account, date range and who generated the report and when.
 - **Help signing in:** a one-page printable "How to sign in" guide for family members.
@@ -310,6 +317,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Settings screen and "Setup needed" | Done |
 | Change Log page | Done |
 | Database, CSV import (ASB) | In progress |
+| Balances, balance check after every import, the Summary | Done |
 | Akahu sync | Planned |
 | Categories, overrides and notes | Done |
 | Rules for new transactions | Done |

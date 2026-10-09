@@ -14,8 +14,9 @@ export const lastTransactionId = async (db: D1Database) => (await db.prepare('SE
 
 /**
  * Called after each committed change to an Account's Transactions (every Import chunk, so it may run more than once
- * per Import). Applies the Rules to the Transactions the change added, and only those. Transfer pairing and the Balance
- * Check will be called from here when they land.
+ * per Import). Applies the Rules to the Transactions the change added, and only those. Transfer pairing will be called
+ * from here when it lands. The Balance Check is not: it needs the whole Import, so it runs after the last chunk
+ * (balance-check.ts).
  */
 export async function afterTransactionsChanged(db: D1Database, change: TransactionsChange): Promise<void> {
   if (change.afterId !== undefined) await applyRules(db, { accountId: change.accountId, afterId: change.afterId })

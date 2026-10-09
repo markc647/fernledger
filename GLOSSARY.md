@@ -53,7 +53,8 @@ The association between an Account and its account in Akahu; it can break when a
 _Avoid_: Mapping, connection
 
 **Balance Check**:
-The comparison, after each Sync, between an Account's balance as reported by the bank and the balance calculated from its Transactions.
+The comparison, after each Import, between an Account's balance as reported by the bank and the balance calculated from its Transactions; it will also run after each Sync.
+The rules are in README [Correct](README.md#correct).
 _Avoid_: Reconciliation, audit
 
 **Cutover Date**:
@@ -100,6 +101,12 @@ _Avoid_: Type, kind
 **Report**:
 A print-formatted view of Transactions over a date range, which any Member can print or save as PDF.
 _Avoid_: Statement, export
+
+## Viewing
+
+**Summary**:
+The page every Member lands on: the balance of each Account, the newest Transactions and any Balance Check warnings.
+_Avoid_: Dashboard, home page
 
 ## Configuration
 
