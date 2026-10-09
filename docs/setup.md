@@ -65,6 +65,45 @@ With `CI=true` (which the scripts set) Wrangler answers its own yes/no prompts i
 
 `FERNLEDGER_WRANGLER` (a stand-in for the Wrangler binary) and `FERNLEDGER_MIGRATIONS_DIR` (a stand-in for `migrations/`) exist so the script tests can run without touching Cloudflare. Don't set them for a real run.
 
+## Backups and restore
+
+The Worker backs up every table to your R2 bucket (`BACKUPS` in `wrangler.jsonc`) on the weekly cron (Sunday 15:00 UTC), under `backups/<NZ date>/`. README ("Recoverable") says what that protects. Nothing deletes a backup; to remove old ones, delete them in the R2 dashboard.
+
+- `manifest.json` lists each table with its row count and CREATE statement, and each part's object key, size and SHA-256 checksum. **A backup exists only once its manifest does**; the restore script and you should ignore a folder without one.
+- Each table is split into `<table>.<n>.ndjson` parts of up to 1000 rows and 256 KB, one JSON object per row.
+- Tables come from the database's own schema, so a table added by a later release is backed up with no change to the backup code. The exceptions are tables that can't be read page by page by rowid: `WITHOUT ROWID` tables, virtual (for example full-text search) tables and their internal shadow tables. These are **not copied**; the manifest's `skipped` list names each with the reason, and the restore script prints it. Fernledger's own tables are ordinary tables. A future table of one of those kinds will need backup support added with it.
+- A backup refuses (and logs `backup.failed` with `BackupFormatError`) a number JSON can't hold exactly: a whole number above 2^53 or infinity. Money is whole cents, far below that.
+- A run on a date that already has a manifest is skipped, never overwritten.
+
+**How a run fits the Free plan (ADR 0004).** One invocation gets 10 ms of CPU and 50 subrequests, so it can write only about 1 MB of backup (and at most 40 D1 and R2 operations on the weekly cron, 20 on a continuation). A run saves its place after every part and carries on in the Worker's other cron invocations (the two daily ones) until it finishes. That gives roughly 15 MB of backup a week, about **40,000 to 50,000 Transactions** at around 300 bytes each, with the rest of the database counted in. A database that size or smaller finishes within the week, usually within a few days.
+
+Past that, a run can't finish before the next Sunday. The next Sunday then marks it abandoned (`incomplete.json` in its folder, a `backup.abandoned` log line with the row count, and a note in the next manifest) and starts again, so backups stop completing. Watch the Worker logs for `backup.abandoned`. If you get there, take a manual copy instead: `npx wrangler d1 export <database> --remote --output backup.sql`. D1's own restore point (above) covers the last 7 days.
+
+A run longer than one invocation is a rolling copy, not a single point in time: a row edited while it is under way may be captured either side of the edit. For a point-in-time copy use the D1 restore point that `npm run deploy` records.
+
+### Restoring
+
+Restore into an **empty** database that has the schema. A restore adds rows and never overwrites, and it refuses a database that already has rows in any backed-up table or lacks a backed-up column (a database with extra columns, from a newer schema, is fine).
+
+```bash
+npm run restore -- 2026-10-12 --dry-run   # downloads and verifies the backup, checks the target, prints the loads; writes nothing
+npm run restore -- 2026-10-12             # confirms the account, then restores
+```
+
+It downloads the manifest and every part (only the manifest and parts under that date's folder), checks each one's size, checksum and row count, checks the database has every backed-up table and column, and only then loads the database, one `wrangler d1 execute --file` per part. It ends by counting the rows in each table and comparing them with the manifest. `--dry-run` does all of that except the load, so it needs your account (it only reads) and shows the commands it would run. Add `--yes` to skip the account prompt, `--database <name>` to restore into a different database, and `--local` to use Wrangler's local dev storage instead of your account.
+
+If a load fails part-way, the database holds some of the rows: empty it (or create a fresh one and apply the migrations) and run the restore again.
+
+**Practice run, twice a year.** Create a scratch database, give it the schema, restore into it, check the row counts the script prints, then delete the scratch database:
+
+```bash
+npx wrangler d1 create fernledger-practice --location oc
+npx wrangler d1 execute fernledger-practice --remote --file migrations/<file>.sql   # each file in migrations/, in order
+npm run restore -- <backup date> --database fernledger-practice
+```
+
+CI runs the round trip (seed, back up with the Worker's own code, restore with this script, compare) on a local SQLite database, and never touches a Cloudflare account.
+
 ## Cloudflare Access (one-time, by hand)
 
 The app has no login of its own. Cloudflare Access sits in front of it, and the Worker checks the Access token on every API request (ADR 0002).

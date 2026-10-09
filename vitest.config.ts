@@ -11,6 +11,7 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: './wrangler.jsonc' },
       miniflare: {
+        d1Databases: ['RESTORE_TARGET'], // a second, empty database for the backup round-trip test
         bindings: {
           ACCESS_TEAM_DOMAIN: 'example.cloudflareaccess.com',
           ACCESS_AUD: 'test-aud',
