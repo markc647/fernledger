@@ -69,7 +69,7 @@ test('the Admin previews an ASB file, then imports it and sees the summary and t
   await page.getByRole('link', { name: 'See the transactions' }).click()
   const interest = page.getByRole('row', { name: new RegExp(`Thu 31 Oct 2019 ${name} ASB BANK - INTEREST`) })
   await expect(interest).toContainText('+$1.20')
-  await expect(page.getByRole('row', { name: new RegExp(`${name} EXAMPLE, SMITH & CO`) })).toContainText('-$1,234.50')
+  await expect(page.getByRole('row', { name: new RegExp(`${name} EXAMPLE, SMITH & CO`) })).toContainText('−$1,234.50')
   await noAxeViolations(page)
 })
 

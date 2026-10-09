@@ -92,7 +92,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
         </label>
         <input {...field('app_title')} type="text" maxLength={60} className={inputStyle} aria-describedby="app_title-hint" />
         <p id="app_title-hint" className="mt-1 text-sm text-muted-foreground">
-          Will be shown in the header and on Reports. For example, "Mum's finances".
+          Shown in the header, and will be shown on Reports. For example, "Mum's finances".
         </p>
       </div>
       <fieldset className="space-y-6">

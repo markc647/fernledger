@@ -50,7 +50,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **CSV export** for any date range.
 - **Change Log** of every edit the Admin makes, visible to everyone.
 - **Light and dark themes.**
-- **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header and reports will show it.
+- **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and reports will.
 - **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications.
 
 ## What it doesn't do
@@ -208,7 +208,7 @@ Fernledger is often used by families where some members are older, and by people
 
 - **Standard:** every release meets [WCAG 2.2 AA](https://www.w3.org/TR/WCAG22/). Automated accessibility checks (axe) run on every page in both themes in CI. Before each release we test by keyboard only, with a screen reader (VoiceOver/NVDA), and at 200% zoom.
 - **Readable text:** an in-app text-size control (**A / A+ / A++**) is remembered on each device. Body text starts at 16px, and table text is never smaller than 15px. Everything works at 200% browser zoom with no sideways scrolling.
-- **Plain language:** "Money in" and "Money out", not debit and credit. Dates like "Tue 8 Oct 2026", amounts like "−$1,234.56". Technical settings, such as cutover dates and account links, appear only in the Admin's settings, each with a one-line explanation.
+- **Plain language:** "Money in" and "Money out", not debit and credit. Dates like "Thu 8 Oct 2026", amounts like "−$1,234.56". Technical settings, such as cutover dates and account links, appear only in the Admin's settings, each with a one-line explanation.
 - **Colour is never the only signal.** Amounts carry a sign, and statuses carry an icon and words. Red and green are chosen to stay distinguishable for colour-blind users. Contrast meets AA in both light and dark themes.
 - **Respects your device:** follows your light/dark setting, reduced-motion preference and Windows high-contrast mode.
 - **A calm home page for Members:** read-only Members land on a simple Summary. It shows each account's balance, this month's spending against budget, recent transactions and when the data was last updated. Charts and filters are one click away.
