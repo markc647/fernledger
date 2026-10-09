@@ -8,10 +8,10 @@ import { effectiveCategory } from './effective-category'
 
 export const DEFAULT_LIMIT = 50
 export const MAX_LIMIT = 200
-/** Longest text searched for, so one request can't ask SQLite to match a pattern of any length. */
+/** Longest text searched for, so one request can't ask SQLite to look for text of any length. The page keeps to the same length (src/lib/transaction-search.ts). */
 export const MAX_TEXT = 100
 
-/** The columns a list can be sorted by. A sort never names a column from the request: it names one of these. */
+/** The columns a list can be sorted by. A sort never names a column from the request: it names one of these. The page offers the same ones (src/lib/transaction-search.ts). */
 export const SORT_KEYS = ['date', 'account', 'description', 'category', 'amount'] as const
 export type SortKey = (typeof SORT_KEYS)[number]
 export type SortDirection = 'asc' | 'desc'
@@ -33,6 +33,7 @@ export const searchQuery = z
     dir: z.optional(z.enum(['asc', 'desc'])),
     limit: digits,
     offset: digits,
+    count: z.optional(z.enum(['true', 'false', 'only'])),
   })
   .check(
     z.refine((q) => !q.from || !q.to || q.from <= q.to, { path: ['to'] }),
@@ -49,13 +50,26 @@ export type Search = {
   /** NZ dates, both ends included. */
   from?: string
   to?: string
-  /** Text to find in the description, bank memo or Note; `undefined` when blank. */
+  /** Text to find in the description, bank memo, Note or what the bank supplied about the payment; `undefined` when blank. */
   text?: string
   sort: SortKey
   dir: SortDirection
   limit: number
   offset: number
+  /** What to work out: the page of rows, how many Transactions match, or both. */
+  want: Want
 }
+
+/** 'page' is the rows alone, 'count' only how many match, and 'both' the two. */
+export type Want = 'page' | 'count' | 'both'
+
+/**
+ * Counting reads every Transaction the filters keep (ADR 0004: D1 bills rows read), so a request counts only when it asks to
+ * (`count=true` or `count=only`) or is the first page, which is where a search starts. Later pages, and callers with no use for
+ * a total (the Summary), don't count.
+ */
+const wantOf = (count: SearchQuery['count'], offset: number): Want =>
+  count === 'only' ? 'count' : count === 'true' ? 'both' : count === 'false' ? 'page' : offset === 0 ? 'both' : 'page'
 
 /** A date sorts newest first unless asked otherwise, and everything else A to Z (or smallest first). */
 const defaultDirection = (sort: SortKey): SortDirection => (sort === 'date' ? 'desc' : 'asc')
@@ -63,6 +77,7 @@ const defaultDirection = (sort: SortKey): SortDirection => (sort === 'date' ? 'd
 /** The validated query as a Search: defaults filled in and the page size capped. */
 export function toSearch(q: SearchQuery): Search {
   const sort = q.sort ?? 'date'
+  const offset = Number(q.offset ?? 0)
   return {
     accountId: q.accountId === undefined ? undefined : Number(q.accountId),
     categoryId: q.categoryId === undefined ? undefined : Number(q.categoryId),
@@ -73,14 +88,26 @@ export function toSearch(q: SearchQuery): Search {
     sort,
     dir: q.dir ?? defaultDirection(sort),
     limit: Math.min(Math.max(Number(q.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT),
-    offset: Number(q.offset ?? 0),
+    offset,
+    want: wantOf(q.count, offset),
   }
 }
 
-const ESCAPE = '\\'
-
-/** A LIKE pattern that matches `text` anywhere, with `%`, `_` and the escape character itself taken literally. Pair it with `ESCAPE '\'`. */
-export const likePattern = (text: string) => `%${text.replace(/[\\%_]/g, (c) => ESCAPE + c)}%`
+/**
+ * What a text search looks in: the description, the bank's memo, the Note, and what the bank supplied about the payment (its
+ * reference, which is the cheque number for an Import, the counterparty's account, particulars, code and card suffix).
+ * Interpolated into SQL, so constants written here and never anything from a request.
+ */
+const TEXT_COLUMNS = [
+  't.description',
+  't.bank_memo',
+  't.note',
+  't.bank_reference',
+  't.bank_counterparty_account',
+  't.bank_particulars',
+  't.bank_payment_code',
+  't.bank_card_suffix',
+]
 
 export type Statement = { sql: string; binds: (string | number)[] }
 
@@ -111,9 +138,10 @@ export function buildSearch(search: Search): { count: Statement; page: Statement
     binds.push(search.to)
   }
   if (search.text !== undefined) {
-    const pattern = likePattern(search.text)
-    where.push(`(t.description LIKE ? ESCAPE '${ESCAPE}' OR t.bank_memo LIKE ? ESCAPE '${ESCAPE}' OR t.note LIKE ? ESCAPE '${ESCAPE}')`)
-    binds.push(pattern, pattern, pattern)
+    // `instr`, not `LIKE`: D1 refuses a LIKE pattern over 50 bytes ("too complex") and the text can be 100 characters. `instr` also
+    // takes `%`, `_` and `\` as the characters they are. `lower()` folds A to Z only, as COLLATE NOCASE does (as Rules do too).
+    where.push(`(${TEXT_COLUMNS.map((column) => `instr(lower(${column}), lower(?)) > 0`).join(' OR ')})`)
+    binds.push(...TEXT_COLUMNS.map(() => search.text!))
   }
   const filter = where.length ? `WHERE ${where.join(' AND ')}` : ''
   // The count joins only what its filters read: the Category's tables, and only when filtering by Category.

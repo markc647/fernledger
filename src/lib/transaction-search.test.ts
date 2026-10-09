@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { apiQuery, parseTransactionSearch, sortOf, tidy } from './transaction-search'
+import { apiQuery, filterQuery, filtersOf, parseTransactionSearch, sortOf, tidy } from './transaction-search'
 
 describe('parseTransactionSearch', () => {
   it('reads every filter the page puts in the address', () => {
@@ -96,5 +96,14 @@ describe('apiQuery', () => {
   it('always says which way to sort when it sorts', () => {
     expect(apiQuery({ sort: 'description' }, 50)).toMatchObject({ sort: 'description', dir: 'asc' })
     expect(apiQuery({}, 50)).not.toHaveProperty('sort')
+  })
+})
+
+describe('filtersOf and filterQuery', () => {
+  it('keep the filters and leave out the sort and the page, so every page and order of a search shares one count', () => {
+    const search = { account: 2, category: 7, from: '2026-01-01', to: '2026-03-31', q: 'cafe' } as const
+    expect(filtersOf({ ...search, sort: 'amount', dir: 'asc', page: 3 })).toEqual(search)
+    expect(filtersOf({ sort: 'amount', page: 2 })).toEqual({})
+    expect(filterQuery({ ...search, sort: 'amount', page: 3 })).toEqual({ accountId: '2', categoryId: '7', from: '2026-01-01', to: '2026-03-31', text: 'cafe' })
   })
 })

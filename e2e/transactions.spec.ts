@@ -14,7 +14,7 @@ const accountsFor = (project: string) => ({
   cheque: { number: project === 'dark' ? '99-9999-9999999-71' : '99-9999-9999999-73', name: `Search cheque ${project}` },
 })
 
-type Seed = { account: { number: string; name: string }; rows: { date: string; description: string; amountCents: number }[] }
+type Seed = { account: { number: string; name: string }; rows: { date: string; description: string; amountCents: number; chequeNumber?: string }[] }
 
 async function seed(context: BrowserContext, baseURL: string, batches: Seed[]) {
   await signInAs(context, 'admin')
@@ -24,8 +24,8 @@ async function seed(context: BrowserContext, baseURL: string, batches: Seed[]) {
       data: {
         account,
         chunk: { index: 0, count: 1 },
-        file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: '2012-01-01', to: '2012-12-31' },
-        rows: rows.map((r, i) => ({ date: r.date, uniqueId: `${r.description.replaceAll(' ', '')}${i}`, tranType: 'EFTPOS', chequeNumber: null, payee: r.description, bankMemo: 'EFTPOS', amountCents: r.amountCents })),
+        file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: '2012-01-01', to: '2012-12-31', ledgerBalance: { cents: 0, date: '2012-12-31' } },
+        rows: rows.map((r, i) => ({ date: r.date, uniqueId: `${r.description.replaceAll(' ', '')}${i}`, tranType: 'EFTPOS', chequeNumber: r.chequeNumber ?? null, payee: r.description, bankMemo: 'EFTPOS', amountCents: r.amountCents })),
       },
     })
     expect(res.ok()).toBe(true)
@@ -236,9 +236,10 @@ test('a Transaction opens to show its details, and Back returns to the same sear
   const bank = page.getByRole('region', { name: 'From the bank' })
   await expect(bank).toContainText('Imported from a bank file')
   await expect(bank).toContainText('EFTPOS')
+  await expect(bank.getByText('Bank memo')).toBeVisible()
   // A bank file has no time of day and none of the Sync fields, and the page makes none up.
   await expect(bank.getByText('Bank Time')).toHaveCount(0)
-  await expect(bank.getByText('First seen by Akahu')).toHaveCount(0)
+  await expect(bank).toContainText("Akahu hasn't reported this Transaction, so there is no first-seen time")
   await expect(bank).toContainText('A bank file doesn\'t include the counterparty account')
   // A Member can read it and not change it.
   await expect(page.getByRole('button', { name: /^Edit/ })).toHaveCount(0)
@@ -248,6 +249,70 @@ test('a Transaction opens to show its details, and Back returns to the same sear
   await expect(page).toHaveURL(new RegExp(`/transactions\\?q=${stamp}`))
   await expect(searchBox(page)).toHaveValue(stamp)
   await expect(dataRows(page)).toHaveCount(4)
+})
+
+test("an Import's cheque number is labelled as one and does not hide the explanation of what a bank file lacks", async ({ page, context, baseURL }, testInfo) => {
+  const { savings } = accountsFor(testInfo.project.name)
+  const stamp = `cheque${testInfo.project.name}${Date.now()}`
+  const description = `EXAMPLE CHEQUE ${stamp}`
+  await seed(context, baseURL!, [{ account: savings, rows: [{ date: '2012-08-01', description, amountCents: -4500, chequeNumber: '000123' }] }])
+  await signInAs(context, 'member')
+  await page.goto('/transactions')
+
+  await searchFor(page, stamp)
+  await expect(dataRows(page)).toHaveCount(1)
+  await page.getByRole('link', { name: description }).click()
+  const bank = page.getByRole('region', { name: 'From the bank' })
+  await expect(bank).toContainText('Cheque number')
+  await expect(bank).toContainText('000123')
+  await expect(bank.getByText('Reference', { exact: true })).toHaveCount(0)
+  await expect(bank).toContainText("A bank file doesn't include the counterparty account")
+  await expect(bank).toContainText("Akahu hasn't reported this Transaction, so there is no first-seen time")
+  await noAxeViolations(page)
+
+  // The cheque number can be searched for.
+  await page.getByRole('link', { name: 'Back to Transactions' }).click()
+  await searchFor(page, '000123')
+  await expect(page.getByRole('link', { name: description })).toBeVisible()
+})
+
+test('typed filters say they are not applied until Search is pressed', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  await page.goto('/transactions')
+  const hint = 'Press Search to apply these filters.'
+  await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
+  await expect(page.getByText(hint)).toHaveCount(0)
+
+  await searchBox(page).fill('cafe')
+  await expect(page.getByText(hint)).toBeVisible()
+  await noAxeViolations(page)
+
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(page.getByText(hint)).toHaveCount(0)
+  await page.getByLabel('From', { exact: true }).fill('2012-10-02')
+  await expect(page.getByText(hint)).toBeVisible()
+  await page.getByLabel('From', { exact: true }).fill('')
+  await expect(page.getByText(hint)).toHaveCount(0)
+})
+
+test('Back from a Transaction opened on the Uncategorised page returns to the Uncategorised page, in the same order', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  const row = { id: 4242, accountId: 1, accountName: 'Example savings', date: '2026-10-08', description: 'EXAMPLE CAFE TOWN', bankType: 'EFTPOS', amountCents: -2345, categoryId: null, categoryName: null, categorySource: null, note: null }
+  const detail = { ...row, bankMemo: '', bankReference: null, bankCounterpartyAccount: null, bankCardSuffix: null, bankParticulars: null, bankPaymentCode: null, source: 'import', bankTime: null, firstSeenAt: null }
+  await page.route(/\/api\/transactions\?/, (route) => {
+    const countOnly = new URL(route.request().url()).searchParams.get('count') === 'only'
+    return route.fulfill({ json: countOnly ? { total: 1, transactions: [] } : { total: null, transactions: [row] } })
+  })
+  await page.route('**/api/transactions/4242', (route) => route.fulfill({ json: detail }))
+
+  await page.goto('/uncategorised?sort=amount')
+  await page.getByRole('link', { name: 'EXAMPLE CAFE TOWN' }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Transaction' })).toBeVisible()
+  await page.getByRole('link', { name: 'Back to Uncategorised' }).click()
+
+  await expect(page).toHaveURL(/\/uncategorised\?sort=amount$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Uncategorised' })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: 'Amount' })).toHaveAttribute('aria-sort', 'ascending')
 })
 
 test('the details show what Sync supplies, and a Bank Time only when the bank gave one', async ({ page, context }) => {

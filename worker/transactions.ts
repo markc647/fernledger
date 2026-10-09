@@ -3,7 +3,7 @@ import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { effectiveCategory, type CategorySource } from './effective-category'
-import { buildSearch, searchQuery, toSearch } from './transaction-search'
+import { buildSearch, searchQuery, toSearch, type Statement } from './transaction-search'
 import { validate } from './validate'
 
 /** The Admin's Override: a Category in use, or null to take it off. */
@@ -69,19 +69,26 @@ const findTransaction = (db: D1Database, id: number) =>
 
 /**
  * Every Member can read these. The list is searched, filtered, sorted and paged by the query string (transaction-search.ts);
- * by default it is every Transaction, newest first, 50 at a time. `/:id` is one Transaction in full.
+ * by default it is every Transaction, newest first, 50 at a time, with the total on the first page (`total` is null when
+ * the request didn't count). `/:id` is one Transaction in full.
  */
 export const transactions = new Hono<AppEnv>()
   .get('/', validate('query', searchQuery), async (c) => {
     const db = c.env.DB
-    // The count reads every Transaction the filters keep; the page reads little more than itself when its order is the date
-    // index's (ADR 0004: 10 ms of CPU, and D1 bills rows read). A date range is served by the (date, id) index, and an Override
-    // Category by its own index. An Account filter wants (account_id, date, id): the balances ticket's migration 1002 adds it and
-    // this ticket adds none. A text filter, or a sort on any column but date, reads every Transaction the other filters keep.
-    // When Rules arrive the effective Category is worked out per Transaction, so a Category filter should be revisited then.
-    const { count, page } = buildSearch(toSearch(c.req.valid('query')))
-    const [total, rows] = await db.batch([db.prepare(count.sql).bind(...count.binds), db.prepare(page.sql).bind(...page.binds)])
-    return c.json({ total: (total!.results[0] as { total: number }).total, transactions: rows!.results as TransactionListRow[] })
+    // The count reads every Transaction the filters keep, so it runs only when asked for or on the first page (`want`); the
+    // page reads little more than itself when its order is the date index's (ADR 0004: D1 bills rows read). A date range is
+    // served by the (date, id) index, and an Override Category by its own index. An Account filter wants (account_id, date, id):
+    // the balances ticket's migration 1002 adds it and this ticket adds none. A text filter, or a sort on any column but date,
+    // reads every Transaction the other filters keep. When Rules arrive the effective Category is worked out per Transaction,
+    // so a Category filter should be revisited then.
+    const search = toSearch(c.req.valid('query'))
+    const { count, page } = buildSearch(search)
+    const run = ({ sql, binds }: Statement) => db.prepare(sql).bind(...binds)
+    const counting = search.want !== 'page'
+    const paging = search.want !== 'count'
+    const results = await db.batch([...(counting ? [run(count)] : []), ...(paging ? [run(page)] : [])])
+    const total = counting ? (results.shift()!.results[0] as { total: number }).total : null
+    return c.json({ total, transactions: paging ? (results[0]!.results as TransactionListRow[]) : [] })
   })
   .get('/:id', async (c) => {
     const id = c.req.param('id')
@@ -90,7 +97,7 @@ export const transactions = new Hono<AppEnv>()
     const transaction = await c.env.DB.prepare(
       `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.amount_cents AS amountCents, t.description,
               t.bank_memo AS bankMemo, t.bank_type AS bankType, t.bank_reference AS bankReference,
-              t.counterparty_account AS bankCounterpartyAccount, t.card_suffix AS bankCardSuffix, t.particulars AS bankParticulars, t.code AS bankPaymentCode,
+              t.bank_counterparty_account AS bankCounterpartyAccount, t.bank_card_suffix AS bankCardSuffix, t.bank_particulars AS bankParticulars, t.bank_payment_code AS bankPaymentCode,
               t.source, ${category.id} AS categoryId, ${category.name} AS categoryName, ${category.source} AS categorySource, t.note,
               CASE WHEN t.has_bank_time = 1 THEN t.akahu_date_raw END AS bankTime, t.akahu_first_seen_at AS firstSeenAt
        FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}

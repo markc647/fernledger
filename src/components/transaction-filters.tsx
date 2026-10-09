@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { MAX_DATE, MIN_DATE, isSearchDate } from '@/lib/date-range'
 import { accountsQuery, categoriesQuery } from '@/lib/queries'
-import { tidy, type TransactionSearch } from '@/lib/transaction-search'
+import { MAX_TEXT, tidy, type TransactionSearch } from '@/lib/transaction-search'
 
 /** What is typed in the form: text for every field, so a half-typed filter is never lost. */
 type Draft = { account: string; category: string; from: string; to: string; q: string }
@@ -62,6 +62,8 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
 
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch })
   const filtered = Object.values(draftOf(search)).some((value) => value !== '')
+  // Filters are applied when Search is pressed, not as they are typed, so say so while what is shown is not what is asked for.
+  const unapplied = JSON.stringify({ ...draft, q: draft.q.trim() }) !== applied
 
   return (
     <form
@@ -86,13 +88,14 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
             name="q"
             type="search"
             autoComplete="off"
-            maxLength={100}
+            maxLength={MAX_TEXT}
             value={draft.q}
             aria-describedby="filter-q-hint"
             onChange={(event) => set({ q: event.target.value })}
           />
           <p id="filter-q-hint" className="mt-1 text-muted-foreground">
-            Finds text in the description, the bank's memo and the Note.
+            Finds text in the description, the bank's memo, the Note, and the payment details the bank gave: cheque number or reference, counterparty account,
+            particulars, code and card.
           </p>
         </div>
         <div>
@@ -171,6 +174,10 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
             Clear filters
           </Button>
         )}
+      </div>
+      {/* Always in the page, so a screen reader announces the text when it appears. */}
+      <div role="status" className="mt-2">
+        {unapplied && <p className="text-muted-foreground">Press Search to apply these filters.</p>}
       </div>
     </form>
   )

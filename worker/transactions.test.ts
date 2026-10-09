@@ -13,7 +13,7 @@ async function call(path: string, who: Who = 'member') {
 }
 
 type Row = { id: number; accountId: number; accountName: string; date: string; description: string; amountCents: number; categoryId: number | null; categoryName: string | null; categorySource: string | null; note: string | null }
-type Page = { total: number; transactions: Row[] }
+type Page = { total: number | null; transactions: Row[] }
 
 const search = async (query = '', who: Who = 'member'): Promise<Page> => {
   const res = await call(`/api/transactions${query}`, who)
@@ -188,6 +188,30 @@ describe('searching by text', () => {
     expect((await search('?text=cAfE')).total).toBe(3)
   })
 
+  it('also finds what the bank supplied about the payment: reference, counterparty, particulars, code and card', async () => {
+    const id = await add({ description: 'EXAMPLE PAYEE' })
+    await env.DB.prepare(
+      "UPDATE transactions SET bank_reference = 'CHQ 000123', bank_counterparty_account = '99-9999-9999999-97', bank_particulars = 'EXAMPLE RENT', bank_payment_code = 'EXAMPLE CODE X', bank_card_suffix = '4321' WHERE id = ?",
+    )
+      .bind(id)
+      .run()
+    await add({ description: 'EXAMPLE OTHER' })
+
+    for (const text of ['chq 000123', '9999999-97', 'example rent', 'code x', '4321']) expect(await descriptions(`?text=${encodeURIComponent(text)}`), text).toEqual(['EXAMPLE PAYEE'])
+  })
+
+  it('finds a 100-character search in text with multibyte characters', async () => {
+    // D1 refuses a LIKE pattern over 50 bytes, and this is 100 characters and 150 bytes. Matching must not depend on one.
+    const long = `${'é'.repeat(50)}${'x'.repeat(50)}`
+    await add({ description: `EXAMPLE ${'é'.repeat(50)}${'X'.repeat(50)} SHOP` })
+    await add({ description: `EXAMPLE ${'é'.repeat(50)}${'x'.repeat(49)} SHOP` })
+
+    expect(long).toHaveLength(100)
+    const page = await search(`?text=${encodeURIComponent(long)}`)
+    expect(page.total).toBe(1)
+    expect(page.transactions.map((t) => t.description)).toEqual([`EXAMPLE ${'é'.repeat(50)}${'X'.repeat(50)} SHOP`])
+  })
+
   it('matches inside a word, not only at the start', async () => {
     await add({ description: 'EXAMPLE SUPERMARKET' })
     expect(await descriptions('?text=permark')).toEqual(['EXAMPLE SUPERMARKET'])
@@ -327,17 +351,17 @@ describe('paging', () => {
     }
   })
 
-  it('gives an empty page, with the total, past the end', async () => {
+  it('gives an empty page past the end', async () => {
     await add()
     await add()
-    expect(await search('?offset=10')).toEqual({ total: 2, transactions: [] })
+    expect(await search('?offset=10&count=true')).toEqual({ total: 2, transactions: [] })
   })
 
   it('pages a filtered list and counts only the filtered rows', async () => {
     for (let i = 1; i <= 5; i += 1) await add({ description: `EXAMPLE CAFE ${i}`, date: `2026-10-0${i}` })
     for (let i = 1; i <= 4; i += 1) await add({ description: `EXAMPLE OTHER ${i}` })
 
-    const second = await search('?text=cafe&limit=2&offset=2')
+    const second = await search('?text=cafe&limit=2&offset=2&count=true')
 
     expect(second.total).toBe(5)
     expect(second.transactions.map((t) => t.description)).toEqual(['EXAMPLE CAFE 3', 'EXAMPLE CAFE 2'])
@@ -350,6 +374,35 @@ describe('paging', () => {
     ['offset', '1234567890'],
   ])('rejects %s=%s, naming only the field', async (field, value) => {
     expect(await refusal(`?${field}=${value}`)).toEqual({ status: 400, body: { error: 'Invalid request', field } })
+  })
+})
+
+describe('counting', () => {
+  beforeEach(async () => {
+    for (let i = 0; i < 5; i += 1) await add({ description: `EXAMPLE CAFE ${i}` })
+  })
+
+  it('counts on the first page and leaves it out of later ones, which the page already has the total for', async () => {
+    expect(await search('?limit=2')).toMatchObject({ total: 5, transactions: [{}, {}] })
+    expect(await search('?limit=2&offset=2')).toMatchObject({ total: null, transactions: [{}, {}] })
+  })
+
+  it('leaves the count out when asked, whatever the page', async () => {
+    expect(await search('?limit=2&count=false')).toMatchObject({ total: null, transactions: [{}, {}] })
+  })
+
+  it('counts a later page when asked', async () => {
+    expect(await search('?limit=2&offset=4&count=true')).toMatchObject({ total: 5, transactions: [{}] })
+  })
+
+  it('counts alone, with no rows, when asked for only the count', async () => {
+    expect(await search('?text=cafe&count=only')).toEqual({ total: 5, transactions: [] })
+    expect(await search('?text=nothing&count=only')).toEqual({ total: 0, transactions: [] })
+    expect(await search('?limit=2&offset=2&count=only')).toEqual({ total: 5, transactions: [] })
+  })
+
+  it('refuses any other count, naming only the field', async () => {
+    expect(await refusal('?count=maybe')).toEqual({ status: 400, body: { error: 'Invalid request', field: 'count' } })
   })
 })
 
@@ -429,7 +482,7 @@ describe('GET /api/transactions/:id', () => {
   it('returns what Sync supplied: the counterparty, card, particulars and code', async () => {
     const id = await add()
     await env.DB.prepare(
-      "UPDATE transactions SET source = 'sync', counterparty_account = '99-9999-9999999-97', card_suffix = '1234', particulars = 'EXAMPLE PART', code = 'EXAMPLE CODE', bank_reference = 'EXAMPLE REF' WHERE id = ?",
+      "UPDATE transactions SET source = 'sync', bank_counterparty_account = '99-9999-9999999-97', bank_card_suffix = '1234', bank_particulars = 'EXAMPLE PART', bank_payment_code = 'EXAMPLE CODE', bank_reference = 'EXAMPLE REF' WHERE id = ?",
     )
       .bind(id)
       .run()

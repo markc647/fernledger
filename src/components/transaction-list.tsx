@@ -20,8 +20,8 @@ import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import { meQuery } from '@/lib/me'
-import { PAGE_SIZE, transactionsQuery } from '@/lib/queries'
-import { SORT_KEYS, sortOf, tidy, type SortKey, type TransactionSearch } from '@/lib/transaction-search'
+import { PAGE_SIZE, transactionCountQuery, transactionsQuery } from '@/lib/queries'
+import { SORT_KEYS, sortOf, tidy, type DetailOrigin, type SortKey, type TransactionSearch } from '@/lib/transaction-search'
 
 type Row = InferResponseType<typeof api.transactions.$get, 200>['transactions'][number]
 
@@ -56,19 +56,23 @@ const hasFilter = (search: TransactionSearch) => search.account !== undefined ||
 /**
  * Transactions, a page at a time, with their Category and Note. `search` is what is asked for (filters, sort, page) and
  * `onSearch` changes it; the page keeps it in its address. The server does the searching, sorting and paging, and the table
- * (TanStack Table in manual mode) holds the sort and page. The Admin gets an Edit button on each row to set an Override
- * and a Note; a Member sees the same list read-only. With `showFilters` there is a search form above the list.
+ * (TanStack Table in manual mode) holds the sort and page. How many match is asked once per search, not per page (it reads
+ * every Transaction the filters keep: ADR 0004). The Admin gets an Edit button on each row to set an Override and a Note; a
+ * Member sees the same list read-only. With `showFilters` there is a search form above the list. A Transaction's details
+ * come back to this list, or to the Uncategorised page when `origin` says that is where the reader started.
  */
 export function TransactionList({
   search,
   onSearch,
   showFilters = false,
+  origin,
   emptyMessage,
   intro,
 }: {
   search: TransactionSearch
   onSearch: (search: TransactionSearch, options?: { replace?: boolean }) => void
   showFilters?: boolean
+  origin?: DetailOrigin
   emptyMessage: ReactNode
   intro?: ReactNode
 }) {
@@ -77,6 +81,8 @@ export function TransactionList({
   // A range that runs backwards can't match anything; the form explains it when typed, and a hand-edited address is explained here.
   const backwards = !!search.from && !!search.to && search.from > search.to
   const { data, error, isFetching } = useQuery({ ...transactionsQuery(search), placeholderData: keepPreviousData, enabled: !backwards })
+  // The total is kept while a new search's is fetched, and a page or sort change doesn't ask again.
+  const { data: total, error: countError } = useQuery({ ...transactionCountQuery(search), placeholderData: keepPreviousData, enabled: !backwards })
   const { data: me } = useQuery(meQuery)
   // Until `me` arrives nobody is the Admin: the edit controls fail closed. The API refuses a Member's write whatever the page shows.
   const isAdmin = me?.role === 'admin'
@@ -98,7 +104,7 @@ export function TransactionList({
   const results = useRef<HTMLDivElement>(null)
   const summary = useRef<HTMLParagraphElement>(null)
   const paged = useRef(false)
-  const lastPage = data !== undefined && page * PAGE_SIZE >= data.total
+  const lastPage = total !== undefined && page * PAGE_SIZE >= total
   useEffect(() => {
     if (!paged.current || isFetching) return // wait for the new page, so what is announced and scrolled to is the new list
     paged.current = false
@@ -107,14 +113,14 @@ export function TransactionList({
   }, [page, lastPage, isFetching])
 
   // A page past the end (the history shrank, or the address was edited) goes to the last one that has Transactions.
-  const lastPageNumber = data && data.total > 0 ? Math.ceil(data.total / PAGE_SIZE) : undefined
+  const lastPageNumber = total !== undefined && total > 0 ? Math.ceil(total / PAGE_SIZE) : undefined
   useEffect(() => {
     if (lastPageNumber !== undefined && !isFetching && page > lastPageNumber) onSearch(tidy({ ...search, page: lastPageNumber }), { replace: true })
   }, [lastPageNumber, isFetching, page, search, onSearch])
 
   const linkSearch = JSON.stringify(search)
   const columns = useMemo(() => {
-    const here: TransactionSearch = JSON.parse(linkSearch)
+    const here: TransactionSearch & { origin?: DetailOrigin } = { ...JSON.parse(linkSearch), origin }
     return helper.columns([
       helper.accessor('date', { header: 'Date', sortDescFirst: true, cell: (info) => <span className="whitespace-nowrap">{formatDate(info.getValue())}</span> }),
       helper.accessor('accountName', { id: 'account', header: 'Account' }),
@@ -170,13 +176,13 @@ export function TransactionList({
           ]
         : []),
     ])
-  }, [isAdmin, linkSearch])
+  }, [isAdmin, linkSearch, origin])
 
   const table = useTable({
     features,
     columns,
     data: data?.transactions ?? NO_ROWS,
-    rowCount: data?.total,
+    rowCount: total,
     manualSorting: true,
     manualPagination: true,
     enableSortingRemoval: false,
@@ -234,17 +240,21 @@ export function TransactionList({
         <p role="alert" className="mt-4 font-medium">
           The “To” date is before the “From” date. Change one of them to see Transactions.
         </p>
-      ) : error ? (
+      ) : error || countError ? (
         <p role="alert" className="mt-4">Fernledger couldn't load the Transactions. Reload the page to try again.</p>
-      ) : !data ? (
+      ) : !data || (data.transactions.length === 0 && total === undefined) ? (
         <p role="status" className="mt-4">Loading…</p>
-      ) : data.total === 0 ? (
+      ) : total === 0 || (data.transactions.length === 0 && page === 1) ? (
         <p role="status" className="mt-4">{filtered ? 'No Transactions match these filters.' : emptyMessage}</p>
+      ) : data.transactions.length === 0 ? (
+        // A page past the end, until the effect above moves to the last one.
+        <p role="status" className="mt-4">Loading…</p>
       ) : (
         <div ref={results} aria-busy={isFetching} className="mt-4 scroll-mt-4">
           <p ref={summary} role="status" tabIndex={-1} className="mb-4 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-            Showing {((page - 1) * PAGE_SIZE + 1).toLocaleString('en-NZ')} to {Math.min(page * PAGE_SIZE, data.total).toLocaleString('en-NZ')} of{' '}
-            {data.total.toLocaleString('en-NZ')}
+            Showing {((page - 1) * PAGE_SIZE + 1).toLocaleString('en-NZ')} to{' '}
+            {(total === undefined ? (page - 1) * PAGE_SIZE + data.transactions.length : Math.min(page * PAGE_SIZE, total)).toLocaleString('en-NZ')}
+            {total === undefined ? '' : ` of ${total.toLocaleString('en-NZ')}`}
             {filtered ? ' matching' : ''}, sorted by {String(table.getColumn(sort)?.columnDef.header)}, {SORT_WORDS[sort][dir === 'asc' ? 'ascending' : 'descending']}.
           </p>
           <ResponsiveTable caption={filtered ? 'Transactions matching the search' : 'Transactions'} columns={tableColumns} rows={table.getRowModel().rows} getRowKey={(row) => row.id} />
@@ -256,7 +266,8 @@ export function TransactionList({
               Next
             </Button>
             <span>
-              Page {page.toLocaleString('en-NZ')} of {table.getPageCount().toLocaleString('en-NZ')}
+              Page {page.toLocaleString('en-NZ')}
+              {total === undefined ? '' : ` of ${table.getPageCount().toLocaleString('en-NZ')}`}
             </span>
           </nav>
         </div>

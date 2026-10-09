@@ -7,11 +7,18 @@ import { Button } from '@/components/ui/button'
 import { formatDate, formatDateTime } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { transactionQuery } from '@/lib/queries'
-import type { TransactionSearch } from '@/lib/transaction-search'
+import type { DetailOrigin, TransactionSearch } from '@/lib/transaction-search'
 
 const linkStyle = 'inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
-function BackLink({ search }: { search: TransactionSearch }) {
+/** Back to the list the reader came from, with the same order, page and filters. */
+function BackLink({ search, origin }: { search: TransactionSearch; origin?: DetailOrigin }) {
+  if (origin === 'uncategorised')
+    return (
+      <Link to="/uncategorised" search={{ sort: search.sort, dir: search.dir, page: search.page }} className={linkStyle}>
+        Back to Uncategorised
+      </Link>
+    )
   return (
     <Link to="/transactions" search={search} className={linkStyle}>
       Back to Transactions
@@ -34,9 +41,10 @@ const present = (value: string | null): value is string => value !== null && val
 /**
  * One Transaction in full: what the list shows, and everything the bank supplied (the counterparty's account, card,
  * particulars, code and reference), its Bank Time when the bank gave one, and when Akahu first saw it. Every Member can read
- * it; the Admin can also set its Override and Note. `back` is the search the reader came from.
+ * it; the Admin can also set its Override and Note. `back` is the search the reader came from, and `origin` the page, when it
+ * wasn't Transactions.
  */
-export function TransactionDetail({ id, back }: { id: string; back: TransactionSearch }) {
+export function TransactionDetail({ id, back, origin }: { id: string; back: TransactionSearch; origin?: DetailOrigin }) {
   const { data: t, error } = useQuery(transactionQuery(id))
   const { data: me } = useQuery(meQuery)
   // Until `me` arrives nobody is the Admin: the edit control fails closed. The API refuses a Member's write whatever the page shows.
@@ -58,7 +66,7 @@ export function TransactionDetail({ id, back }: { id: string; back: TransactionS
       <>
         <h1 className="text-2xl font-semibold">Transaction not found</h1>
         <p role="alert" className="mt-2">There is no Transaction with that number. It may have been removed when imported history was replaced.</p>
-        <BackLink search={back} />
+        <BackLink search={back} origin={origin} />
       </>
     )
   if (error)
@@ -66,7 +74,7 @@ export function TransactionDetail({ id, back }: { id: string; back: TransactionS
       <>
         <h1 className="text-2xl font-semibold">Transaction</h1>
         <p role="alert" className="mt-2">Fernledger couldn't load this Transaction. Reload the page to try again.</p>
-        <BackLink search={back} />
+        <BackLink search={back} origin={origin} />
       </>
     )
   if (!t)
@@ -77,17 +85,13 @@ export function TransactionDetail({ id, back }: { id: string; back: TransactionS
       </>
     )
 
-  const paymentDetails = [
-    t.bankCounterpartyAccount && 'counterparty account',
-    t.bankCardSuffix && 'card',
-    t.bankParticulars && 'particulars',
-    t.bankPaymentCode && 'code',
-    t.bankReference && 'reference',
-  ].some(Boolean)
+  // An Import's reference is a cheque number. It doesn't stand in for the payment details a bank file lacks, so it doesn't count as one.
+  const imported = t.source === 'import'
+  const paymentDetails = [t.bankCounterpartyAccount, t.bankCardSuffix, t.bankParticulars, t.bankPaymentCode, imported ? null : t.bankReference].some((value) => value !== null && value.trim() !== '')
 
   return (
     <>
-      <BackLink search={back} />
+      <BackLink search={back} origin={origin} />
       <h1 className="text-2xl font-semibold">Transaction</h1>
       <p className="mt-2">
         {formatDate(t.date)}, {t.description}, <Amount cents={t.amountCents} />
@@ -151,14 +155,18 @@ export function TransactionDetail({ id, back }: { id: string; back: TransactionS
         <dl className="mt-3 grid gap-3">
           <Fact label="Source">{t.source === 'sync' ? 'Synced from Akahu' : 'Imported from a bank file'}</Fact>
           {present(t.bankType) && <Fact label="Type">{t.bankType}</Fact>}
-          {present(t.bankMemo) && <Fact label="Memo">{t.bankMemo}</Fact>}
+          {present(t.bankMemo) && <Fact label="Bank memo">{t.bankMemo}</Fact>}
           {present(t.bankCounterpartyAccount) && <Fact label="Counterparty account">{t.bankCounterpartyAccount}</Fact>}
           {present(t.bankCardSuffix) && <Fact label="Card">Ending {t.bankCardSuffix}</Fact>}
           {present(t.bankParticulars) && <Fact label="Particulars">{t.bankParticulars}</Fact>}
           {present(t.bankPaymentCode) && <Fact label="Code">{t.bankPaymentCode}</Fact>}
-          {present(t.bankReference) && <Fact label="Reference">{t.bankReference}</Fact>}
+          {present(t.bankReference) && <Fact label={imported ? 'Cheque number' : 'Reference'}>{t.bankReference}</Fact>}
           {t.bankTime !== null && <Fact label="Bank Time">{formatDateTime(t.bankTime)}</Fact>}
-          {t.firstSeenAt !== null && <Fact label="First seen by Akahu">{formatDateTime(t.firstSeenAt)}</Fact>}
+          {t.firstSeenAt !== null ? (
+            <Fact label="First seen by Akahu">{formatDateTime(t.firstSeenAt)}</Fact>
+          ) : (
+            imported && <Fact label="First seen by Akahu">Akahu hasn't reported this Transaction, so there is no first-seen time.</Fact>
+          )}
         </dl>
         {!paymentDetails && (
           <p className="mt-3 text-muted-foreground">

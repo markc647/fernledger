@@ -200,7 +200,7 @@ test.describe('zoom', () => {
         await page.route(/\/api\/transactions\?/, (route) =>
           route.fulfill({
             json: {
-              total: 1234,
+              total: null,
               transactions: [{ id: 1, accountId: 1, accountName: longName, date: '2026-10-08', description: 'EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN', bankType: 'EFTPOS', amountCents: -123456789 }],
             },
           }),
@@ -303,6 +303,27 @@ test.describe('responsive table', () => {
     await expect(cards.first()).toContainText('Thu 8 Oct 2026')
     await expect(cards.first()).toContainText('Example Supermarket')
     await expect(cards.first()).toContainText('−$1,111.11')
+  })
+
+  test('sorts by a column heading on a wide screen and from a menu on cards', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 })
+    await page.goto('/styleguide')
+    const table = page.getByRole('table', { name: 'Sample transactions' })
+    const amount = table.getByRole('columnheader', { name: 'Amount' })
+    await expect(table.getByRole('columnheader', { name: 'Date' })).toHaveAttribute('aria-sort', 'descending')
+
+    await amount.getByRole('button').click()
+    await expect(amount).toHaveAttribute('aria-sort', 'ascending')
+    await expect(table.getByRole('row').nth(1)).toContainText('Example Power Company') // the largest money out
+    await amount.getByRole('button').click()
+    await expect(amount).toHaveAttribute('aria-sort', 'descending')
+    await expect(table.getByRole('row').nth(1)).toContainText('Example Employer wages')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    const menu = page.getByLabel('Sort by')
+    await expect(menu).toHaveValue('amount:descending')
+    await menu.selectOption({ label: 'Description, A to Z' })
+    await expect(page.getByRole('list', { name: 'Sample transactions' }).getByRole('listitem').first()).toContainText('Example Employer wages')
   })
 
   test('builds each cell once, so the page has no duplicate ids, at either width', async ({ page }) => {

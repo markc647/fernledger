@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import { api } from './api'
 import { HttpError } from './me'
-import { apiQuery, type TransactionSearch } from './transaction-search'
+import { apiQuery, filterQuery, filtersOf, type TransactionSearch } from './transaction-search'
 
 export const PAGE_SIZE = 50
 
@@ -31,16 +31,35 @@ export const changeLogQuery = (filters: ChangeLogFilters, page: number) =>
     },
   })
 
-/** One page of Transactions for a search (filters, sort and page), as the API returns it. Every key starts with 'transactions', so saving an Override or Note refreshes them all. */
+/**
+ * One page of Transactions for a search (filters, sort and page), as the API returns it, without a count: counting reads
+ * every Transaction the filters keep (ADR 0004), so it is `transactionCountQuery`'s, asked once per search and not per page.
+ * Every key starts with 'transactions', so saving an Override or Note refreshes them all.
+ */
 export const transactionsQuery = (search: TransactionSearch) =>
   queryOptions({
     queryKey: ['transactions', 'list', search],
     queryFn: async () => {
-      const res = await api.transactions.$get({ query: apiQuery(search, PAGE_SIZE) })
+      const res = await api.transactions.$get({ query: { ...apiQuery(search, PAGE_SIZE), count: 'false' } })
       if (!res.ok) throw new HttpError(res.status)
       return res.json()
     },
   })
+
+/** How many Transactions a search matches. Only its filters count, so paging and sorting reuse the answer instead of asking again. */
+export const transactionCountQuery = (search: TransactionSearch) => {
+  const filters = filtersOf(search)
+  return queryOptions({
+    queryKey: ['transactions', 'count', filters],
+    queryFn: async () => {
+      const res = await api.transactions.$get({ query: { ...filterQuery(filters), count: 'only' } })
+      if (!res.ok) throw new HttpError(res.status)
+      const { total } = await res.json()
+      if (total === null) throw new Error('The API did not count') // count=only always does; this narrows the type
+      return total
+    },
+  })
+}
 
 /** One Transaction in full. A 404 means there is no such Transaction. */
 export const transactionQuery = (id: string) =>
@@ -102,7 +121,8 @@ export const RECENT_TRANSACTIONS = 5
 export const recentTransactionsQuery = queryOptions({
   queryKey: ['transactions', 'recent'],
   queryFn: async () => {
-    const res = await api.transactions.$get({ query: { limit: String(RECENT_TRANSACTIONS) } })
+    // No count: the Summary shows no total, and counting would read every Transaction on every visit (ADR 0004).
+    const res = await api.transactions.$get({ query: { limit: String(RECENT_TRANSACTIONS), count: 'false' } })
     if (!res.ok) throw new HttpError(res.status)
     return res.json()
   },
