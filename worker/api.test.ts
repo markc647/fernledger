@@ -31,12 +31,16 @@ const sign = (claims: Record<string, unknown>, opts: SignOptions = {}) =>
     .setExpirationTime(opts.exp ?? '5m')
     .sign(opts.key ?? signingKey)
 
-type CallOptions = { token?: string; method?: string; headers?: Record<string, string> }
+type CallOptions = { token?: string; method?: string; headers?: Record<string, string>; origin?: string }
 
-/** The real request path: routing and the configured env, as `wrangler dev` would serve them. */
+/**
+ * Goes through the Worker's exported handler with the env configured in vitest.config.ts.
+ * The test env has no assets layer, so `assets.run_worker_first` isn't exercised here;
+ * browser-level asset routing belongs to the Playwright seam (ticket 03).
+ */
 async function call(path: string, opts: CallOptions = {}) {
   const headers = { ...opts.headers, ...(opts.token ? { 'Cf-Access-Jwt-Assertion': opts.token } : {}) }
-  return exports.default.fetch(new Request(`https://app.test${path}`, { method: opts.method ?? 'GET', headers }))
+  return exports.default.fetch(new Request(`${opts.origin ?? 'https://app.test'}${path}`, { method: opts.method ?? 'GET', headers }))
 }
 
 /** Calls the Worker's fetch handler directly, only for cases that change the Worker's settings or origin. */
@@ -94,7 +98,7 @@ describe('Access verification on /api', () => {
     expect((await call('/api/me', { token })).status).toBe(401)
   })
 
-  it.each([{ email: 123 }, { email: '' }, {}])('rejects a token without a usable email claim (%j)', async (claims) => {
+  it.each([{ email: 123 }, { email: '' }, { email: '   ' }, {}])('rejects a token without a usable email claim (%j)', async (claims) => {
     expect((await call('/api/me', { token: await sign(claims) })).status).toBe(401)
   })
 
@@ -127,10 +131,9 @@ describe('read-only Members', () => {
 })
 
 describe('local development identity', () => {
-  const dev = { DEV_USER_EMAIL: 'Dev@example.com' }
-
+  // DEV_USER_EMAIL is set to Dev@example.com in vitest.config.ts; it only ever applies on localhost.
   it('stands in for a signed-in Member on localhost, without a token', async () => {
-    const res = await callWith('http://localhost:5173/api/me', dev)
+    const res = await call('/api/me', { origin: 'http://localhost:5173' })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ email: 'dev@example.com', role: 'member' })
   })
@@ -142,11 +145,11 @@ describe('local development identity', () => {
   })
 
   it('is ignored on any other host', async () => {
-    expect((await callWith('https://app.test/api/me', dev)).status).toBe(401)
+    expect((await call('/api/me')).status).toBe(401)
   })
 
   it('cannot be spoofed with a Host header on a non-localhost URL', async () => {
-    expect((await callWith('https://app.test/api/me', dev, { headers: { Host: 'localhost' } })).status).toBe(401)
+    expect((await call('/api/me', { headers: { Host: 'localhost' } })).status).toBe(401)
   })
 })
 

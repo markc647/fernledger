@@ -13,6 +13,7 @@ export default defineConfig({
           ACCESS_TEAM_DOMAIN: 'example.cloudflareaccess.com',
           ACCESS_AUD: 'test-aud',
           ADMIN_EMAIL: 'Admin@example.com',
+          DEV_USER_EMAIL: 'Dev@example.com', // honoured on localhost only
         },
       },
     }),

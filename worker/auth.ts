@@ -15,7 +15,7 @@ export type AuthConfig = {
 export const roleFor = (email: string, adminEmail: string | undefined): Role =>
   adminEmail && email.toLowerCase() === adminEmail.toLowerCase() ? 'admin' : 'member'
 
-const emailClaim = z.string().check(z.minLength(1))
+const emailClaim = z.string().check(z.trim(), z.minLength(1))
 
 /** Verifies the Cloudflare Access JWT. Returns null for anything that isn't a valid, signed, in-date token for this app. */
 export async function authenticate(request: Request, config: AuthConfig): Promise<Member | null> {
