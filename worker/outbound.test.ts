@@ -53,9 +53,13 @@ const EXERCISES: Exercise[] = [
   { route: 'POST /api/imports/chunks', path: () => '/api/imports/chunks', opts: { method: 'POST', body: {
       account: { number: '99-9999-9999999-99' },
       chunk: { index: 0, count: 1 },
-      file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-01', to: '2026-10-31' },
+      file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-01', to: '2026-10-31', ledgerBalance: { cents: 0, date: '2026-10-31' } },
       rows: [{ date: '2026-10-01', uniqueId: 'ID1', tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SHOP', bankMemo: 'EFTPOS', amountCents: -1000 }],
     } } },
+  // The balance routes read what that chunk recorded.
+  { route: 'GET /api/balances', path: () => '/api/balances' },
+  { route: 'GET /api/balances/:accountId/history', path: (id) => `/api/balances/${id}/history` },
+  { route: 'GET /api/balance-checks', path: () => '/api/balance-checks' },
   // Then a Category and the Transaction that chunk made, for the Category routes and the Override and Note on that Transaction.
   { route: 'POST /api/categories', path: () => '/api/categories', opts: { method: 'POST', body: { name: 'Example category' } } },
   { route: 'GET /api/categories', path: () => '/api/categories' },
@@ -89,7 +93,9 @@ describe('outbound calls', () => {
     expect(hostsContacted().filter((host) => !ALLOWED_HOSTS.includes(host))).toEqual(['github.com'])
   })
 
-  it('makes none from any route, signed in as the Admin', async () => {
+  // One request per route (about 0.5 s alone), but the full suite runs many workerd instances at once and this test has
+  // taken over 5 s on a busy machine, so it has a longer limit than the 5 s default. It is a load allowance, not a slow route.
+  it('makes none from any route, signed in as the Admin', { timeout: 30_000 }, async () => {
     let accountId = 0
     for (const { route, path, opts } of EXERCISES) {
       const res = await call(path(accountId), typeof opts === 'function' ? opts(accountId) : opts)

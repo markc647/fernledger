@@ -1,5 +1,6 @@
 import type { BankCsvResult } from './bank-csv'
 import { api } from './api'
+import type { BalanceCheckOutcome } from './balance-check'
 import { planChunks } from './import-chunks'
 import { HttpError } from './me'
 
@@ -13,6 +14,8 @@ export type ImportSummary = {
   dropped: number
   /** Imported Transactions removed first, when replacing imported history. */
   removed: number
+  /** How the file's ledger balance compared with the Transactions held, once the last part is saved. */
+  balanceCheck: BalanceCheckOutcome | null
 }
 
 export type ImportOptions = {
@@ -51,7 +54,7 @@ const MAX_CLEAR_STEPS = 40
 /** Sends a parsed file to the Worker one chunk at a time, in order, and adds up what each chunk reports. */
 export async function runImport(file: BankCsvResult, options: ImportOptions, onProgress: (sent: number, total: number) => void): Promise<ImportSummary> {
   const chunks = planChunks(file.rows)
-  const summary: ImportSummary = { added: 0, duplicates: 0, skipped: file.errors.length, dropped: 0, removed: 0 }
+  const summary: ImportSummary = { added: 0, duplicates: 0, skipped: file.errors.length, dropped: 0, removed: 0, balanceCheck: null }
   const replacing = options.replaceAccountId !== undefined
 
   async function send(index: number, rows: (typeof chunks)[number]) {
@@ -59,7 +62,7 @@ export async function runImport(file: BankCsvResult, options: ImportOptions, onP
       json: {
         account: { number: file.accountNumber, ...(options.accountName ? { name: options.accountName } : {}) },
         chunk: { index, count: chunks.length },
-        file: { adapterId: file.adapterId, rowCount: file.rows.length, skipped: file.errors.length, from: file.dateRange.from, to: file.dateRange.to },
+        file: { adapterId: file.adapterId, rowCount: file.rows.length, skipped: file.errors.length, from: file.dateRange.from, to: file.dateRange.to, ledgerBalance: file.ledgerBalance },
         rows,
         // These apply to the whole Import, so they ride on the first chunk only.
         ...(index === 0 && options.cutoverDate ? { cutoverDate: options.cutoverDate } : {}),
@@ -86,6 +89,7 @@ export async function runImport(file: BankCsvResult, options: ImportOptions, onP
       summary.duplicates += result.duplicates
       summary.dropped += result.dropped
       summary.removed += result.removed
+      if (result.balanceCheck) summary.balanceCheck = result.balanceCheck
     } catch (error) {
       throw new ImportStopped(index, chunks.length, error, summary.removed)
     }
