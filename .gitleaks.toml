@@ -16,3 +16,8 @@ regex = '''Bank \d{2}; Branch \d{4}; Account'''
 id = "asb-account-short-form"
 description = "ASB account number in short 'Account NNNNNNN-NN' form"
 regex = '''Account \d{7}-\d{2,3}'''
+
+# Made-up fixtures (fake bank code 99) legitimately contain these shapes. This path only.
+[allowlist]
+description = "Made-up bank fixtures"
+paths = ['''^test/fixtures/''']
