@@ -84,6 +84,10 @@ _Avoid_: Manual category, exception
 Free text the Admin attaches to a single Transaction.
 _Avoid_: Comment, memo
 
+**Carry over**:
+What replacing an Account's imported history does with the Admin's Overrides and Notes: each goes to the re-imported Transaction with the same bank unique ID. One with no match is lost, and the finished Import and the Change Log say how many were carried over and how many lost.
+_Avoid_: Migrate, restore, reapply
+
 **Budget**:
 A planned monthly spending amount for a Category, effective from a given month onward; unspent amounts do not carry over.
 _Avoid_: Limit, allowance, envelope

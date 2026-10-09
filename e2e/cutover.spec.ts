@@ -1,5 +1,5 @@
 import { AxeBuilder } from '@axe-core/playwright'
-import type { Page } from '@playwright/test'
+import type { BrowserContext, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
 
 // The light and dark projects run side by side against one local database, so each uses its own made-up Account.
@@ -25,6 +25,16 @@ const chooseFile = (page: Page, text: string) =>
   page.getByLabel('Bank export file').setInputFiles({ name: 'cutover.csv', mimeType: 'text/csv', buffer: Buffer.from(text) })
 
 const summaryValue = (page: Page, label: string) => page.getByText(label, { exact: true }).locator('xpath=following-sibling::dd[1]')
+
+/** Gives the Account's Transaction a Note, the way the Admin does (the API needs the same-origin header the page sends). */
+async function setNote(context: BrowserContext, baseURL: string, account: string, description: string, note: string) {
+  const list = await context.request.get('/api/transactions?limit=200')
+  const { transactions } = (await list.json()) as { transactions: { id: number; accountName: string; description: string }[] }
+  const found = transactions.find((t) => t.accountName === account && t.description === description)
+  expect(found, `${description} in ${account}`).toBeDefined()
+  const res = await context.request.put(`/api/transactions/${found!.id}/note`, { headers: { Origin: baseURL }, data: { note } })
+  expect(res.ok()).toBe(true)
+}
 
 const noAxeViolations = async (page: Page) => {
   const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
@@ -71,8 +81,11 @@ test('the Admin changes and clears the Cutover Date in Settings, which explains 
   await expect(page.getByLabel(`Cutover Date for ${name}`, { exact: true })).toHaveValue('')
 })
 
-test('the Admin replaces imported history after confirming, and the old rows go', async ({ page, context }, testInfo) => {
+test('the Admin replaces imported history after confirming, and the old rows go, with the Notes that found no match reported as lost', async ({ page, context, baseURL }, testInfo) => {
   await signInAs(context, 'admin')
+  // Both old rows have a Note of the Admin's own, and nothing in the replacement file has either's unique ID.
+  await setNote(context, baseURL!, accountName(testInfo), 'EXAMPLE SHOP 29', 'Example note one')
+  await setNote(context, baseURL!, accountName(testInfo), 'EXAMPLE SHOP 30', 'Example note two')
   await page.goto('/import')
   await chooseFile(page, asbFile(suffix(testInfo), ['2026/09/10', '2026/09/11', '2026/09/12']))
   await expect(page.getByText(`Existing Account: ${accountName(testInfo)}`)).toBeVisible()
@@ -81,6 +94,8 @@ test('the Admin replaces imported history after confirming, and the old rows go'
   const dialog = page.getByRole('alertdialog')
   await trigger.click()
   await expect(dialog).toContainText('removes the 2 Transactions that were imported into this Account')
+  await expect(dialog).toContainText('2 Transactions have your own Category or a Note. These are carried over to the Transactions that come back in this file with the same unique ID from your bank.')
+  await expect(dialog).not.toContainText('will be lost')
   // The safe answer has focus, so Enter or a stray tap doesn't remove anything.
   await expect(page.getByRole('button', { name: 'No, keep what is there' })).toBeFocused()
   await noAxeViolations(page)
@@ -99,11 +114,36 @@ test('the Admin replaces imported history after confirming, and the old rows go'
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
   await expect(summaryValue(page, 'Added')).toHaveText('3')
   await expect(summaryValue(page, 'Old imported Transactions removed')).toHaveText('2')
+  await expect(summaryValue(page, 'Transactions that kept their own Category or Note')).toHaveText('0')
+  await expect(summaryValue(page, 'Categories and Notes lost (no matching Transaction)')).toHaveText('2')
+  await expect(page.getByText('2 Transactions had your own Category or a Note, but no Transaction in this file has their unique ID from your bank')).toBeVisible()
 
   await page.getByRole('link', { name: 'See the transactions' }).click()
   const name = accountName(testInfo)
   await expect(page.getByRole('row', { name: new RegExp(`Sat 12 Sept 2026 ${name} EXAMPLE SHOP 12`) })).toBeVisible()
   await expect(page.getByRole('row', { name: new RegExp(`${name} EXAMPLE SHOP 29`) })).toHaveCount(0)
+})
+
+test('a Note on an imported Transaction comes back with it when the history is replaced by a file that has it again', async ({ page, context, baseURL }, testInfo) => {
+  const name = accountName(testInfo)
+  await signInAs(context, 'admin')
+  // The previous test left the Account with the Transactions of 10, 11 and 12 September.
+  await setNote(context, baseURL!, name, 'EXAMPLE SHOP 11', 'Example note kept across a replace')
+  await page.goto('/import')
+  await chooseFile(page, asbFile(suffix(testInfo), ['2026/09/10', '2026/09/11', '2026/09/12', '2026/09/13']))
+
+  await page.getByRole('button', { name: 'Replace imported history…' }).click()
+  await expect(page.getByRole('alertdialog')).toContainText('1 Transaction has your own Category or a Note. This is carried over')
+  await page.getByRole('button', { name: 'Yes, replace imported history' }).click()
+
+  await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
+  await expect(summaryValue(page, 'Transactions that kept their own Category or Note')).toHaveText('1')
+  await expect(summaryValue(page, 'Categories and Notes lost (no matching Transaction)')).toHaveText('0')
+  await expect(page.getByText('had your own Category or a Note, but no Transaction in this file')).toHaveCount(0)
+
+  await page.getByRole('link', { name: 'See the transactions' }).click()
+  await expect(page.getByRole('row').filter({ hasText: name }).filter({ hasText: 'EXAMPLE SHOP 11' }).filter({ hasText: 'Example note kept across a replace' })).toBeVisible()
+  await expect(page.getByRole('row').filter({ hasText: name }).filter({ hasText: 'EXAMPLE SHOP 13' }).filter({ hasText: 'Example note kept across a replace' })).toHaveCount(0)
 })
 
 test('the Cutover Date checkbox has a touch target of at least 44px', async ({ page, context }, testInfo) => {

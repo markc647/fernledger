@@ -142,7 +142,7 @@ test.describe('zoom', () => {
       test(`/import with the replace question open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example savings', accountNumber: '99-9999-9999999-97', cutoverDate: '2026-10-01' }] }))
-        await page.route('**/api/imports/imported/1', (route) => route.fulfill({ json: { imported: 6000, withOverrideOrNote: 40 } }))
+        await page.route('**/api/imports/imported/1', (route) => route.fulfill({ json: { imported: 6000, withOverrideOrNote: 40, carryOverWaiting: 3 } }))
         await page.setViewportSize({ width, height })
         await page.goto('/import')
         await sizeButton(page, size).click()
@@ -160,7 +160,7 @@ test.describe('zoom', () => {
         await page.getByLabel('Bank export file').setInputFiles({ name: 'zoom.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
         await page.getByRole('button', { name: 'Replace imported history…' }).click()
         await expect(page.getByRole('alertdialog')).toContainText('removed in steps of 5,000')
-        await expect(page.getByRole('alertdialog')).toContainText('40 Transactions have your own Category or a Note; these will be lost')
+        await expect(page.getByRole('alertdialog')).toContainText('40 Transactions have your own Category or a Note. These are carried over')
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({

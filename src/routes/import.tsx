@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { describeBalanceCheck, type BalanceCheckOutcome } from '@/lib/balance-check'
 import { adapters, BankCsvError, parseBankCsv, type BankCsvResult } from '@/lib/bank-csv'
 import { formatBalance, formatDate } from '@/lib/format'
+import { describeCarryBefore, describeLost } from '@/lib/import-carry'
 import { countOnOrAfter, DAILY_ROW_WRITES, MAX_IMPORT_ROWS, REPLACE_SLICE, replaceWrites, WRITES_PER_ROW } from '@/lib/import-chunks'
 import { describeStop } from '@/lib/import-stop'
 import { meQuery } from '@/lib/me'
@@ -149,13 +150,14 @@ function ImportFlow() {
   }
 
   if (step.name === 'stopped') {
-    const { headline, happened, next } = describeStop(step)
+    const { headline, happened, kept, next } = describeStop(step)
     return (
       <div className="mt-4 max-w-xl space-y-4">
         <p role="alert">
           <Status tone="danger">{headline}</Status>
         </p>
         {happened && <p className="font-medium">{happened}</p>}
+        {kept && <p>{kept}</p>}
         <p>{next}</p>
         <Button size="touch" onClick={reset}>
           Choose the file again
@@ -164,6 +166,7 @@ function ImportFlow() {
     )
   }
 
+  const lostMessage = describeLost(step.summary.lost)
   return (
     <section className="mt-4 space-y-4" aria-labelledby="summary-heading">
       <h2 id="summary-heading" className="text-xl font-semibold">
@@ -184,7 +187,20 @@ function ImportFlow() {
             <dd className="text-right tabular-nums">{step.summary.removed}</dd>
           </>
         )}
+        {(step.summary.carried > 0 || step.summary.lost > 0) && (
+          <>
+            <dt>Transactions that kept their own Category or Note</dt>
+            <dd className="text-right tabular-nums">{step.summary.carried}</dd>
+            <dt>Categories and Notes lost (no matching Transaction)</dt>
+            <dd className="text-right tabular-nums">{step.summary.lost}</dd>
+          </>
+        )}
       </dl>
+      {lostMessage && (
+        <p role="status" className="max-w-xl">
+          <Status tone="warning">{lostMessage}</Status>
+        </p>
+      )}
       {step.summary.balanceCheck && <BalanceCheckResult outcome={step.summary.balanceCheck} />}
       <div className="flex flex-wrap gap-2">
         <Link to="/transactions" className="inline-flex min-h-11 items-center rounded-lg bg-primary px-4 text-primary-foreground hover:bg-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
@@ -360,7 +376,8 @@ const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en
 function ReplaceDialog(props: { account: { id: number; name: string }; incomingRows: number; onReplace: () => void; onCancel: () => void }) {
   const { data, isError } = useQuery(importedRowsQuery(props.account.id))
   const imported = data?.imported
-  const withOwnWork = data?.withOverrideOrNote ?? 0
+  // What the Admin set by hand is carried over to rows with the same bank unique ID; how many don't match is known only afterwards.
+  const carryText = describeCarryBefore({ withOwnWork: data?.withOverrideOrNote ?? 0, waiting: data?.carryOverWaiting ?? 0 })
   const keepButton = useRef<HTMLButtonElement>(null)
   useEffect(() => keepButton.current?.focus(), [])
   const inSteps = imported !== undefined && imported > REPLACE_SLICE
@@ -391,11 +408,11 @@ function ReplaceDialog(props: { account: { id: number; name: string }; incomingR
             Transactions that came from Sync are not touched. It can't be undone, except by importing the old files again. The Change Log records it.
           </p>
         )}
-        {withOwnWork > 0 && (
-          <p className="font-semibold">
-            {plural(withOwnWork, 'Transaction', 'Transactions')} {withOwnWork === 1 ? 'has' : 'have'} your own Category or a Note; {withOwnWork === 1 ? 'this' : 'these'} will be lost. The replacement rows start without them.
+        {carryText.map((paragraph) => (
+          <p key={paragraph} className="font-semibold">
+            {paragraph}
           </p>
-        )}
+        ))}
         {inSteps && (
           <p>
             That is more than {REPLACE_SLICE.toLocaleString('en-NZ')}, so the old Transactions are removed in steps of {REPLACE_SLICE.toLocaleString('en-NZ')} before the file is imported. Each step is final: if the

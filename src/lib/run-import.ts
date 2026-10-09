@@ -14,6 +14,10 @@ export type ImportSummary = {
   dropped: number
   /** Imported Transactions removed first, when replacing imported history. */
   removed: number
+  /** Transactions given the Category or Note of the removed Transaction with the same bank unique ID (worker/carry-over.ts), over every part. */
+  carried: number
+  /** Categories and Notes of removed Transactions that no Transaction in the file claimed, which are gone. */
+  lost: number
   /** How the file's ledger balance compared with the Transactions held, once the last part is saved. */
   balanceCheck: BalanceCheckOutcome | null
 }
@@ -54,7 +58,7 @@ const MAX_CLEAR_STEPS = 40
 /** Sends a parsed file to the Worker one chunk at a time, in order, and adds up what each chunk reports. */
 export async function runImport(file: BankCsvResult, options: ImportOptions, onProgress: (sent: number, total: number) => void): Promise<ImportSummary> {
   const chunks = planChunks(file.rows)
-  const summary: ImportSummary = { added: 0, duplicates: 0, skipped: file.errors.length, dropped: 0, removed: 0, balanceCheck: null }
+  const summary: ImportSummary = { added: 0, duplicates: 0, skipped: file.errors.length, dropped: 0, removed: 0, carried: 0, lost: 0, balanceCheck: null }
   const replacing = options.replaceAccountId !== undefined
 
   async function send(index: number, rows: (typeof chunks)[number]) {
@@ -89,6 +93,11 @@ export async function runImport(file: BankCsvResult, options: ImportOptions, onP
       summary.duplicates += result.duplicates
       summary.dropped += result.dropped
       summary.removed += result.removed
+      // The last part says how many were carried over in all, and how many were lost (the Worker holds the running total).
+      if (result.carriedTotal !== null && result.lost !== null) {
+        summary.carried = result.carriedTotal
+        summary.lost = result.lost
+      }
       if (result.balanceCheck) summary.balanceCheck = result.balanceCheck
     } catch (error) {
       throw new ImportStopped(index, chunks.length, error, summary.removed)

@@ -8,6 +8,7 @@ describe('describeStop', () => {
     expect(describeStop(stop)).toEqual({
       headline: 'The Import stopped after 2 of 5 parts were saved.',
       happened: null,
+      kept: null,
       next: 'Nothing is lost. Choose the same file again and import it: rows already saved are recognised and skipped.',
     })
   })
@@ -25,6 +26,7 @@ describe('describeStop', () => {
   it('says part of the old history has been removed, for a replace that stopped while clearing it, and to use Replace again', () => {
     const result = describeStop({ sent: 0, total: 3, replacing: true, removed: 5000, dailyLimit: true })
     expect(result.happened).toBe('Part of the old history has been removed.')
+    expect(result.kept).toContain('Any Category or Note you set on the removed Transactions is kept')
     expect(result.next).toContain('use "Replace imported history"')
     expect(result.next).toContain('tomorrow')
   })
@@ -32,10 +34,13 @@ describe('describeStop', () => {
   it('says the old history is gone once a part of the new file was saved, and that a plain Import finishes it', () => {
     const result = describeStop({ sent: 1, total: 3, replacing: true, removed: 40, dailyLimit: false })
     expect(result.happened).toBe('The old history has been removed and part of the new file is saved.')
+    expect(result.kept).toContain('is kept, and is carried over to the Transactions imported from the file')
     expect(result.next).toContain('import it: rows already saved are recognised and skipped')
   })
 
   it('says nothing was removed when a replace stopped before removing anything', () => {
-    expect(describeStop({ sent: 0, total: 3, replacing: true, removed: 0, dailyLimit: false }).happened).toBe('Nothing was removed.')
+    const result = describeStop({ sent: 0, total: 3, replacing: true, removed: 0, dailyLimit: false })
+    expect(result.happened).toBe('Nothing was removed.')
+    expect(result.kept).toBeNull() // nothing was held, so there is nothing to say about it
   })
 })
