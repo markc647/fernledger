@@ -6,6 +6,7 @@
     "cutover.spec.ts": [92, 93],
     "import.spec.ts": [94, 95, 96, 97, 99],
     "report-balances.spec.ts": [51, 52, 53, 54, 55, 56],
+    "report-spending.spec.ts": [74, 75, 76, 77, 78, 79],
     "reports.spec.ts": [60, 61, 62, 63],
     "rules.spec.ts": [84, 85],
     "summary.spec.ts": [86, 87],

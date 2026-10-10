@@ -131,7 +131,7 @@ What a Change Log entry changed, such as Settings, Import, Account, Category, Ru
 _Avoid_: Type on its own
 
 **Report**:
-A print-formatted view of Transactions, or of each Account's balances, over a date range, which any Member can print or save as PDF.
+A print-formatted view of Transactions, of each Account's balances, or of what each Spending Category spent, over a date range, which any Member can print or save as PDF.
 _Avoid_: Statement, export
 
 **CSV export**:

@@ -122,6 +122,22 @@ export const reportBalancesQuery = (accounts: { id: number; name: string; accoun
       }),
   })
 
+/**
+ * The spending-by-Category Report's data: what each Spending Category spent over the range, for the one Account or, with none, all of
+ * them. One request either way (worker/report-spending.ts). Read once and kept, as the other Reports are: a Report is a snapshot.
+ */
+export const reportSpendingQuery = (accountId: number | undefined, from: string, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'spending', accountId ?? null, from, to],
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const res = await api.reports.spending.$get({ query: { ...(accountId === undefined ? {} : { accountId: String(accountId) }), from, to } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
 /** The Categories in use, by name. */
 export const categoriesQuery = queryOptions({
   queryKey: ['categories'],

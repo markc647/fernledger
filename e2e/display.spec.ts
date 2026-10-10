@@ -93,7 +93,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances']
+  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -532,6 +532,48 @@ test.describe('zoom', () => {
         await sizeButton(page, size).click()
         await expect(page.getByRole('article', { name: 'Balances over time' })).toContainText('$1,234,567.89')
         await expect(page.getByRole('article', { name: 'Balances over time' })).toContainText('Balance differs from bank by $1,234,567.89')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The spending-by-Category Report with its longest content: a long app title and Account name, a Category name with no spaces, the largest amounts, money
+  // back and a total that is less than nothing, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/reports/spending with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
+        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
+        await page.route('**/api/reports/spending?**', (route) =>
+          route.fulfill({
+            json: {
+              accountId: null,
+              from: '2026-09-01',
+              to: '2026-10-31',
+              categories: [
+                { categoryId: 1, categoryName: 'Health and medical costs for the household and the long-term care fees'.padEnd(120, 'z'), cents: 123456789012 },
+                { categoryId: 2, categoryName: 'Groceries', cents: -123456789 },
+              ],
+              uncategorisedCents: -123456789012,
+              totalCents: -123456789,
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/reports/spending?from=2026-09-01&to=2026-10-31')
+        await sizeButton(page, size).click()
+        const report = page.getByRole('article', { name: 'Spending by Category' })
+        await expect(report).toContainText('$1,234,567,890.12')
+        await expect(report).toContainText('$1,234,567.89 back')
+        await expect(report).toContainText('Uncategorised')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))

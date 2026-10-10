@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { BalancesForm, TransactionListingForm } from '@/components/report-form'
+import { BalancesForm, SpendingForm, TransactionListingForm } from '@/components/report-form'
 
 export const Route = createFileRoute('/reports')({
   component: Reports,
@@ -15,7 +15,16 @@ function Reports() {
     <>
       <h1 className="text-2xl font-semibold">Reports</h1>
       <p className="mt-2">A Report opens in a new window, laid out for paper. Print it from there, or save it as a PDF.</p>
-      <section aria-labelledby="transaction-listing" className="mt-6">
+      <section aria-labelledby="spending-by-category" className="mt-6">
+        <h2 id="spending-by-category" className="text-xl font-semibold">
+          Spending by Category
+        </h2>
+        <p className="mt-2">What each Spending Category spent in the dates you choose, largest first, with Uncategorised on its own and the total. Transfers between your own Accounts, Loans and Income are left out.</p>
+        <div className="mt-4">
+          <SpendingForm />
+        </div>
+      </section>
+      <section aria-labelledby="transaction-listing" className="mt-8">
         <h2 id="transaction-listing" className="text-xl font-semibold">
           Transaction listing
         </h2>
