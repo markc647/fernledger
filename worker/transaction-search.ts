@@ -1,6 +1,7 @@
 import * as z from 'zod/mini'
 import { isQueryDate } from './dates'
 import { effectiveCategory, type EffectiveCategory } from './effective-category'
+import { PARTNER_JOIN } from './transfers'
 
 // Searching, filtering, sorting and paging the Transactions (the query for GET /api/transactions), as pure functions.
 // The SQL is built here from constants chosen by validated input; a value from the request only ever reaches SQLite as a
@@ -16,6 +17,10 @@ export const SORT_KEYS = ['date', 'account', 'description', 'category', 'amount'
 export type SortKey = (typeof SORT_KEYS)[number]
 export type SortDirection = 'asc' | 'desc'
 
+/** The Transfers filter: only Transfers, or everything but them (the spending). The page offers the same ones (src/lib/transaction-search.ts). */
+export const TRANSFERS_FILTERS = ['only', 'exclude'] as const
+export type TransfersFilter = (typeof TRANSFERS_FILTERS)[number]
+
 const digits = z.optional(z.string().check(z.regex(/^\d{1,9}$/)))
 const id = z.optional(z.string().check(z.regex(/^[1-9]\d{0,8}$/)))
 const nzDate = z.optional(z.string().check(z.refine(isQueryDate)))
@@ -28,6 +33,8 @@ export const filterFields = {
   accountId: id,
   categoryId: id,
   uncategorised: z.optional(z.literal('true')),
+  // 'exclude' is the Transactions that count as spending: everything that is not a Transfer (effective-category.ts).
+  transfers: z.optional(z.enum(TRANSFERS_FILTERS)),
   from: nzDate,
   to: nzDate,
   text: z.optional(z.string().check(z.trim(), z.maxLength(MAX_TEXT))),
@@ -59,6 +66,8 @@ export type Filters = {
   accountId?: number
   categoryId?: number
   uncategorised: boolean
+  /** Only Transfers, or everything but: the spending. Unset is both. */
+  transfers?: TransfersFilter
   /** NZ dates, both ends included. */
   from?: string
   to?: string
@@ -90,10 +99,11 @@ const wantOf = (count: SearchQuery['count'], offset: number): Want =>
 const defaultDirection = (sort: SortKey): SortDirection => (sort === 'date' ? 'desc' : 'asc')
 
 /** The validated filters of a query string as Filters: IDs read as numbers, blank text dropped. */
-export const toFilters = (q: { accountId?: string; categoryId?: string; uncategorised?: 'true'; from?: string; to?: string; text?: string }): Filters => ({
+export const toFilters = (q: { accountId?: string; categoryId?: string; uncategorised?: 'true'; transfers?: TransfersFilter; from?: string; to?: string; text?: string }): Filters => ({
   accountId: q.accountId === undefined ? undefined : Number(q.accountId),
   categoryId: q.categoryId === undefined ? undefined : Number(q.categoryId),
   uncategorised: q.uncategorised === 'true',
+  transfers: q.transfers,
   from: q.from,
   to: q.to,
   text: q.text || undefined,
@@ -141,6 +151,9 @@ export type Statement = { sql: string; binds: (string | number)[] }
  * or sort reads every Transaction the other filters keep, and each join costs a row read on top (ADR 0004: D1 bills rows
  * read). The list, its count and the CSV export all pay that cost. A cached count, or a column kept up to date, is a later
  * ticket's call.
+ * Whether a Transaction is a Transfer comes from the same definition (`category.isTransfer`, which needs `category.joins` too), so
+ * the Transfers filter costs what the Category filter does. A Transfer is in no Category and is not Uncategorised: it is not
+ * spending, so there is no Category to choose for it (`category.shown`).
  */
 export function buildFilter(filters: Filters, category: EffectiveCategory = effectiveCategory()): { conditions: string[]; binds: (string | number)[] } {
   const conditions: string[] = []
@@ -150,10 +163,11 @@ export function buildFilter(filters: Filters, category: EffectiveCategory = effe
     binds.push(filters.accountId)
   }
   if (filters.categoryId !== undefined) {
-    conditions.push(`${category.id} = ?`)
+    conditions.push(`${category.id} = ? AND NOT ${category.isTransfer}`)
     binds.push(filters.categoryId)
   }
-  if (filters.uncategorised) conditions.push(`${category.id} IS NULL`)
+  if (filters.uncategorised) conditions.push(`${category.id} IS NULL AND NOT ${category.isTransfer}`)
+  if (filters.transfers !== undefined) conditions.push(filters.transfers === 'only' ? category.isTransfer : `NOT ${category.isTransfer}`)
   if (filters.from !== undefined) {
     conditions.push('t.date >= ?')
     binds.push(filters.from)
@@ -173,14 +187,15 @@ export function buildFilter(filters: Filters, category: EffectiveCategory = effe
 
 /**
  * The two statements a list needs: how many Transactions match (`count`), and one page of them (`page`).
- * `count` joins only what its filters read. The filters are `buildFilter`'s.
+ * `count` joins only what its filters read. The filters are `buildFilter`'s. The page also names the Account of a paired
+ * Transaction's matching Transaction, two more reads for each paired row it touches and none for the rest.
  */
 export function buildSearch(search: Search): { count: Statement; page: Statement } {
   const category = effectiveCategory()
   const { conditions, binds } = buildFilter(search, category)
   const filter = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
-  // The count joins only what its filters read: the Category's tables, and only when filtering by Category.
-  const filterJoins = search.categoryId !== undefined || search.uncategorised ? category.joins : ''
+  // The count joins only what its filters read: the Category's tables, and only when filtering by Category or Transfer (the Override decides both).
+  const filterJoins = search.categoryId !== undefined || search.uncategorised || search.transfers !== undefined ? category.joins : ''
 
   // Within equal values, newest first, so a page boundary never repeats or skips a Transaction.
   const direction = search.dir === 'asc' ? 'ASC' : 'DESC'
@@ -188,8 +203,8 @@ export function buildSearch(search: Search): { count: Statement; page: Statement
     date: ['t.date', 't.id'],
     account: ['a.name COLLATE NOCASE'],
     description: ['t.description COLLATE NOCASE'],
-    // Uncategorised last when ascending.
-    category: [`(${category.name} IS NULL)`, `${category.name} COLLATE NOCASE`],
+    // Uncategorised last when ascending, and Transfers, which have no Category to sort by, with them.
+    category: [`(${category.shown.name} IS NULL)`, `${category.shown.name} COLLATE NOCASE`],
     amount: ['t.amount_cents'],
   }
   const order = [...terms[search.sort].map((term) => `${term} ${direction}`), ...(search.sort === 'date' ? [] : ['t.date DESC', 't.id DESC'])].join(', ')
@@ -200,8 +215,10 @@ export function buildSearch(search: Search): { count: Statement; page: Statement
       // Sorted by date (the default) the page is read off the date index and stops after `limit` rows. Any other sort, and any
       // text filter, reads every Transaction the other filters keep (ADR 0004: D1 bills rows read, so those are the dear requests).
       sql: `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.description, t.bank_type AS bankType, t.amount_cents AS amountCents,
-                   ${category.id} AS categoryId, ${category.name} AS categoryName, ${category.source} AS categorySource, t.note
+                   ${category.shown.id} AS categoryId, ${category.shown.name} AS categoryName, ${category.shown.source} AS categorySource, t.note,
+                   ${category.transfer} AS transfer, partner_account.name AS transferAccountName
             FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
+            ${PARTNER_JOIN}
             ${filter}
             ORDER BY ${order} LIMIT ? OFFSET ?`,
       binds: [...binds, search.limit, search.offset],

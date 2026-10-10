@@ -1,4 +1,5 @@
 import { isSearchDate } from './date-range'
+import type { TransferSource } from './transfers'
 
 // The Transaction listing Report's data, put together in the browser from the API's pages (worker/report-transactions.ts).
 // A page is read at a time (ADR 0004: many small requests, not one big one): about 50 pages for the cap, plus about one request
@@ -17,8 +18,10 @@ export type ReportRow = {
   date: string
   description: string
   amountCents: number
-  /** The effective Category's name, or null while Uncategorised. */
+  /** The effective Category's name, or null while Uncategorised or a Transfer. */
   categoryName: string | null
+  /** Set while the Transaction is a Transfer, which the listing names instead of a Category. */
+  transfer: TransferSource | null
   note: string | null
   /** 'import' for a bank file, which gives a cheque number and nothing else about the payment; 'sync' for Akahu. */
   source: 'import' | 'sync'

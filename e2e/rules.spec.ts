@@ -139,7 +139,7 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
     await expect(page.getByLabel('Text contains')).toHaveValue(`EXAMPLE TWO ${stamp}`)
     await expect(page.getByLabel('Amount from ($)')).toHaveValue('10.00')
     await page.getByLabel('What the Rule does').selectOption({ label: 'Mark as a Transfer' })
-    await expect(page.getByText('It takes effect when Transfer pairing ships')).toBeVisible()
+    await expect(page.getByText('is a Transfer even if no matching Transaction is found in another Account')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save Rule' })).toBeEnabled()
     await noAxeViolations(page)
     await page.getByRole('button', { name: 'Save Rule' }).click()

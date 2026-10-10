@@ -1,6 +1,6 @@
 import * as z from 'zod/mini'
 import { isQueryDate, isRealDate } from './dates'
-import { effectiveCategory } from './effective-category'
+import { effectiveCategory, type TransferSource } from './effective-category'
 import type { Statement } from './transaction-search'
 
 // The data of the Transaction listing Report (GET /api/reports/transactions), as pure functions. One Account at a time, oldest
@@ -72,7 +72,7 @@ export function buildReportPage(query: ReportQuery): Statement {
   }
   binds.push(query.limit + 1)
   return {
-    sql: `SELECT t.id, t.date, t.description, t.amount_cents AS amountCents, ${category.name} AS categoryName, t.note, t.source,
+    sql: `SELECT t.id, t.date, t.description, t.amount_cents AS amountCents, ${category.shown.name} AS categoryName, ${category.transfer} AS transfer, t.note, t.source,
                  t.bank_reference AS bankReference, t.bank_counterparty_account AS bankCounterpartyAccount, t.bank_card_suffix AS bankCardSuffix,
                  t.bank_particulars AS bankParticulars, t.bank_payment_code AS bankPaymentCode
           FROM transactions t ${category.joins}
@@ -89,7 +89,9 @@ export type ReportRow = {
   date: string
   description: string
   amountCents: number
+  /** The Category a reader sees: none for a Transfer (`transfer` says so), which is not spending. */
   categoryName: string | null
+  transfer: TransferSource | null
   note: string | null
   source: 'import' | 'sync'
   bankReference: string | null

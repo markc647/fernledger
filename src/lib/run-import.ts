@@ -17,6 +17,8 @@ export type ImportSummary = {
   dropped: number
   /** Imported Transactions removed first, when replacing imported history. */
   removed: number
+  /** Pairs of Transactions matched as Transfers with another Account's, over every part (worker/transfers.ts). A pair is counted once. */
+  paired: number
   /** Transactions given the Override or Note of the removed Transaction with the same bank unique ID (worker/carry-over.ts), over every part. */
   carried: number
   /** Of those, how many went to a Transaction whose amount is not the removed one's. */
@@ -67,7 +69,7 @@ const MAX_CLEAR_STEPS = 40
 /** Sends a parsed file to the Worker one chunk at a time, in order, and adds up what each chunk reports. */
 export async function runImport(file: BankCsvResult, options: ImportOptions, onProgress: (sent: number, total: number) => void): Promise<ImportSummary> {
   const chunks = planChunks(file.rows)
-  const summary: ImportSummary = { added: 0, duplicates: 0, skipped: file.errors.length, dropped: 0, removed: 0, carried: 0, differing: 0, lost: 0, lostTransactions: [], stillWaiting: 0, balanceCheck: null }
+  const summary: ImportSummary = { added: 0, duplicates: 0, skipped: file.errors.length, dropped: 0, removed: 0, paired: 0, carried: 0, differing: 0, lost: 0, lostTransactions: [], stillWaiting: 0, balanceCheck: null }
   const replacing = options.replaceAccountId !== undefined
 
   async function send(index: number, rows: (typeof chunks)[number]) {
@@ -104,6 +106,7 @@ export async function runImport(file: BankCsvResult, options: ImportOptions, onP
       summary.duplicates += result.duplicates
       summary.dropped += result.dropped
       summary.removed += result.removed
+      summary.paired += result.paired
       // The last part says how many were carried over in all, how many went to another amount, and how many were lost or are
       // still waiting (the Worker holds the running totals).
       if (result.carriedTotal !== null) {

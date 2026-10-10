@@ -13,6 +13,8 @@
 // (docs/bank-formats/asb.md), so a day the bank has numbered differently since can match a different Transaction: each
 // held row remembers its amount, and the Import says how many were given to a Transaction with another amount.
 
+import { IMPORTED_SLICE } from './import-rows'
+
 /** Categories in use. A removed Category counts as none (GLOSSARY: Uncategorised), so its Override is never carried. */
 const IN_USE = 'SELECT id FROM categories WHERE removed_at IS NULL'
 
@@ -27,14 +29,14 @@ export const annotated = (alias: string) => `(${alias}.note IS NOT NULL OR ${ali
 const liveOverride = (alias: string) => `CASE WHEN ${alias}.override_category IN (${IN_USE}) THEN ${alias}.override_category END`
 
 // Copies the Overrides and Notes of the Account's first ?2 Import-sourced rows (by ID: the rows DELETE_IMPORTED removes
-// in the same batch, imports.ts) into the holding table, with what is needed to say what they were on. A row already
+// in the same batch, imports.ts; both select them with IMPORTED_SLICE) into the holding table, with what is needed to say what they were on. A row already
 // held (from a replace that did not finish) is brought up to date and made waiting again, so what the Account holds is
 // always what it last had. ?1 = the Account.
 export const HOLD_REMOVED = `
   INSERT INTO carry_over (account_id, bank_unique_id, override_category, note, date, amount_cents, description, category_name)
   SELECT t.account_id, t.bank_unique_id, c.id, t.note, t.date, t.amount_cents, t.description, c.name
   FROM transactions t LEFT JOIN categories c ON c.id = t.override_category AND c.removed_at IS NULL
-  WHERE t.id IN (SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT ?2)
+  WHERE t.id IN (${IMPORTED_SLICE})
     AND t.bank_unique_id IS NOT NULL AND ${annotated('t')}
   ON CONFLICT (account_id, bank_unique_id) DO UPDATE SET
     override_category = excluded.override_category, note = excluded.note, date = excluded.date, amount_cents = excluded.amount_cents,
@@ -43,7 +45,7 @@ export const HOLD_REMOVED = `
 /** How many of those rows have something to hold, for the Change Log entry of a step that removes them. Same ?1 and ?2. */
 export const COUNT_REMOVED_ANNOTATED = `
   SELECT COUNT(*) AS n FROM transactions t
-  WHERE t.id IN (SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT ?2)
+  WHERE t.id IN (${IMPORTED_SLICE})
     AND t.bank_unique_id IS NOT NULL AND ${annotated('t')}`
 
 // A replace that starts again from the beginning holds the Overrides and Notes of the rows it removes, including the ones

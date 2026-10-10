@@ -5,14 +5,15 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { MAX_DATE, MIN_DATE, isSearchDate } from '@/lib/date-range'
 import { accountsQuery, categoriesQuery, transactionCountQuery } from '@/lib/queries'
-import { EXPORT_MAX_ROWS, exportPath, MAX_TEXT, tidy, type TransactionSearch } from '@/lib/transaction-search'
+import { EXPORT_MAX_ROWS, exportPath, MAX_TEXT, TRANSFERS_FILTERS, tidy, type TransactionSearch } from '@/lib/transaction-search'
 
 /** What is typed in the form: text for every field, so a half-typed filter is never lost. */
-type Draft = { account: string; category: string; from: string; to: string; q: string }
+type Draft = { account: string; category: string; transfers: string; from: string; to: string; q: string }
 
 const draftOf = (search: TransactionSearch): Draft => ({
   account: search.account === undefined ? '' : String(search.account),
   category: search.category === undefined ? '' : String(search.category),
+  transfers: search.transfers ?? '',
   from: search.from ?? '',
   to: search.to ?? '',
   q: search.q ?? '',
@@ -23,6 +24,7 @@ const searchOf = (draft: Draft, current: TransactionSearch): TransactionSearch =
   tidy({
     account: draft.account ? Number(draft.account) : undefined,
     category: draft.category === 'uncategorised' ? 'uncategorised' : draft.category ? Number(draft.category) : undefined,
+    transfers: TRANSFERS_FILTERS.find((filter) => filter === draft.transfers),
     from: draft.from,
     to: draft.to,
     q: draft.q.trim(),
@@ -41,7 +43,7 @@ function problemWith(draft: Draft): { field: 'from' | 'to'; message: string } | 
 }
 
 /**
- * Search and filters for the Transactions: text, Account, Category and a date range. They apply together when the reader
+ * Search and filters for the Transactions: text, Account, Category, Transfers and a date range. They apply together when the reader
  * presses Search (or Enter), not on every keystroke, so a request is made once the question is asked. The address holds
  * the result, so Back and reload return to it.
  */
@@ -131,6 +133,16 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
                 {c.name}
               </option>
             ))}
+          </Select>
+        </div>
+        <div>
+          <label htmlFor="filter-transfers" className="block font-medium">
+            Transfers
+          </label>
+          <Select id="filter-transfers" value={draft.transfers} onChange={(event) => set({ transfers: event.target.value })}>
+            <option value="">Show all</option>
+            <option value="exclude">Leave out Transfers</option>
+            <option value="only">Only Transfers</option>
           </Select>
         </div>
         <div className="grid gap-4 sm:col-span-2 sm:grid-cols-2 lg:col-span-1">

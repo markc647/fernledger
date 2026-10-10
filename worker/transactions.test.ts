@@ -474,6 +474,10 @@ describe('GET /api/transactions/:id', () => {
       categoryName: 'Eating out',
       categorySource: 'override',
       note: 'Lunch with Sam',
+      transfer: null,
+      transferAccountName: null,
+      transferTransactionId: null,
+      transferPartnerOverridden: false,
       bankTime: null,
       firstSeenAt: null,
     })

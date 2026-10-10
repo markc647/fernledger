@@ -133,7 +133,7 @@ export function exportChunk(filters: Filters, after: After, limit: number, maxBy
   return {
     sql: `WITH page AS (
             SELECT t.id, t.date, t.amount_cents AS cents, a.name AS account, t.description AS description,
-                   COALESCE(${category.name}, 'Uncategorised') AS category, t.note AS note, t.bank_type AS type, t.bank_memo AS memo,
+                   COALESCE(${category.shown.name}, CASE WHEN ${category.isTransfer} THEN 'Transfer' ELSE 'Uncategorised' END) AS category, t.note AS note, t.bank_type AS type, t.bank_memo AS memo,
                    t.bank_reference AS reference, t.bank_counterparty_account AS counterparty, t.bank_particulars AS particulars,
                    t.bank_payment_code AS code, t.bank_card_suffix AS card
             FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
