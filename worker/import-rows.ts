@@ -19,16 +19,18 @@ export const DAILY_ROW_WRITES = 100_000
 
 /**
  * A row costs 3 writes: the row itself, its date index and its unique-ID index. Removing a row costs the same.
- * An imported row that a Rule matches costs one more (rule-apply.ts stores the result on its row); the estimates built
- * on this number leave that out, and the day's limit is still handled when it is reached.
- * A Transfer, and an Override or Note carried over, cost more: see WRITES_PER_PAIRED_IMPORTED and WRITES_PER_CARRIED.
+ * A Rule adds to that (rule-apply.ts stores the result on the imported row): 1 for a Transfer mark, 2 for a Category, because
+ * the Category also has an entry in the rule_category index; removing a row with a Category takes that entry out, 1 more. So a
+ * row removed and its replacement imported cost 6 in all, 9 when a Rule gave them a Category. A Transfer (WRITES_PER_PAIRED_IMPORTED
+ * and _REMOVED) and an Override or Note carried over (WRITES_PER_CARRIED) cost more again. The estimates built on this number are
+ * for the plain 6 and leave the rest out, and the day's limit is still handled when it is reached.
  */
 export const WRITES_PER_ROW = 3
 
 /**
  * What carrying one Transaction's Override or Note over costs, at most: holding it (the row and its key, 2), giving it to
  * the new row (the row, and its Category index, 2), marking it given (1) and clearing it (2). A replace of rows that
- * mostly have neither adds little to the 3 per row above; one where every row has one adds 7 for each.
+ * mostly have neither adds little to the 6 per pair above; one where every row has one adds 7 for each pair.
  */
 export const WRITES_PER_CARRIED = 7
 
@@ -48,13 +50,13 @@ export const MAX_CHUNKS = 20
 /**
  * Most Import-sourced rows removed in one go when replacing imported history: 15,000 writes, leaving room in the day
  * for the new file (at most 10,000 rows, 30,000 writes). Larger histories are removed in steps of this size first
- * (`/api/imports/clear-history`). A replace writes about 3 x (rows removed + rows imported) in all, so the day's
- * allowance covers roughly 33,000 rows between them, less 7 writes (WRITES_PER_CARRIED) for each Override or Note
- * carried over, which are few of the rows, and less 3 for each removed row that was paired and 4 for each imported row that
- * is (WRITES_PER_PAIRED_REMOVED and _IMPORTED). If every row were a Transfer the day would cover about 15,000 rows between
- * removing and importing; a household's Transfers are a small share of its rows. A slice in which every row has an Override
- * or Note holds 5,000 x 2 = 10,000 writes on top of the 15,000 to remove them, and one in which every row is paired costs
- * 5,000 x 3 = 15,000 more to let go of its matching Transactions, still inside the day. An Account with more imported rows than that cannot be
+ * (`/api/imports/clear-history`). A slice costs 15,000 writes to remove, up to about 20,000 when a Rule gave every row a
+ * Category (4 each, with the rule_category index entry), and 5,000 x 3 = 15,000 more if every row was paired (it lets go of its matching
+ * Transaction too: WRITES_PER_PAIRED_REMOVED). A replace writes 6 for each row removed and imported, 9 with a Rule's Category,
+ * 16 with an Override or Note carried over as well (WRITES_PER_CARRIED), and 7 more for a row that is paired (13 for a paired row
+ * replaced where an unpaired one costs 6: WRITES_PER_PAIRED_REMOVED and _IMPORTED). So the day's allowance covers about 16,000 rows
+ * replaced at best, about 6,000 when every row has a Rule's Category and something to carry over, and about 4,000 if every row is
+ * a Transfer as well, which a household's rows are not. An Account with more imported rows than that cannot be
  * replaced in one day: the Import stops at the limit ("Daily limit reached") and the Admin carries on the next day.
  */
 export const REPLACE_SLICE = 5000

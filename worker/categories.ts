@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
+import { restartRerun } from './rule-rerun'
 import { validate } from './validate'
 
 type CategoryRow = { id: number; name: string }
@@ -72,7 +73,8 @@ export const categories = new Hono<AppEnv>()
     const used = await db.prepare('SELECT COUNT(*) AS n FROM transactions WHERE override_category = ?').bind(id).first<{ n: number }>()
     const overrides = used?.n ?? 0
 
-    await recordChange(db, db.prepare("UPDATE categories SET removed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?").bind(id), {
+    // A Rule whose Category is removed no longer counts (rule-apply.ts), so a re-run that is running would have to look at its Transactions again.
+    await recordChange(db, [db.prepare("UPDATE categories SET removed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?").bind(id), restartRerun(db)], {
       actor: c.var.member,
       type: 'category',
       summary: `Removed Category ${category.name}`,
