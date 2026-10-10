@@ -465,7 +465,7 @@ describe('GET /api/imports/imported/:accountId', () => {
     const id = await accountId()
     await addSyncRow(id, 'SYNC1')
 
-    expect(await (await imported(id)).json()).toEqual({ imported: 2, withOverrideOrNote: 0 })
+    expect(await (await imported(id)).json()).toEqual({ imported: 2, withOverrideOrNote: 0, carryOverWaiting: 0 })
   })
 
   it('counts the Import-sourced rows that have an Override to a Category in use or a Note, which a replace would remove', async () => {
@@ -482,7 +482,7 @@ describe('GET /api/imports/imported/:accountId', () => {
     await addSyncRow(id, 'SYNC1')
     await set('SYNC1', 'note', 'Sync rows are not removed by a replace')
 
-    expect(await (await imported(id)).json()).toEqual({ imported: 5, withOverrideOrNote: 2 })
+    expect(await (await imported(id)).json()).toEqual({ imported: 5, withOverrideOrNote: 2, carryOverWaiting: 0 })
   })
 
   it('answers 404 for an Account that does not exist', async () => {
