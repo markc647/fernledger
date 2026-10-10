@@ -18,7 +18,7 @@ export type EditableTransaction = {
   categoryId: number | null
   /** 'override' while the Category is the Admin's own choice. */
   categorySource: string | null
-  /** Set while the Transaction is a Transfer, which an Override turns into spending. */
+  /** Set while the Transaction is a Transfer, which an Override takes out of the Transfers. */
   transfer: TransferSource | null
   note: string | null
 }

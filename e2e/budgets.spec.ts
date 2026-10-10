@@ -93,6 +93,7 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await expect(widgetRow(page, name)).toContainText('$56.79 left')
   await expect(widgetRow(page, name).locator('svg[aria-hidden="true"]')).toHaveCount(1)
   await expect(widgetRow(page, 'Spending outside Budgets')).toContainText('Not in a Budget')
+  await expect(widgetRow(page, 'Uncategorised (includes money in not yet given a Category)')).toContainText('Not in a Budget')
   await noAxeViolations(page)
 
   // A lower Budget from this month puts the Category over it.

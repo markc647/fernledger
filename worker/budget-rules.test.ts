@@ -135,22 +135,45 @@ describe('budgetVsActual', () => {
     expect(rows.map((r) => r.spentCents)).toEqual([7500, -1500])
   })
 
-  it('adds up the rest as spending outside Budgets: Uncategorised and the Spending Categories with no Budget', () => {
-    const { otherCents } = budgetVsActual(inEffect, [spend(1, 9500), spend(3, 100), spend(4, 1000, 250), spend(null, 700)])
+  it('adds up the Spending Categories with no Budget as spending outside Budgets, and Uncategorised on its own', () => {
+    const { otherCents, uncategorisedCents } = budgetVsActual(inEffect, [spend(1, 9500), spend(3, 100), spend(4, 1000, 250), spend(null, 700)])
 
-    expect(otherCents).toBe(100 + 750 + 700)
+    expect(otherCents).toBe(100 + 750)
+    expect(uncategorisedCents).toBe(700)
+  })
+
+  it('counts money in that has no Category yet against Uncategorised, which can go below zero', () => {
+    const { otherCents, uncategorisedCents } = budgetVsActual(inEffect, [spend(null, 700, 300_000)])
+
+    expect(uncategorisedCents).toBe(-299_300)
+    expect(otherCents).toBe(0)
+  })
+
+  it('adds up rows of several months for a Category, and does not let the last month stand for the rest', () => {
+    const month = (m: string, categoryId: number | null, outCents: number): SpendingRow => ({ month: m, categoryId, kind: 'spending', outCents, inCents: 0 })
+
+    const { rows, otherCents, uncategorisedCents } = budgetVsActual(inEffect, [month('2026-09', 1, 4000), month('2026-10', 1, 500), month('2026-09', 3, 100), month('2026-10', 3, 20), month('2026-09', null, 7), month('2026-10', null, 1)])
+
+    expect(rows[0]).toMatchObject({ categoryId: 1, spentCents: 4500 })
+    expect(otherCents).toBe(120)
+    expect(uncategorisedCents).toBe(8)
   })
 
   it('leaves Income and Loans out of the rest, since they are not spending', () => {
-    const { rows, otherCents } = budgetVsActual(inEffect, [spend(1, 9500), spend(6, 0, 300_000, 'income'), spend(7, 50_000, 0, 'loans'), spend(null, 700)])
+    const { rows, otherCents, uncategorisedCents } = budgetVsActual(inEffect, [spend(1, 9500), spend(6, 0, 300_000, 'income'), spend(7, 50_000, 0, 'loans'), spend(null, 700)])
 
     expect(rows).toHaveLength(2)
-    expect(otherCents).toBe(700)
+    expect(otherCents).toBe(0)
+    expect(uncategorisedCents).toBe(700)
   })
 
   it('has nothing outside Budgets when everything is in one', () => {
-    expect(budgetVsActual(inEffect, [spend(1, 9500)]).otherCents).toBe(0)
-    expect(budgetVsActual(inEffect, [])).toEqual({ rows: [{ categoryId: 1, categoryName: 'Fuel', budgetCents: 9000, spentCents: 0 }, { categoryId: 2, categoryName: 'Groceries', budgetCents: 80_000, spentCents: 0 }], otherCents: 0 })
+    expect(budgetVsActual(inEffect, [spend(1, 9500)])).toMatchObject({ otherCents: 0, uncategorisedCents: 0 })
+    expect(budgetVsActual(inEffect, [])).toEqual({
+      rows: [{ categoryId: 1, categoryName: 'Fuel', budgetCents: 9000, spentCents: 0 }, { categoryId: 2, categoryName: 'Groceries', budgetCents: 80_000, spentCents: 0 }],
+      otherCents: 0,
+      uncategorisedCents: 0,
+    })
   })
 
   it('keeps the order it was given', () => {

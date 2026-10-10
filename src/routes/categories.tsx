@@ -8,7 +8,7 @@ import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
 import { KIND_HINTS, KIND_LABELS, KINDS, type CategoryKind } from '@/lib/category-kinds'
 import { HttpError, meQuery } from '@/lib/me'
-import { categoriesQuery } from '@/lib/queries'
+import { budgetsQuery, categoriesQuery } from '@/lib/queries'
 
 export const Route = createFileRoute('/categories')({
   component: Categories,
@@ -38,6 +38,9 @@ function Categories() {
   const [notice, setNotice] = useState('')
   // Until `me` arrives nobody is the Admin: the controls fail closed. The API refuses a Member's write whatever the page shows.
   const isAdmin = me?.role === 'admin'
+  // How many Budget changes each Spending Category has, for the questions that say what a change to it does to them. Only the Admin sees those.
+  const { data: budgets } = useQuery({ ...budgetsQuery, enabled: isAdmin })
+  const budgetChanges = (id: number) => budgets?.budgets.find((b) => b.categoryId === id)?.changes.length ?? 0
 
   // Back to the button that opened the form (or, if its row is gone, the message), so keyboard focus is never lost.
   const status = useRef<HTMLParagraphElement>(null)
@@ -67,9 +70,9 @@ function Categories() {
         editing?.id === c.id && editing.action === 'rename' ? (
           <RenameForm category={c} taken={sameName} onDone={(message) => done(message, `rename-${c.id}-button`)} onCancel={() => done('', `rename-${c.id}-button`)} />
         ) : editing?.id === c.id && editing.action === 'set-kind' ? (
-          <KindForm category={c} onDone={(message) => done(message, `kind-${c.id}-button`)} onCancel={() => done('', `kind-${c.id}-button`)} />
+          <KindForm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message, `kind-${c.id}-button`)} onCancel={() => done('', `kind-${c.id}-button`)} />
         ) : editing?.id === c.id && editing.action === 'remove' ? (
-          <RemoveConfirm category={c} onDone={(message) => done(message)} onCancel={() => done('', `remove-${c.id}-button`)} />
+          <RemoveConfirm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message)} onCancel={() => done('', `remove-${c.id}-button`)} />
         ) : (
           <div className="flex flex-wrap justify-end gap-2">
             <Button id={`rename-${c.id}-button`} size="touch" variant="outline" aria-label={`Rename ${c.name}`} onClick={() => { setNotice(''); setEditing({ action: 'rename', id: c.id }) }}>
@@ -212,7 +215,7 @@ function RenameForm({ category, taken, onDone, onCancel }: { category: Category;
   )
 }
 
-function KindForm({ category, onDone, onCancel }: { category: Category; onDone: (message: string) => void; onCancel: () => void }) {
+function KindForm({ category, budgetChanges, onDone, onCancel }: { category: Category; budgetChanges: number; onDone: (message: string) => void; onCancel: () => void }) {
   const queryClient = useQueryClient()
   const [kind, setKind] = useState<CategoryKind>(category.kind)
   const save = useMutation({
@@ -247,7 +250,7 @@ function KindForm({ category, onDone, onCancel }: { category: Category; onDone: 
           ))}
         </Select>
         <p id={`kind-${category.id}-hint`} className="mt-1 text-muted-foreground">
-          {KIND_HINTS[kind]} A change counts for every month, past ones too.{category.kind === 'spending' && kind !== 'spending' && ' Its Budgets are kept but not used.'}
+          {KIND_HINTS[kind]} A change counts for every month, past ones too.{category.kind === 'spending' && kind !== 'spending' && budgetChanges > 0 && ' Its Budgets are kept but not used.'}
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -263,7 +266,7 @@ function KindForm({ category, onDone, onCancel }: { category: Category; onDone: 
   )
 }
 
-function RemoveConfirm({ category, onDone, onCancel }: { category: Category; onDone: (message: string) => void; onCancel: () => void }) {
+function RemoveConfirm({ category, budgetChanges, onDone, onCancel }: { category: Category; budgetChanges: number; onDone: (message: string) => void; onCancel: () => void }) {
   const queryClient = useQueryClient()
   // Opens on the safe answer. Cancelling puts focus back on the Remove button (Categories' `done`), and a removal on the message.
   const keep = useRef<HTMLButtonElement>(null)
@@ -287,7 +290,16 @@ function RemoveConfirm({ category, onDone, onCancel }: { category: Category; onD
   return (
     <div role="group" aria-label={`Remove ${category.name}`} className="space-y-2 text-start">
       <p>Remove {category.name}? Transactions with it as their Override lose that Override and fall back to their Rule or Akahu category, or Uncategorised if neither applies.</p>
-      <p>If it has a Budget, the Budget stops being used in every month, past ones too, and Budget vs actual no longer lists it.</p>
+      {category.kind !== 'spending' && (
+        <p>
+          {category.name} is {category.kind === 'income' ? 'an Income' : 'a Loans'} Category, so its Transactions stop counting as {category.kind === 'income' ? 'income' : 'a loan'}. Those that end up Uncategorised count as Spending.
+        </p>
+      )}
+      {budgetChanges > 0 && (
+        <p>
+          Its Budget ({budgetChanges} {budgetChanges === 1 ? 'change' : 'changes'}) stops being used in every month, past ones too, and Budget vs actual no longer lists it.
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button size="touch" aria-label={`Yes, remove ${category.name}`} disabled={remove.isPending} onClick={() => remove.mutate()}>
           Yes, remove

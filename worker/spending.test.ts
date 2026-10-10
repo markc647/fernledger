@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { buildSpending, rollUp, type SpendingRow } from './spending'
+import { buildSpending, isLoan, rollUp, type SpendingRow } from './spending'
+import { effectiveCategory } from './effective-category'
 
 // Spending and Income (spending.ts, ADR 0012), tested directly against D1. How Budgets use them, through the real request
 // path, is in budgets.test.ts. All the data is made up (bank 99).
@@ -277,8 +278,60 @@ describe('rollUp', () => {
     ])
   })
 
+  it('adds each Category up over every month given, so a range is not added up by the caller; Uncategorised is null', () => {
+    const { byCategory } = rollUp([
+      row('2026-09', 1, 'spending', 4000, 0),
+      row('2026-10', 1, 'spending', 500, 100),
+      row('2026-09', null, 'spending', 7, 0),
+      row('2026-10', null, 'spending', 0, 1000),
+      row('2026-09', 2, 'income', 0, 300_000),
+      row('2026-10', 2, 'income', 20, 300_000),
+      row('2026-10', 3, 'loans', 50_000, 0),
+    ])
+
+    expect(byCategory).toEqual([
+      { categoryId: 1, kind: 'spending', cents: 4400 },
+      { categoryId: null, kind: 'spending', cents: -993 },
+      { categoryId: 2, kind: 'income', cents: 599_980 },
+    ])
+  })
+
   it('has nothing for no rows', () => {
-    expect(rollUp([])).toEqual({ categories: [], months: [] })
+    expect(rollUp([])).toEqual({ categories: [], byCategory: [], months: [] })
+  })
+})
+
+describe('isLoan', () => {
+  const loans = async () => {
+    const category = effectiveCategory()
+    const sql = `SELECT t.id FROM transactions t ${category.joins} WHERE ${isLoan(category)} ORDER BY t.id`
+    return (await env.DB.prepare(sql).all<{ id: number }>()).results.map((r) => r.id)
+  }
+
+  it('picks out the Transactions in a Loans Category, whether money went out or came in, and no others', async () => {
+    const lent = await add(accountA, '2026-10-02', -50_000, { override: 'Loans' })
+    const repaid = await add(accountA, '2026-10-20', 10_000, { rule: 'Loans' })
+    await add(accountA, '2026-10-03', -100, { override: 'Groceries' })
+    await add(accountA, '2026-10-04', 300_000, { rule: 'Wages and salary' })
+    await add(accountA, '2026-10-05', -700)
+
+    expect(await loans()).toEqual([lent, repaid])
+  })
+
+  it('leaves out a Transfer, but takes in a half of one that the Admin gave a Loans Category, as lending to a tracked Account does', async () => {
+    const { out, into } = await pair('2026-10-05', 5000)
+    expect(await loans()).toEqual([])
+
+    await env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id IN (?, ?)').bind(ids['Loans'], out, into).run()
+
+    expect(await loans()).toEqual([out, into])
+  })
+
+  it('leaves out a Transaction in a removed Loans Category', async () => {
+    await add(accountA, '2026-10-02', -50_000, { override: 'Loans' })
+    await env.DB.prepare("UPDATE categories SET removed_at = '2026-10-09T00:00:00.000Z' WHERE name = 'Loans'").run()
+
+    expect(await loans()).toEqual([])
   })
 })
 

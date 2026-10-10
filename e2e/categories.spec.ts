@@ -137,7 +137,7 @@ test('the Admin sets the kind of a Category, Members see it, and only a Spending
   await expect(page.getByLabel('Kind', { exact: true })).toHaveValue('spending')
   await page.getByLabel('New Category').fill(name)
   await page.getByLabel('Kind', { exact: true }).selectOption('loans')
-  await expect(page.getByText('Money lent or borrowed. Not spending or income, and has no Budget.')).toBeVisible()
+  await expect(page.getByText('Money lent or borrowed. Make one Category for each person, such as Loan – Alice. Not spending or income, and has no Budget.')).toBeVisible()
   await page.getByRole('button', { name: 'Add Category' }).click()
   await expect(page.getByRole('status').filter({ hasText: `Added ${name}.` })).toBeVisible()
   await expect(page.getByRole('row', { name })).toContainText('Loans')

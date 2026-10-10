@@ -53,12 +53,16 @@ describe('capNotice', () => {
   })
 
   it('says how many are used, and that none can be removed, once the history is nearly full', () => {
-    expect(capNotice(540, 600)).toBe('Fernledger keeps at most 600 Budget changes, for good, and none can be removed. 540 are used.')
+    expect(capNotice(540, 600)).toBe(
+      'Fernledger keeps at most 600 Budget changes, for good, and none can be removed. 540 are used, counting changes kept for Categories that are no longer Spending or have been removed.',
+    )
     expect(capNotice(599, 600)).toContain('599 are used')
   })
 
   it('says when it is full, and that a month with a change can still be replaced', () => {
-    expect(capNotice(600, 600)).toBe('Fernledger keeps at most 600 Budget changes, for good, and all 600 are used. A month that already has a change can still be replaced.')
+    expect(capNotice(600, 600)).toBe(
+      'Fernledger keeps at most 600 Budget changes, for good, and all 600 are used, counting changes kept for Categories that are no longer Spending or have been removed. A month that already has a change can still be replaced.',
+    )
   })
 })
 

@@ -1,16 +1,8 @@
-// The one place Spending and Income are worked out: what Budget vs actual, the Reports and the dashboard total, so none of them can
-// disagree. The rules, and why, are ADR 0012 (docs/adr/0012-spending-and-category-kinds.md); this file is how they are written.
-//
-//   buildSpending  SQL: money out and money in for each NZ month and Category in a date range, for all Accounts or one.
-//   rollUp         turns those rows into Spending and Income figures, per Category and per month. Totals come from here.
-//
-// Rows for a Loans-kind Category come back from `buildSpending` too, with `kind: 'loans'`: `rollUp` leaves them out of every
-// total, and the Loans Report (#38) reads them straight from the rows.
-//
-// It is SQL, not a function over fetched rows (ADR 0004), and it reads the date index over the range asked for and nothing
+// Spending and Income are worked out here and nowhere else (ADR 0012), so Budgets, the Reports and the Dashboard can't disagree.
+// It is SQL, not a function over fetched rows (ADR 0004): `buildSpending` reads the date index over the range asked for and nothing
 // of the history around it (spending.test.ts pins the rows read).
-import { UNCATEGORISED_KIND, type CategoryKind } from './category-kinds'
-import { effectiveCategory } from './effective-category'
+import { isLoansKind, LOANS, UNCATEGORISED_KIND, type CategoryKind } from './category-kinds'
+import { effectiveCategory, type EffectiveCategory } from './effective-category'
 
 /** NZ dates, both ends included. `accountId` limits it to one Account. They must have been checked (`isQueryDate`, `isMonth`): they only ever reach SQLite as bound values. */
 export type SpendingRange = { from: string; to: string; accountId?: number }
@@ -22,6 +14,7 @@ export type SpendingRow = { month: string; categoryId: number | null; kind: Cate
  * The statement that works out money out and money in for the range, grouped by NZ month and Category, oldest month first.
  * Transfers are left out (`isTransfer`), and a Transaction's Category and kind are its effective Category's (`shown`). The caller
  * prepares it with `binds`: `db.prepare(sql).bind(...binds)`. A Pending Transaction is stored apart from `transactions`, so it is never read.
+ * Rows of a Loans Category come back too, with `kind: 'loans'`, but `rollUp` leaves them out.
  */
 export function buildSpending(range: SpendingRange): { sql: string; binds: (string | number)[] } {
   const category = effectiveCategory()
@@ -41,14 +34,26 @@ export function buildSpending(range: SpendingRange): { sql: string; binds: (stri
   }
 }
 
+/**
+ * SQL that is true for a Transaction in a Loans Category, and not for a Transfer: the one definition of "a loan", for the Loans Report to list
+ * from (`WHERE ${isLoan()}`, with `category.joins` in the query). The Loans Report reads the Transactions themselves, so it needs this and
+ * not the totals `buildSpending` gives. Pass the `effectiveCategory()` the query already uses.
+ */
+export const isLoan = (category: EffectiveCategory = effectiveCategory()) => `(${category.shown.kind} = '${LOANS}')`
+
 /** One Category's figure for one month: Spending (money out less money in) or Income (money in less money out). Below zero when the other way round. */
 export type CategoryFigure = { month: string; categoryId: number | null; kind: 'spending' | 'income'; cents: number }
+
+/** One Category's figure over the whole range: its months added together. A null `categoryId` is Uncategorised. */
+export type CategoryTotal = Omit<CategoryFigure, 'month'>
 
 export type MonthTotals = { month: string; spendingCents: number; incomeCents: number }
 
 export type RollUp = {
   /** Each Spending and Income Category with something in a month, in the order the rows came. A Loans Category is not here. */
   categories: CategoryFigure[]
+  /** Each of them over all the rows given, so a range of months is not added up by the caller. */
+  byCategory: CategoryTotal[]
   /** Spending and Income in all, for each month that has any, in the order the rows came. */
   months: MonthTotals[]
 }
@@ -56,15 +61,19 @@ export type RollUp = {
 /** Spending and Income from the rows of `buildSpending`. */
 export function rollUp(rows: SpendingRow[]): RollUp {
   const categories: CategoryFigure[] = []
+  const byCategory = new Map<number | null, CategoryTotal>()
   const months = new Map<string, MonthTotals>()
   for (const row of rows) {
-    if (row.kind === 'loans') continue
+    if (isLoansKind(row.kind)) continue
     const cents = row.kind === 'income' ? row.inCents - row.outCents : row.outCents - row.inCents
     categories.push({ month: row.month, categoryId: row.categoryId, kind: row.kind, cents })
-    const total = months.get(row.month) ?? { month: row.month, spendingCents: 0, incomeCents: 0 }
-    if (row.kind === 'income') total.incomeCents += cents
-    else total.spendingCents += cents
-    months.set(row.month, total)
+    const total = byCategory.get(row.categoryId) ?? { categoryId: row.categoryId, kind: row.kind, cents: 0 }
+    total.cents += cents
+    byCategory.set(row.categoryId, total)
+    const month = months.get(row.month) ?? { month: row.month, spendingCents: 0, incomeCents: 0 }
+    if (row.kind === 'income') month.incomeCents += cents
+    else month.spendingCents += cents
+    months.set(row.month, month)
   }
-  return { categories, months: [...months.values()] }
+  return { categories, byCategory: [...byCategory.values()], months: [...months.values()] }
 }

@@ -390,6 +390,20 @@ test('a backup from before Categories existed restores and keeps the starter Cat
   assert.equal(s.target.prepare('SELECT count(*) AS n FROM settings').get().n, 2)
 })
 
+test('a backup from before Category kinds restores every Category as Spending, with no starter Loans Category added', async () => {
+  const s = await scenario(['1602']) // the source has no kind column, as a database from before ADR 0012 has not
+  assert.equal(s.source.prepare("SELECT count(*) AS n FROM pragma_table_info('categories') WHERE name = 'kind'").get().n, 0)
+
+  const r = restore(s)
+
+  assert.equal(r.status, 0, r.out)
+  const restored = s.target.prepare('SELECT name, kind FROM categories ORDER BY id').all()
+  assert.equal(restored.length, 22, "the backup's Categories replace the starter list, so the starter Loans Category is not left behind")
+  assert.ok(restored.every((c) => c.kind === 'spending'))
+  assert.ok(restored.some((c) => c.name === 'Wages and salary'), 'the starter income Category is back, as Spending until the Admin sets it again')
+  assert.ok(!restored.some((c) => c.name === 'Loans'))
+})
+
 test('restore will not clear the starter Categories while a table that refers to them has rows, even one the backup lacks', async () => {
   const dir = tempDir()
   const source = newDatabase(join(dir, 'source.sqlite'))

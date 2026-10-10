@@ -14,7 +14,7 @@ async function call(path: string, opts: { who?: Who; method?: string; body?: unk
 }
 
 type Category = { id: number; name: string; kind: string }
-type Row = { id: number; categoryId: number | null; categoryName: string | null; categorySource: string | null; note: string | null; description: string }
+type Row = { id: number; categoryId: number | null; categoryName: string | null; categorySource: string | null; categoryKind: string | null; note: string | null; description: string }
 
 const categories = async (who: Who = 'member'): Promise<Category[]> => (await call('/api/categories', { who })).json()
 const idOf = async (name: string) => (await categories()).find((c) => c.name === name)!.id
@@ -233,6 +233,19 @@ describe('the kind of a Category', () => {
     expect(res.status).toBe(403)
     expect(await kindOf('Groceries')).toBe('spending')
     expect(await changeLog()).toEqual([])
+  })
+
+  it('comes with each Transaction the API lists and describes, so the pages can mark Income and Loans, and is none while Uncategorised', async () => {
+    const [loan, wage, shop, bare] = [await transaction(1), await transaction(2), await transaction(3), await transaction(4)]
+    for (const [t, name] of [[loan, 'Loans'], [wage, 'Wages and salary'], [shop, 'Groceries']] as const) {
+      await call(`/api/transactions/${t}/override`, { method: 'PUT', body: { categoryId: await idOf(name) } })
+    }
+
+    const listed = Object.fromEntries((await list()).transactions.map((t) => [t.id, t.categoryKind]))
+    const described = async (id: number) => ((await (await call(`/api/transactions/${id}`)).json()) as { categoryKind: string | null }).categoryKind
+
+    expect(listed).toEqual({ [loan]: 'loans', [wage]: 'income', [shop]: 'spending', [bare]: null })
+    expect([await described(loan), await described(wage), await described(shop), await described(bare)]).toEqual(['loans', 'income', 'spending', null])
   })
 
   it.each(['999999', 'abc', '1.5'])('answers 404 for a Category that is not there (%s)', async (id) => {

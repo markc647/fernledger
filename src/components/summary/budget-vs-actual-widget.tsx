@@ -9,12 +9,12 @@ import { budgetVsActualQuery } from '@/lib/queries'
 
 const money = 'whitespace-nowrap tabular-nums [font-kerning:none]'
 
-/** A Category with a Budget, or the one row for everything that has none. */
+/** A Category with a Budget, or a row for what has none: Spending Categories without a Budget, and Uncategorised. */
 type Row = { key: string; name: string; budgetCents: number | null; spentCents: number }
 
 /**
  * Summary widget: this month's Budget for each Spending Category that has one, against what it spent, and whether it is over or under,
- * then what the rest spent. Which Budget a month has and what was spent come from the Worker (ADR 0012); the browser only words how they compare.
+ * then what the rest spent, and Uncategorised on its own. Which Budget a month has and what was spent come from the Worker (ADR 0012); the browser only words how they compare.
  */
 export function BudgetVsActualWidget() {
   const { data, error } = useQuery(budgetVsActualQuery)
@@ -24,6 +24,7 @@ export function BudgetVsActualWidget() {
       ? [
           ...data.rows.map((row) => ({ key: String(row.categoryId), name: row.categoryName, budgetCents: row.budgetCents, spentCents: row.spentCents })),
           { key: 'other', name: 'Spending outside Budgets', budgetCents: null, spentCents: data.otherCents },
+          { key: 'uncategorised', name: 'Uncategorised (includes money in not yet given a Category)', budgetCents: null, spentCents: data.uncategorisedCents },
         ]
       : []
   return (

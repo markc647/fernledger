@@ -119,7 +119,7 @@ test('the Transfers filter shows all, only Transfers, or everything but them, an
   await expect(page).not.toHaveURL(/transfers=/)
 })
 
-test('the Admin can count one half of a Transfer as spending by choosing a Category for it', async ({ page, context, baseURL }, testInfo) => {
+test('the Admin can take one half of a Transfer out of the Transfers by choosing a Category for it', async ({ page, context, baseURL }, testInfo) => {
   const { everyday, savings } = accountsFor(testInfo.project.name)
   const stamp = `${testInfo.project.name}${Date.now()}`
   const out = `TFR TO SAVINGS ${stamp}`
@@ -134,19 +134,19 @@ test('the Admin can count one half of a Transfer as spending by choosing a Categ
   await expect(outRow).toContainText(`Transfer to ${savings.name}`)
 
   await outRow.getByRole('button', { name: /^Edit Category and Note/ }).click()
-  await expect(page.getByText('This Transaction is a Transfer, so choosing a Category also makes it count as spending.')).toBeVisible()
+  await expect(page.getByText("This Transaction is a Transfer. Choosing a Category takes it out of the Transfers: it then counts under that Category's kind, which is Spending, Income or Loans.")).toBeVisible()
   await noAxeViolations(page)
   await page.locator('#edit-category').selectOption({ label: 'Gifts and donations' })
   await page.getByRole('button', { name: 'Save', exact: true }).click()
 
-  // This half is spending in that Category now; its matching Transaction is still a Transfer.
+  // This half is in that Category now (a Spending one); its matching Transaction is still a Transfer.
   await expect(outRow).toContainText('Gifts and donations')
   await expect(outRow).not.toContainText('Transfer')
   await expect(dataRows(page).filter({ hasText: into })).toContainText(`Transfer from ${everyday.name}`)
 
-  // The details of the half that is still a Transfer say the other counts as spending, and how to undo the pairing.
+  // The details of the half that is still a Transfer say the other counts under its Category's kind, and how to undo the pairing.
   await page.getByRole('link', { name: into }).click()
-  await expect(page.getByText('The matching Transaction counts as spending, because the Admin chose a Category for it.')).toBeVisible()
+  await expect(page.getByText("The matching Transaction counts under its own Category's kind, because the Admin chose a Category for it.")).toBeVisible()
   await expect(page.getByText('Set a Category on this one too if the pairing is wrong.')).toBeVisible()
   await noAxeViolations(page)
 })
@@ -201,4 +201,39 @@ test('the Report names a Transfer instead of a Category, and the CSV link carrie
   await page.goto(`/transactions?q=${stamp}&transfers=exclude`)
   await expect(dataRows(page)).toHaveCount(1)
   await expect(page.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', /transfers=exclude/)
+})
+
+test('lending to a tracked Account: a Loans Category on both halves counts as a loan, not as spending, and the pages say so', async ({ page, context, baseURL }, testInfo) => {
+  const { everyday, savings } = accountsFor(testInfo.project.name)
+  const stamp = `${testInfo.project.name}${Date.now()}`
+  const out = `LOAN TO CHILD ${stamp}`
+  const into = `LOAN FROM PARENT ${stamp}`
+  await seed(context, baseURL!, [
+    { account: everyday, rows: [{ description: out, amountCents: -7322 }] },
+    { account: savings, rows: [{ description: into, amountCents: 7322 }] },
+  ])
+  await signInAs(context, 'admin')
+  await page.goto(`/transactions?q=${stamp}`)
+
+  for (const description of [out, into]) {
+    const row = dataRows(page).filter({ hasText: description })
+    await row.getByRole('button', { name: /^Edit Category and Note/ }).click()
+    await page.locator('#edit-category').selectOption({ label: 'Loans' })
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(row).toContainText('Loans')
+  }
+
+  // Neither half is a Transfer or spending now. The list marks both as a loan, in words.
+  for (const description of [out, into]) {
+    const row = dataRows(page).filter({ hasText: description })
+    await expect(row).not.toContainText('Transfer')
+    await expect(row).toContainText('Loan, not spending')
+  }
+
+  // The details say what it is, without calling it spending.
+  await page.getByRole('link', { name: out }).click()
+  await expect(page.getByText(`This matches a Transaction in ${savings.name}. Each counts under its own Category's kind, because the Admin chose a Category for each.`)).toBeVisible()
+  await expect(page.getByText('Loan, not spending')).toBeVisible()
+  await expect(page.getByText(/count as spending/)).toHaveCount(0)
+  await noAxeViolations(page)
 })

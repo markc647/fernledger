@@ -30,8 +30,9 @@ const budgetIn = async (name: string, month: string) => {
   const row = (await budgets(month)).budgets.find((b) => b.categoryName === name)!
   return [row.amountCents, row.effectiveFrom] as const
 }
-const vsActual = async (month: string, who: Who = 'member') => (await (await call(`/api/budgets/vs-actual?month=${month}`, { who })).json()) as { month: string; rows: VsActual[]; otherCents: number }
+const vsActual = async (month: string, who: Who = 'member') => (await (await call(`/api/budgets/vs-actual?month=${month}`, { who })).json()) as { month: string; rows: VsActual[]; otherCents: number; uncategorisedCents: number }
 const otherOn = async (month: string) => (await vsActual(month)).otherCents
+const uncategorisedOn = async (month: string) => (await vsActual(month)).uncategorisedCents
 const spentOn = async (month: string, name: string) => (await vsActual(month)).rows.find((r) => r.categoryName === name)?.spentCents
 
 const set = (name: string, effectiveFrom: string, amountCents: number | null, who: Who = 'admin') => call(`/api/budgets/${ids[name]}`, { who, method: 'PUT', body: { effectiveFrom, amountCents } })
@@ -398,10 +399,11 @@ describe('budget vs actual', () => {
     ])
     await override('FUEL1', 'Fuel')
 
-    const { month, rows, otherCents } = await vsActual('2026-10')
+    const { month, rows, otherCents, uncategorisedCents } = await vsActual('2026-10')
 
     expect(month).toBe('2026-10')
-    expect(otherCents).toBe(700)
+    expect(otherCents).toBe(0)
+    expect(uncategorisedCents).toBe(700)
     expect(rows).toEqual([
       { categoryId: ids['Fuel'], categoryName: 'Fuel', budgetCents: 9_000, spentCents: 9_500 },
       { categoryId: ids['Groceries'], categoryName: 'Groceries', budgetCents: 80_000, spentCents: 5_550 },
@@ -467,12 +469,12 @@ describe('budget vs actual', () => {
       expect(await spentOn('2026-10', 'Groceries')).toBe(1_200)
     })
 
-    it('one a Rule marks as a Transfer, which has no Category, so it is not in the spending outside Budgets either', async () => {
+    it('one a Rule marks as a Transfer, which has no Category, so it is not in Uncategorised either', async () => {
       await mustSet('Groceries', '2026-08', 80_000)
       await rule('EXAMPLE SWEEP', { transfer: true })
       await importInto(EVERYDAY, [row('2026-10-05', -7_000, 'EXAMPLE SWEEP'), row('2026-10-06', -700, 'EXAMPLE DAIRY')])
 
-      expect(await otherOn('2026-10')).toBe(700)
+      expect(await uncategorisedOn('2026-10')).toBe(700)
     })
 
     it('but counts a half the Admin chose a Category for, and still leaves out its matching Transaction', async () => {
@@ -517,7 +519,7 @@ describe('budget vs actual', () => {
 })
 
 describe('spending outside Budgets', () => {
-  it('is what Uncategorised and the Spending Categories with no Budget spent, less their refunds', async () => {
+  it('is what the Spending Categories with no Budget spent, less their refunds, and Uncategorised is on its own', async () => {
     await mustSet('Groceries', '2026-08', 80_000)
     await rule('EXAMPLE COUNTDOWN', { category: 'Groceries' })
     await rule('EXAMPLE CAFE', { category: 'Eating out' })
@@ -528,10 +530,11 @@ describe('spending outside Budgets', () => {
       row('2026-10-06', -700, 'EXAMPLE DAIRY'),
     ])
 
-    const { rows, otherCents } = await vsActual('2026-10')
+    const { rows, otherCents, uncategorisedCents } = await vsActual('2026-10')
 
     expect(rows.map((r) => [r.categoryName, r.spentCents])).toEqual([['Groceries', 4_000]])
-    expect(otherCents).toBe(2_000 + 700)
+    expect(otherCents).toBe(2_000)
+    expect(uncategorisedCents).toBe(700)
   })
 
   it('moves into a Category when it gets a Budget, and out of the rest', async () => {
@@ -547,6 +550,19 @@ describe('spending outside Budgets', () => {
 
   it('is nothing for a month with no Transactions', async () => {
     expect(await otherOn('2026-10')).toBe(0)
+    expect(await uncategorisedOn('2026-10')).toBe(0)
+  })
+
+  it('has money in that no Category has been given yet as a negative Uncategorised, since Uncategorised counts as Spending, and not in the rest', async () => {
+    await mustSet('Groceries', '2026-08', 80_000)
+    await importInto(EVERYDAY, [row('2026-10-02', 300_000, 'EXAMPLE PAYROLL', 'PAY'), row('2026-10-03', -700, 'EXAMPLE DAIRY')])
+
+    expect(await uncategorisedOn('2026-10')).toBe(-299_300)
+    expect(await otherOn('2026-10')).toBe(0)
+
+    await override('PAY', 'Wages and salary') // giving it its Category takes it out of Spending
+
+    expect(await uncategorisedOn('2026-10')).toBe(700)
   })
 })
 
@@ -563,10 +579,11 @@ describe('Category kinds', () => {
     ])
     await override('REAL', 'Groceries')
 
-    const { rows, otherCents } = await vsActual('2026-10')
+    const { rows, otherCents, uncategorisedCents } = await vsActual('2026-10')
 
     expect(rows).toEqual([{ categoryId: ids['Groceries'], categoryName: 'Groceries', budgetCents: 80_000, spentCents: 1_200 }])
     expect(otherCents).toBe(0)
+    expect(uncategorisedCents).toBe(0)
   })
 
   it('refuse a Budget on an Income or Loans Category (400), naming the Category, and write nothing', async () => {

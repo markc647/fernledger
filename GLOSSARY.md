@@ -85,7 +85,7 @@ What the Income Categories brought into the Accounts in a month, less what went 
 _Avoid_: Earnings
 
 **Loans**:
-The Category kind for money lent or borrowed, such as a loan between family: neither Spending nor Income, and left out of Budgets. The Loans Report lists them. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+The Category kind for money lent or borrowed, such as a loan between family: neither Spending nor Income, and left out of Budgets. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
 _Avoid_: Debt
 
 **Uncategorised**:
@@ -123,8 +123,8 @@ The record of every change the Admin makes: who, what and when; visible to all M
 _Avoid_: Audit trail, history
 
 **Change type**:
-The kind of thing a Change Log entry changed, such as Settings, Import, Account, Category, Rule, Budget or Transaction; Members can filter the Change Log by it. Not a Category.
-_Avoid_: Type, kind
+What a Change Log entry changed, such as Settings, Import, Account, Category, Rule, Budget or Transaction; Members can filter the Change Log by it. Not a Category, and not a Category kind.
+_Avoid_: Type on its own
 
 **Report**:
 A print-formatted view of Transactions, or of each Account's balances, over a date range, which any Member can print or save as PDF.

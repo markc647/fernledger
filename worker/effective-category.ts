@@ -51,8 +51,8 @@ export type EffectiveCategory = {
   /**
    * SQL for how the Transaction is a Transfer: 'pair' when it is paired with a Transaction in another Account (transfers.ts),
    * 'rule' when a Rule marks it and nothing paired it (the backstop), NULL when it is not a Transfer. A pair outranks the Rule,
-   * and an Override outranks both: if the Admin has chosen a Category for this Transaction (one in use), it is spending in that
-   * Category, however it is paired. Only that Transaction: its matching Transaction stays a Transfer. Reads `t.transfer_of` and
+   * and an Override outranks both: if the Admin has chosen a Category for this Transaction (one in use), it counts under that
+   * Category's kind (Spending, Income or Loans, ADR 0012), however it is paired. Only that Transaction: its matching Transaction stays a Transfer. Reads `t.transfer_of` and
    * `t.rule_transfer`, and the Override's join, so `joins` must be in the query.
    */
   transfer: string

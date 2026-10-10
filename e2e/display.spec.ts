@@ -316,11 +316,17 @@ test.describe('zoom', () => {
     }
   }
 
-  // The Categories page with a long Category name and its Admin forms open: the kind form, then the removal question.
+  // The Categories page with a long Category name and its Admin forms open: the kind form (with the Budgets it keeps), then the removal question for a
+  // Spending Category with Budget changes and for an Income one. The Categories and Budgets are stubbed.
+  const categoryForms = [
+    { form: 'the kind form', button: 'Set kind of', category: 'long' },
+    { form: 'the removal question', button: 'Remove', category: 'long' },
+    { form: 'the removal question for an Income Category', button: 'Remove', category: 'Wages and salary' },
+  ] as const
   for (const { name, width, height } of zoomLevels) {
     for (const size of ['A', 'A++'] as const) {
-      for (const open of ['Set kind of', 'Remove'] as const) {
-        test(`/categories with the ${open === 'Remove' ? 'removal question' : 'kind form'} open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+      for (const { form, button, category } of categoryForms) {
+        test(`/categories with ${form} open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
           await signInAs(context, 'admin')
           const longName = 'Health and medical costs for the household and the long-term care fees'
           await page.route(/\/api\/categories$/, (route) =>
@@ -328,12 +334,31 @@ test.describe('zoom', () => {
               ? route.fulfill({ json: [{ id: 1, name: longName, kind: 'spending' }, { id: 2, name: 'Wages and salary', kind: 'income' }, { id: 3, name: 'Loans', kind: 'loans' }] })
               : route.fallback(),
           )
+          await page.route(/\/api\/budgets(\?.*)?$/, (route) =>
+            route.fulfill({
+              json: {
+                month: '2026-10',
+                changeCount: 2,
+                changeLimit: 600,
+                budgets: [{ categoryId: 1, categoryName: longName, amountCents: 5000, effectiveFrom: '2026-08', changes: [{ effectiveFrom: '2026-08', amountCents: 5000 }, { effectiveFrom: '2026-12', amountCents: null }] }],
+              },
+            }),
+          )
           await page.setViewportSize({ width, height })
           await page.goto('/categories')
           await sizeButton(page, size).click()
-          await page.getByRole('button', { name: `${open} ${longName}` }).click()
-          if (open === 'Remove') await expect(page.getByText('If it has a Budget, the Budget stops being used')).toBeVisible()
-          else await expect(page.locator('#kind-1')).toBeFocused()
+          const target = category === 'long' ? longName : category
+          await page.getByRole('button', { name: `${button} ${target}` }).click()
+          if (button === 'Set kind of') {
+            await expect(page.locator('#kind-1')).toBeFocused()
+            await page.locator('#kind-1').selectOption('loans')
+            await expect(page.getByText('Its Budgets are kept but not used.')).toBeVisible()
+          } else if (category === 'long') {
+            await expect(page.getByText('Its Budget (2 changes) stops being used in every month, past ones too')).toBeVisible()
+          } else {
+            await expect(page.getByText('Wages and salary is an Income Category, so its Transactions stop counting as income. Those that end up Uncategorised count as Spending.')).toBeVisible()
+            await expect(page.getByText('stops being used in every month')).toHaveCount(0)
+          }
           // Measure only once the size is applied and the buttons have finished their width transition.
           await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
           await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
@@ -363,6 +388,7 @@ test.describe('zoom', () => {
                 { categoryId: 3, categoryName: 'Fuel', budgetCents: 100000000000, spentCents: -123456789 },
               ],
               otherCents: 123456789012,
+              uncategorisedCents: -123456789012,
             },
           }),
         )
@@ -376,6 +402,8 @@ test.describe('zoom', () => {
         await expect(widget).toContainText('$1,234,567.89 back')
         await expect(widget).toContainText('Spending outside Budgets')
         await expect(widget).toContainText('$1,234,567,890.12')
+        await expect(widget).toContainText('Uncategorised (includes money in not yet given a Category)')
+        await expect(widget).toContainText('$1,234,567,890.12 back')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))

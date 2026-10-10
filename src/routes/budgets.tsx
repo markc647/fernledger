@@ -21,10 +21,26 @@ const AMOUNT_HINT = 'Enter an amount of more than $0 in dollars, such as 800 or 
 /** The amount hint, with how to have no Budget when there is one to end. */
 const amountHint = (canEnd: boolean) => (canEnd ? `${AMOUNT_HINT} To have no Budget, use End Budget.` : AMOUNT_HINT)
 
+/** A 400 from the Worker, with the field it named. */
+class Refused extends HttpError {
+  field: string
+  constructor(field: string) {
+    super(400)
+    this.field = field
+  }
+}
+
+/** What each field the Worker can refuse means to the Admin. A field the page did not expect means the page may be out of date. */
+const REFUSED: Record<string, string> = {
+  amountCents: AMOUNT_HINT,
+  effectiveFrom: 'Choose a month from the list.',
+  categoryId: 'This Category is no longer a Spending Category, so it cannot have a Budget. Reload the page to see the Categories as they are now.',
+}
+
 /** Why a save failed, in words for the reader. */
 const whyNot = (error: unknown) =>
-  error instanceof HttpError && error.status === 400
-    ? AMOUNT_HINT
+  error instanceof Refused
+    ? (REFUSED[error.field] ?? 'Fernledger did not accept that. Reload the page, then try again.')
     : error instanceof HttpError && error.status === 409
       ? 'Fernledger keeps a limited number of Budget changes, and they cannot be removed, so there is no room to add another. Choose a month that already has a change, and replace it.'
       : 'That did not work. Try again.'
@@ -166,6 +182,7 @@ function BudgetPanel({
   const save = useMutation({
     mutationFn: async (amountCents: number | null) => {
       const res = await api.budgets[':categoryId'].$put({ param: { categoryId: String(row.categoryId) }, json: { effectiveFrom: from, amountCents } })
+      if (res.status === 400) throw new Refused(((await res.json().catch(() => ({}))) as { field?: string }).field ?? '')
       if (!res.ok) throw new HttpError(res.status)
       return res.json()
     },

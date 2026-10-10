@@ -12,5 +12,8 @@ export const KIND_LABELS: Record<CategoryKind, string> = { spending: 'Spending',
 export const KIND_HINTS: Record<CategoryKind, string> = {
   spending: 'Counts as spending, and can have a Budget.',
   income: 'Counts as income, and has no Budget.',
-  loans: 'Money lent or borrowed. Not spending or income, and has no Budget.',
+  loans: 'Money lent or borrowed. Make one Category for each person, such as Loan – Alice. Not spending or income, and has no Budget.',
 }
+
+/** What a list says under a Transaction's Category when its kind is not the usual one, so a loan or a wage is not read as spending. Spending needs no note. */
+export const KIND_NOTES: Record<CategoryKind, string | null> = { spending: null, income: 'Income', loans: 'Loan, not spending' }

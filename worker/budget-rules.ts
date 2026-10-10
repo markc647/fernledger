@@ -8,7 +8,8 @@ import { rollUp, type SpendingRow } from './spending'
 /**
  * The most Budget changes the database holds in all (rows of `budgets`), for good: a change is replaced, never removed. The Budgets
  * page reads every one (ADR 0004: D1 bills rows read), and 600 is a change every month for two years in 25 Categories, far past what a
- * family sets. The page says how many are used as it nears the limit.
+ * family sets. The count includes changes kept for a Category that is no longer Spending or was removed, which the page does not list.
+ * The page says how many are used as it nears the limit.
  */
 export const MAX_BUDGET_CHANGES = 600
 
@@ -73,16 +74,19 @@ export function budgetInMonth(changes: { effectiveFrom: string; amountCents: num
 export type VsActual = { categoryId: number; categoryName: string; budgetCents: number; spentCents: number }
 
 /**
- * Budget vs actual for one month: each Spending Category that has a Budget in it, with what it spent (ADR 0012; `spending` is that one
- * month's rows). `otherCents` is what the rest spent: Uncategorised and the Spending Categories with no Budget, so a Member sees the
- * whole of the spending and not only the part that has a Budget.
+ * Budget vs actual: each Spending Category that has a Budget in the month, with what it spent (ADR 0012). `spending` is that month's rows;
+ * rows of several months are added together, which is not what a month's Budget is compared with. `uncategorisedCents` is what Uncategorised
+ * spent, which counts as Spending and so includes money in that has no Category yet. `otherCents` is the Spending Categories with no Budget,
+ * so a Member sees the whole of the spending and not only the part that has a Budget.
  */
-export function budgetVsActual(inEffect: InEffect[], spending: SpendingRow[]): { rows: VsActual[]; otherCents: number } {
+export function budgetVsActual(inEffect: InEffect[], spending: SpendingRow[]): { rows: VsActual[]; otherCents: number; uncategorisedCents: number } {
   const spent = new Map<number | null, number>()
-  for (const figure of rollUp(spending).categories) if (figure.kind === 'spending') spent.set(figure.categoryId, figure.cents)
+  for (const total of rollUp(spending).byCategory) if (total.kind === 'spending') spent.set(total.categoryId, total.cents)
+  const uncategorisedCents = spent.get(null) ?? 0
+  spent.delete(null)
   const rows = inEffect.flatMap((row) => (row.amountCents === null ? [] : [{ categoryId: row.categoryId, categoryName: row.categoryName, budgetCents: row.amountCents, spentCents: spent.get(row.categoryId) ?? 0 }]))
   for (const row of rows) spent.delete(row.categoryId)
-  return { rows, otherCents: [...spent.values()].reduce((sum, cents) => sum + cents, 0) }
+  return { rows, otherCents: [...spent.values()].reduce((sum, cents) => sum + cents, 0), uncategorisedCents }
 }
 
 /** A change as the Change Log shows it, in plain words and dollars: the page shows what is recorded as it is. `before` is the Budget in effect that month. */
