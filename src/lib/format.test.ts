@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { formatAmount, formatBalance, formatDate, formatDateTime, formatInstantDate, moneyLabel } from './format'
+import { formatAmount, formatBalance, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, moneyLabel } from './format'
+
+describe('formatDateAtTime (when a Report was generated)', () => {
+  it.each([
+    [new Date('2026-10-08T02:42:00.000Z'), 'Thu 8 Oct 2026 at 3:42 pm'], // summer time, UTC+13
+    [new Date('2026-07-01T00:05:00.000Z'), 'Wed 1 Jul 2026 at 12:05 pm'], // winter time, UTC+12
+    [new Date('2026-10-07T11:00:00.000Z'), 'Thu 8 Oct 2026 at 12:00 am'], // already the next day in NZ
+    [new Date('2026-10-07T10:59:59.999Z'), 'Wed 7 Oct 2026 at 11:59 pm'],
+    [Date.UTC(2026, 9, 8, 2, 42), 'Thu 8 Oct 2026 at 3:42 pm'], // a timestamp, as a query reports when its data arrived
+  ])('writes the moment %s in NZ time as "%s", whatever the device\'s time zone', (instant, text) => {
+    expect(formatDateAtTime(instant)).toBe(text)
+  })
+
+  it('refuses a moment that is not one, without echoing it', () => {
+    expect(() => formatDateAtTime(Number.NaN)).toThrow(RangeError)
+  })
+})
 
 describe('formatDateTime', () => {
   it.each([

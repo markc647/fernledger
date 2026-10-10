@@ -2,8 +2,10 @@
 // (worker/effective-category.ts); this is only the wording, so the list, the details and the Edit panel can't say different things.
 // A Transaction's matching Transaction is the one it is paired with, in the other Account.
 
-/** How a Transaction is a Transfer: paired with a matching Transaction, or marked by a Rule when nothing paired with it. */
-export type TransferSource = 'pair' | 'rule'
+import type { TransferSource } from '../generated/api/effective-category'
+
+/** How a Transaction is a Transfer: paired with a matching Transaction, or marked by a Rule when nothing paired with it (the Worker's type: worker/effective-category.ts). */
+export type { TransferSource }
 
 /** What the API says about a Transaction's Transfer. `transferAccountName` is the Account of its matching Transaction, even when an Override makes this one spending. */
 export type TransferFields = { amountCents: number; transfer: TransferSource | null; transferAccountName: string | null }
@@ -24,7 +26,7 @@ export function transferLabel(t: TransferFields): string | null {
  */
 export function transferEditHint(t: Pick<TransferFields, 'transfer'>): string | null {
   if (t.transfer === null) return null
-  const matching = t.transfer === 'pair' ? ' Its matching Transaction stays a Transfer; set a Category on it too if the pairing is wrong.' : ''
+  const matching = t.transfer === 'pair' ? ' Its matching Transaction stays a Transfer unless it has a Category of its own; set a Category on it too if the pairing is wrong.' : ''
   return `This Transaction is a Transfer, so choosing a Category also makes it count as spending.${matching}`
 }
 

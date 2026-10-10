@@ -22,6 +22,27 @@ function Transactions() {
     <>
       <h1 className="text-2xl font-semibold">Transactions</h1>
       <p className="mt-2">Search and filter every Transaction, and open one to see all of its details.</p>
+      {/* The Report lists the whole Account and dates, whatever the other filters say, so it carries only those. It is a page for paper, so it opens in a new window. */}
+      <p className="mt-2">
+        {search.from && search.to ? (
+          <>
+            <Link
+              to="/reports/transactions"
+              search={{ account: search.account, from: search.from, to: search.to }}
+              target="_blank"
+              rel="noopener"
+              className="underline underline-offset-4"
+            >
+              Open a Transaction listing Report for these dates (opens in a new window)
+            </Link>
+            . It lists every Transaction in the Account and dates, whatever the other filters say.
+          </>
+        ) : (
+          <>
+            To print Transactions as a Report, set a From and To date and search, or <Link to="/reports" className="underline underline-offset-4">choose dates on the Reports page</Link>.
+          </>
+        )}
+      </p>
       <TransactionList
         search={search}
         onSearch={onSearch}

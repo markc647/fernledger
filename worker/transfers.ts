@@ -77,7 +77,8 @@ export const pairTransfersStatement = (db: D1Database, scope: { accountNumber: s
  * replacement has a match. Without this a half would stay a Transfer of a Transaction that no longer exists.
  *
  * Whatever else removes Transactions must do the same in its own batch. Each matching Transaction costs two writes (its row and its entry in
- * the partial Transfer index), up to twice the slice in all, on top of the removal's own (import-rows.ts: REPLACE_SLICE).
+ * the partial Transfer index), up to twice the slice in all, and each removed row one more for its own entry in that index, on top of
+ * the removal's own (import-rows.ts: WRITES_PER_PAIRED_REMOVED).
  */
 export const UNPAIR_PARTNERS = `UPDATE transactions SET transfer_of = NULL WHERE transfer_of IN (${IMPORTED_SLICE})`
 

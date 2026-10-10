@@ -137,7 +137,8 @@ const COUNT_IMPORTED_AND_ANNOTATED = `SELECT COUNT(*) AS imported,
 // in one statement, so rows added between the count and the delete can't push one replace past the write budget in
 // ADR 0004: a removed row costs 3 D1 writes (the row and its two indexes), so a slice is 15,000 of the day's 100,000, and
 // each of its rows that has an Override or Note costs 2 more to hold (the row and its key): at worst 10,000 more. A removed
-// row that was paired costs up to 2 more, to let go of its matching Transaction (transfers.ts): at worst 10,000 more again.
+// row that was paired costs up to 3 more, for its own Transfer index entry and to let go of its matching Transaction (transfers.ts): at worst
+// 15,000 more again.
 const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (${IMPORTED_SLICE})`
 
 type AccountRow = { id: number; name: string; cutover_date: string | null }

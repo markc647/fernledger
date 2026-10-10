@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { apiQuery, filterQuery, filtersOf, parseTransactionSearch, sortOf, tidy } from './transaction-search'
+import { apiQuery, exportPath, filterQuery, filtersOf, parseTransactionSearch, sortOf, tidy } from './transaction-search'
 
 describe('parseTransactionSearch', () => {
   it('reads every filter the page puts in the address', () => {
@@ -119,5 +119,23 @@ describe('filtersOf and filterQuery', () => {
     expect(filtersOf({ transfers: 'exclude', page: 2 })).toEqual({ transfers: 'exclude' })
     expect(filterQuery({ transfers: 'only' })).toEqual({ transfers: 'only' })
     expect(filterQuery({ ...search, sort: 'amount', page: 3 })).toEqual({ accountId: '2', categoryId: '7', from: '2026-01-01', to: '2026-03-31', text: 'cafe' })
+  })
+})
+
+describe('exportPath', () => {
+  it('carries the filters and leaves out the sort and the page, which the export does not take', () => {
+    const path = exportPath({ account: 2, category: 'uncategorised', from: '2026-01-01', to: '2026-03-31', q: 'cafe & bar', sort: 'amount', dir: 'asc', page: 3 })
+    const url = new URL(path, 'http://localhost')
+    expect(url.pathname).toBe('/api/transactions/export.csv')
+    expect(Object.fromEntries(url.searchParams)).toEqual({ accountId: '2', uncategorised: 'true', from: '2026-01-01', to: '2026-03-31', text: 'cafe & bar' })
+  })
+
+  it('has no query string when nothing is filtered', () => {
+    expect(exportPath({ sort: 'amount', page: 2 })).toBe('/api/transactions/export.csv')
+  })
+
+  it('carries the Transfers filter, so the file holds what the list shows', () => {
+    expect(exportPath({ transfers: 'only' })).toBe('/api/transactions/export.csv?transfers=only')
+    expect(exportPath({ q: 'cafe', transfers: 'exclude', page: 3, sort: 'amount' })).toBe('/api/transactions/export.csv?transfers=exclude&text=cafe')
   })
 })

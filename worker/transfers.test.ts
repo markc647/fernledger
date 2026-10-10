@@ -209,8 +209,8 @@ describe('identical Transactions on the same day (round-ups and repeat payments)
     expect(await pairs()).toHaveLength(3)
     expect(await unpaired()).toEqual([])
     // One to one: no Transaction is in two pairs, and each answers the other.
-    const partners = (await env.DB.prepare('SELECT transfer_of FROM transactions').all<{ transfer_of: number }>()).results.map((r) => r.transfer_of)
-    expect(new Set(partners).size).toBe(6)
+    const matching = (await env.DB.prepare('SELECT transfer_of FROM transactions').all<{ transfer_of: number }>()).results.map((r) => r.transfer_of)
+    expect(new Set(matching).size).toBe(6)
     await expectWholePairs()
   })
 
@@ -658,6 +658,93 @@ describe('Rules, pairs and carried Notes in one chunk', () => {
     const counts = (await (await call(`/api/imports/imported/${everyday}`)).json()) as Record<string, number>
 
     expect(counts).toMatchObject({ imported: 2, paired: 1 })
+  })
+})
+
+describe('the CSV file and the Report', () => {
+  /** A pair, a Transfer a Rule marks, a Rule-categorised pair, a purchase a Rule categorises, and plain spending. */
+  async function household() {
+    const groceries = await categoryId('Groceries')
+    await transferRule('ROUND UP')
+    expect((await call('/api/rules', { method: 'POST', body: { textContains: 'GROC', categoryId: groceries } })).status).toBe(201)
+    await importInto(EVERYDAY, [
+      row(DAY, -5000, 'GROC TFR TO SAVINGS', 'OUT'),
+      row(DAY, -50, 'ROUND UP', 'ROUND'),
+      row(DAY, -12_000, 'PAYMENT TO A FRIEND', 'FRIEND'),
+      row(DAY, -2000, 'GROC SHOP', 'SHOP'),
+    ])
+    await importInto(SAVINGS, [row(DAY, 5000, 'TFR FROM EVERYDAY', 'IN')])
+    return { groceries }
+  }
+
+  /** The file for these filters: each line's description and Category. Plain cells only, which these made-up rows have. */
+  async function exported(query: string) {
+    const res = await call(`/api/transactions/export.csv${query}`, { who: 'member' })
+    expect(res.status).toBe(200)
+    // The file's own lines start with a date; the header and the totals at the end do not.
+    const lines = (await res.text()).replace(/^\uFEFF/, '').split('\r\n').filter((line) => /^\d{4}-\d{2}-\d{2},/.test(line))
+    return lines.map((line) => {
+      const cells = line.split(',')
+      return { description: cells[2]!, category: cells[3]! }
+    })
+  }
+  const descriptions = (rows: { description: string }[]) => rows.map((r) => r.description).sort()
+
+  it('holds exactly the Transactions the list shows, for the Transfers filter and for the Category filters that leave Transfers out', async () => {
+    const { groceries } = await household()
+    const queries = ['', 'transfers=only', 'transfers=exclude', 'uncategorised=true', `categoryId=${groceries}`, `categoryId=${groceries}&transfers=exclude`]
+
+    for (const query of queries) {
+      const inList = descriptions(await described(query ? `&${query}` : ''))
+      expect(descriptions(await exported(query ? `?${query}` : '')), query).toEqual(inList)
+    }
+    // And they are the ones that were meant: the Transfers are the three halves, spending is what is left, and a Transfer is under no Category.
+    expect(descriptions(await exported('?transfers=only'))).toEqual(['GROC TFR TO SAVINGS', 'ROUND UP', 'TFR FROM EVERYDAY'])
+    expect(descriptions(await exported('?transfers=exclude'))).toEqual(['GROC SHOP', 'PAYMENT TO A FRIEND'])
+    expect(descriptions(await exported(`?categoryId=${groceries}`))).toEqual(['GROC SHOP'])
+    expect(descriptions(await exported('?uncategorised=true'))).toEqual(['PAYMENT TO A FRIEND'])
+  })
+
+  it('refuses a transfers filter it does not know, as the list does', async () => {
+    const res = await call('/api/transactions/export.csv?transfers=maybe', { who: 'member' })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid request', field: 'transfers' })
+  })
+
+  it('names a Transfer in its Category column, never as Uncategorised or under the Category a Rule would give it', async () => {
+    await household()
+
+    const rows = await exported('')
+
+    expect(rows.find((r) => r.description === 'GROC TFR TO SAVINGS')!.category).toBe('Transfer')
+    expect(rows.find((r) => r.description === 'ROUND UP')!.category).toBe('Transfer')
+    expect(rows.find((r) => r.description === 'TFR FROM EVERYDAY')!.category).toBe('Transfer')
+    expect(rows.find((r) => r.description === 'GROC SHOP')!.category).toBe('Groceries')
+    expect(rows.find((r) => r.description === 'PAYMENT TO A FRIEND')!.category).toBe('Uncategorised')
+  })
+
+  it('shows a Category in the file again once an Override makes the Transfer spending', async () => {
+    await household()
+    await override('OUT', await categoryId('Gifts and donations'))
+
+    expect((await exported('')).find((r) => r.description === 'GROC TFR TO SAVINGS')!.category).toBe('Gifts and donations')
+    expect(descriptions(await exported('?transfers=exclude'))).toContain('GROC TFR TO SAVINGS')
+  })
+
+  it("gives the Report's rows no Category for a Transfer, and says it is one", async () => {
+    await household()
+    const everyday = (await env.DB.prepare('SELECT id FROM accounts WHERE name = ?').bind('Everyday').first<{ id: number }>())!.id
+
+    const res = await call(`/api/reports/transactions?accountId=${everyday}&from=2026-10-01&to=2026-10-31`, { who: 'member' })
+
+    expect(res.status).toBe(200)
+    const { transactions } = (await res.json()) as { transactions: { description: string; categoryName: string | null; transfer: string | null }[] }
+    const byName = (description: string) => transactions.find((t) => t.description === description)
+    expect(byName('GROC TFR TO SAVINGS')).toMatchObject({ transfer: 'pair', categoryName: null })
+    expect(byName('ROUND UP')).toMatchObject({ transfer: 'rule', categoryName: null })
+    expect(byName('GROC SHOP')).toMatchObject({ transfer: null, categoryName: 'Groceries' })
+    expect(byName('PAYMENT TO A FRIEND')).toMatchObject({ transfer: null, categoryName: null })
   })
 })
 

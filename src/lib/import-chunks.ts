@@ -24,7 +24,7 @@ export const WRITES_PER_ROW: typeof WORKER_WRITES_PER_ROW = 3
 export const WRITES_PER_CARRIED: typeof WORKER_WRITES_PER_CARRIED = 7
 /** What a Transfer costs on top of its row: more to import (both halves are written) and to remove (the matching Transaction is let go of). */
 export const WRITES_PER_PAIRED_IMPORTED: typeof WORKER_WRITES_PER_PAIRED_IMPORTED = 4
-export const WRITES_PER_PAIRED_REMOVED: typeof WORKER_WRITES_PER_PAIRED_REMOVED = 2
+export const WRITES_PER_PAIRED_REMOVED: typeof WORKER_WRITES_PER_PAIRED_REMOVED = 3
 
 /** The most rows one Import can carry. */
 export const MAX_IMPORT_ROWS = CHUNK_SIZE * MAX_CHUNKS

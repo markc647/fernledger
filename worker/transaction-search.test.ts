@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:workers'
 import { beforeAll, describe, expect, it } from 'vitest'
 import * as z from 'zod/mini'
-import { MAX_TEXT as PAGE_MAX_TEXT, SORT_KEYS as PAGE_SORT_KEYS, TRANSFERS_FILTERS as PAGE_TRANSFERS_FILTERS } from '../src/lib/transaction-search'
+import { EXPORT_MAX_ROWS as PAGE_EXPORT_MAX_ROWS, MAX_TEXT as PAGE_MAX_TEXT, SORT_KEYS as PAGE_SORT_KEYS, TRANSFERS_FILTERS as PAGE_TRANSFERS_FILTERS } from '../src/lib/transaction-search'
+import { EXPORT_MAX_ROWS } from './transaction-export'
 import { buildSearch, MAX_LIMIT, MAX_TEXT, searchQuery, SORT_KEYS, toSearch, TRANSFERS_FILTERS, type Search } from './transaction-search'
 
 const search = (over: Partial<Search> = {}): Search => ({ uncategorised: false, sort: 'date', dir: 'desc', limit: 50, offset: 0, want: 'both', ...over })
@@ -50,6 +51,10 @@ describe('the Transactions page', () => {
 
   it('offers exactly the Transfers filters the API accepts', () => {
     expect([...PAGE_TRANSFERS_FILTERS]).toEqual([...TRANSFERS_FILTERS])
+  })
+
+  it('tells the reader the most a CSV export holds', () => {
+    expect(PAGE_EXPORT_MAX_ROWS).toBe(EXPORT_MAX_ROWS)
   })
 
   it('stops typing at the length of text the API accepts', () => {

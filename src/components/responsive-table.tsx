@@ -11,8 +11,8 @@ export type Column<Row> = {
   cell: (row: Row) => ReactNode
   /** Right-align (money and numbers). */
   align?: 'start' | 'end'
-  /** Keep the heading on one line, for a narrow column (such as a number) that the other columns would otherwise squeeze until its heading breaks. */
-  nowrap?: boolean
+  /** Classes for the column's heading and cells in the table (not on cards), such as `whitespace-nowrap` for a date. */
+  className?: string
   /**
    * Lets the reader sort by this column. In the table its heading is a button; on cards, where there are no headings, a
    * "Sort by" menu lists it. The table only shows the order it is given: `set` is where the page re-sorts (here, on the server).
@@ -115,12 +115,21 @@ export function ResponsiveTable<Row>({
   rows,
   getRowKey,
   emptyMessage = 'Nothing to show yet.',
+  className,
+  printHeading,
 }: {
   caption: string
   columns: Column<Row>[]
   rows: Row[]
   getRowKey: (row: Row) => string | number
   emptyMessage?: string
+  /** For the table (the wide layout), such as `print:text-[12pt]` on a Report. */
+  className?: string
+  /**
+   * Shown above the column headings on paper only, and so repeated with them at the top of every page the table runs onto: what the
+   * table is, when the page around it won't say (a Report's "app – Report – Account – dates" line).
+   */
+  printHeading?: ReactNode
 }) {
   const wide = useIsWide()
   // The caption stays on the empty state: a screen reader still hears what the missing data was.
@@ -136,10 +145,11 @@ export function ResponsiveTable<Row>({
     return (
       <>
         <SortMenu columns={columns} />
-        <ul aria-label={caption} className="grid gap-3 text-[0.9375rem]">
+        {/* One column that may shrink to the window: without it a card is as wide as its longest unbroken word (a long web address in a Note). */}
+        <ul aria-label={caption} className="grid grid-cols-1 gap-3 text-[0.9375rem]">
           {rows.map((row) => (
             <li key={getRowKey(row)} className="rounded-xl border bg-card p-4 text-card-foreground">
-              <dl className="grid gap-2">
+              <dl className="grid grid-cols-1 gap-2">
                 {columns.map((column) => (
                   <div key={column.key} className="flex items-start justify-between gap-4">
                     <dt className="shrink-0 text-muted-foreground">{column.header}</dt>
@@ -154,16 +164,23 @@ export function ResponsiveTable<Row>({
     )
   }
   return (
-    <table className="w-full border-collapse text-[0.9375rem]">
+    <table className={cn('w-full border-collapse text-[0.9375rem]', className)}>
       <caption className="sr-only">{caption}</caption>
       <thead>
+        {printHeading && (
+          <tr className="hidden print:table-row">
+            <td colSpan={columns.length} className="pb-3 text-start">
+              {printHeading}
+            </td>
+          </tr>
+        )}
         <tr className="border-b-2">
           {columns.map((column) => (
             <th
               key={column.key}
               scope="col"
               aria-sort={column.sort ? (column.sort.direction ?? 'none') : undefined}
-              className={cn(column.sort ? 'px-1 py-0' : 'px-3 py-2', 'font-semibold', column.nowrap && 'whitespace-nowrap', align(column))}
+              className={cn(column.sort ? 'px-1 py-0' : 'px-3 py-2', 'font-semibold', align(column), column.className)}
             >
               {column.sort ? <SortHeading column={{ ...column, sort: column.sort }} /> : column.header}
             </th>
@@ -174,7 +191,7 @@ export function ResponsiveTable<Row>({
         {rows.map((row) => (
           <tr key={getRowKey(row)} className="border-b">
             {columns.map((column) => (
-              <td key={column.key} className={cn('px-3 py-3 align-top', align(column))}>
+              <td key={column.key} className={cn('px-3 py-3 align-top', align(column), column.className)}>
                 {column.cell(row)}
               </td>
             ))}

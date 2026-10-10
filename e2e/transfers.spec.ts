@@ -10,8 +10,8 @@ const noAxeViolations = async (page: Page) => {
 // The light and dark projects share one local database, so each has Accounts of its own, and the Transactions are dated
 // in 2011 and use amounts no other spec does, so nothing from another spec can pair with them (Transfers pair on date and amount).
 const accountsFor = (project: string) => ({
-  everyday: { number: project === 'dark' ? '99-9999-9999999-62' : '99-9999-9999999-60', name: `Household everyday ${project}` },
-  savings: { number: project === 'dark' ? '99-9999-9999999-63' : '99-9999-9999999-61', name: `Household savings ${project}` },
+  everyday: { number: project === 'dark' ? '99-9999-9999999-42' : '99-9999-9999999-40', name: `Household everyday ${project}` },
+  savings: { number: project === 'dark' ? '99-9999-9999999-43' : '99-9999-9999999-41', name: `Household savings ${project}` },
 })
 
 type Seed = { account: { number: string; name: string }; rows: { description: string; amountCents: number }[] }
@@ -55,7 +55,7 @@ test('a Transfer between two Accounts is named as one, in the list and in its de
   await expect(dataRows(page).filter({ hasText: friend })).not.toContainText('Transfer')
   await noAxeViolations(page)
 
-  // Its details explain, and lead to the other half.
+  // Its details explain, and lead to the matching Transaction.
   await page.getByRole('link', { name: out }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Transaction' })).toBeVisible()
   await expect(page.getByText(`Money moved to ${savings.name}. It is not counted as spending.`)).toBeVisible()
@@ -139,7 +139,7 @@ test('the Admin can count one half of a Transfer as spending by choosing a Categ
   await page.locator('#edit-category').selectOption({ label: 'Gifts and donations' })
   await page.getByRole('button', { name: 'Save', exact: true }).click()
 
-  // This half is spending in that Category now; the other half is still a Transfer.
+  // This half is spending in that Category now; its matching Transaction is still a Transfer.
   await expect(outRow).toContainText('Gifts and donations')
   await expect(outRow).not.toContainText('Transfer')
   await expect(dataRows(page).filter({ hasText: into })).toContainText(`Transfer from ${everyday.name}`)
@@ -177,4 +177,28 @@ test('the Import screen says how many Transfers it matched with other Accounts',
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
   await expect(page.getByText('Transfers matched with other Accounts').locator('xpath=following-sibling::dd[1]')).toHaveText('1')
   await noAxeViolations(page)
+})
+
+test('the Report names a Transfer instead of a Category, and the CSV link carries the Transfers filter', async ({ page, context, baseURL }, testInfo) => {
+  const { everyday, savings } = accountsFor(testInfo.project.name)
+  const stamp = `${testInfo.project.name}${Date.now()}`
+  const out = `TFR TO SAVINGS ${stamp}`
+  const friend = `PAYMENT TO A FRIEND ${stamp}`
+  await seed(context, baseURL!, [
+    { account: everyday, rows: [{ description: out, amountCents: -7326 }, { description: friend, amountCents: -2116 }] },
+    { account: savings, rows: [{ description: `TFR FROM EVERYDAY ${stamp}`, amountCents: 7326 }] },
+  ])
+  const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
+  const everydayId = accounts.find((a) => a.name === everyday.name)!.id
+  await signInAs(context, 'member')
+
+  await page.goto(`/reports/transactions?account=${everydayId}&from=2011-01-01&to=2011-12-31`)
+  const listing = page.getByRole('article', { name: 'Transaction listing' })
+  await expect(listing.getByRole('row').filter({ hasText: out })).toContainText('Transfer')
+  await expect(listing.getByRole('row').filter({ hasText: out })).not.toContainText('Uncategorised')
+  await expect(listing.getByRole('row').filter({ hasText: friend })).toContainText('Uncategorised')
+
+  await page.goto(`/transactions?q=${stamp}&transfers=exclude`)
+  await expect(dataRows(page)).toHaveCount(1)
+  await expect(page.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', /transfers=exclude/)
 })

@@ -3,7 +3,8 @@ import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { effectiveCategory, type CategorySource, type TransferSource } from './effective-category'
-import { buildSearch, searchQuery, toSearch, type Statement } from './transaction-search'
+import { exportQuery, exportResponse } from './transaction-export'
+import { buildSearch, searchQuery, toFilters, toSearch, type Statement } from './transaction-search'
 import { PARTNER_JOIN } from './transfers'
 import { validate } from './validate'
 
@@ -99,6 +100,8 @@ export const transactions = new Hono<AppEnv>()
     const total = counting ? (results.shift()!.results[0] as { total: number }).total : null
     return c.json({ total, transactions: paging ? (results[0]!.results as TransactionListRow[]) : [] })
   })
+  // The same filters as the list, as a CSV file (transaction-export.ts). Ahead of '/:id', which would take "export.csv" for an ID.
+  .get('/export.csv', validate('query', exportQuery), (c) => exportResponse(c.env.DB, toFilters(c.req.valid('query'))))
   .get('/:id', async (c) => {
     const id = c.req.param('id')
     if (!ID.test(id)) return c.json({ error: 'Not found' }, 404)

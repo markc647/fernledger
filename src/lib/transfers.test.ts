@@ -56,7 +56,7 @@ describe('transferExplanation', () => {
 describe('transferEditHint', () => {
   it('tells the Admin a Category makes a Transfer spending, and that the matching Transaction needs one too if the pairing is wrong', () => {
     expect(transferEditHint({ transfer: 'pair' })).toBe(
-      'This Transaction is a Transfer, so choosing a Category also makes it count as spending. Its matching Transaction stays a Transfer; set a Category on it too if the pairing is wrong.',
+      'This Transaction is a Transfer, so choosing a Category also makes it count as spending. Its matching Transaction stays a Transfer unless it has a Category of its own; set a Category on it too if the pairing is wrong.',
     )
   })
 

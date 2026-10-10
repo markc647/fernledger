@@ -110,6 +110,10 @@ _Avoid_: Type, kind
 A print-formatted view of Transactions over a date range, which any Member can print or save as PDF.
 _Avoid_: Statement, export
 
+**CSV export**:
+A spreadsheet file of the Transactions that match the Transactions page's filters.
+_Avoid_: Report
+
 ## Viewing
 
 **Summary**:

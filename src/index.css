@@ -236,6 +236,64 @@
   }
 }
 
+/* Anything that is printed: a table's headings come back at the top of every page it runs onto, and a row, or a heading
+   and what it heads, is not cut by a page break. */
+@media print {
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    break-inside: avoid;
+  }
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+}
+
+/* Reports (src/components/report-frame.tsx; README: Reports). A Report is a named page, so these margins and the number in
+   them are the Report's alone: How to sign in keeps the browser's own margins.
+   Everything a reader needs to identify a page (what it is, which Account and dates, who generated it and when) is in the page
+   itself, in each table's heading, so it comes back on every page in every browser, and the text is 12pt or more. The one thing
+   that comes from the page margin is "Page 2 of 5": CSS margin boxes, which only Chrome and Edge 131 and later draw. Firefox and
+   Safari print the Report without them, and can number the pages in their own header and footer if the reader turns that on
+   (the hint on the Report says so). */
+@page report {
+  margin: 18mm 15mm 20mm;
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font: 12pt/1.3 var(--font-sans);
+    color: #000;
+    vertical-align: top;
+    padding-top: 3mm;
+    white-space: nowrap;
+  }
+}
+.report-frame {
+  page: report;
+}
+/* On paper a Report's own margins stand in for the screen's width limit and padding, which would narrow its tables. Only a
+   Report: every other printed page keeps them. */
+@media print {
+  main:has(.report-frame) {
+    max-width: none;
+    padding: 0;
+  }
+}
+/* Black on white. The colours that carry meaning on screen (money in and out, muted words) are black on paper, because the
+   sign and the words "Money in" and "Money out" carry it, and a black-and-white printer would turn a colour into a grey. */
+@media print {
+  .report-frame {
+    --foreground: oklch(0 0 0);
+    --muted-foreground: oklch(0 0 0);
+    --success: oklch(0 0 0);
+    --danger: oklch(0 0 0);
+    --border: oklch(0.45 0 0);
+    color: oklch(0 0 0);
+  }
+}
+
 /* Windows high contrast (forced colours). The browser swaps our colours for the reader's palette, which drops
    box-shadow focus rings and background-only states, so give both a border or outline that survives. */
 @media (forced-colors: active) {

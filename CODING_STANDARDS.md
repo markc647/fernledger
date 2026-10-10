@@ -19,6 +19,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 - Business logic lives in pure functions with their own tests. Worker handlers stay thin: authenticate, validate, call the logic, respond.
 - Every `/api` request is authenticated via the Access JWT and fails closed.
 - Spending is every Transaction that isn't a Transfer. A query that lists, filters or totals spending (Budgets, Reports, the Summary, a Category total) builds from `effectiveCategory()` in `worker/effective-category.ts` and uses its `isTransfer`, never its own version of "paired, or a Rule marks it", and a test proves a Transfer is left out.
+- A Category shown to a reader (a page, a Report, a CSV file) comes from `effectiveCategory().shown`, never its `id`, `name` or `source`: a Transfer has none, and shows as a Transfer rather than as Uncategorised or under a Rule's Category.
 - A batch that adds Transactions (Import today, Sync when it lands) puts `pairTransfersStatement` (`worker/transfers.ts`) in the same batch, after the insert and the Rules, so a Transfer is never missed. A batch that removes Transactions also lets go of their matching Transactions in the same batch, because a pair's pointer is deliberately not a foreign key (`migrations/1501_transfers.sql`).
 - Every Admin change is written with `recordChange` (`worker/changelog.ts`), which batches it with its Change Log entry. Never write to the Change Log separately. Each entry has a `type` from `CHANGE_TYPES`; a new kind of Admin change adds its type there so Members can filter by it.
 - Log with `logEvent` (`worker/log.ts`), not `console`: it takes only an event name, an ID, a count and an error, which it reduces to its class.
@@ -58,4 +59,8 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 - Size text in `rem` so the A / A+ / A++ control scales it, and use `size="touch"` for interactive targets.
 - Add a new page to the zoom test in `e2e/display.spec.ts`.
 - A printout leaves out the app header (`print:hidden` in `src/routes/__root.tsx`), and with it the app title, so a printable page writes its own title, as How to sign in does.
+- A Report goes inside `ReportFrame` (`src/components/report-frame.tsx`), which writes the title block and sets the page title and the page number's margin (in `src/index.css`; README [Reports](README.md#reports)). Don't write a Report's own title or `@page` rules.
+- A Report's tables are `ResponsiveTable` with `className="print:text-[12pt]"` and `printHeading={useReportIdentity()(account)}`, so every printed page says what it is in every browser; nothing in a Report is under 12pt in print.
+- A Report that lists rows reads them a page at a time from `/api/reports/…` (ADR 0004), through `loadListing` in `src/lib/report-transactions.ts` and its cap, and says what it did not read (never "nothing" for an Account it stopped before).
+- A new Report adds its print layout (page count, repeated headings, type size) to `e2e/reports.spec.ts` and its page to the zoom test.
 - Show state with a border or outline as well as a box-shadow or fill: Windows high contrast removes the latter.

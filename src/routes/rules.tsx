@@ -116,7 +116,7 @@ function AdminRules() {
   }
 
   const columns: Column<Item>[] = [
-    { key: 'order', header: 'Order', nowrap: true, cell: (item) => item.number },
+    { key: 'order', header: 'Order', className: 'whitespace-nowrap', cell: (item) => item.number },
     { key: 'when', header: 'When', cell: (item) => sentence(ruleConditions(item.rule)) },
     { key: 'then', header: 'Then', cell: (item) => ruleResult(item.rule) },
     {

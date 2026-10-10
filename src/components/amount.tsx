@@ -24,7 +24,7 @@ export function Amount({
       <span className={cn('font-medium whitespace-nowrap tabular-nums [font-kerning:none]', cents < 0 && 'text-danger', cents > 0 && !balance && 'text-success')}>
         {balance ? formatBalance(cents) : formatAmount(cents)}
       </span>
-      {label && <span className="text-muted-foreground">{label}</span>}
+      {label && <span className="whitespace-nowrap text-muted-foreground">{label}</span>}
     </span>
   )
 }
