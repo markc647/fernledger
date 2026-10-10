@@ -3,12 +3,12 @@ import { isSearchDate } from './date-range'
 // What the Transactions page keeps in its address, so a search survives a reload and Back returns to it. The API's own
 // parameters are built from it by `apiQuery`. Everything here is forgiving: an address typed or edited by hand never breaks the page.
 
-/** The sorts the API accepts (worker/transaction-search.ts pins the two lists together in its test). */
+/** The sorts the API accepts (worker/transaction-search.test.ts pins the two lists together). */
 export const SORT_KEYS = ['date', 'account', 'description', 'category', 'amount'] as const
 export type SortKey = (typeof SORT_KEYS)[number]
 export type SortDirection = 'asc' | 'desc'
 
-/** The longest text the API searches for (worker/transaction-search.ts pins the two together in its test). */
+/** The longest text the API searches for (worker/transaction-search.test.ts pins the two together). */
 export const MAX_TEXT = 100
 /** The last page the address accepts: 100,000 pages of 50 is 5 million Transactions, far past any history the app is built for. */
 const MAX_PAGE = 100_000
@@ -94,6 +94,18 @@ export function filterQuery(search: TransactionSearch): Record<string, string> {
   if (search.to) query.to = search.to
   if (search.q) query.text = search.q
   return query
+}
+
+/** The most Transactions a CSV export holds (worker/transaction-search.test.ts pins the two together). */
+export const EXPORT_MAX_ROWS = 5_000
+
+/**
+ * Where the CSV export of this search's filters is. The export takes the filters and nothing else, so a sort or page in the
+ * address is left out. Opened as a link, it downloads, and its file is named by its dates.
+ */
+export function exportPath(search: TransactionSearch): string {
+  const query = new URLSearchParams(filterQuery(search)).toString()
+  return `/api/transactions/export.csv${query ? `?${query}` : ''}`
 }
 
 /** The API's query string for this search and a page of `pageSize`. Blank filters are left out. */
