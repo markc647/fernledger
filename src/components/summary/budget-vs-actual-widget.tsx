@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { ResponsiveTable } from '@/components/responsive-table'
 import { Status } from '@/components/status'
-import { budgetStatus, spentText } from '@/lib/budgets'
+import { budgetStatus, spentParts } from '@/lib/budgets'
 import { formatBalance, formatMonth } from '@/lib/format'
 import { meQuery } from '@/lib/me'
 import { budgetVsActualQuery } from '@/lib/queries'
@@ -52,7 +52,20 @@ export function BudgetVsActualWidget() {
             columns={[
               { key: 'category', header: 'Category', cell: (row) => row.name },
               { key: 'budget', header: 'Budget', align: 'end', cell: (row) => (row.budgetCents === null ? 'No Budget' : <span className={money}>{formatBalance(row.budgetCents)}</span>) },
-              { key: 'spent', header: 'Spent', align: 'end', cell: (row) => <span className={money}>{spentText(row.spentCents)}</span> },
+              {
+                key: 'spent',
+                header: 'Spent',
+                align: 'end',
+                cell: (row) => {
+                  const { amount, back } = spentParts(row.spentCents)
+                  return (
+                    <>
+                      <span className={money}>{amount}</span>
+                      {back && ' back'}
+                    </>
+                  )
+                },
+              },
               {
                 key: 'status',
                 header: 'Status',

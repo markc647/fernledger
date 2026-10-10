@@ -128,7 +128,7 @@ test('the Admin adds, renames and removes a Category', async ({ page, context },
   await expect(page.getByRole('cell', { name: renamed, exact: true })).toHaveCount(0)
 })
 
-test('the Admin sets the kind of a Category, Members see it, and only a Spending Category has a Budget', async ({ page, context }, testInfo) => {
+test('the Admin sets the kind of a Category, Members see it, and only a Spending Category has a Budget', async ({ page, context, baseURL }, testInfo) => {
   await signInAs(context, 'admin')
   const name = `Kind ${testInfo.project.name} ${Date.now() % 1000000}`
   await page.goto('/categories')
@@ -163,7 +163,16 @@ test('the Admin sets the kind of a Category, Members see it, and only a Spending
   await page.goto('/budgets')
   await expect(page.getByRole('button', { name: `Edit Budget for ${name}` })).toBeVisible()
 
-  // And making it Income takes it away again, with its Budgets kept but not used.
+  // Making it Income takes it away again. With no Budgets there is nothing to say about them; with some, they are kept but not used.
+  await page.goto('/categories')
+  await page.getByRole('button', { name: `Set kind of ${name}` }).click()
+  await page.locator('select[id^="kind-"]').selectOption('income')
+  await expect(page.getByText('A change counts for every month, past ones too.')).toBeVisible()
+  await expect(page.getByText('Its Budgets are kept but not used.')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  const categories = (await (await context.request.get('/api/categories')).json()) as { id: number; name: string }[]
+  const budget = await context.request.put(`/api/budgets/${categories.find((c) => c.name === name)!.id}`, { headers: { Origin: baseURL! }, data: { effectiveFrom: '2026-10', amountCents: 1000 } })
+  expect(budget.ok()).toBe(true)
   await page.goto('/categories')
   await page.getByRole('button', { name: `Set kind of ${name}` }).click()
   await page.locator('select[id^="kind-"]').selectOption('income')

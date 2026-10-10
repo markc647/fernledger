@@ -22,8 +22,8 @@ export function budgetStatus(budgetCents: number, spentCents: number): BudgetSta
   return { kind: 'under', tone: 'success', words: 'Under Budget', detail: `${formatBalance(budgetCents - spentCents)} left` }
 }
 
-/** What a Category spent, in words: "$55.50", or "$15.00 back" when more came back than went out (a refund), never a minus sign for spending. */
-export const spentText = (spentCents: number) => (spentCents < 0 ? `${formatBalance(-spentCents)} back` : formatBalance(spentCents))
+/** What a Category spent in two parts, so the amount can be kept in one piece and "back" left free to wrap: "$55.50", or "$15.00" with `back` when more came back than went out (a refund). Never a minus sign for spending. */
+export const spentParts = (spentCents: number) => ({ amount: formatBalance(Math.abs(spentCents)), back: spentCents < 0 })
 
 /** The changes to a Category's Budget that begin after `month`: a Budget set from `month` stops when the first of them starts. */
 export const laterChanges = <T extends { effectiveFrom: string }>(changes: T[], month: string) => changes.filter((change) => change.effectiveFrom > month)

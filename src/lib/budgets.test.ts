@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addMonths, budgetStatus, capNotice, changeLine, laterChanges, monthChoices, savedMessage, spentText } from './budgets'
+import { addMonths, budgetStatus, capNotice, changeLine, laterChanges, monthChoices, savedMessage, spentParts } from './budgets'
 
 describe('budgetStatus', () => {
   it('is under Budget, with what is left, while less than the Budget has been spent', () => {
@@ -26,12 +26,12 @@ describe('budgetStatus', () => {
   })
 })
 
-describe('spentText', () => {
+describe('spentParts', () => {
   it('writes what was spent in dollars, and money back as money back rather than as a negative spend', () => {
-    expect(spentText(5_550)).toBe('$55.50')
-    expect(spentText(0)).toBe('$0.00')
-    expect(spentText(-1_500)).toBe('$15.00 back')
-    expect(spentText(-123_456_789)).toBe('$1,234,567.89 back')
+    expect(spentParts(5_550)).toEqual({ amount: '$55.50', back: false })
+    expect(spentParts(0)).toEqual({ amount: '$0.00', back: false })
+    expect(spentParts(-1_500)).toEqual({ amount: '$15.00', back: true })
+    expect(spentParts(-123_456_789)).toEqual({ amount: '$1,234,567.89', back: true })
   })
 })
 
