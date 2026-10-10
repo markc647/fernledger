@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { balanceDiffersMessage, describeBalanceCheck } from './balance-check'
+import { balanceDiffersMessage, describeBalanceCheck, noBalanceReason } from './balance-check'
+
+describe('noBalanceReason', () => {
+  it('says why an Account has no balance, in the words the Summary and the balances Report share', () => {
+    expect(noBalanceReason('after-cutover')).toBe('The bank balance we have is after the Cutover Date')
+    expect(noBalanceReason('file-ends-early')).toBe('The file ended before its bank balance date')
+    expect(noBalanceReason('alone')).toBe('No bank balance yet')
+    expect(noBalanceReason(null)).toBe('No bank balance yet')
+  })
+})
 
 describe('balanceDiffersMessage', () => {
   it('names the amount and the date of the previous bank balance', () => {
