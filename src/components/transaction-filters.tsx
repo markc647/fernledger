@@ -1,5 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -70,7 +69,7 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
   const canDownload = !unapplied && !backwards
   // How many match: the count the list asks for, with the same key, so this makes no request of its own. A file holds the oldest
   // EXPORT_MAX_ROWS, so say so before the reader downloads, not only in the file.
-  const { data: total } = useQuery({ ...transactionCountQuery(search), enabled: !backwards })
+  const { data: total } = useQuery({ ...transactionCountQuery(search), placeholderData: keepPreviousData, enabled: !backwards })
   const tooMany = total !== undefined && total > EXPORT_MAX_ROWS
   const describedBy = [total !== undefined && 'filter-download-count', tooMany && 'filter-download-warning', 'filter-download-hint'].filter(Boolean).join(' ')
 
@@ -203,17 +202,18 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
         {unapplied && <p className="text-muted-foreground">Press Search to apply these filters.</p>}
         {tooMany && (
           <p id="filter-download-warning" className="font-medium">
-            Only the oldest {EXPORT_MAX_ROWS.toLocaleString('en-NZ')} will be saved. Set From and To to one year at a time to save the rest.
+            Only the oldest up to {EXPORT_MAX_ROWS.toLocaleString('en-NZ')} will be saved (fewer if Notes are long). Set From and To to one year at a time to save the
+            rest.
           </p>
         )}
       </div>
       <p id="filter-download-hint" className="mt-2 text-muted-foreground">
         Download CSV saves the Transactions that match the filters you last searched with, oldest first, to open in a spreadsheet. Once saved, a file is outside
-        Fernledger's sign-in.{' '}
-        <Link to="/about-your-data" hash="seen" className="underline underline-offset-4">
-          About your data
-        </Link>{' '}
-        says what that means.
+        Fernledger's sign-in: see{' '}
+        <a href="https://github.com/markc647/fernledger#what-it-cant-protect-against" className="underline underline-offset-4">
+          what it can't protect against
+        </a>
+        .
       </p>
     </form>
   )

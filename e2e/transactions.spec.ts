@@ -358,7 +358,7 @@ test('a Member downloads the Transactions they searched for as a CSV file, with 
   )
 })
 
-test('says how many Transactions match, and warns before a download that would stop short, and where saved files are explained', async ({ page, context }) => {
+test('says how many Transactions match, warns before a download that would stop short, and links to what a saved file leaves unprotected', async ({ page, context }) => {
   await signInAs(context, 'member')
   const row = { id: 4242, accountId: 1, accountName: 'Example savings', date: '2026-10-08', description: 'EXAMPLE CAFE TOWN', bankType: 'EFTPOS', amountCents: -2345, categoryId: null, categoryName: null, categorySource: null, note: null }
   let total = 5001
@@ -367,12 +367,12 @@ test('says how many Transactions match, and warns before a download that would s
     return route.fulfill({ json: countOnly ? { total, transactions: [] } : { total: null, transactions: [row] } })
   })
   const matches = page.locator('#filter-download-count')
-  const warning = page.getByText('Only the oldest 5,000 will be saved. Set From and To to one year at a time to save the rest.')
+  const warning = page.getByText('Only the oldest up to 5,000 will be saved (fewer if Notes are long). Set From and To to one year at a time to save the rest.')
 
   await page.goto('/transactions')
   await expect(matches).toHaveText('5,001 Transactions match')
   await expect(warning).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Download CSV' })).toHaveAccessibleDescription(/5,001 Transactions match.*Only the oldest 5,000 will be saved/)
+  await expect(page.getByRole('link', { name: 'Download CSV' })).toHaveAccessibleDescription(/5,001 Transactions match.*Only the oldest up to 5,000 will be saved/)
   await noAxeViolations(page)
 
   // Exactly the most is not too many, and one is "matches".
@@ -384,10 +384,11 @@ test('says how many Transactions match, and warns before a download that would s
   await page.reload()
   await expect(matches).toHaveText('1 Transaction matches')
 
-  // What leaves Fernledger's protection is explained where the Member can read it.
-  await page.getByRole('search', { name: 'Search Transactions' }).getByRole('link', { name: 'About your data' }).click()
-  await expect(page).toHaveURL(/\/about-your-data#seen$/)
-  await expect(page.getByText('A file saved from Fernledger, such as a CSV export of Transactions, is outside all of this.')).toBeVisible()
+  // What leaves Fernledger's protection is explained in the README, and the search links to that section.
+  await expect(page.getByRole('search', { name: 'Search Transactions' }).getByRole('link', { name: "what it can't protect against" })).toHaveAttribute(
+    'href',
+    'https://github.com/markc647/fernledger#what-it-cant-protect-against',
+  )
 })
 
 test('Back from a Transaction opened on the Uncategorised page returns to the Uncategorised page, in the same order', async ({ page, context }) => {

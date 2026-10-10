@@ -60,6 +60,10 @@ test.describe('About your data', () => {
     await expect(section(page, 'What is held')).toContainText('Transactions')
     await expect(section(page, 'What is held')).toContainText('Change Log')
     await expect(section(page, 'Who can see it')).toContainText('Cloudflare Access')
+    await expect(section(page, 'Who can see it').getByRole('link', { name: "what it can't protect against" })).toHaveAttribute(
+      'href',
+      'https://github.com/markc647/fernledger#what-it-cant-protect-against',
+    )
   })
 
   test('lists everything the database holds: Accounts, Transactions, Balances, Categories, the Change Log, sign-in, Settings', async ({ page, context }) => {

@@ -94,7 +94,11 @@ function AboutYourData() {
           Fernledger sends your data to no one else. It contacts no one but Akahu (only if this Fernledger uses Akahu Sync) and, to check a sign-in, your own Cloudflare Access. It has no analytics, tracking or email.
         </p>
         <p>
-          A file saved from Fernledger, such as a CSV export of Transactions, is outside all of this. It has no sign-in, so anyone who has the file can read it, and it isn't in the Change Log. Keep it somewhere private.
+          A file saved from Fernledger, such as a CSV export of Transactions, is outside all of this. See{' '}
+          <a href="https://github.com/markc647/fernledger#what-it-cant-protect-against" className="underline underline-offset-4">
+            what it can't protect against
+          </a>
+          .
         </p>
       </Section>
 
