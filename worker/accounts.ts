@@ -3,7 +3,7 @@ import * as z from 'zod/mini'
 import { accountName, isoDate } from './account-fields'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
-import { validate } from './validate'
+import { pathId, validate } from './validate'
 
 type AccountRow = { id: number; name: string; accountNumber: string; cutoverDate: string | null }
 
@@ -16,7 +16,8 @@ export const accounts = new Hono<AppEnv>()
     return c.json(results)
   })
   .patch('/:id', validate('json', rename), async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const { name } = c.req.valid('json')
     const db = c.env.DB
     const account = Number.isSafeInteger(id) ? await db.prepare('SELECT name FROM accounts WHERE id = ?').bind(id).first<{ name: string }>() : null
@@ -33,7 +34,8 @@ export const accounts = new Hono<AppEnv>()
   })
   // The Cutover Date (ADR 0003): Import drops rows dated on or after it. Setting it deletes nothing already saved.
   .put('/:id/cutover-date', validate('json', cutover), async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const { cutoverDate } = c.req.valid('json')
     const db = c.env.DB
     const account = Number.isSafeInteger(id) ? await db.prepare('SELECT name, cutover_date FROM accounts WHERE id = ?').bind(id).first<{ name: string; cutover_date: string | null }>() : null

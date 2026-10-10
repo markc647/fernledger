@@ -30,7 +30,7 @@ import { chunkDetail, chunkStatements, chunkSummary, replaceWouldLeaveNothing } 
 import { badPreviewField, badRowField, IMPORTED_SLICE, MAX_CHUNKS, REPLACE_SLICE, serialisePreviewRows, serialiseRows, type ImportRow, type PreviewRow } from './import-rows'
 import { applyRulesStatement, lastTransactionId } from './rule-apply'
 import { pairTransfersStatement, unpairPartnersOfImportedStatement } from './transfers'
-import { validate } from './validate'
+import { pathId, validate } from './validate'
 
 // The browser parses the file (ADR 0004) and sends rows in chunks of about 500. Limits measured and chosen
 // (D1 limits from developers.cloudflare.com/d1/platform/limits, checked 2026-10):
@@ -278,7 +278,8 @@ export const imports = new Hono<AppEnv>()
   // Overrides, Notes and Not a Transfer marks an earlier replace that stopped part way is still holding for the Account, and how many of the rows are
   // half of a Transfer, which cost more writes to remove and to import again (import-rows.ts: WRITES_PER_PAIRED_REMOVED).
   .get('/imported/:accountId', async (c) => {
-    const accountId = Number(c.req.param('accountId'))
+    const accountId = pathId(c.req.param('accountId'))
+    if (accountId === null) return c.json({ error: 'Not found' }, 404)
     const db = c.env.DB
     const account = Number.isSafeInteger(accountId) ? await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first() : null
     if (!account) return c.json({ error: 'Not found' }, 404)

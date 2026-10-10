@@ -5,7 +5,7 @@ import { findCategory } from './categories'
 import { recordChange } from './changelog'
 import { monthEnd, monthStart, nzMonth } from './months'
 import { buildSpending, type SpendingRow } from './spending'
-import { validate } from './validate'
+import { pathId, validate } from './validate'
 
 // A monthly Budget for each Spending Category, effective from a month onward (migrations/1601_budgets.sql, budget-rules.ts). Every Member
 // can read them; the guard in app.ts already refuses a change from anyone but the Admin. Each change is one Change Log entry of type
@@ -39,7 +39,9 @@ export const budgets = new Hono<AppEnv>()
   .put('/:categoryId', validate('json', budgetBody), async (c) => {
     const { effectiveFrom, amountCents } = c.req.valid('json')
     const db = c.env.DB
-    const category = await findCategory(db, Number(c.req.param('categoryId')))
+    const categoryId = pathId(c.req.param('categoryId'))
+    if (categoryId === null) return c.json({ error: 'Not found' }, 404)
+    const category = await findCategory(db, categoryId)
     if (!category) return c.json({ error: 'Not found' }, 404)
     // Budgets are for Spending Categories only (ADR 0012). The Category is in the path, so that is the field named.
     if (category.kind !== 'spending') return c.json({ error: 'Invalid request', field: 'categoryId' }, 400)

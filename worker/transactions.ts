@@ -7,7 +7,7 @@ import { effectiveCategory, type CategorySource, type TransferSource } from './e
 import { exportQuery, exportResponse } from './transaction-export'
 import { buildSearch, categoryProbe, isFewInCategory, needsCategoryProbe, searchQuery, toFilters, toSearch, type Statement } from './transaction-search'
 import { clearHeldNotTransferStatement, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, PARTNER_JOIN } from './transfers'
-import { nothing, validate } from './validate'
+import { nothing, pathId, validate } from './validate'
 
 /** The Admin's Override: a Category in use, or null to take it off. */
 const overrideBody = z.object({ categoryId: z.nullable(z.int().check(z.positive())) })
@@ -75,12 +75,6 @@ type TransactionDetail = {
   bankTime: string | null
   firstSeenAt: string | null
 }
-
-/** A Transaction's ID in a path: digits only, no sign, exponent or leading zero, so it is what it looks like. */
-const ID = /^[1-9]\d{0,14}$/
-
-/** The Transaction a path names, or null when the path is not an ID as written (`1e1` is 10 to Number(), and is not Transaction 10): the routes answer 404. */
-const transactionId = (raw: string) => (ID.test(raw) ? Number(raw) : null)
 
 /** Describes a Transaction in a Change Log summary: enough to find it, from its ID, date and description. */
 type Described = { id: number; date: string; description: string }
@@ -163,7 +157,7 @@ export const transactions = new Hono<AppEnv>()
   // The same filters as the list, as a CSV file (transaction-export.ts). Ahead of '/:id', which would take "export.csv" for an ID.
   .get('/export.csv', validate('query', exportQuery), (c) => exportResponse(c.env.DB, toFilters(c.req.valid('query'))))
   .get('/:id', async (c) => {
-    const id = transactionId(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
     if (id === null) return c.json({ error: 'Not found' }, 404)
     const category = effectiveCategory()
     const transaction = await c.env.DB.prepare(
@@ -192,7 +186,7 @@ export const transactions = new Hono<AppEnv>()
   })
   // The guard in app.ts has already required the Admin, so these only validate the body's shape.
   .put('/:id/override', validate('json', overrideBody), async (c) => {
-    const id = transactionId(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
     if (id === null) return c.json({ error: 'Not found' }, 404)
     const { categoryId } = c.req.valid('json')
     const db = c.env.DB
@@ -225,7 +219,7 @@ export const transactions = new Hono<AppEnv>()
     return c.json({ id, categoryId: category?.id ?? null })
   })
   .put('/:id/note', validate('json', noteBody), async (c) => {
-    const id = transactionId(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
     if (id === null) return c.json({ error: 'Not found' }, 404)
     const note = c.req.valid('json').note || null
     const db = c.env.DB
@@ -247,7 +241,7 @@ export const transactions = new Hono<AppEnv>()
   // with the Change Log entry, and pairing and the Rules leave them alone from then on (transfers.ts). Undo takes the marks off and pairs them again. The guard
   // in app.ts has already required the Admin. A request that finds nothing to do writes no entry (`onlyIfChanged`).
   .post('/:id/not-transfer', validate('json', nothing), async (c) => {
-    const id = transactionId(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
     if (id === null) return c.json({ error: 'Not found' }, 404)
     const db = c.env.DB
     const transaction = await findTransferState(db, id)
@@ -272,7 +266,7 @@ export const transactions = new Hono<AppEnv>()
     return c.json({ id, notTransfer: true })
   })
   .delete('/:id/not-transfer', validate('json', nothing), async (c) => {
-    const id = transactionId(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
     if (id === null) return c.json({ error: 'Not found' }, 404)
     const db = c.env.DB
     const transaction = await findTransferState(db, id)
