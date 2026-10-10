@@ -4,6 +4,7 @@ import { ReportFrame } from '@/components/report-frame'
 import { TransactionListingForm } from '@/components/report-form'
 import { CappedNotice, TransactionListing } from '@/components/transaction-listing'
 import { accountsQuery, reportListingQuery } from '@/lib/queries'
+import { accountLabel } from '@/lib/report-frame'
 import { parseReportSearch } from '@/lib/report-transactions'
 
 // The Report lives in its address (?account=2&from=2026-10-01&to=2026-10-31), so it can be reopened or sent on, and the
@@ -61,11 +62,12 @@ function TransactionListingReport() {
   if (listing.error) return <p role="alert">Fernledger couldn't load this Report. Reload the page to try again.</p>
   if (!listing.data) return <p role="status">Loading…</p>
 
-  const names = selected.map((a) => a.name).join(', ')
+  const labels = selected.map(accountLabel).join('; ')
   return (
     <ReportFrame
       name={NAME}
-      accounts={search.account === undefined ? `All Accounts (${names})` : names}
+      accounts={search.account === undefined ? `All Accounts: ${labels}` : labels}
+      accountsInTitle={search.account === undefined ? 'All Accounts' : selected[0]!.name}
       from={range.from}
       to={range.to}
       generatedAt={listing.dataUpdatedAt}

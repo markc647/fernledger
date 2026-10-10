@@ -319,7 +319,7 @@ test.describe('zoom', () => {
         await page.route('**/api/reports/transactions?**', (route) =>
           route.fulfill({
             json: {
-              transactions: [{ id: 1, date: '2026-10-08', description: `${long} shop with a long enough name to wrap on a narrow screen`, amountCents: -123456789, categoryName: 'Category with a long name'.padEnd(40, 'z'), note: `${long} note that goes on and on` }],
+              transactions: [{ id: 1, date: '2026-10-08', description: `${long} shop with a long enough name to wrap on a narrow screen`, amountCents: -123456789, categoryName: 'Category with a long name'.padEnd(40, 'z'), note: `${long} note that goes on and on`, source: 'sync', bankReference: long, bankCounterpartyAccount: '99-9999-9999999-97', bankCardSuffix: '1234', bankParticulars: long, bankPaymentCode: long }],
               next: null,
             },
           }),

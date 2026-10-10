@@ -62,8 +62,7 @@ function Layout() {
           </div>
         </div>
       </header>
-      {/* On paper the page sets its own margins (@page), so the screen's width limit and padding stand aside. */}
-      <main id="main" tabIndex={-1} className="mx-auto max-w-5xl p-4 print:max-w-none print:p-0">
+      <main id="main" tabIndex={-1} className="mx-auto max-w-5xl p-4">
         {meError ? (
           isNotSignedIn(meError) ? (
             <>

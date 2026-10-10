@@ -79,7 +79,7 @@ export const transactionQuery = (id: string) =>
  * the cap. The pages are read once and kept: a Report is a snapshot ("Generated … at …" is when the data arrived), so a refocused
  * window doesn't read thousands of rows again.
  */
-export const reportListingQuery = (accounts: { id: number; name: string }[], from: string, to: string) =>
+export const reportListingQuery = (accounts: { id: number; name: string; accountNumber: string }[], from: string, to: string) =>
   queryOptions({
     queryKey: ['reports', 'transactions', accounts.map((a) => a.id), from, to],
     staleTime: Infinity,

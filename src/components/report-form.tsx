@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { MAX_DATE, MIN_DATE, isSearchDate } from '@/lib/date-range'
 import { accountsQuery } from '@/lib/queries'
-import type { ReportSearch } from '@/lib/report-transactions'
+import { REPORT_ROW_CAP, type ReportSearch } from '@/lib/report-transactions'
 
 /** What is wrong with the dates, if anything, and the field to mark. */
 function problemWith(from: string, to: string): { field: 'from' | 'to'; message: string } | null {
@@ -87,7 +87,8 @@ export function TransactionListingForm({ defaults = {} }: { defaults?: ReportSea
           {problem.message}
         </p>
       )}
-      <div className="mt-4">
+      <p className="mt-4">A Report lists up to {REPORT_ROW_CAP.toLocaleString('en-NZ')} Transactions.</p>
+      <div className="mt-3">
         {/* The words may wrap: at the largest text size on a phone they are wider than the window. */}
         <Button type="submit" size="touch" className="text-center whitespace-normal">
           Open Report in a new window

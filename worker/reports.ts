@@ -5,7 +5,7 @@ import { validate } from './validate'
 
 /**
  * The data behind the print-formatted Reports (README: Reports). Every Member can read them. Each is read a page at a time,
- * so no request goes past the free plan's CPU budget (ADR 0004); the Report page puts the pages together.
+ * so each request stays small (ADR 0004; sizes in report-transactions.ts); the Report page puts the pages together.
  */
 export const reports = new Hono<AppEnv>().get('/transactions', validate('query', reportQuery), async (c) => {
   const query = toReportQuery(c.req.valid('query'))

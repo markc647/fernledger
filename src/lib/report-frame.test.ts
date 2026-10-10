@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cssString, describeRange, generatedLine, runningHead } from './report-frame'
+import { accountLabel, describeRange, generatedLine, reportHeading } from './report-frame'
 
 describe('describeRange', () => {
   it('writes both ends the way the rest of the app writes a date', () => {
@@ -16,31 +16,16 @@ describe('generatedLine', () => {
   })
 })
 
-describe('runningHead', () => {
-  const parts = { appTitle: "Mum's finances", name: 'Transaction listing', accounts: 'Example savings', range: 'Thu 1 Oct 2026 to Sat 31 Oct 2026' }
-  it('carries the title, the Report, the Account and the dates', () => {
-    expect(runningHead(parts)).toBe("Mum's finances · Transaction listing · Example savings · Thu 1 Oct 2026 to Sat 31 Oct 2026")
-  })
-  it('stops at 200 characters with an ellipsis, so a long list of Accounts can\'t outgrow the page margin', () => {
-    const head = runningHead({ ...parts, accounts: 'Example account name that goes on and on, '.repeat(20) })
-    expect(Array.from(head)).toHaveLength(200)
-    expect(head.endsWith('…')).toBe(true)
-  })
-  it('does not cut a character in two', () => {
-    const head = runningHead({ ...parts, appTitle: '😀'.repeat(150) })
-    expect(head).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/) // no lone half of a pair
+describe('accountLabel', () => {
+  it('names the Account and gives its bank number', () => {
+    expect(accountLabel({ name: 'Example savings', accountNumber: '99-9999-9999999-99' })).toBe('Example savings (99-9999-9999999-99)')
   })
 })
 
-describe('cssString (the text of a page margin, set as a CSS custom property)', () => {
-  it('quotes the text', () => {
-    expect(cssString("Mum's finances")).toBe('"Mum\'s finances"')
-  })
-  it('escapes a quote and a backslash, so the text can\'t end the string and add CSS of its own', () => {
-    expect(cssString('a"b\\c')).toBe('"a\\"b\\\\c"')
-    expect(cssString('"; } body { display: none; } /*')).toBe('"\\"; } body { display: none; } /*"')
-  })
-  it('turns line breaks into spaces, which a CSS string can\'t hold', () => {
-    expect(cssString('one\ntwo\r\nthree\ffour')).toBe('"one two three four"')
+describe('reportHeading', () => {
+  it('carries the app title, the Report, the Account and the dates, in the order a file name wants them', () => {
+    expect(reportHeading({ appTitle: "Mum's finances", name: 'Transaction listing', accounts: 'Example savings', range: 'Thu 1 Oct 2026 to Sat 31 Oct 2026' })).toBe(
+      "Mum's finances – Transaction listing – Example savings – Thu 1 Oct 2026 to Sat 31 Oct 2026",
+    )
   })
 })

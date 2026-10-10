@@ -1,27 +1,50 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { meQuery } from '@/lib/me'
-import { cssString, describeRange, generatedLine, runningHead } from '@/lib/report-frame'
+import { describeRange, generatedLine, reportHeading } from '@/lib/report-frame'
 import { settingsQuery } from '@/lib/settings'
+
+/** What a Report says about itself, for the parts of it that repeat the title block on every printed page (see `useReportIdentity`). */
+type ReportIdentity = { appTitle: string; name: string; range: string; generated: string }
+const Identity = createContext<ReportIdentity | null>(null)
+
+/**
+ * The heading to give each printed table (`ResponsiveTable`'s `printHeading`), for the Account it lists: two lines, "<app> –
+ * <Report> – <Account> – <dates>" and "Generated … by …". A browser repeats a table's heading at the top of every page the
+ * table runs onto, so every printed page says what it is and who made it, in every browser, with no help from page margins.
+ * Null outside a Report.
+ */
+export function useReportIdentity() {
+  const identity = useContext(Identity)
+  return (accounts: string) =>
+    identity && (
+      <>
+        <span className="block font-semibold">{reportHeading({ ...identity, accounts })}</span>
+        <span className="block">{identity.generated}</span>
+      </>
+    )
+}
 
 /**
  * The frame every Report is printed in (README: Reports). It writes the Report's own title block, because a printout leaves
- * out the app header and with it the app title: the app title from Settings, the Report's name, its Account(s) and dates,
- * and "Generated Thu 8 Oct 2026 at 3:42 pm by <the signed-in email>". A Report is a page that opens in a new window; it
- * puts what it lists in `children`, as tables (ResponsiveTable with `print:text-[12pt]`) and headings no smaller than 12pt.
+ * out the app header and with it the app title: the app title from Settings, the Report's name, its Account(s) and dates, and
+ * "Generated Thu 8 Oct 2026 at 3:42 pm by <the signed-in email>". A Report is a page that opens in a new window; it puts what it
+ * lists in `children`, as tables (ResponsiveTable with `print:text-[12pt]` and a `printHeading` from `useReportIdentity`) and
+ * headings no smaller than 12pt.
  *
  * On paper (src/index.css, `.report-frame`): text is black on white and at least 12pt, table headings repeat on every page,
- * a row never splits across pages, and the Report's own page margins hold the page numbers ("Page 2 of 5") and, after the
- * first page, a running head and the generated line, so a loose page says what it is and who printed it. Those margin
- * boxes are Chromium's (Chrome, Edge, Opera and Brave 131 and later); Firefox and Safari print the same Report without
- * them, and number the pages themselves in the browser's own header and footer, which the hint on screen points to.
+ * and a row never splits across pages. The two lines that identify the Report come back on every page in every browser, in
+ * each table's heading. Page numbers ("Page 2 of 5") sit in the Report's own page margin, which only Chrome and Edge 131 and later
+ * draw; other browsers print the Report without them, and number the pages in their own header and footer if the reader turns
+ * that on, which the hint on screen says.
  *
  * `generatedAt` is when the data arrived. The email is the signed-in Member's own, from Access; it is printed, never logged.
  */
 export function ReportFrame({
   name,
   accounts,
+  accountsInTitle,
   from,
   to,
   generatedAt,
@@ -30,8 +53,10 @@ export function ReportFrame({
 }: {
   /** The Report's name, such as "Transaction listing". */
   name: string
-  /** The Account(s) it covers, in words: one name, or "All Accounts (…)". */
+  /** The Account(s) it covers, in words, for the title block: each with its bank number. */
   accounts: string
+  /** The same for the browser's page title, which is the name "Save as PDF" suggests: "All Accounts", or the one Account's name. */
+  accountsInTitle: string
   /** NZ dates, both ends included. */
   from: string
   to: string
@@ -46,33 +71,40 @@ export function ReportFrame({
   const appTitle = settings.data?.app_title
   const email = me.data?.email
   const range = describeRange(from, to)
+  const generated = email ? generatedLine(generatedAt, email) : undefined
 
-  // Page margins can only be filled from CSS, so the words travel as custom properties on the document (src/index.css).
-  const head = appTitle ? runningHead({ appTitle, name, accounts, range }) : undefined
-  const foot = email ? generatedLine(generatedAt, email) : undefined
+  // The page's title names the file "Save as PDF" suggests, and it is what a browser's own print header shows.
+  const title = appTitle ? reportHeading({ appTitle, name, accounts: accountsInTitle, range }) : undefined
   useEffect(() => {
-    if (head === undefined || foot === undefined) return
-    const root = document.documentElement
-    root.style.setProperty('--report-head', cssString(head))
-    root.style.setProperty('--report-foot', cssString(foot))
+    if (title === undefined) return
+    const before = document.title
+    let cancelled = false
+    // The app's header sets the page title to the app title when the Settings arrive, and an effect in a parent runs after its
+    // children's, so a Report that appeared in the same moment would lose to it. A microtask runs after every effect of this render.
+    queueMicrotask(() => {
+      if (!cancelled) document.title = title
+    })
     return () => {
-      root.style.removeProperty('--report-head')
-      root.style.removeProperty('--report-foot')
+      cancelled = true
+      document.title = before
     }
-  }, [head, foot])
+  }, [title])
+
+  const identity = useMemo(() => (appTitle && generated ? { appTitle, name, range, generated } : null), [appTitle, name, range, generated])
 
   // Without the app title and who is signed in the printout would not say what it is or who made it, so it waits for both.
   if (settings.error) return <p role="alert">Fernledger couldn't load the details this Report needs. Reload the page to try again.</p>
-  if (appTitle === undefined || email === undefined) return <p role="status">Loading…</p>
+  if (identity === null) return <p role="status">Loading…</p>
 
   return (
-    <>
+    <Identity.Provider value={identity}>
       <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 print:hidden">
         <Button size="touch" onClick={() => window.print()}>
           Print or save as PDF
         </Button>
         <p className="min-w-0 flex-1 basis-64">
-          In the print window, choose “Save as PDF” to keep a copy. If the printout has no page numbers, turn on “Headers and footers” there.
+          In the print window, choose “Save as PDF” to keep a copy. Chrome and Edge number the pages (“Page 2 of 5”) themselves. In Firefox and Safari, turn on the print
+          window's header and footer option to get page numbers.
         </p>
       </div>
       <article aria-labelledby="report-title" className="report-frame">
@@ -90,11 +122,11 @@ export function ReportFrame({
               <dt className="font-semibold">Dates:</dt> <dd>{range}</dd>
             </div>
           </dl>
-          <p className="mt-1">{foot}</p>
+          <p className="mt-1">{generated}</p>
         </header>
         {notice}
         {children}
       </article>
-    </>
+    </Identity.Provider>
   )
 }

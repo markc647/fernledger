@@ -2,6 +2,7 @@ import { env, exports } from 'cloudflare:workers'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { REPORT_PAGE_SIZE as PAGE_REPORT_PAGE_SIZE } from '../src/lib/report-transactions'
 import { buildReportPage, REPORT_PAGE_SIZE, type ReportQuery } from './report-transactions'
+import { MAX_LIMIT } from './transaction-search'
 
 // Seam 1: the Transaction listing Report's data, through the Worker's exported handler as the local-development Admin or a
 // read-only Member (the dev identity cookie is honoured on localhost only). Every Member can read it.
@@ -12,7 +13,20 @@ async function call(path: string, who: Who = 'member') {
   return exports.default.fetch(new Request(`${origin}${path}`, { headers: { Cookie: `fernledger_dev_as=${who}` } }))
 }
 
-type Row = { id: number; date: string; description: string; amountCents: number; categoryName: string | null; note: string | null }
+type Row = {
+  id: number
+  date: string
+  description: string
+  amountCents: number
+  categoryName: string | null
+  note: string | null
+  source: string
+  bankReference: string | null
+  bankCounterpartyAccount: string | null
+  bankCardSuffix: string | null
+  bankParticulars: string | null
+  bankPaymentCode: string | null
+}
 type Page = { transactions: Row[]; next: string | null }
 
 let savings = 0
@@ -28,13 +42,13 @@ const refusal = async (path: string) => {
   return { status: res.status, body: await res.json() }
 }
 
-type Added = { date?: string; amountCents?: number; description?: string; note?: string | null; overrideCategory?: number | null; accountId?: number }
+type Added = { date?: string; amountCents?: number; description?: string; note?: string | null; overrideCategory?: number | null; ruleCategory?: number | null; accountId?: number }
 let n = 0
 /** Adds a made-up Transaction and returns its ID. Dated 1 October 2026 unless `date` says otherwise. */
 async function add(t: Added = {}) {
   n += 1
-  const { meta } = await env.DB.prepare('INSERT INTO transactions (account_id, date, amount_cents, description, source, note, override_category) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(t.accountId ?? savings, t.date ?? '2026-10-01', t.amountCents ?? -1000, t.description ?? `EXAMPLE SHOP ${n}`, 'import', t.note ?? null, t.overrideCategory ?? null)
+  const { meta } = await env.DB.prepare('INSERT INTO transactions (account_id, date, amount_cents, description, source, note, override_category, rule_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(t.accountId ?? savings, t.date ?? '2026-10-01', t.amountCents ?? -1000, t.description ?? `EXAMPLE SHOP ${n}`, 'import', t.note ?? null, t.overrideCategory ?? null, t.ruleCategory ?? null)
     .run()
   return meta.last_row_id
 }
@@ -53,6 +67,9 @@ beforeEach(async () => {
   n = 0
 })
 
+/** What an Import has no more of: nothing the bank said about the payment. */
+const bankless = { source: 'import', bankReference: null, bankCounterpartyAccount: null, bankCardSuffix: null, bankParticulars: null, bankPaymentCode: null }
+
 describe('what a Report lists', () => {
   it('lists the Account\'s Transactions in the range, oldest first, with the Note and the effective Category', async () => {
     const groceries = starters[0]!
@@ -62,8 +79,8 @@ describe('what a Report lists', () => {
     const { transactions, next } = await page()
 
     expect(transactions).toEqual([
-      { id: early, date: '2026-10-02', description: 'EXAMPLE EARLY', amountCents: -1000, categoryName: groceries.name, note: 'Paid by cheque 123' },
-      { id: late, date: '2026-10-20', description: 'EXAMPLE LATE', amountCents: -1000, categoryName: null, note: null },
+      { ...bankless, id: early, date: '2026-10-02', description: 'EXAMPLE EARLY', amountCents: -1000, categoryName: groceries.name, note: 'Paid by cheque 123' },
+      { ...bankless, id: late, date: '2026-10-20', description: 'EXAMPLE LATE', amountCents: -1000, categoryName: null, note: null },
     ])
     expect(next).toBeNull()
   })
@@ -96,6 +113,31 @@ describe('what a Report lists', () => {
     await env.DB.prepare('UPDATE categories SET removed_at = ? WHERE id = ?').bind('2026-10-05T00:00:00.000Z', gone.id).run()
 
     expect((await page()).transactions[0]!.categoryName).toBeNull()
+  })
+
+  it('shows the Category a Rule supplied, an Override over it, and a removed Rule Category as Uncategorised', async () => {
+    const [byOverride, byRule] = starters
+    await add({ description: 'EXAMPLE RULE ONLY', ruleCategory: byRule!.id })
+    await add({ description: 'EXAMPLE BOTH', overrideCategory: byOverride!.id, ruleCategory: byRule!.id })
+    await add({ description: 'EXAMPLE RULE REMOVED', ruleCategory: starters[2]!.id })
+    await env.DB.prepare('UPDATE categories SET removed_at = ? WHERE id = ?').bind('2026-10-05T00:00:00.000Z', starters[2]!.id).run()
+
+    expect((await page()).transactions.map((t) => [t.description, t.categoryName])).toEqual([
+      ['EXAMPLE RULE ONLY', byRule!.name],
+      ['EXAMPLE BOTH', byOverride!.name],
+      ['EXAMPLE RULE REMOVED', null],
+    ])
+  })
+
+  it('carries everything the bank said about each payment, for the record: reference or cheque number, counterparty account, card, particulars and code', async () => {
+    const id = await add({ description: 'EXAMPLE SYNCED' })
+    await env.DB.prepare(
+      "UPDATE transactions SET source = 'sync', bank_reference = 'Ref 77', bank_counterparty_account = '99-9999-9999999-97', bank_card_suffix = '1234', bank_particulars = 'Rent', bank_payment_code = 'Oct' WHERE id = ?",
+    )
+      .bind(id)
+      .run()
+
+    expect((await page()).transactions[0]).toMatchObject({ source: 'sync', bankReference: 'Ref 77', bankCounterpartyAccount: '99-9999-9999999-97', bankCardSuffix: '1234', bankParticulars: 'Rent', bankPaymentCode: 'Oct' })
   })
 
   it('gives every Member the same Report as the Admin', async () => {
@@ -156,8 +198,9 @@ describe('paging', () => {
     expect((await page()).transactions).toHaveLength(REPORT_PAGE_SIZE) // and that is the page when none is asked for
   })
 
-  it('uses the page size the Report page asks for (the page keeps its own copy)', () => {
+  it('uses the page size the Report page asks for (the page keeps its own copy), no bigger than the largest page of the Transactions list', () => {
     expect(PAGE_REPORT_PAGE_SIZE).toBe(REPORT_PAGE_SIZE)
+    expect(REPORT_PAGE_SIZE).toBeLessThanOrEqual(MAX_LIMIT)
   })
 })
 
@@ -191,16 +234,20 @@ describe('what a request refuses', () => {
 
 describe('what a request reads from D1', () => {
   // ADR 0004: D1 Free bills rows read (5 million a day). A Report pages with a keyset (the date and ID to continue after),
-  // not an offset, so every page costs about its own size however far into the history it is.
+  // not an offset, so every page costs about its own size however far into the history it is. A third of the Transactions
+  // here have an Override and a third a Rule's Category, as a real history will, and each of those costs a read of its
+  // Category (the effective Category joins both: effective-category.ts), so a row costs up to three reads, not one.
   const TRANSACTIONS = 6000
+  const PAGE_READS = (REPORT_PAGE_SIZE + 1) * 3 + 10 // the page and one more, each with up to two Category lookups
   let accountId = 0
   beforeEach(async () => {
     await env.DB.prepare(
       `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${TRANSACTIONS})
-       INSERT INTO transactions (account_id, date, amount_cents, description, source)
-       SELECT CASE WHEN i % 2 = 0 THEN ? ELSE ? END, date('2020-01-01', '+' || (i / 4) || ' days'), -100, 'EXAMPLE ' || i, 'import' FROM seq`,
+       INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category, rule_category)
+       SELECT CASE WHEN i % 2 = 0 THEN ? ELSE ? END, date('2020-01-01', '+' || (i / 4) || ' days'), -100, 'EXAMPLE ' || i, 'import',
+              CASE WHEN i % 3 = 0 THEN ? END, CASE WHEN i % 3 = 1 THEN ? END FROM seq`,
     )
-      .bind(savings, cheque)
+      .bind(savings, cheque, starters[0]!.id, starters[1]!.id)
       .run()
     accountId = savings
   })
@@ -214,18 +261,19 @@ describe('what a request reads from D1', () => {
   it('reads a page and one more to know whether there is another, not the whole history', async () => {
     const r = await reads({})
     expect(r.rows).toBe(REPORT_PAGE_SIZE + 1)
-    expect(r.read).toBeLessThanOrEqual(REPORT_PAGE_SIZE + 10)
+    expect(r.read).toBeLessThanOrEqual(PAGE_READS)
+    expect(r.read).toBeGreaterThan((REPORT_PAGE_SIZE + 1) * 1.5) // the Category lookups are in the count, so the bound above means something
   })
 
   it('reads no more for a page deep in the history than for the first', async () => {
     const r = await reads({ after: { date: '2022-06-01', id: 4000 } })
-    expect(r.rows).toBeGreaterThan(0)
-    expect(r.read).toBeLessThanOrEqual(REPORT_PAGE_SIZE + 10)
+    expect(r.rows).toBe(REPORT_PAGE_SIZE + 1)
+    expect(r.read).toBeLessThanOrEqual(PAGE_READS)
   })
 
   it('reads only the dates asked for, in the Account asked for', async () => {
     const r = await reads({ from: '2021-03-01', to: '2021-03-31' })
     expect(r.rows).toBeGreaterThan(0)
-    expect(r.read).toBeLessThanOrEqual(r.rows + 10)
+    expect(r.read).toBeLessThanOrEqual(r.rows * 3 + 10)
   })
 })

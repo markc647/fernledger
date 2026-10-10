@@ -1,7 +1,9 @@
 import { Amount } from '@/components/amount'
+import { useReportIdentity } from '@/components/report-frame'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { formatDate } from '@/lib/format'
-import { REPORT_ROW_CAP, type AccountListing, type Listing, type ReportRow } from '@/lib/report-transactions'
+import { accountLabel } from '@/lib/report-frame'
+import { detailsOf, REPORT_ROW_CAP, type AccountListing, type Listing, type ReportRow } from '@/lib/report-transactions'
 
 /** Tighter cells on paper, where a page is 680px wide and a Report is many pages long. */
 const PAPER = 'print:px-2 print:py-2'
@@ -11,7 +13,21 @@ const PAPER = 'print:px-2 print:py-2'
 // which can run long, are the columns that give way.
 const columns: Column<ReportRow>[] = [
   { key: 'date', header: 'Date', className: `${PAPER} whitespace-nowrap [overflow-wrap:normal]`, cell: (row) => formatDate(row.date) },
-  { key: 'description', header: 'Description', className: PAPER, cell: (row) => row.description },
+  {
+    key: 'description',
+    header: 'Description',
+    className: PAPER,
+    // What the bank said about the payment, in a line under the description: an attorney has to show where the money went.
+    cell: (row) => {
+      const details = detailsOf(row)
+      return (
+        <>
+          {row.description}
+          {details.length > 0 && <span className="mt-1 block text-muted-foreground">{details.join(' · ')}</span>}
+        </>
+      )
+    },
+  },
   { key: 'category', header: 'Category', className: `${PAPER} [overflow-wrap:break-word]`, cell: (row) => row.categoryName ?? 'Uncategorised' },
   {
     key: 'note',
@@ -53,24 +69,40 @@ function Totals({ moneyInCents, moneyOutCents, netCents }: { moneyInCents: numbe
 const countOf = (count: number) => `${count.toLocaleString('en-NZ')} ${count === 1 ? 'Transaction' : 'Transactions'}`
 
 /**
- * An Account: its name, how many Transactions, the totals, then the Transactions. The totals come before the table, so they
- * never end up alone on a last page, and a reader sees the sum before the detail.
+ * An Account: its name and bank number, how many Transactions, the totals, then the Transactions. The totals come before the table,
+ * so they never end up alone on a last page, and a reader sees the sum before the detail. An Account the Report stopped before
+ * (the cap) is said to be not listed, never to have nothing in the range.
  */
 function AccountSection({ section }: { section: AccountListing }) {
   const headingId = `account-${section.accountId}`
+  const printHeading = useReportIdentity()(accountLabel({ name: section.accountName, accountNumber: section.accountNumber }))
   return (
     <section aria-labelledby={headingId} className="mt-8 print:mt-6">
       <h2 id={headingId} className="text-xl font-semibold print:text-[15pt]">
-        {section.accountName}
+        {section.accountName} <span className="font-normal">({section.accountNumber})</span>
       </h2>
-      {section.rows.length === 0 ? (
+      {section.status === 'not-listed' ? (
+        <p className="mt-2 font-semibold">Not listed: this Report stopped before this Account.</p>
+      ) : section.rows.length === 0 ? (
         <p className="mt-2">No Transactions in these dates.</p>
       ) : (
         <>
-          <p className="mt-1">{countOf(section.rows.length)}, oldest first.</p>
+          <p className="mt-1">
+            {section.status === 'partial' ? `${countOf(section.rows.length)} listed, oldest first.` : `${countOf(section.rows.length)}, oldest first.`}
+          </p>
+          {section.status === 'partial' && (
+            <p className="mt-1 font-semibold">Partly listed: this Report stopped part way through this Account. The Transactions and totals here are only those listed.</p>
+          )}
           <Totals {...section} />
           <div className="mt-4">
-            <ResponsiveTable caption={`Transactions in ${section.accountName}`} columns={columns} rows={section.rows} getRowKey={(row) => row.id} className="print:text-[12pt]" />
+            <ResponsiveTable
+              caption={`Transactions in ${section.accountName}`}
+              columns={columns}
+              rows={section.rows}
+              getRowKey={(row) => row.id}
+              className="print:text-[12pt]"
+              printHeading={printHeading}
+            />
           </div>
         </>
       )}
@@ -82,8 +114,8 @@ function AccountSection({ section }: { section: AccountListing }) {
 export function CappedNotice({ alert = false }: { alert?: boolean }) {
   return (
     <p role={alert ? 'alert' : undefined} className="mt-6 border-2 border-foreground p-3 font-semibold break-inside-avoid">
-      This Report stops after {REPORT_ROW_CAP.toLocaleString('en-NZ')} Transactions. It lists one Account after another, oldest first, so Transactions after that are not listed, and the
-      totals count only what is listed. Choose a shorter range, or one Account, to see the rest.
+      This Report stops after {REPORT_ROW_CAP.toLocaleString('en-NZ')} Transactions. It lists one Account after another, oldest first, so Transactions after that, in this Account or a
+      later one, are not listed, and the totals count only what is listed. Choose a shorter range, or one Account, to see the rest.
     </p>
   )
 }

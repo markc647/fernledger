@@ -116,6 +116,7 @@ export function ResponsiveTable<Row>({
   getRowKey,
   emptyMessage = 'Nothing to show yet.',
   className,
+  printHeading,
 }: {
   caption: string
   columns: Column<Row>[]
@@ -124,6 +125,11 @@ export function ResponsiveTable<Row>({
   emptyMessage?: string
   /** For the table (the wide layout), such as `print:text-[12pt]` on a Report. */
   className?: string
+  /**
+   * Shown above the column headings on paper only, and so repeated with them at the top of every page the table runs onto: what the
+   * table is, when the page around it won't say (a Report's "app – Report – Account – dates" line).
+   */
+  printHeading?: ReactNode
 }) {
   const wide = useIsWide()
   // The caption stays on the empty state: a screen reader still hears what the missing data was.
@@ -161,6 +167,13 @@ export function ResponsiveTable<Row>({
     <table className={cn('w-full border-collapse text-[0.9375rem]', className)}>
       <caption className="sr-only">{caption}</caption>
       <thead>
+        {printHeading && (
+          <tr className="hidden print:table-row">
+            <td colSpan={columns.length} className="pb-3 text-start">
+              {printHeading}
+            </td>
+          </tr>
+        )}
         <tr className="border-b-2">
           {columns.map((column) => (
             <th

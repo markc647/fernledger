@@ -34,6 +34,9 @@ const shopCents = (i: number) => -(1000 + i)
 const note = (i: number) => `Paid by cheque ${i}`
 const hasNote = (i: number) => i % 10 === 0
 const hasOverride = (i: number) => i % 7 === 0
+/** An Import's only word about a payment is a cheque number, which a Report prints under the description. */
+const hasCheque = (i: number) => i % 10 === 5
+const chequeNumber = (i: number) => String(i + 100).padStart(6, '0')
 
 type Seeded = { savingsId: number; chequeId: number; category: string }
 const seeded = new Map<string, Seeded>()
@@ -44,21 +47,21 @@ async function seed(context: BrowserContext, baseURL: string, project: string): 
   if (known) return known
   const { year, savings, cheque } = dataFor(project)
   await signInAs(context, 'admin')
-  const importRows = async (account: { number: string; name: string }, rows: { date: string; uniqueId: string; payee: string; amountCents: number }[]) => {
+  const importRows = async (account: { number: string; name: string }, rows: { date: string; uniqueId: string; payee: string; amountCents: number; chequeNumber?: string }[]) => {
     const res = await context.request.post('/api/imports/chunks', {
       headers: { Origin: baseURL },
       data: {
         account,
         chunk: { index: 0, count: 1 },
         file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: `${year}-01-01`, to: `${year}-12-31`, ledgerBalance: { cents: 0, date: `${year}-12-31` } },
-        rows: rows.map((r) => ({ ...r, tranType: 'EFTPOS', chequeNumber: null, bankMemo: 'EFTPOS' })),
+        rows: rows.map((r) => ({ ...r, tranType: 'EFTPOS', chequeNumber: r.chequeNumber ?? null, bankMemo: 'EFTPOS' })),
       },
     })
     expect(res.ok()).toBe(true)
   }
   await importRows(
     savings,
-    Array.from({ length: SHOPS }, (_, i) => ({ date: day(year, 4 * i), uniqueId: `RPT${year}S${i}`, payee: shop(i), amountCents: shopCents(i) })),
+    Array.from({ length: SHOPS }, (_, i) => ({ date: day(year, 4 * i), uniqueId: `RPT${year}S${i}`, payee: shop(i), amountCents: shopCents(i), chequeNumber: hasCheque(i) ? chequeNumber(i) : undefined })),
   )
   await importRows(cheque, [
     { date: day(year, 10), uniqueId: `RPT${year}C1`, payee: 'EXAMPLE WAGES', amountCents: 50000 },
@@ -210,14 +213,19 @@ test.describe('on screen', () => {
     await expect(report.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible()
     const header = report.locator('header')
     await expect(header).toContainText("Mum's finances")
-    await expect(header).toContainText(`Account: ${savings.name}`)
+    await expect(header).toContainText(`Account: ${savings.name} (${savings.number})`) // the bank's number is beside the name
     await expect(header).toContainText(`Dates: ${first} to ${last}`)
     await expect(header).toContainText(GENERATED)
+    await expect(report.getByRole('heading', { level: 2, name: `${savings.name} (${savings.number})` })).toBeVisible()
 
     const table = report.getByRole('table', { name: `Transactions in ${savings.name}` })
     await expect(table.getByRole('columnheader')).toHaveText(['Date', 'Description', 'Category', 'Note', 'Amount'])
     await expect(table.locator('tbody tr')).toHaveCount(SHOPS)
-    expect(await table.locator('tbody tr td:nth-child(2)').allTextContents()).toEqual(Array.from({ length: SHOPS }, (_, i) => shop(i))) // oldest first
+    // Oldest first. A cheque number, all an Import knows about a payment, is under the description.
+    expect(await table.locator('tbody tr td:nth-child(2)').allTextContents()).toEqual(Array.from({ length: SHOPS }, (_, i) => shop(i) + (hasCheque(i) ? `Cheque number: ${chequeNumber(i)}` : '')))
+    // The line that says what a page is belongs to paper: it is in the table's heading, and not on screen.
+    await expect(table.locator('thead tr')).toHaveCount(2)
+    await expect(table.locator('thead tr').first()).toBeHidden()
     const firstRow = table.locator('tbody tr').first()
     await expect(firstRow).toContainText(first)
     await expect(firstRow).toContainText(category) // an Override is the Category shown
@@ -241,7 +249,8 @@ test.describe('on screen', () => {
     const report = article(page)
     await expect(report.getByRole('heading', { level: 2, name: savings.name })).toBeVisible()
     await expect(report.getByRole('heading', { level: 2, name: cheque.name })).toBeVisible()
-    await expect(report.locator('header')).toContainText('Account: All Accounts (')
+    await expect(report.locator('header')).toContainText('Account: All Accounts: ')
+    await expect(report.locator('header')).toContainText(`${savings.name} (${savings.number})`) // each Account with its bank number
     await expect(report.getByRole('table', { name: `Transactions in ${cheque.name}` }).locator('tbody tr')).toHaveCount(3)
     const total = report.getByRole('region', { name: 'All Accounts' })
     await expect(total).toContainText(`${SHOPS + 3} Transactions listed.`)
@@ -288,26 +297,43 @@ test.describe('on screen', () => {
     await expect(cards.first()).toContainText('Category')
   })
 
-  test('stops at 10,000 Transactions and says so, at the top and again before the end', async ({ page, context, baseURL }, testInfo) => {
-    test.setTimeout(120_000) // twenty full pages, and ten thousand rows to draw
+  test('stops at 10,000 Transactions and says so, at the top and again before the end, and never says an Account it did not read has nothing', async ({ page, context, baseURL }, testInfo) => {
+    test.setTimeout(120_000) // fifty full pages, and ten thousand rows to draw
     const { year } = dataFor(testInfo.project.name)
-    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
-    // An Account with more than the cap in the range: every page is full, and there is always one more.
+    // Three Accounts, the first with more than the cap in the range: every page is full, and there is always one more.
+    // The cap falls part way through the first, so the other two are never read.
+    const names = ['Example first', 'Example second', 'Example third']
+    await page.route('**/api/accounts', (route) => route.fulfill({ json: names.map((name, i) => ({ id: i + 1, name, accountNumber: `99-9999-9999999-9${i}`, cutoverDate: null })) }))
+    const asked: string[] = []
     await page.route('**/api/reports/transactions?**', async (route) => {
       const params = new URL(route.request().url()).searchParams
+      asked.push(params.get('accountId')!)
       const limit = Number(params.get('limit'))
       const start = Number(params.get('after') ?? 0)
-      const transactions = Array.from({ length: limit }, (_, k) => ({ id: start + k + 1, date: `${year}-10-01`, description: `EXAMPLE ${start + k + 1}`, amountCents: -100, categoryName: null, note: null }))
+      const transactions = Array.from({ length: limit }, (_, k) => ({ id: start + k + 1, date: `${year}-10-01`, description: `EXAMPLE ${start + k + 1}`, amountCents: -100, categoryName: null, note: null, source: 'import', bankReference: null, bankCounterpartyAccount: null, bankCardSuffix: null, bankParticulars: null, bankPaymentCode: null }))
       await route.fulfill({ json: { transactions, next: String(start + limit) } })
     })
-    await page.goto(reportAddress(savingsId, year))
+    await page.goto(`/reports/transactions?from=${year}-01-01&to=${year}-12-31`)
 
     const report = article(page)
     await expect(report.getByRole('alert')).toContainText('This Report stops after 10,000 Transactions', { timeout: 60_000 })
-    await expect(report.getByText('10,000 Transactions, oldest first.')).toBeVisible()
+    await expect(report.getByText('10,000 Transactions listed, oldest first.')).toBeVisible()
     await expect(report.locator('tbody tr')).toHaveCount(10_000)
     await expect(report.getByText('This Report stops after 10,000 Transactions')).toHaveCount(2)
+    await expect(report.getByRole('region', { name: 'All Accounts' })).toContainText('10,000 Transactions listed.')
+
+    // The Account the cap fell in is partly listed; the others were not listed, which is not the same as having nothing in the dates.
+    await expect(report.getByRole('region', { name: 'Example first' })).toContainText('Partly listed: this Report stopped part way through this Account.')
+    for (const name of ['Example second', 'Example third']) {
+      const section = report.getByRole('region', { name })
+      await expect(section).toContainText('Not listed: this Report stopped before this Account.')
+      await expect(section).not.toContainText('No Transactions in these dates')
+      await expect(section.getByRole('table')).toHaveCount(0)
+    }
+    await expect(report.getByText('No Transactions in these dates')).toHaveCount(0)
+    expect(new Set(asked)).toEqual(new Set(['1'])) // nothing was asked about the Accounts after the cut-off
     await expect(report.locator('dl').last()).toContainText('−$10,000.00')
   })
 
@@ -356,9 +382,24 @@ test.describe('printed', () => {
     await expect(header).toBeVisible()
     await expect(header.getByText(TITLE, { exact: true })).toBeVisible() // the Admin's words, as typed
     await expect(header.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible()
-    await expect(header).toContainText(`Account: ${savings.name}`)
+    await expect(header).toContainText(`Account: ${savings.name} (${savings.number})`)
     await expect(header).toContainText(`Dates: ${first} to ${last}`)
     await expect(header.getByText(GENERATED, { exact: true })).toBeVisible()
+  })
+
+  test('puts the same identifying lines in the table heading, which a browser repeats on every page', async ({ page }, testInfo) => {
+    const { first, last, savings } = dataFor(testInfo.project.name)
+    const identity = page.locator('thead tr').first()
+    await expect(identity).toBeVisible() // on screen it is not
+    await expect(identity).toContainText(`${TITLE} – Transaction listing – ${savings.name} (${savings.number}) – ${first} to ${last}`)
+    await expect(identity).toContainText(GENERATED)
+    // It is one of the table's heading rows, with the column headings: that is what makes a browser repeat it.
+    expect(await page.locator('thead').evaluate((el) => [getComputedStyle(el).display, el.querySelectorAll('tr').length])).toEqual(['table-header-group', 2])
+  })
+
+  test('names the page for Save as PDF: the app, the Report, the Account and the dates', async ({ page }, testInfo) => {
+    const { first, last, savings } = dataFor(testInfo.project.name)
+    await expect(page).toHaveTitle(`${TITLE} – Transaction listing – ${savings.name} – ${first} to ${last}`)
   })
 
   test('is black text on white paper, even from the dark theme', async ({ page }, testInfo) => {
@@ -445,27 +486,30 @@ test.describe('printed', () => {
     })
   })
 
-  test('says what the Report is and who generated it in the margins of every page after the first', async ({ page }, testInfo) => {
+  test('says what the Report is, which Account and dates, and who generated it and when, at the top of every page the table runs onto', async ({ page }, testInfo) => {
     const { first, last, savings } = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    const top = (p: (typeof pages)[number]) => p.text.filter((t) => t.y > p.height - (18 / 25.4) * 72)
-    const bottom = (p: (typeof pages)[number]) => p.text.filter((t) => t.y < (20 / 25.4) * 72)
-    const join = (items: { str: string }[]) => items.map((t) => t.str).join(' ').replace(/\s+/g, ' ')
-
-    // The first page has the title block in the page itself, so its margins hold only the page number.
-    expect(top(pages[0]!)).toEqual([])
-    expect(textOf(pages[0]!)).toContain(GENERATED)
-    expect(join(bottom(pages[0]!))).toBe(`Page 1 of ${pages.length}`)
-
-    for (const p of pages.slice(1)) {
-      // The Admin's title comes through exactly: the quote and backslash in it did not end the string in the page's CSS.
-      expect(join(top(p))).toBe(`${TITLE} · Transaction listing · ${savings.name} · ${first} to ${last}`)
-      expect(join(bottom(p))).toContain(GENERATED)
-      expect(join(bottom(p))).toContain(`Page ${pages.indexOf(p) + 1} of ${pages.length}`)
+    const withRows = pages.filter((p) => textOf(p).includes('EXAMPLE SHOP'))
+    expect(withRows.length).toBeGreaterThanOrEqual(3)
+    // In each page's own body, not its margins, so every browser prints it. The Admin's title comes through as typed, quote and backslash too.
+    // (The line may wrap, even inside the Account's number at a hyphen, so the comparison ignores where it broke.)
+    const squash = (text: string) => text.replace(/\s+/g, '')
+    for (const p of withRows) {
+      const text = squash(textOf(p))
+      expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(`${TITLE} – Transaction listing – ${savings.name} (${savings.number}) – ${first} to ${last}`))
+      expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(GENERATED))
     }
   })
 
-  test('sets every word of it, margins included, in at least 12pt type', async ({ page }) => {
+  test('has nothing in the top margin and only the page number in the bottom one', async ({ page }) => {
+    const pages = await readPdf(await page.pdf({ format: 'A4' }))
+    for (const [index, p] of pages.entries()) {
+      expect(p.text.filter((t) => t.y > p.height - (18 / 25.4) * 72), `top margin of page ${index + 1}`).toEqual([])
+      expect(p.text.filter((t) => t.y < (20 / 25.4) * 72).map((t) => t.str), `bottom margin of page ${index + 1}`).toEqual([`Page ${index + 1} of ${pages.length}`])
+    }
+  })
+
+  test('sets every word of it, the page numbers included, in at least 12pt type', async ({ page }) => {
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     const sizes = pages.flatMap((p, index) => p.text.filter((t) => t.size < 11.95).map((t) => `page ${index + 1}: ${t.size}pt "${t.str}"`))
     expect(sizes).toEqual([])
@@ -476,5 +520,57 @@ test.describe('printed', () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(article(page).getByRole('table')).toBeVisible()
     await expect(article(page).getByRole('list')).toHaveCount(0)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// Around a Report
+
+test.describe('around a Report', () => {
+  test('is titled for Save as PDF while a Report is open, and goes back to the app title when it is left', async ({ page, context, request, baseURL }, testInfo) => {
+    const { year, first, last, savings } = dataFor(testInfo.project.name)
+    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
+    await setTitle(request, baseURL, "Mum's finances")
+    await signInAs(context, 'member')
+    await page.goto(reportAddress(savingsId, year))
+    await expect(page).toHaveTitle(`Mum's finances – Transaction listing – ${savings.name} – ${first} to ${last}`)
+    await page.getByRole('link', { name: 'Back to Reports' }).click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible()
+    await expect(page).toHaveTitle("Mum's finances")
+
+    await page.goto(`/reports/transactions?from=${year}-01-01&to=${year}-12-31`)
+    await expect(page).toHaveTitle(`Mum's finances – Transaction listing – All Accounts – ${first} to ${last}`)
+  })
+
+  test('another printed page keeps the screen padding: only a Report sets its own margins', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.emulateMedia({ media: 'print' })
+    await page.goto('/how-to-sign-in')
+    await expect(page.getByRole('heading', { level: 1, name: 'How to sign in' })).toBeVisible()
+    expect(await page.locator('main').evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('16px')
+  })
+
+  test('a Transaction from Sync shows everything the bank said under its description, with the parts it lacks left out', async ({ page, context, baseURL }, testInfo) => {
+    const { year } = dataFor(testInfo.project.name)
+    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    const row = { id: 1, date: `${year}-10-01`, amountCents: -100, categoryName: null, note: null, source: 'sync' }
+    await page.route('**/api/reports/transactions?**', (route) =>
+      route.fulfill({
+        json: {
+          transactions: [
+            { ...row, description: 'EXAMPLE FULL', bankReference: 'Ref 77', bankCounterpartyAccount: '99-9999-9999999-97', bankCardSuffix: '1234', bankParticulars: 'Rent', bankPaymentCode: 'Oct' },
+            { ...row, id: 2, description: 'EXAMPLE PARTLY', bankReference: null, bankCounterpartyAccount: '99-9999-9999999-97', bankCardSuffix: null, bankParticulars: ' ', bankPaymentCode: null },
+            { ...row, id: 3, description: 'EXAMPLE NONE', bankReference: null, bankCounterpartyAccount: null, bankCardSuffix: null, bankParticulars: null, bankPaymentCode: null },
+          ],
+          next: null,
+        },
+      }),
+    )
+    await page.goto(reportAddress(savingsId, year))
+    const rows = article(page).locator('tbody tr td:nth-child(2)')
+    await expect(rows.nth(0)).toHaveText('EXAMPLE FULLReference: Ref 77 · Counterparty account: 99-9999-9999999-97 · Card: ending 1234 · Particulars: Rent · Code: Oct')
+    await expect(rows.nth(1)).toHaveText('EXAMPLE PARTLYCounterparty account: 99-9999-9999999-97')
+    await expect(rows.nth(2)).toHaveText('EXAMPLE NONE')
   })
 })
