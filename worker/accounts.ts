@@ -20,7 +20,7 @@ export const accounts = new Hono<AppEnv>()
     if (id === null) return c.json({ error: 'Not found' }, 404)
     const { name } = c.req.valid('json')
     const db = c.env.DB
-    const account = Number.isSafeInteger(id) ? await db.prepare('SELECT name FROM accounts WHERE id = ?').bind(id).first<{ name: string }>() : null
+    const account = await db.prepare('SELECT name FROM accounts WHERE id = ?').bind(id).first<{ name: string }>()
     if (!account) return c.json({ error: 'Not found' }, 404)
 
     await recordChange(db, db.prepare('UPDATE accounts SET name = ? WHERE id = ?').bind(name, id), {
@@ -38,7 +38,7 @@ export const accounts = new Hono<AppEnv>()
     if (id === null) return c.json({ error: 'Not found' }, 404)
     const { cutoverDate } = c.req.valid('json')
     const db = c.env.DB
-    const account = Number.isSafeInteger(id) ? await db.prepare('SELECT name, cutover_date FROM accounts WHERE id = ?').bind(id).first<{ name: string; cutover_date: string | null }>() : null
+    const account = await db.prepare('SELECT name, cutover_date FROM accounts WHERE id = ?').bind(id).first<{ name: string; cutover_date: string | null }>()
     if (!account) return c.json({ error: 'Not found' }, 404)
 
     await recordChange(db, db.prepare('UPDATE accounts SET cutover_date = ? WHERE id = ?').bind(cutoverDate, id), {

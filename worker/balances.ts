@@ -78,7 +78,7 @@ export const balances = new Hono<AppEnv>()
     if (accountId === null) return c.json({ error: 'Not found' }, 404)
     const { from, to } = c.req.valid('query')
     const db = c.env.DB
-    const account = Number.isSafeInteger(accountId) ? await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first() : null
+    const account = await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first()
     if (!account) return c.json({ error: 'Not found' }, 404)
 
     const [anchor, points] = await db.batch([db.prepare(ANCHOR).bind(accountId), db.prepare(HISTORY).bind(accountId, from ?? null, to ?? null)])

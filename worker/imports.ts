@@ -281,7 +281,7 @@ export const imports = new Hono<AppEnv>()
     const accountId = pathId(c.req.param('accountId'))
     if (accountId === null) return c.json({ error: 'Not found' }, 404)
     const db = c.env.DB
-    const account = Number.isSafeInteger(accountId) ? await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first() : null
+    const account = await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first()
     if (!account) return c.json({ error: 'Not found' }, 404)
     const counts = await db.prepare(COUNT_IMPORTED_AND_ANNOTATED).bind(accountId).first<{ imported: number; annotated: number; paired: number; waiting: number }>()
     return c.json({ imported: counts?.imported ?? 0, withOwnWork: counts?.annotated ?? 0, paired: counts?.paired ?? 0, carryOverWaiting: counts?.waiting ?? 0 })

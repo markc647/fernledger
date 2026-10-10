@@ -4,8 +4,8 @@ import * as z from 'zod/mini'
 /** The body of a change with nothing to say: the guard (app.ts) wants a JSON body, so the browser sends `{}`, and anything more is refused. */
 export const nothing = z.strictObject({})
 
-/** An ID in a path: digits only, no sign, exponent or leading zero, so it is what it looks like. */
-const ID = /^[1-9]\d{0,14}$/
+/** An ID in a path or a query string: digits only, no sign, exponent or leading zero. At most 15 digits, so Number() reads it exactly (16 digits can pass 2^53). */
+export const ID = /^[1-9]\d{0,14}$/
 
 /** The row a path names, or null when the path does not write its ID as it is (`1e1` is 10 to Number(), and is not row 10): the route answers 404. */
 export const pathId = (raw: string) => (ID.test(raw) ? Number(raw) : null)
