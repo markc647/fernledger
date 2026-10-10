@@ -75,7 +75,7 @@ test.describe('About your data', () => {
     // The Change Log keeps values, Notes included, and is where the Admin's email address is held.
     await expect(held.getByRole('listitem').filter({ hasText: 'The Change Log:' })).toContainText('often with the values from before and after')
     await expect(held.getByRole('listitem').filter({ hasText: 'The Change Log:' })).toContainText('any Note')
-    await expect(held.getByRole('listitem').filter({ hasText: 'Who may sign in:' })).toContainText("It writes the Admin's email address into each Change Log entry")
+    await expect(held.getByRole('listitem').filter({ hasText: 'Who may sign in:' })).toContainText("It writes the Admin's email address into each Change Log entry, and into the record that lets a big change, such as applying the Rules to every Transaction, carry on in steps")
     await expect(held).not.toContainText(/Admin's email address, outside the database/)
   })
 
@@ -84,7 +84,7 @@ test.describe('About your data', () => {
     await page.goto('/about-your-data')
     await expect(section(page, 'What is held')).toContainText('A copy of the database is saved every week')
     await expect(section(page, 'What is held')).toContainText("The sign-in list and any Akahu keys are kept outside the database, so the backups don't hold them")
-    await expect(section(page, 'What is held')).toContainText("The Admin's email address is in the Change Log, so it is in the backups")
+    await expect(section(page, 'What is held')).toContainText("The Admin's email address is in the Change Log and in the record of a big change, so it is in the backups")
     await expect(section(page, 'How long it is kept')).toContainText('earlier backups still hold their copy')
   })
 

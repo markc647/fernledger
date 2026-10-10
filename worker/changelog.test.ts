@@ -49,6 +49,38 @@ describe('recordChange', () => {
     expect(await changeLog()).toMatchObject([{ summary: 'Filled in About your data', before: null, after: null }])
   })
 
+  describe('for a mutation that may find it has nothing to do (onlyIfChanged)', () => {
+    const rename = (from: string, to: string) => env.DB.prepare("UPDATE settings SET value = ? WHERE key = 'app_title' AND value = ?").bind(to, from)
+    const entry = { actor: admin, type: 'settings', summary: 'Changed the app title', onlyIfChanged: true } as const
+
+    it('writes the entry when the mutation changed a row', async () => {
+      await recordChange(env.DB, rename('Starting title', 'Changed'), entry)
+
+      expect(await getSetting(env.DB, 'app_title')).toBe('Changed')
+      expect(await changeLog()).toMatchObject([{ summary: 'Changed the app title' }])
+    })
+
+    it('writes nothing when the mutation changed no row, so a change that did not happen has no entry', async () => {
+      await recordChange(env.DB, rename('Some other title', 'Changed'), entry)
+
+      expect(await getSetting(env.DB, 'app_title')).toBe('Starting title')
+      expect(await changeLog()).toEqual([])
+    })
+
+    it('goes by the last statement of several', async () => {
+      await recordChange(env.DB, [putSetting(env.DB, 'about_contact', 'Sam'), rename('Some other title', 'Changed')], entry)
+
+      expect(await getSetting(env.DB, 'about_contact')).toBe('Sam') // the first statement still ran
+      expect(await changeLog()).toEqual([])
+    })
+
+    it('is not the default: a change without it always has its entry', async () => {
+      await recordChange(env.DB, rename('Some other title', 'Changed'), { actor: admin, type: 'settings', summary: 'Tried to change the app title' })
+
+      expect(await changeLog()).toMatchObject([{ summary: 'Tried to change the app title' }])
+    })
+  })
+
   it('leaves no entry, and no partial change, when a mutation fails', async () => {
     const failing = [putSetting(env.DB, 'app_title', 'Should not stick'), env.DB.prepare('INSERT INTO no_such_table (x) VALUES (1)')]
 

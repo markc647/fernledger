@@ -29,6 +29,14 @@ export const CATEGORY_SLOTS: readonly CategorySlot[] = [
   { source: 'akahu', column: null },
 ]
 
+/**
+ * The columns of the `transactions` row that can hold a Category ID, one for each slot that has a column, without the table alias.
+ * A Category filter finds its candidates through these (transaction-search.ts), so each needs an index of its own; a source that
+ * gains a column here gains it there, and transaction-search.test.ts fails if its index is missing.
+ */
+export const categoryColumns = (slots: readonly CategorySlot[] = CATEGORY_SLOTS): string[] =>
+  slots.flatMap((slot) => (slot.column === null ? [] : [slot.column.replace(/^t\./, '')]))
+
 export type EffectiveCategory = {
   /** LEFT JOINs to put after the `transactions` table (aliased `t`), one per slot that has a column. */
   joins: string

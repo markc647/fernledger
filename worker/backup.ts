@@ -255,9 +255,10 @@ export async function startBackup(env: Env, scheduledTime: number, prefix = back
   await advance(env, state, ops, WEEKLY_OPS, false)
 }
 
-/** Any other cron: carries on an unfinished run. Costs one R2 read when there is nothing to do. */
-export async function continueBackup(env: Env): Promise<void> {
+/** Any other cron: carries on an unfinished run. Costs one R2 read when there is nothing to do. True when there was a run to carry on. */
+export async function continueBackup(env: Env): Promise<boolean> {
   const state = await readState(env)
-  if (state?.status !== 'running') return
+  if (state?.status !== 'running') return false
   await advance(env, state, 1, CONTINUE_OPS, true)
+  return true
 }
