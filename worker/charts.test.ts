@@ -335,6 +335,19 @@ describe('spending by Category', () => {
     expect(result.totalCents).toBe(4000)
   })
 
+  it('counts a pairing the Admin has said is Not a Transfer, and leaves it out again when it is a Transfer once more', async () => {
+    await pair('2026-10-03', 5000)
+    const outHalf = (await env.DB.prepare('SELECT id FROM transactions WHERE account_id = ? AND amount_cents < 0').bind(accountA).first<{ id: number }>())!.id
+    expect((await spending('from=2026-10-01&to=2026-10-31')).categories).toEqual([])
+
+    expect((await call(`/api/transactions/${outHalf}/not-transfer`, { method: 'POST', body: {} })).status).toBe(200)
+    // Both halves are now spending and money back with no Category, so Uncategorised has a row: it nets to nothing, which a Transfer never had.
+    expect((await spending('from=2026-10-01&to=2026-10-31')).categories).toEqual([{ categoryId: null, name: 'Uncategorised', cents: 0 }])
+
+    expect((await call(`/api/transactions/${outHalf}/not-transfer`, { method: 'DELETE', body: {} })).status).toBe(200)
+    expect((await spending('from=2026-10-01&to=2026-10-31')).categories).toEqual([])
+  })
+
   it('leaves out Income and Loans, and counts Uncategorised, with its own name and no Category', async () => {
     await add(accountA, '2026-10-02', -4000, { override: 'Groceries' })
     await add(accountA, '2026-10-03', 500_000, { override: 'Wages and salary' })
