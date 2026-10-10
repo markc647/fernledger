@@ -418,7 +418,7 @@ describe('the balances Report’s request', () => {
       [`/api/reports/balances?accountId=${id}&from=2026-07-01`, 'to'],
       [`/api/reports/balances?accountId=abc&from=2026-07-01&to=2026-07-31`, 'accountId'],
       [`/api/reports/balances?accountId=0&from=2026-07-01&to=2026-07-31`, 'accountId'],
-      [`/api/reports/balances?accountId=1234567890&from=2026-07-01&to=2026-07-31`, 'accountId'],
+      [`/api/reports/balances?accountId=1234567890123456&from=2026-07-01&to=2026-07-31`, 'accountId'],
       [`/api/reports/balances?accountId=${id}&from=2026-02-30&to=2026-07-31`, 'from'],
       [`/api/reports/balances?accountId=${id}&from=1999-12-31&to=2026-07-31`, 'from'],
       [`/api/reports/balances?accountId=${id}&from=2026-07-01&to=2101-01-01`, 'to'],
