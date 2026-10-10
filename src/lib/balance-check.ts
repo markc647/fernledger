@@ -10,6 +10,13 @@ export function noBalanceReason(latestStatus: string | null) {
   return 'No bank balance yet'
 }
 
+/** What the Admin can do about an Account that has no balance, as a sentence that follows `noBalanceReason`. */
+export function noBalanceHint(latestStatus: string | null) {
+  if (latestStatus === 'after-cutover') return "The Admin can import a file with a bank balance dated before the Cutover Date, or change the Cutover Date in Settings."
+  if (latestStatus === 'file-ends-early') return 'The Admin can import a file that runs to its balance date.'
+  return 'The Admin can import a bank file to give it one.'
+}
+
 /** "Balance differs from bank by $12.34 since Thu 8 Oct 2026": the size of the difference (no sign) and the date of the previous bank balance it was compared with. */
 export const balanceDiffersMessage = (differenceCents: number, since: string) =>
   `Balance differs from bank by ${formatBalance(Math.abs(differenceCents))} since ${formatDate(since)}`

@@ -48,9 +48,9 @@ export function Dashboard({ me }: { me: { email: string; role: Role } }) {
         </section>
         <BalanceWarningsWidget />
         <BalancesWidget />
-        <LazyCharts />
         <BudgetVsActualWidget />
         <RecentTransactionsWidget />
+        <LazyCharts />
       </div>
     </>
   )

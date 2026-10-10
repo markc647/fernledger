@@ -3,11 +3,12 @@ import { ResponsiveContainer, Tooltip } from 'recharts'
 import { cn } from '@/lib/utils'
 
 // shadcn/ui Charts (a container that gives a chart its colours and size, and a tooltip), written for Recharts 3 and for this app:
-// - the colours go on the container as CSS variables (`--color-<key>`) set through the DOM, not in a <style> element, so a chart needs nothing from
-//   the Content Security Policy beyond what the rest of the app already has;
+// - the colours go on the container as CSS variables (`--color-<key>`) through React's `style`, which sets them on the element's style object, not in a <style>
+//   element as stock shadcn does. The Content Security Policy allows inline styles today (worker/security-headers.ts), so this is not needed to run; it keeps a
+//   chart working should a stricter `style-src` ever drop 'unsafe-inline';
 // - text is sized in rem, so the A / A+ / A++ control scales an axis as it scales the page, and never below the 15px a table's text keeps;
-// - nothing moves: a chart draws itself at once (each chart sets `isAnimationActive={false}`), which reduced-motion readers need and the accessibility
-//   checks measure.
+// - nothing moves: a chart draws itself at once (each chart sets `isAnimationActive={false}`, and `ChartTooltip` does by default), which reduced-motion readers need
+//   and the accessibility checks measure.
 // A chart is a picture of numbers that are also written out: put it in a `ChartFigure`, which names it for a screen reader in a sentence, and write the
 // figures beside it as a table. The picture itself is one image to assistive technology (Recharts' own keyboard layer is off), and takes no focus.
 
@@ -54,7 +55,8 @@ function ChartFigure({ label, className, children }: { label: string; className?
   )
 }
 
-const ChartTooltip = Tooltip
+/** Recharts' tooltip, which does not animate in. */
+const ChartTooltip = (props: React.ComponentProps<typeof Tooltip>) => <Tooltip isAnimationActive={false} {...props} />
 
 type TooltipItem = { dataKey?: string | number | ((...args: never[]) => unknown); name?: string | number; value?: unknown; color?: string }
 

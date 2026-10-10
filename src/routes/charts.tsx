@@ -12,7 +12,7 @@ function ChartsPage() {
     <>
       <h1 className="text-2xl font-semibold">Charts</h1>
       <div className="mt-6">
-        <Charts />
+        <Charts choosableRange />
       </div>
     </>
   )

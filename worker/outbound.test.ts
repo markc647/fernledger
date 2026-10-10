@@ -69,7 +69,7 @@ const EXERCISES: Exercise[] = [
   { route: 'GET /api/balances/:accountId/history', path: (id) => `/api/balances/${id}/history` },
   { route: 'GET /api/balance-checks', path: () => '/api/balance-checks' },
   // The charts add up those balances, and what the chunk spent.
-  { route: 'GET /api/charts/net-worth', path: () => '/api/charts/net-worth' },
+  { route: 'GET /api/charts/net-worth', path: () => '/api/charts/net-worth?range=24-months' },
   { route: 'GET /api/charts/spending', path: () => '/api/charts/spending?from=2026-10-01&to=2026-10-31' },
   // Then a Category and the Transaction that chunk made, for the Category routes and the Override and Note on that Transaction.
   { route: 'POST /api/categories', path: () => '/api/categories', opts: { method: 'POST', body: { name: 'Example category' } } },

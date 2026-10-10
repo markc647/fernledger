@@ -153,7 +153,7 @@ The page any Member can open, and the part of the Dashboard, that draws trends: 
 _Avoid_: Graphs, analytics
 
 **Net worth**:
-The balance of every tracked Account added up at the end of each month, worked out from each Account's balance history. It is not assets or investments entered by hand, which Fernledger does not track (README, What it doesn't do). A chart of it is on the Charts page; the Reports page's balances over time lists each Account's own.
+The money in the tracked Accounts added up at the end of each month, worked out from each Account's balance history. Only the money in those Accounts: a loan to or from someone whose account isn't tracked shows as a fall or a rise, and assets or investments entered by hand are not part of it (README, What it doesn't do). Months before an Account's first Transaction are an estimate. The Charts page and the Dashboard draw it; the Reports page's balances over time lists each Account's own.
 _Avoid_: Total balance, wealth
 
 ## Configuration

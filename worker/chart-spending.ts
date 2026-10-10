@@ -1,14 +1,9 @@
 import * as z from 'zod/mini'
 import { isQueryDate } from './dates'
 import { monthEnd, monthsBefore, monthStart, nzMonth } from './months'
-import { buildSpending, rollUp, type SpendingRow } from './spending'
 
-// Spending by Category for a period (GET /api/charts/spending). What counts as Spending, and in which Category, is spending.ts's alone (ADR 0012):
-// `buildSpending` reads the period's rows, leaving out Transfers and Pending Transactions, and `rollUp` adds a Category's months together
-// and leaves out Income and Loans. This file asks for a period, names the Categories and orders them.
-//
-// Cost (ADR 0004): two statements, whatever the period. The totals read each Transaction in the dates three times (four when a Rule names its
-// Category), so the dearest period, the whole history, reads about four times its Transactions.
+// The question the spending chart asks (GET /api/charts/spending): which dates. The answer is spending-by-category.ts's, the same one a Report of it
+// gets (ADR 0012), so this file is only the periods the Worker names and the query string that asks for them or for two dates.
 
 /** Periods named by the Worker, because "this month" is a New Zealand month whatever the clock of the browser asking. */
 export const SPENDING_PERIODS = ['this-month', 'last-month', 'past-3-months', 'past-12-months'] as const
@@ -53,43 +48,3 @@ export const spendingQuery = z
 
 /** The NZ dates the query asks about. The query has been checked, so a period or both dates are there. */
 export const rangeOf = (query: Query, now: Date): { from: string; to: string } => (query.period ? periodDates(query.period, now) : { from: query.from!, to: query.to! })
-
-export const UNCATEGORISED_NAME = 'Uncategorised'
-
-/** What one Spending Category spent over the period: money out less money in, so a refund comes off it and it is below zero when more came back. A null `categoryId` is Uncategorised. */
-export type SpendingCategory = { categoryId: number | null; name: string; cents: number }
-
-export type SpendingByCategory = {
-  from: string
-  to: string
-  /** Spending in all over the period: the Categories' figures added up. */
-  totalCents: number
-  /** Each Spending Category with something in the period, the most first, then by name. A Category that took in more than it paid out comes last. */
-  categories: SpendingCategory[]
-}
-
-/** The Categories in use, whose names the totals give: a Transaction in a removed Category has fallen through to its next Category or Uncategorised (effective-category.ts). */
-export const CATEGORY_NAMES = 'SELECT id, name FROM categories WHERE removed_at IS NULL'
-
-/** Spending by Category from the rows `buildSpending` gave and the names of the Categories in use, with no database. */
-export function spendingByCategory(range: { from: string; to: string }, rows: SpendingRow[], names: { id: number; name: string }[]): SpendingByCategory {
-  const { byCategory, months } = rollUp(rows)
-  const nameOf = new Map(names.map((category) => [category.id, category.name]))
-  const categories = byCategory
-    .filter((total) => total.kind === 'spending')
-    .map((total) => {
-      const name = total.categoryId === null ? UNCATEGORISED_NAME : nameOf.get(total.categoryId)
-      // The names are read in the same batch as the rows, so a Category in the totals is one in use.
-      if (name === undefined) throw new Error('A Category in the totals has no name')
-      return { categoryId: total.categoryId, name, cents: total.cents }
-    })
-    .sort((a, b) => b.cents - a.cents || a.name.localeCompare(b.name))
-  return { ...range, totalCents: months.reduce((sum, month) => sum + month.spendingCents, 0), categories }
-}
-
-/** Reads the period in one D1 batch (two statements; ADR 0004 allows 50). */
-export async function readSpending(db: D1Database, range: { from: string; to: string }): Promise<SpendingByCategory> {
-  const spending = buildSpending(range)
-  const [rows, names] = await db.batch([db.prepare(spending.sql).bind(...spending.binds), db.prepare(CATEGORY_NAMES)])
-  return spendingByCategory(range, rows!.results as SpendingRow[], names!.results as { id: number; name: string }[])
-}

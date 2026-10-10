@@ -311,7 +311,7 @@
   }
   /* A chart's line and bars are drawn in theme colours, which the reader's palette may not keep. Draw them in the text colour; the
      figures beside the chart say the rest. */
-  [data-slot="chart"] :is(.recharts-line-curve, .recharts-dot, .recharts-rectangle) {
+  [data-slot="chart"] :is(.recharts-line-curve, .recharts-dot, .recharts-rectangle):not(.recharts-tooltip-cursor) {
     fill: CanvasText;
     stroke: CanvasText;
   }

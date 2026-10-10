@@ -1,10 +1,10 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { SpendingByCategory } from './chart-spending'
 import worker from './index'
-import { EVERY_DATE, MAX_NET_WORTH_ACCOUNTS, type NetWorth } from './net-worth'
+import { EVERY_DATE, MAX_NET_WORTH_ACCOUNTS, type NetWorth, type NetWorthRange } from './net-worth'
 import { monthEnd, monthsBefore, monthStart, nzMonth } from './months'
+import { readSpendingByCategory, type SpendingByCategory } from './spending-by-category'
 
 // Seam 1: the numbers behind the charts (GET /api/charts/net-worth and /spending), through the Worker's exported handler as the local-development
 // Admin or a read-only Member (the dev identity cookie is honoured on localhost only). Net worth is the Accounts' balance history added up, so the main
@@ -27,23 +27,45 @@ async function call(path: string, opts: { who?: Who; method?: string; body?: unk
 }
 
 /**
- * The Worker's own handler with a database that records what the request does to it: the SQL of each statement prepared, and the rows each statement
- * of a batch read (D1 reports them with the result). ADR 0004 allows 50 statements to an invocation and bills rows read.
+ * The Worker's own handler with a database that records what the request does to it: the SQL of each statement prepared, and the rows each statement read
+ * (D1 reports them with the result), in the order the statements finished, whether they ran alone or in a batch. ADR 0004 allows 50 statements to an
+ * invocation and bills rows read.
  */
 async function measured(path: string) {
-  const watched = { prepared: [] as string[], batchReads: [] as number[] }
+  const watched = { prepared: [] as string[], reads: [] as number[] }
+  const rowsRead = (result: { meta: unknown }) => (result.meta as { rows_read: number }).rows_read
+  const real = new WeakMap<object, D1PreparedStatement>()
+  // A statement whose results are counted when it is run on its own; a batch counts its own.
+  const track = (statement: D1PreparedStatement): D1PreparedStatement => {
+    const proxy: D1PreparedStatement = new Proxy(statement, {
+      get(target, property) {
+        const value = Reflect.get(target, property)
+        if (property === 'bind') return (...binds: unknown[]) => track(target.bind(...binds))
+        if (property === 'all' || property === 'run') {
+          return async () => {
+            const result = await (value as () => Promise<{ meta: unknown }>).call(target)
+            watched.reads.push(rowsRead(result))
+            return result
+          }
+        }
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    real.set(proxy, statement)
+    return proxy
+  }
   const db = new Proxy(env.DB, {
     get(target, property) {
       if (property === 'prepare') {
         return (sql: string) => {
           watched.prepared.push(sql)
-          return target.prepare(sql)
+          return track(target.prepare(sql))
         }
       }
       if (property === 'batch') {
         return async (statements: D1PreparedStatement[]) => {
-          const results = await target.batch(statements)
-          watched.batchReads.push(...results.map((result) => (result.meta as { rows_read: number }).rows_read))
+          const results = await target.batch(statements.map((statement) => real.get(statement) ?? statement))
+          watched.reads.push(...results.map(rowsRead))
           return results
         }
       }
@@ -75,8 +97,9 @@ async function importFile(rows: unknown[], options: ImportOptions) {
 }
 
 const accountId = async (number: string) => (await env.DB.prepare('SELECT id FROM accounts WHERE account_number = ?').bind(number).first<{ id: number }>())!.id
-const netWorth = async (who: Who = 'member'): Promise<NetWorth> => {
-  const res = await call('/api/charts/net-worth', { who })
+/** Net worth for a range (every month unless it says), as a Member unless it says. */
+const netWorth = async (range: NetWorthRange = 'all', who: Who = 'member'): Promise<NetWorth> => {
+  const res = await call(`/api/charts/net-worth?range=${range}`, { who })
   expect(res.status).toBe(200)
   return res.json()
 }
@@ -115,7 +138,7 @@ const importBoth = async () => {
 
 describe('net worth over time', () => {
   it('is nothing for a Fernledger with no Accounts', async () => {
-    expect(await netWorth()).toEqual({ counted: [], notCounted: [], points: [], tooManyAccounts: null })
+    expect(await netWorth()).toEqual({ range: 'all', counted: [], notCounted: [], points: [], tooManyAccounts: null })
   })
 
   it('adds the Accounts\' balances at the end of each month, carries a month with no Transactions, and ends on the last date held', async () => {
@@ -149,55 +172,133 @@ describe('net worth over time', () => {
     expect(points.at(-1)!.cents).toBe(now.reduce((sum, a) => sum + a.balanceCents, 0))
   })
 
-  it('names the Accounts, and is the same for a Member as for the Admin', async () => {
+  it('names the Accounts with the last date each holds, and is the same for a Member as for the Admin', async () => {
     await importBoth()
 
-    const asMember = await netWorth('member')
+    const asMember = await netWorth('all', 'member')
 
-    expect(asMember).toEqual(await netWorth('admin'))
-    const names = (await env.DB.prepare('SELECT id, name FROM accounts ORDER BY name').all<{ id: number; name: string }>()).results
-    expect(asMember.counted).toEqual(names.map((a) => ({ accountId: a.id, accountName: a.name })))
+    expect(asMember).toEqual(await netWorth('all', 'admin'))
+    const names = (await env.DB.prepare('SELECT id, name FROM accounts ORDER BY name COLLATE NOCASE, id').all<{ id: number; name: string }>()).results
+    expect(asMember.counted.map((a) => [a.accountId, a.accountName])).toEqual(names.map((a) => [a.id, a.name]))
+    expect(Object.fromEntries(asMember.counted.map((a) => [a.accountId, a.lastDate]))).toEqual({ [await accountId(savings)]: '2026-10-07', [await accountId(cheque)]: '2026-10-03' })
   })
 
-  it('leaves out an Account with no bank balance to work from, says so, and totals the rest', async () => {
+  it('leaves out an Account with no bank balance to work from, says why in the Summary\'s terms, and totals the rest', async () => {
     await importFile(july, { ledger: ['2026-10-01', 14_000], cutoverDate: '2026-10-01' }) // its only balance is on its Cutover Date: not counted
     await importFile(chequeRows, { number: cheque, ledger: ['2026-10-03', CHEQUE_TO_OCT_3], from: '2026-09-01' })
 
     const result = await netWorth()
 
-    expect(result.notCounted).toEqual([{ accountId: await accountId(savings), accountName: expect.any(String) }])
-    expect(result.counted).toEqual([{ accountId: await accountId(cheque), accountName: expect.any(String) }])
+    expect(result.notCounted).toEqual([{ accountId: await accountId(savings), accountName: expect.any(String), latestStatus: 'after-cutover' }])
+    expect(result.counted).toEqual([{ accountId: await accountId(cheque), accountName: expect.any(String), lastDate: '2026-10-03' }])
     expect(result.points).toEqual([
       { date: '2026-09-30', cents: CHEQUE_OPENING - 777 },
       { date: '2026-10-03', cents: CHEQUE_TO_OCT_3 },
     ])
   })
 
-  it('has no points when no Account has a bank balance to work from', async () => {
-    await importFile(july, { ledger: ['2026-10-01', 14_000], cutoverDate: '2026-10-01' })
+  it('says a file that ended before its balance\'s date, and an Account with no balance at all, as the Summary does', async () => {
+    await importFile(july, { ledger: ['2026-08-31', 14_000], to: '2026-07-31' }) // the file ends before its balance
+    await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-97', 'Example empty')").run()
 
     const result = await netWorth()
 
     expect(result.points).toEqual([])
     expect(result.counted).toEqual([])
-    expect(result.notCounted).toHaveLength(1)
+    expect(result.notCounted).toHaveLength(2)
+    expect(result.notCounted).toEqual(
+      expect.arrayContaining([
+        { accountId: await accountId(savings), accountName: expect.any(String), latestStatus: 'file-ends-early' },
+        { accountId: await accountId('99-9999-9999999-97'), accountName: 'Example empty', latestStatus: null },
+      ]),
+    )
   })
 
   it('counts each leg of a Transfer in its Account\'s balance, as the balances do: moving money between the Accounts does not change net worth', async () => {
-    // $50.00 moves from savings ($100.00 before) to cheque ($20.00 before) on 10 August. Each file's balance is after it.
-    await importFile([tx('T1', '2026-08-10', -5000)], { ledger: ['2026-08-31', 5000], from: '2026-08-01' })
-    await importFile([tx('T2', '2026-08-10', 5000)], { number: cheque, ledger: ['2026-08-31', 7000], from: '2026-08-01' })
+    // Savings: $100.00, +$50.00 in July, then $50.00 to Cheque on 10 August: $100.00. Cheque: $20.00, -$3.00 in July, then +$50.00: $67.00. Each file's balance is after it.
+    await importFile([tx('S1', '2026-07-10', 5000), tx('T1', '2026-08-10', -5000)], { ledger: ['2026-08-31', 10_000], from: '2026-07-01' })
+    await importFile([tx('C1', '2026-07-20', -300), tx('T2', '2026-08-10', 5000)], { number: cheque, ledger: ['2026-08-31', 6_700], from: '2026-07-01' })
     expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE transfer_of IS NOT NULL').first<{ n: number }>())!.n).toBe(2) // paired, or the test means little
 
-    expect((await netWorth()).points).toEqual([{ date: '2026-08-31', cents: 5000 + 7000 }])
+    // Both months are $167.00: July is $150.00 + $17.00 and August $100.00 + $67.00. Leave a leg out of its Account's balance and August is not $167.00.
+    expect((await netWorth()).points).toEqual([
+      { date: '2026-07-31', cents: 15_000 + 1_700 },
+      { date: '2026-08-31', cents: 10_000 + 6_700 },
+    ])
+  })
+
+  it('counts an Account at the balance it opened with before its history begins, so money moved into it by then is counted twice: those months are an estimate', async () => {
+    // Savings holds $150.00 after July and pays $3.00 to Cheque on 10 August. Cheque's own history begins on 5 September, with $3.00 before its first Transaction
+    // ($2.00 after it), because the $3.00 had arrived by then. Fernledger has nothing of Cheque's before 5 September, so it counts it at that $3.00 all along.
+    await importFile([tx('S1', '2026-07-10', 5000), tx('M1', '2026-08-10', -300)], { ledger: ['2026-09-30', 14_700], from: '2026-07-01' })
+    await importFile([tx('C1', '2026-09-05', -100)], { number: cheque, ledger: ['2026-09-30', 200], from: '2026-09-01' })
+
+    expect((await netWorth()).points).toEqual([
+      { date: '2026-07-31', cents: 15_000 + 300 }, // too high by $3.00: Cheque did not hold it yet, and Savings still did
+      { date: '2026-08-31', cents: 14_700 + 300 }, // right: the $3.00 has moved from one to the other
+      { date: '2026-09-30', cents: 14_700 + 200 },
+    ])
+  })
+
+  describe('ranges', () => {
+    // The ranges end with this month, so the Transactions are dated from it: Savings opens with $100.00, then +$50.00 30 months ago, -$10.00 25 months ago,
+    // -$20.00 10 months ago and +$4.00 last month, each on the 10th.
+    const now = nzMonth(new Date())
+    const on = (monthsAgo: number) => `${monthsBefore(now, monthsAgo)}-10`
+    const rows = [tx('R1', on(30), 5000), tx('R2', on(25), -1000), tx('R3', on(10), -2000), tx('R4', on(1), 400)]
+    const importLong = () => importFile(rows, { ledger: [on(1), OPENING + 5000 - 1000 - 2000 + 400], from: `${monthsBefore(now, 30)}-01` })
+
+    it('shows every month for all, and the months from 23 months ago for 24 months, which carry the balance from before the range', async () => {
+      await importLong()
+
+      const all = await netWorth('all')
+      const recent = await netWorth('24-months')
+
+      expect(all.points).toHaveLength(30) // 30 months ago to last month
+      expect(all.points[0]).toEqual({ date: monthEnd(monthsBefore(now, 30)), cents: 15_000 })
+      expect(recent.points).toHaveLength(23) // 23 months ago to last month
+      expect(recent.points[0]).toEqual({ date: monthEnd(monthsBefore(now, 23)), cents: 14_000 }) // what 25 months ago left, carried
+      expect(recent.points.at(-1)).toEqual({ date: on(1), cents: 12_400 })
+      expect(recent.points).toEqual(all.points.slice(-23)) // the months it shares are the same figures
+    })
+
+    it('shows the last 5 years from the earliest month held when that is later, so it is every month here', async () => {
+      await importLong()
+
+      expect((await netWorth('5-years')).points).toEqual((await netWorth('all')).points)
+    })
+
+    it('asks for the last 24 months when no range is named, and answers for the one it did', async () => {
+      await importLong()
+
+      const unnamed = (await (await call('/api/charts/net-worth')).json()) as NetWorth
+
+      expect(unnamed.range).toBe('24-months')
+      expect(unnamed.points).toEqual((await netWorth('24-months')).points)
+      expect((await netWorth('all')).range).toBe('all')
+    })
+
+    it('is the last month alone, at the balances the Accounts ended with, when the range begins after everything held', async () => {
+      await importFile([tx('R1', on(30), 5000), tx('R2', on(26), -1000)], { ledger: [on(26), OPENING + 5000 - 1000], from: `${monthsBefore(now, 30)}-01` })
+
+      expect((await netWorth('24-months')).points).toEqual([{ date: on(26), cents: 14_000 }])
+    })
+
+    it('refuses a range it does not know and names only the field', async () => {
+      for (const range of ['12-months', 'ALL', '']) {
+        const res = await call(`/api/charts/net-worth?range=${range}`)
+        expect(res.status, range).toBe(400)
+        expect(await res.json(), range).toEqual({ error: 'Invalid request', field: 'range' })
+      }
+    })
   })
 
   it('is refused for a stranger, and no one can change it', async () => {
-    expect((await call('/api/charts/net-worth', { who: null })).status).toBe(401)
+    expect((await call('/api/charts/net-worth?range=all', { who: null })).status).toBe(401)
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
-      expect((await call('/api/charts/net-worth', { who: 'member', method, body: {} })).status, method).toBe(403)
+      expect((await call('/api/charts/net-worth?range=all', { who: 'member', method, body: {} })).status, method).toBe(403)
     }
-    expect((await call('/api/charts/net-worth', { who: 'member', method: 'POST' })).status).toBe(403) // not even with no body
+    expect((await call('/api/charts/net-worth?range=all', { who: 'member', method: 'POST' })).status).toBe(403) // not even with no body
   })
 })
 
@@ -209,7 +310,7 @@ describe('net worth\'s cost (ADR 0004)', () => {
   it('uses one statement for the list and one for each Account: 50 with the most Accounts it reads, which the free plan allows', async () => {
     await addAccounts(MAX_NET_WORTH_ACCOUNTS)
 
-    const { res, watched } = await measured('/api/charts/net-worth')
+    const { res, watched } = await measured('/api/charts/net-worth?range=24-months')
 
     const body = (await res.json()) as NetWorth
     expect(res.status).toBe(200)
@@ -222,42 +323,63 @@ describe('net worth\'s cost (ADR 0004)', () => {
   it('reads no history, and says so, for more Accounts than that, rather than total some of them', async () => {
     await addAccounts(MAX_NET_WORTH_ACCOUNTS + 1)
 
-    const { res, watched } = await measured('/api/charts/net-worth')
+    const { res, watched } = await measured('/api/charts/net-worth?range=all')
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ counted: [], notCounted: [], points: [], tooManyAccounts: { count: MAX_NET_WORTH_ACCOUNTS + 1, limit: MAX_NET_WORTH_ACCOUNTS } })
+    expect(await res.json()).toEqual({ range: 'all', counted: [], notCounted: [], points: [], tooManyAccounts: { count: MAX_NET_WORTH_ACCOUNTS + 1, limit: MAX_NET_WORTH_ACCOUNTS } })
     expect(watched.prepared).toHaveLength(1) // the list, and no more
-    expect(watched.batchReads).toEqual([])
+    expect(watched.reads).toHaveLength(1)
   })
 
-  it('reads a Transaction about six times, as the balances Report does, whatever the dates: the figure ADR 0004 gives', async () => {
+  describe('reading the Transactions', () => {
     const TRANSACTIONS = [4000, 2000]
-    for (const [i, count] of TRANSACTIONS.entries()) {
-      await env.DB.prepare('INSERT INTO accounts (id, name, account_number) VALUES (?1, ?2, ?3)').bind(i + 1, `Example account ${i}`, `99-9999-9999999-${i}0`).run()
-      await env.DB.prepare(
-        `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${count})
-         INSERT INTO transactions (account_id, date, amount_cents, description, source)
-         SELECT ?1, date('2010-01-01', '+' || (i / 4) || ' days'), -100, 'EXAMPLE ' || i, 'import' FROM seq`,
-      )
-        .bind(i + 1)
-        .run()
-      await env.DB.prepare("INSERT INTO balance_checks (account_id, as_of_date, bank_cents, source, through_transaction_id, status) VALUES (?1, '2015-01-01', 123456, 'import', (SELECT MAX(id) FROM transactions), 'alone')").bind(i + 1).run()
-    }
 
-    const { res, watched } = await measured('/api/charts/net-worth')
+    beforeEach(async () => {
+      for (const [i, count] of TRANSACTIONS.entries()) {
+        await env.DB.prepare('INSERT INTO accounts (id, name, account_number) VALUES (?1, ?2, ?3)').bind(i + 1, `Example account ${i}`, `99-9999-9999999-${i}0`).run()
+        await env.DB.prepare(
+          `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${count})
+           INSERT INTO transactions (account_id, date, amount_cents, description, source)
+           SELECT ?1, date('2010-01-01', '+' || (i / 4) || ' days'), -100, 'EXAMPLE ' || i, 'import' FROM seq`,
+        )
+          .bind(i + 1)
+          .run()
+        await env.DB.prepare("INSERT INTO balance_checks (account_id, as_of_date, bank_cents, source, through_transaction_id, status) VALUES (?1, '2015-01-01', 123456, 'import', (SELECT MAX(id) FROM transactions), 'alone')").bind(i + 1).run()
+      }
+    })
 
-    const body = (await res.json()) as NetWorth
-    expect(body.counted).toHaveLength(2)
-    expect(body.points.length).toBeGreaterThan(40) // about four years of months, so the bounds below are not about an empty answer
-    expect(watched.prepared).toHaveLength(1 + 2)
-    expect(watched.batchReads).toHaveLength(2)
-    for (const [i, count] of TRANSACTIONS.entries()) {
-      expect(watched.batchReads[i]!, `account ${i}`).toBeGreaterThan(count * 4) // so the bound below is about the Transactions, not slack
-      expect(watched.batchReads[i]!, `account ${i}`).toBeLessThanOrEqual(count * 7 + 100)
-    }
+    it('reads a Transaction about six times, as the balances Report does: the figure ADR 0004 gives', async () => {
+      const { res, watched } = await measured('/api/charts/net-worth?range=all')
+
+      const body = (await res.json()) as NetWorth
+      expect(body.counted).toHaveLength(2)
+      expect(body.points.length).toBeGreaterThan(40) // about four years of months, so the bounds below are not about an empty answer
+      expect(watched.prepared).toHaveLength(1 + 2)
+      const [, ...histories] = watched.reads // the first is the list of Accounts
+      expect(histories).toHaveLength(2)
+      for (const [i, count] of TRANSACTIONS.entries()) {
+        expect(histories[i]!, `account ${i}`).toBeGreaterThan(count * 4) // so the bound below is about the Transactions, not slack
+        expect(histories[i]!, `account ${i}`).toBeLessThanOrEqual(count * 7 + 100)
+      }
+    })
+
+    it('reads the same for the last 24 months as for every month: a range narrows what is sent, because balance history is worked out from every Transaction', async () => {
+      const everything = await measured('/api/charts/net-worth?range=all')
+      const recent = await measured('/api/charts/net-worth?range=24-months')
+
+      const [, ...all] = everything.watched.reads
+      const [, ...window] = recent.watched.reads
+      expect(((await recent.res.json()) as NetWorth).points.length).toBeLessThan(((await everything.res.json()) as NetWorth).points.length) // what is sent
+      expect(window).toHaveLength(2)
+      for (const [i, count] of TRANSACTIONS.entries()) {
+        expect(window[i]!, `account ${i}`).toBeGreaterThan(count * 4) // not cut: the whole of the Account is read
+        expect(window[i]!, `account ${i}`).toBeLessThanOrEqual(all[i]! + 100)
+        expect(window[i]!, `account ${i}`).toBeLessThanOrEqual(count * 7 + 100)
+      }
+    })
   })
 
-  it('asks the history of every date, so no month of any Transaction is left out', () => {
+  it('asks the history of every date, so no month of any Transaction is left out of a range of all', () => {
     expect(EVERY_DATE.from < '2000-01-01' && EVERY_DATE.to > '2100-12-31').toBe(true)
   })
 })
@@ -379,6 +501,29 @@ describe('spending by Category', () => {
     expect(figures(await spending('from=2026-10-01&to=2026-10-31'))).toEqual([['Groceries', 4000], ['Uncategorised', 1000]])
   })
 
+  it('is exactly what readSpendingByCategory gives for the dates, so a Report that calls it gets the same totals, Categories and order', async () => {
+    await add(accountA, '2026-09-20', -1200, { override: 'Eating out' })
+    await add(accountA, '2026-10-02', -4000, { override: 'Groceries' })
+    await add(accountA, '2026-10-20', 1000, { override: 'Groceries' })
+    await add(accountA, '2026-10-05', -9000, { override: 'Fuel' })
+    await add(accountA, '2026-10-09', -4000) // Uncategorised
+    await add(accountB, '2026-10-12', -3000, { override: 'Groceries' })
+    await add(accountA, '2026-10-08', 400_000, { override: 'Wages and salary' })
+    await add(accountA, '2026-10-14', -20_000, { override: 'Loans' })
+    await pair('2026-10-07', 5000)
+
+    for (const [from, to] of [['2026-10-01', '2026-10-31'], ['2026-09-01', '2026-10-31'], ['2026-10-09', '2026-10-09'], ['2030-01-01', '2030-12-31']]) {
+      const direct = await readSpendingByCategory(env.DB, { from: from!, to: to! })
+      const viaApi = await spending(`from=${from}&to=${to}`)
+
+      expect(viaApi, `${from} to ${to}`).toEqual(JSON.parse(JSON.stringify(direct)))
+      expect(viaApi.totalCents).toBe(viaApi.categories.reduce((sum, c) => sum + c.cents, 0))
+    }
+    // The helper also takes one Account, which the chart never asks for and a Report does: the same figures, narrowed.
+    const one = await readSpendingByCategory(env.DB, { from: '2026-10-01', to: '2026-10-31', accountId: accountB })
+    expect(one.categories.map((c) => [c.name, c.cents])).toEqual([['Groceries', 3000]])
+  })
+
   it('is empty when there is no spending, with the dates it was asked for', async () => {
     expect(await spending('from=2026-10-01&to=2026-10-31')).toEqual({ from: '2026-10-01', to: '2026-10-31', totalCents: 0, categories: [] })
   })
@@ -478,22 +623,21 @@ describe('spending by Category\'s cost (ADR 0004)', () => {
 
   const inDates = async (from: string, to: string) => (await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE date >= ? AND date <= ?').bind(from, to).first<{ n: number }>())!.n
 
-  it('uses two statements however long the dates are, and reads the dates asked for and not the history around them', async () => {
+  it('uses one statement however long the dates are, and reads the dates asked for and not the history around them', async () => {
     const month = await measured('/api/charts/spending?from=2026-04-01&to=2026-04-30')
     const year = await measured('/api/charts/spending?from=2000-01-01&to=2100-12-31')
 
     expect(month.res.status).toBe(200)
     expect(year.res.status).toBe(200)
-    expect(month.watched.prepared).toHaveLength(2)
-    expect(year.watched.prepared).toHaveLength(2)
-    const [monthRows, monthNames] = month.watched.batchReads as [number, number]
-    const [yearRows] = year.watched.batchReads as [number, number]
+    expect(month.watched.prepared).toHaveLength(1) // names come with the totals: there is no lookup by ID
+    expect(year.watched.prepared).toHaveLength(1)
+    const [monthRows] = month.watched.reads as [number]
+    const [yearRows] = year.watched.reads as [number]
     const inMonth = await inDates('2026-04-01', '2026-04-30')
     expect(inMonth).toBeGreaterThan(400)
     expect(monthRows).toBeGreaterThan(inMonth * 2) // so the bound below is about the Transactions, not slack
     expect(monthRows).toBeLessThanOrEqual(inMonth * 4 + 50) // ADR 0004: three reads for each, four when a Rule names the Category too
     expect(yearRows).toBeLessThanOrEqual(TRANSACTIONS * 4 + 50)
     expect(monthRows).toBeLessThan(yearRows / 5) // a month does not read the year
-    expect(monthNames).toBeLessThanOrEqual(100) // the Categories in use: a few dozen
   })
 })

@@ -2,19 +2,18 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useId, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { ResponsiveTable } from '@/components/responsive-table'
+import { Spent } from '@/components/spent'
 import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
+import { UNCATEGORISED_SPENDING } from '@/lib/budgets'
 import { barsOf, datesProblem, describeDates, PERIOD_LABELS, PERIODS, shorten, spendingSummary, type SpendingCategory, type SpendingPeriod } from '@/lib/charts'
 import { MAX_DATE, MIN_DATE } from '@/lib/date-range'
 import { formatAxisDollars, formatBalance } from '@/lib/format'
 import { spendingByCategoryQuery } from '@/lib/queries'
-import { spentParts } from '@/lib/budgets'
 import { useElementWidth, useRem } from '@/lib/use-chart-size'
 
 const config = { cents: { label: 'Spent', color: 'var(--chart-2)' } } satisfies ChartConfig
-
-const money = 'whitespace-nowrap tabular-nums [font-kerning:none]'
 
 /** The bars: one for each Category drawn, its name beside it as far as there is room (the tooltip and the table have the whole name). */
 function Bars({ bars }: { bars: SpendingCategory[] }) {
@@ -31,10 +30,7 @@ function Bars({ bars }: { bars: SpendingCategory[] }) {
           <CartesianGrid horizontal={false} />
           <XAxis type="number" domain={[0, 'auto']} tickFormatter={formatAxisDollars} tickCount={4} tickMargin={4} />
           <YAxis type="category" dataKey="name" width={labelWidth} interval={0} tickLine={false} tickMargin={6} tickFormatter={(name: string) => shorten(name, maxChars)} />
-          <ChartTooltip
-            cursor={{ fill: 'var(--muted)' }}
-            content={<ChartTooltipContent labelFormatter={(name) => String(name)} valueFormatter={formatBalance} />}
-          />
+          <ChartTooltip cursor={{ fill: 'var(--muted)' }} content={<ChartTooltipContent labelFormatter={(name) => String(name)} valueFormatter={formatBalance} />} />
           <Bar dataKey="cents" name="Spent" fill="var(--color-cents)" stroke="var(--color-cents)" radius={4} maxBarSize={28} isAnimationActive={false} />
         </BarChart>
       </ChartContainer>
@@ -46,8 +42,8 @@ function Bars({ bars }: { bars: SpendingCategory[] }) {
 type Choice = SpendingPeriod | 'custom'
 
 /**
- * Spending by Category for a period the reader chooses: bars for the biggest Categories and a table of them all (worker/chart-spending.ts, so what is
- * Spending is the same as in Budget vs actual: Transfers, Pending Transactions, Income and Loans are left out, and Uncategorised is counted).
+ * Spending by Category for a period the reader chooses: bars for the biggest Categories and a table of them all (worker/spending-by-category.ts, so what is
+ * Spending is the same as in Budget vs actual and a Report of it: Transfers, Pending Transactions, Income and Loans are left out, and Uncategorised is counted).
  * The figures come from the Worker as they are shown.
  */
 export function SpendingByCategory() {
@@ -57,7 +53,7 @@ export function SpendingByCategory() {
   const [to, setTo] = useState('')
   const problem = choice === 'custom' ? datesProblem(from, to) : null
   const request = choice === 'custom' ? { from, to } : { period: choice }
-  const { data, error } = useQuery({ ...spendingByCategoryQuery(request), enabled: problem === null, placeholderData: keepPreviousData })
+  const { data, error, isPlaceholderData } = useQuery({ ...spendingByCategoryQuery(request), enabled: problem === null, placeholderData: keepPreviousData })
 
   const pick = (value: string) => {
     // Choosing dates starts from the ones on the screen, so the chart stays as it is until a date is changed.
@@ -67,11 +63,11 @@ export function SpendingByCategory() {
     }
     setChoice(value as Choice)
   }
-  const { bars, leftOut } = barsOf(data?.categories ?? [])
+  const { rows, bars, leftOut } = barsOf(data?.categories ?? [])
   const dates = data ? describeDates(data.from, data.to) : ''
 
   return (
-    <section aria-labelledby="spending-heading">
+    <section aria-labelledby="spending-heading" aria-busy={isPlaceholderData}>
       <h2 id="spending-heading" className="mb-3 text-xl font-semibold">
         Spending by Category
       </h2>
@@ -125,51 +121,47 @@ export function SpendingByCategory() {
         )
       ) : (
         <div className="mt-4">
-          <p className="mb-3 text-muted-foreground">
-            What the Categories spent in {dates}, money out less money back, such as a refund. Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted. Uncategorised
-            counts as spending, so money in that has no Category yet comes off it.
-          </p>
-          {bars.length > 0 && (
-            <ChartFigure label={spendingSummary(dates, bars.length)}>
-              <Bars bars={bars} />
-            </ChartFigure>
-          )}
-          {leftOut > 0 && (
-            <p className="mt-2 text-muted-foreground">
-              The chart shows the biggest {bars.length} Categories. The table has {leftOut === 1 ? 'the other one' : `the other ${leftOut}`} too.
+          {isPlaceholderData && (
+            <p role="status" className="mb-2 font-medium">
+              Updating…
             </p>
           )}
-          <div className="mt-3">
-            <ResponsiveTable
-              caption={`Spending by Category in ${dates}`}
-              rows={data.categories}
-              getRowKey={(row) => row.categoryId ?? 'uncategorised'}
-              emptyMessage={`Nothing was spent in ${dates}.`}
-              columns={[
-                { key: 'category', header: 'Category', cell: (row) => row.name },
-                {
-                  key: 'spent',
-                  header: 'Spent',
-                  align: 'end',
-                  cell: (row) => {
-                    const { amount, back } = spentParts(row.cents)
-                    return (
-                      <>
-                        <span className={money}>{amount}</span>
-                        {back && ' back'}
-                      </>
-                    )
-                  },
-                },
-              ]}
-            />
+          <div className={isPlaceholderData ? 'opacity-60' : undefined}>
+            <p className="mb-3 text-muted-foreground">
+              What the Categories spent in {dates}, money out less money back, such as a refund. Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted.
+              Uncategorised counts as spending, so money in that has no Category yet comes off it.
+            </p>
+            {bars.length > 0 && (
+              <ChartFigure label={spendingSummary(dates, bars.length)}>
+                <Bars bars={bars} />
+              </ChartFigure>
+            )}
+            {rows.length > 0 && bars.length === 0 && (
+              <p className="mb-2 font-medium">Nothing was spent above zero in {dates}: every Category took back as much as it spent, or more. The table shows what came back.</p>
+            )}
+            {leftOut > 0 && (
+              <p className="mt-2 text-muted-foreground">
+                The chart shows the biggest {bars.length} Categories. The table has {leftOut === 1 ? 'the other one' : `the other ${leftOut}`} too.
+              </p>
+            )}
+            <div className="mt-3">
+              <ResponsiveTable
+                caption={`Spending by Category in ${dates}`}
+                rows={rows}
+                getRowKey={(row) => row.categoryId ?? 'uncategorised'}
+                emptyMessage={`Nothing was spent in ${dates}.`}
+                columns={[
+                  { key: 'category', header: 'Category', cell: (row) => (row.categoryId === null ? UNCATEGORISED_SPENDING : row.name) },
+                  { key: 'spent', header: 'Spent', align: 'end', cell: (row) => <Spent cents={row.cents} /> },
+                ]}
+              />
+            </div>
+            {rows.length > 0 && (
+              <p className="mt-3 font-medium">
+                Total spending in {dates}: <Spent cents={data.totalCents} />
+              </p>
+            )}
           </div>
-          {data.categories.length > 0 && (
-            <p className="mt-3 font-medium">
-              Total spending in {dates}: <span className={money}>{spentParts(data.totalCents).amount}</span>
-              {spentParts(data.totalCents).back && ' back'}
-            </p>
-          )}
         </div>
       )}
     </section>

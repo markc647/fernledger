@@ -421,11 +421,12 @@ test.describe('zoom', () => {
   // and Categories with long names, a Category below zero, and the figures open. The charts' data is stubbed, so this needs nothing in the database.
   const longChartName = 'Health and medical costs for the household and the long-term care fees'
   const stubCharts = async (page: Page) => {
-    await page.route('**/api/charts/net-worth', (route) =>
+    await page.route(/\/api\/charts\/net-worth/, (route) =>
       route.fulfill({
         json: {
-          counted: [{ accountId: 1, accountName: longChartName }],
-          notCounted: [{ accountId: 2, accountName: `${longChartName} credit card` }, { accountId: 3, accountName: 'Example savings' }],
+          range: '24-months',
+          counted: [{ accountId: 1, accountName: longChartName, lastDate: '2027-02-28' }, { accountId: 4, accountName: `${longChartName} term deposit`, lastDate: '2020-03-12' }],
+          notCounted: [{ accountId: 2, accountName: `${longChartName} credit card`, latestStatus: 'after-cutover' }, { accountId: 3, accountName: 'Example savings', latestStatus: null }],
           points: Array.from({ length: 120 }, (_, i) => ({ date: new Date(Date.UTC(2017, i + 1, 0)).toISOString().slice(0, 10), cents: 123_456_789 - i * 2_000_000 })),
           tooManyAccounts: null,
         },
@@ -459,7 +460,8 @@ test.describe('zoom', () => {
           const spending = page.getByRole('region', { name: 'Spending by Category' })
           await expect(netWorth.getByRole('img', { name: /^Line chart of net worth by month/ }).locator('svg.recharts-surface')).toBeVisible()
           await expect(spending.getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
-          await expect(netWorth).toContainText('Not counted yet:')
+          await expect(netWorth).toContainText('These Accounts are not in the total:')
+          await expect(netWorth).toContainText('its balance stays the same after that')
           await netWorth.getByText('Show the figures').click()
           await expect(spending).toContainText('The chart shows the biggest 12 Categories. The table has the other 2 too.')
           await expect(spending).toContainText('$1,234,567.89 back')

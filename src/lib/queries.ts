@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import type { PreviewRow } from '@/generated/api/import-rows'
 import { api } from './api'
-import type { SpendingPeriod } from './charts'
+import type { NetWorthRange, SpendingPeriod } from './charts'
 import type { CarryPreview } from './import-carry'
 import { HttpError } from './me'
 import { loadBalances } from './report-balances'
@@ -229,21 +229,22 @@ export const recentTransactionsQuery = queryOptions({
 })
 
 /**
- * Net worth at the end of each month. Working it out reads every Transaction of every Account about six times (ADR 0004), so the answer is kept for
- * five minutes and not asked again when the window is refocused. The key starts with 'balances', so an Import or a Cutover Date, which change the
- * balances, ask again.
+ * Net worth at the end of each month, for a range. Working it out reads every Transaction of every Account about six times whatever the range (ADR 0004), so the
+ * answer is kept for five minutes and not asked again when the window is refocused. The key starts with 'balances', so an Import or a Cutover Date, which change
+ * the balances, ask again.
  */
-export const netWorthQuery = queryOptions({
-  queryKey: ['balances', 'net-worth'],
-  staleTime: 5 * 60_000,
-  refetchOnWindowFocus: false,
-  retry: 1, // a failed answer has already read a great deal, so it is asked for once more at most (ADR 0004)
-  queryFn: async () => {
-    const res = await api.charts['net-worth'].$get()
-    if (!res.ok) throw new HttpError(res.status)
-    return res.json()
-  },
-})
+export const netWorthQuery = (range: NetWorthRange) =>
+  queryOptions({
+    queryKey: ['balances', 'net-worth', range],
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: 1, // a failed answer has already read a great deal, so it is asked for once more at most (ADR 0004)
+    queryFn: async () => {
+      const res = await api.charts['net-worth'].$get({ query: { range } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
 
 /** Which spending the chart is of: a period the Worker names (so "this month" is a NZ month whatever the device's clock), or two dates. */
 export type SpendingChoice = { period: SpendingPeriod } | { from: string; to: string }

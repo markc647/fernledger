@@ -359,7 +359,7 @@ describe('spending, income and loans once the Admin has said Not a Transfer (ADR
     await notTransfer('OUT')
 
     // Uncategorised counts as Spending.
-    expect(await spent()).toEqual([{ month: '2026-10', categoryId: null, kind: 'spending', outCents: 5000, inCents: 5000 }])
+    expect(await spent()).toEqual([{ month: '2026-10', categoryId: null, categoryName: null, kind: 'spending', outCents: 5000, inCents: 5000 }])
     await treatAsTransferAgain('OUT')
     expect(await spent()).toEqual([])
   })
@@ -373,7 +373,7 @@ describe('spending, income and loans once the Admin has said Not a Transfer (ADR
 
     const rows = await spent()
 
-    expect(rows).toEqual([{ month: '2026-10', categoryId: loans, kind: 'loans', outCents: 5000, inCents: 5000 }])
+    expect(rows).toEqual([{ month: '2026-10', categoryId: loans, categoryName: 'Loans', kind: 'loans', outCents: 5000, inCents: 5000 }])
     expect(rollUp(rows).months).toEqual([])
     // The Transactions API sends the kind of the Category and the Not a Transfer state side by side, and a marked half is not a Transfer.
     expect(await detail('OUT')).toMatchObject({ categoryName: 'Loans', categoryKind: 'loans', transfer: null, notTransfer: true, canMarkNotTransfer: false })
