@@ -1,15 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { Amount } from '@/components/amount'
 import { ResponsiveTable } from '@/components/responsive-table'
+import { noBalanceReason } from '@/lib/balance-check'
 import { formatDate } from '@/lib/format'
 import { balancesQuery } from '@/lib/queries'
-
-/** Why an Account has no balance: a bank balance may exist that the Transactions held don't reach. */
-function noBalanceReason(latestStatus: string | null) {
-  if (latestStatus === 'after-cutover') return 'The bank balance we have is after the Cutover Date'
-  if (latestStatus === 'file-ends-early') return 'The file ended before its bank balance date'
-  return 'No bank balance yet'
-}
 
 /** Summary widget: the balance of each Account, from its latest bank balance. */
 export function BalancesWidget() {
