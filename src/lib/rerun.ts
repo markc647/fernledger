@@ -58,6 +58,20 @@ export function estimateSentence(job: RerunJob): string | null {
 /** When the free plan's day changes: D1 counts it in UTC, so the next 00:00 UTC (1 pm in New Zealand in summer, midday in winter). */
 export const nextAllowanceReset = (now: Date): Date => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
 
+/** How long a page that is waiting for the day to change waits between asking again, once it has asked and been told to wait. */
+export const RECHECK_MS = 5 * 60_000
+
+/**
+ * How long to wait before asking the Worker again whether the day has changed. The first time, until the next 00:00 UTC by this device's
+ * clock, plus a few seconds. A device's clock can be ahead of the Worker's, so the Worker can still say wait when that time comes; after
+ * that the page asks every RECHECK_MS (one small request each) instead of waiting another day. `asked` is how many times it has asked
+ * since the run was last moving.
+ */
+export function waitBeforeAsking(now: Date, asked: number): number {
+  if (asked > 0) return RECHECK_MS
+  return Math.min(nextAllowanceReset(now).getTime() - now.getTime() + 5_000, 2 ** 31 - 1) // (the longest a timer can be)
+}
+
 /**
  * The words for the page's live region. They change only when it starts (or starts again, which is new words each time), at each
  * quarter of the way, when it pauses, and when it ends, so a screen reader announces those and not every step.

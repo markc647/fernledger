@@ -21,9 +21,9 @@ export const DAILY_ROW_WRITES = 100_000
  * A row costs 3 writes: the row itself, its date index and its unique-ID index. Removing a row costs the same.
  * A Rule adds to that (rule-apply.ts stores the result on the imported row): 1 for a Transfer mark, 2 for a Category, because
  * the Category also has an entry in the rule_category index; removing a row with a Category takes that entry out, 1 more. So a
- * row removed and its replacement imported cost 6 in all, 9 when a Rule gave them a Category, and carrying an Override or Note
- * over (WRITES_PER_CARRIED) takes that to 16. The estimates built on this number are for the plain 6 and leave the rest out,
- * and the day's limit is still handled when it is reached.
+ * row removed and its replacement imported cost 6 in all, 9 when a Rule gave them a Category. A Transfer (WRITES_PER_PAIRED_IMPORTED
+ * and _REMOVED) and an Override or Note carried over (WRITES_PER_CARRIED) cost more again. The estimates built on this number are
+ * for the plain 6 and leave the rest out, and the day's limit is still handled when it is reached.
  */
 export const WRITES_PER_ROW = 3
 
@@ -34,6 +34,16 @@ export const WRITES_PER_ROW = 3
  */
 export const WRITES_PER_CARRIED = 7
 
+/**
+ * What a Transfer costs on top of the 3 per row. Pairing writes the matching Transaction's ID on both halves, each a row and an
+ * entry in the Transfer index (transfers.ts), and both halves are written by the Import that adds the second one, so an imported
+ * row that is paired costs 4 more: 7 in all. Removing a paired row deletes its own entry in the Transfer index (1) and lets go of its
+ * matching Transaction, a row and an index entry (2), so a removed row that was paired costs 3 more: 6 in all. A replace that gives
+ * back rows its history had paired removes at 6 and imports at 7: 13 for a row replaced, where an unpaired one costs 6.
+ */
+export const WRITES_PER_PAIRED_IMPORTED = 4
+export const WRITES_PER_PAIRED_REMOVED = 3
+
 /** Chunks in one Import, so 10,000 rows: at most 30,000 of the day's writes. */
 export const MAX_CHUNKS = 20
 
@@ -41,12 +51,22 @@ export const MAX_CHUNKS = 20
  * Most Import-sourced rows removed in one go when replacing imported history: 15,000 writes, leaving room in the day
  * for the new file (at most 10,000 rows, 30,000 writes). Larger histories are removed in steps of this size first
  * (`/api/imports/clear-history`). A slice costs 15,000 writes to remove, up to about 20,000 when a Rule gave every row a
- * Category (4 each, with the rule_category index entry). A replace writes 6 for each row removed and imported, 9 with a Rule's
- * Category and 16 with an Override or Note carried over as well (WRITES_PER_ROW, WRITES_PER_CARRIED), so the day's allowance
- * covers about 16,000 rows replaced at best and about 6,000 at worst. An Account with more imported rows than that cannot be
+ * Category (4 each, with the rule_category index entry), and 5,000 x 3 = 15,000 more if every row was paired (it lets go of its matching
+ * Transaction too: WRITES_PER_PAIRED_REMOVED). A replace writes 6 for each row removed and imported, 9 with a Rule's Category,
+ * 16 with an Override or Note carried over as well (WRITES_PER_CARRIED), and 7 more for a row that is paired (13 for a paired row
+ * replaced where an unpaired one costs 6: WRITES_PER_PAIRED_REMOVED and _IMPORTED). So the day's allowance covers about 16,000 rows
+ * replaced at best, about 6,000 when every row has a Rule's Category and something to carry over, and about 4,000 if every row is
+ * a Transfer as well, which a household's rows are not. An Account with more imported rows than that cannot be
  * replaced in one day: the Import stops at the limit ("Daily limit reached") and the Admin carries on the next day.
  */
 export const REPLACE_SLICE = 5000
+
+/**
+ * The IDs of the rows one replace (or one step of clearing) removes: the Account's (?1) oldest Import-sourced rows, at most ?2
+ * of them. The removal and the release of those rows' matching Transactions (transfers.ts) both select with this, so they agree
+ * on which rows go. Only ever Import-sourced rows: Sync-sourced Transactions are never removed here.
+ */
+export const IMPORTED_SLICE = "SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT ?2"
 
 const isText = (value: unknown, max: number) => typeof value === 'string' && value.length <= max
 

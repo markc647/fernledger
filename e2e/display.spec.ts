@@ -92,7 +92,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules']
+  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/reports', '/reports/transactions']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -300,6 +300,39 @@ test.describe('zoom', () => {
         await page.getByRole('button', { name: 'Edit Category and Note' }).click()
         await expect(page.getByRole('region', { name: 'Edit Category and Note' })).toBeVisible()
         await expect(page.getByRole('region', { name: 'From the bank' })).toContainText('First seen by Akahu')
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The Transaction listing Report with its longest content: a long app title and Account name, a long description and Note,
+  // a huge amount and totals, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/reports/transactions with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        const long = 'EXAMPLE'.padEnd(80, 'x')
+        await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
+        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
+        await page.route('**/api/reports/transactions?**', (route) =>
+          route.fulfill({
+            json: {
+              transactions: [{ id: 1, date: '2026-10-08', description: `${long} shop with a long enough name to wrap on a narrow screen`, amountCents: -123456789, categoryName: 'Category with a long name'.padEnd(40, 'z'), note: `${long} note that goes on and on`, source: 'sync', bankReference: long, bankCounterpartyAccount: '99-9999-9999999-97', bankCardSuffix: '1234', bankParticulars: long, bankPaymentCode: long }],
+              next: null,
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/reports/transactions?account=1&from=2026-10-01&to=2026-10-31')
+        await sizeButton(page, size).click()
+        await expect(page.getByRole('article', { name: 'Transaction listing' })).toContainText('−$1,234,567.89')
+        // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({

@@ -9,7 +9,7 @@ import { api } from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
-import { announcement, estimateSentence, nextAllowanceReset, pausedSentence, progressSentence, restartNote, updatedSentence, type RerunJob } from '@/lib/rerun'
+import { announcement, estimateSentence, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
 import { dollarsForInput, readDollars, ruleConditions, ruleResult, type RuleView } from '@/lib/rules'
 
 export const Route = createFileRoute('/rules')({
@@ -137,7 +137,7 @@ function AdminRules() {
   }
 
   const columns: Column<Item>[] = [
-    { key: 'order', header: 'Order', nowrap: true, cell: (item) => item.number },
+    { key: 'order', header: 'Order', className: 'whitespace-nowrap', cell: (item) => item.number },
     { key: 'when', header: 'When', cell: (item) => sentence(ruleConditions(item.rule)) },
     { key: 'then', header: 'Then', cell: (item) => ruleResult(item.rule) },
     {
@@ -222,6 +222,8 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
   // Words are announced for a run the Admin is watching, not for the last finished run found when the page opens.
   const [watching, setWatching] = useState(false)
   const status = useRef<HTMLParagraphElement>(null)
+  // How many times the page has asked whether the day has changed and been told to wait, since the run was last moving.
+  const asked = useRef(0)
 
   const start = useMutation({
     mutationFn: async () => {
@@ -275,6 +277,7 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
         const { job: next } = await res.json()
         if (stopped) return
         queryClient.setQueryData(rerunQuery.queryKey, next)
+        if (!next?.paused) asked.current = 0
         if (next?.status !== 'running' || next.paused) {
           // Every Category shown in a list may have changed.
           await queryClient.invalidateQueries({ queryKey: ['transactions'] })
@@ -289,17 +292,19 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
     }
   }, [running, paused, problem, holding, attempt, queryClient])
 
-  // When the day changes (00:00 UTC) a run that was waiting for it is asked again. A page left open overnight carries it on.
+  // When the day changes (00:00 UTC) a run that was waiting for it is asked again. A page left open overnight carries it on. This device's
+  // clock may be ahead of the Worker's, in which case the answer can still be to wait: the page then asks every few minutes (waitBeforeAsking),
+  // and `attempt` is among the dependencies so that the timer is set again each time it has gone off.
   useEffect(() => {
     if (!waitingForTheDay) return
-    const wait = Math.min(nextAllowanceReset(new Date()).getTime() - Date.now() + 5_000, 2 ** 31 - 1)
     const timer = setTimeout(() => {
+      asked.current += 1
       setProblem('')
       setAttempt((n) => n + 1)
       void queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
-    }, wait)
+    }, waitBeforeAsking(new Date(), asked.current))
     return () => clearTimeout(timer)
-  }, [waitingForTheDay, queryClient])
+  }, [waitingForTheDay, attempt, queryClient])
 
   const note = job ? restartNote(job) : null
   const estimate = job && !problem ? estimateSentence(job) : null
@@ -621,7 +626,7 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
           {error('target') && <p id="rule-target-error" role="alert" className="mt-1 font-medium text-destructive">{error('target')}</p>}
           {values.target === 'transfer' && (
             <p id="rule-transfer-note" className="mt-1 text-muted-foreground">
-              The mark is stored on each Transaction the Rule matches. It takes effect when Transfer pairing ships; until then they have no Category.
+              A Transaction this Rule marks is a Transfer even if no matching Transaction is found in another Account, so it is not counted as spending. The mark goes on new Transactions as they are imported, and on the ones you already have when you apply the Rules to all Transactions. If the banks date the two halves of a Transfer on different days, write a Rule that marks them as a Transfer.
             </p>
           )}
           {categoriesFailed && <p role="alert" className="mt-1 font-medium text-destructive">The Categories could not be loaded. Reload the page to try again.</p>}

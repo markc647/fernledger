@@ -139,7 +139,7 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
     await expect(page.getByLabel('Text contains')).toHaveValue(`EXAMPLE TWO ${stamp}`)
     await expect(page.getByLabel('Amount from ($)')).toHaveValue('10.00')
     await page.getByLabel('What the Rule does').selectOption({ label: 'Mark as a Transfer' })
-    await expect(page.getByText('It takes effect when Transfer pairing ships')).toBeVisible()
+    await expect(page.getByText('is a Transfer even if no matching Transaction is found in another Account')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save Rule' })).toBeEnabled()
     await noAxeViolations(page)
     await page.getByRole('button', { name: 'Save Rule' }).click()
@@ -354,6 +354,31 @@ test.describe('while the Rules are being applied', () => {
     await expect(rerunButton(page)).toBeDisabled()
     await noAxeViolations(page)
     expect(steps).toBe(0)
+  })
+
+  test('a page whose clock is ahead of the Worker\'s asks again in a few minutes and not a day later', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    // By this page's clock it is ten minutes to midnight UTC, and the Worker's day has not changed when the page first asks.
+    await page.clock.install({ time: new Date('2026-10-11T23:50:00Z') })
+    let current = runningJob({ paused: true })
+    let steps = 0
+    await page.route('**/api/rules/rerun/step', (route) => {
+      steps++
+      current = steps === 1 ? runningJob({ paused: true }) : runningJob({ status: 'done', doneRows: 20_000, percent: 100, finishedAt: '2026-10-12T00:20:00.000Z', updatedAt: '2026-10-12T00:20:00.000Z' })
+      return route.fulfill({ json: { job: current } })
+    })
+    await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: current } }) : route.fallback()))
+    await page.goto('/rules')
+    await expect(page.getByText(/^Paused: it has used the share/)).toBeVisible()
+    expect(steps).toBe(0)
+
+    await page.clock.fastForward('00:10:10') // the page's midnight: it asks, and is told to wait
+    await expect.poll(() => steps).toBe(1)
+    await expect(page.getByText(/^Paused: it has used the share/)).toBeVisible()
+
+    await page.clock.fastForward('00:05:10') // and asks again five minutes later, not tomorrow
+    await expect(page.getByRole('status').filter({ hasText: 'Finished. Looked at all 20,000 Transactions' })).toBeVisible()
+    expect(steps).toBe(2)
   })
 
   test('says the Rules changed while it ran, and that it started again', async ({ page, context }) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { announcement, estimateSentence, nextAllowanceReset, pausedSentence, progressSentence, restartNote, updatedSentence, type RerunJob } from './rerun'
+import { announcement, estimateSentence, nextAllowanceReset, pausedSentence, progressSentence, RECHECK_MS, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from './rerun'
 
 const job = (over: Partial<RerunJob> = {}): RerunJob => ({
   id: 1,
@@ -92,6 +92,19 @@ describe('when the free plan\'s day changes', () => {
     expect(nextAllowanceReset(new Date('2026-10-11T23:59:59.999Z')).toISOString()).toBe('2026-10-12T00:00:00.000Z')
     expect(nextAllowanceReset(new Date('2026-10-12T00:00:00.000Z')).toISOString()).toBe('2026-10-13T00:00:00.000Z')
     expect(nextAllowanceReset(new Date('2026-12-31T20:00:00.000Z')).toISOString()).toBe('2027-01-01T00:00:00.000Z')
+  })
+})
+
+describe('asking again whether the day has changed', () => {
+  it('waits, the first time, until the day changes by this device\'s clock, and a few seconds more', () => {
+    expect(waitBeforeAsking(new Date('2026-10-11T23:50:00.000Z'), 0)).toBe(10 * 60_000 + 5_000)
+    expect(waitBeforeAsking(new Date('2026-10-11T00:00:00.000Z'), 0)).toBe(24 * 3_600_000 + 5_000)
+  })
+
+  it('then asks every few minutes, because the Worker\'s clock may not agree with this device\'s', () => {
+    expect(RECHECK_MS).toBe(300_000)
+    expect(waitBeforeAsking(new Date('2026-10-12T00:00:05.000Z'), 1)).toBe(RECHECK_MS) // the device thinks it is a new day; the Worker has not said so
+    expect(waitBeforeAsking(new Date('2026-10-12T00:00:05.000Z'), 7)).toBe(RECHECK_MS)
   })
 })
 

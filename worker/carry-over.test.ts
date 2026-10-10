@@ -662,8 +662,8 @@ describe('the cost of carrying over (ADR 0004)', () => {
 
     const sql = await prepared(chunkBody([row('A2')], { index: 1, count: 3 }))
 
-    // find the Account, count the rows, find the highest Transaction ID, then insert, apply the Rules and write the Change Log entry
-    expect(sql).toHaveLength(6)
+    // find the Account, count the rows, find the highest Transaction ID, then insert, apply the Rules, pair the Transfers and write the Change Log entry
+    expect(sql).toHaveLength(7)
     expect(sql.filter((s) => /SET override_category|DELETE FROM carry_over|INSERT INTO carry_over|UPDATE carry_over/.test(s))).toEqual([])
   })
 
@@ -674,8 +674,8 @@ describe('the cost of carrying over (ADR 0004)', () => {
 
     const sql = await prepared(chunkBody(Array.from({ length: 199 }, (_, i) => row(`A${i + 1}`)), { index: 1, count: 3 }))
 
-    // the six of a plain chunk, and two more: give the rows what was held, and mark it given
-    expect(sql).toHaveLength(8)
+    // the seven of a plain chunk, and two more: give the rows what was held, and mark it given
+    expect(sql).toHaveLength(9)
   })
 
   const plan = async (sql: string, ...args: unknown[]) => (await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(...args).all<{ detail: string }>()).results.map((r) => r.detail)

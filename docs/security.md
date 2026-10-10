@@ -22,7 +22,7 @@ Each Deployer runs their own copy in their own Cloudflare account. There is no F
 | A leaked Akahu token (if you use Akahu Sync) | Akahu personal-app tokens can't make payments, so a leak exposes history, not money. Tokens are stored as encrypted Worker secrets, never in code or the database. |
 | Interception or disk theft | Data is encrypted in transit (TLS) and at rest (D1, R2). |
 | Cross-site attacks | Changes must come from the app's own address with a JSON body. Strict security headers are set: a Content Security Policy, no framing, no referrer. |
-| Malicious spreadsheet formulas in exports | CSV cells that would run as spreadsheet formulas, such as a payee named `=HYPERLINK(…)`, are escaped. |
+| Malicious spreadsheet formulas in exports | CSV cells that would run as spreadsheet formulas, such as a payee named `=HYPERLINK(…)`, are defused with an apostrophe (see CSV export under [What it does](../README.md#what-it-does)). |
 | Data leaking through logs | Logs contain only IDs, counts and error types, never Transactions, tokens or emails. A test enforces this. |
 | Data leaving for third parties | Nothing calls home: no analytics, telemetry, email or third-party scripts. |
 | Bank data in the repository | [gitleaks](https://github.com/gitleaks/gitleaks) secret scanning, with extra rules that block NZ bank account numbers and bank CSV exports from ever being committed. |

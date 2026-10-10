@@ -68,17 +68,27 @@ export type ChunkPlan = {
 /**
  * The statements of a chunk, built from `prepare` (one per kind, in this order): create the Account, set its Cutover
  * Date, remove the old balances, forget what an earlier attempt gave out and hold the Overrides and Notes of the rows
- * about to go (carry-over.ts), remove the old imported rows, insert the rows. The insert is always last, and the
- * removal of rows, when there is one, is just before it, which is how the handler finds their results.
+ * about to go (carry-over.ts), let go of the matching Transactions of those rows (transfers.ts), remove the old imported rows,
+ * insert the rows. The insert is always last, and the removal of rows, when there is one, is just before it, which is how the
+ * handler finds their results.
  */
 export function chunkStatements<Statement>(
   plan: ChunkPlan,
-  prepare: { createAccount: () => Statement; setCutover: () => Statement; clearBalances: () => Statement; forgetApplied: () => Statement; holdRemoved: () => Statement; removeImported: () => Statement; insertRows: () => Statement },
+  prepare: {
+    createAccount: () => Statement
+    setCutover: () => Statement
+    clearBalances: () => Statement
+    forgetApplied: () => Statement
+    holdRemoved: () => Statement
+    unpairPartners: () => Statement
+    removeImported: () => Statement
+    insertRows: () => Statement
+  },
 ): Statement[] {
   return [
     ...(plan.newAccount ? [prepare.createAccount()] : []),
     ...(plan.setsCutover && !plan.newAccount ? [prepare.setCutover()] : []),
-    ...(plan.replace && !plan.newAccount ? [prepare.clearBalances(), prepare.forgetApplied(), prepare.holdRemoved(), prepare.removeImported()] : []),
+    ...(plan.replace && !plan.newAccount ? [prepare.clearBalances(), prepare.forgetApplied(), prepare.holdRemoved(), prepare.unpairPartners(), prepare.removeImported()] : []),
     prepare.insertRows(),
   ]
 }

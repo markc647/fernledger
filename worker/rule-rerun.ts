@@ -259,7 +259,14 @@ const RESTART = `
       end_id = (SELECT COALESCE(MAX(id), 0) FROM transactions), total_rows = (SELECT COALESCE(MAX(id), 0) FROM transactions)
   WHERE kind = ? AND status = 'running'`
 
-const INSERT = `INSERT INTO data_migration_progress (kind, status, end_id, total_rows, started_by) VALUES (?, 'running', ?, ?, ?)`
+// A new job takes up the day's tally where the last job left it, when that was today (?4, the UTC day): the day's share of rows is the
+// app's, not a job's, so stopping a job and starting another, or finishing one and applying the Rules again, does not spend it twice.
+const INSERT = `
+  WITH counted AS (
+    SELECT usage_day, day_rows_read, day_rows_written FROM data_migration_progress WHERE kind = ?1 AND usage_day = ?4 ORDER BY id DESC LIMIT 1
+  )
+  INSERT INTO data_migration_progress (kind, status, end_id, total_rows, started_by, usage_day, day_rows_read, day_rows_written)
+  VALUES (?1, 'running', ?2, ?2, ?3, (SELECT usage_day FROM counted), COALESCE((SELECT day_rows_read FROM counted), 0), COALESCE((SELECT day_rows_written FROM counted), 0))`
 
 const number = new Intl.NumberFormat('en-NZ')
 
@@ -282,7 +289,7 @@ export async function startRerun(db: D1Database, actor: Member): Promise<RerunJo
   // The highest ID, which is one read; counting the Transactions would read every one.
   const { last } = (await db.prepare('SELECT COALESCE(MAX(id), 0) AS last FROM transactions').first<{ last: number }>())!
   try {
-    await recordChange(db, db.prepare(INSERT).bind(RERUN_KIND, last, last, actor.email), {
+    await recordChange(db, db.prepare(INSERT).bind(RERUN_KIND, last, actor.email, utcDay(new Date())), {
       actor,
       type: 'rule',
       summary: last === 0 ? 'Started applying the Rules to all Transactions (there are none yet)' : `Started applying the Rules to up to ${number.format(last)} Transactions`,

@@ -10,6 +10,7 @@ Fernledger's maintainers collect no one's data. Each deployment is run by whoeve
 - **Account balances.**
 - **Email addresses:** Members' in Cloudflare Access, and the Admin's in every Change Log entry and in the record of each time the Rules are applied to all Transactions.
 - **Notes** the Admin writes.
+- **Exported files:** a saved CSV export leaves Fernledger's protection ([what it can't protect against](../README.md#what-it-cant-protect-against)).
 - **Copies of Notes and descriptions** from replacing imported history: a holding table keeps them until the replace finishes or is discarded, and some Change Log entries keep them until teardown ([How it works](../README.md#how-it-works)).
 
 The counterparty account number and payment references are kept on purpose. An attorney may need to show exactly where money went.
@@ -50,7 +51,7 @@ Fernledger never deletes data automatically. It keeps everything until you run t
 |---|---|
 | Security and encryption | Access sign-in, encrypted storage, read-only Members, Change Log ([Security](../README.md#security-and-privacy)) |
 | Transparency to Members | An in-app **About your data** page saying what's held, who sees it, where it's stored, how long it's kept and who to ask |
-| Access and correction requests | Full CSV export, and Overrides and Notes for corrections |
+| Access and correction requests | CSV export, a date range at a time, with every field the bank supplied, and Overrides and Notes for corrections |
 | Deletion on request | Documented teardown that exports, deletes everything, and, if you use Akahu Sync, revokes the Akahu token |
 | Breach response | A checklist in [security.md](security.md) |
 | Attorney record-keeping | Every Transaction kept with the counterparty account and references, Notes, the Change Log, and printable Reports |

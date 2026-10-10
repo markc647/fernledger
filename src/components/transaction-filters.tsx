@@ -1,18 +1,19 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { MAX_DATE, MIN_DATE, isSearchDate } from '@/lib/date-range'
-import { accountsQuery, categoriesQuery } from '@/lib/queries'
-import { MAX_TEXT, tidy, type TransactionSearch } from '@/lib/transaction-search'
+import { accountsQuery, categoriesQuery, transactionCountQuery } from '@/lib/queries'
+import { EXPORT_MAX_ROWS, exportPath, MAX_TEXT, TRANSFERS_FILTERS, tidy, type TransactionSearch } from '@/lib/transaction-search'
 
 /** What is typed in the form: text for every field, so a half-typed filter is never lost. */
-type Draft = { account: string; category: string; from: string; to: string; q: string }
+type Draft = { account: string; category: string; transfers: string; from: string; to: string; q: string }
 
 const draftOf = (search: TransactionSearch): Draft => ({
   account: search.account === undefined ? '' : String(search.account),
   category: search.category === undefined ? '' : String(search.category),
+  transfers: search.transfers ?? '',
   from: search.from ?? '',
   to: search.to ?? '',
   q: search.q ?? '',
@@ -23,6 +24,7 @@ const searchOf = (draft: Draft, current: TransactionSearch): TransactionSearch =
   tidy({
     account: draft.account ? Number(draft.account) : undefined,
     category: draft.category === 'uncategorised' ? 'uncategorised' : draft.category ? Number(draft.category) : undefined,
+    transfers: TRANSFERS_FILTERS.find((filter) => filter === draft.transfers),
     from: draft.from,
     to: draft.to,
     q: draft.q.trim(),
@@ -41,7 +43,7 @@ function problemWith(draft: Draft): { field: 'from' | 'to'; message: string } | 
 }
 
 /**
- * Search and filters for the Transactions: text, Account, Category and a date range. They apply together when the reader
+ * Search and filters for the Transactions: text, Account, Category, Transfers and a date range. They apply together when the reader
  * presses Search (or Enter), not on every keystroke, so a request is made once the question is asked. The address holds
  * the result, so Back and reload return to it.
  */
@@ -64,6 +66,14 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
   const filtered = Object.values(draftOf(search)).some((value) => value !== '')
   // Filters are applied when Search is pressed, not as they are typed, so say so while what is shown is not what is asked for.
   const unapplied = JSON.stringify({ ...draft, q: draft.q.trim() }) !== applied
+  // The file holds what the list shows, which is the applied search, so it waits for Search; and a range that runs backwards holds nothing.
+  const backwards = !!search.from && !!search.to && search.from > search.to
+  const canDownload = !unapplied && !backwards
+  // How many match: the count the list asks for, with the same key, so this makes no request of its own. A file holds the oldest
+  // EXPORT_MAX_ROWS, so say so before the reader downloads, not only in the file.
+  const { data: total } = useQuery({ ...transactionCountQuery(search), placeholderData: keepPreviousData, enabled: !backwards })
+  const tooMany = total !== undefined && total > EXPORT_MAX_ROWS
+  const describedBy = [total !== undefined && 'filter-download-count', tooMany && 'filter-download-warning', 'filter-download-hint'].filter(Boolean).join(' ')
 
   return (
     <form
@@ -125,6 +135,16 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
             ))}
           </Select>
         </div>
+        <div>
+          <label htmlFor="filter-transfers" className="block font-medium">
+            Transfers
+          </label>
+          <Select id="filter-transfers" value={draft.transfers} onChange={(event) => set({ transfers: event.target.value })}>
+            <option value="">Show all</option>
+            <option value="exclude">Leave out Transfers</option>
+            <option value="only">Only Transfers</option>
+          </Select>
+        </div>
         <div className="grid gap-4 sm:col-span-2 sm:grid-cols-2 lg:col-span-1">
           {(['from', 'to'] as const).map((field) => (
             <div key={field}>
@@ -174,11 +194,39 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
             Clear filters
           </Button>
         )}
+        {canDownload ? (
+          <a href={exportPath(search)} download className={buttonVariants({ variant: 'outline', size: 'touch' })} aria-describedby={describedBy}>
+            Download CSV
+          </a>
+        ) : (
+          <Button type="button" size="touch" variant="outline" disabled aria-describedby={describedBy}>
+            Download CSV
+          </Button>
+        )}
+        {total !== undefined && (
+          <span id="filter-download-count">
+            {total.toLocaleString('en-NZ')} {total === 1 ? 'Transaction matches' : 'Transactions match'}
+          </span>
+        )}
       </div>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <div role="status" className="mt-2">
         {unapplied && <p className="text-muted-foreground">Press Search to apply these filters.</p>}
+        {tooMany && (
+          <p id="filter-download-warning" className="font-medium">
+            Only the oldest up to {EXPORT_MAX_ROWS.toLocaleString('en-NZ')} will be saved (fewer if Notes are long). Set From and To to one year at a time to save the
+            rest.
+          </p>
+        )}
       </div>
+      <p id="filter-download-hint" className="mt-2 text-muted-foreground">
+        Download CSV saves the Transactions that match the filters you last searched with, oldest first, to open in a spreadsheet. Once saved, a file is outside
+        Fernledger's sign-in: see{' '}
+        <a href="https://github.com/markc647/fernledger#what-it-cant-protect-against" className="underline underline-offset-4">
+          what it can't protect against
+        </a>
+        .
+      </p>
     </form>
   )
 }

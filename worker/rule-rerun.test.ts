@@ -746,7 +746,7 @@ describe('a small history', () => {
     // step read and wrote and pauses before a chunk that would take it past its share (2.5 million reads, 40,000 writes), until the day changes.
     const today = () => utcDay(new Date())
     const setTally = (day: string | null, reads: number, writes: number) =>
-      env.DB.prepare("UPDATE data_migration_progress SET usage_day = ?, day_rows_read = ?, day_rows_written = ? WHERE status = 'running'").bind(day, reads, writes).run()
+      env.DB.prepare('UPDATE data_migration_progress SET usage_day = ?, day_rows_read = ?, day_rows_written = ? WHERE id = (SELECT MAX(id) FROM data_migration_progress)').bind(day, reads, writes).run()
     const tally = async () => (await env.DB.prepare('SELECT usage_day, day_rows_read, day_rows_written FROM data_migration_progress ORDER BY id DESC LIMIT 1').first<{ usage_day: string | null; day_rows_read: number; day_rows_written: number }>())!
 
     it('counts what each step reads and writes against today', async () => {
@@ -840,6 +840,64 @@ describe('a small history', () => {
 
       expect(done).toMatchObject({ status: 'done', doneRows: N, percent: 100 })
       await expectSameAsFromScratch()
+    })
+
+    // The day's share belongs to the day, not to a job: ending a job and starting another does not give the new one a fresh share.
+    describe('across jobs', () => {
+      it('is still spent when the Admin stops a job and starts another the same day', async () => {
+        await saveRules()
+        await startOk()
+        await setTally(today(), DAILY_READ_BUDGET - 1, 100) // all but used up
+        await stop()
+
+        const next = await startOk()
+
+        expect(next).toMatchObject({ status: 'running', paused: true, doneRows: 0 })
+        expect(await tally()).toEqual({ usage_day: today(), day_rows_read: DAILY_READ_BUDGET - 1, day_rows_written: 100 })
+        const { db, usage } = metered()
+        expect(await stepRerun(db)).toMatchObject({ paused: true, doneRows: 0 })
+        expect(usage.rowsWritten).toBe(0) // and does nothing
+      })
+
+      it('is still spent when a job finishes and the Rules are applied again the same day', async () => {
+        await saveRules()
+        await startOk()
+        await stepToEnd()
+        const used = await tally()
+        expect(used.usage_day).toBe(today())
+        await setTally(today(), DAILY_READ_BUDGET - 5_000, used.day_rows_written) // finished, and almost all of the share gone
+
+        expect(await startOk()).toMatchObject({ paused: true })
+      })
+
+      it('adds to what the earlier job spent', async () => {
+        await saveRules()
+        await startOk()
+        await stepOk()
+        const first = await tally()
+        await stop()
+
+        await startOk()
+        expect(await tally()).toEqual(first) // taken up where it was
+        await stepOk()
+
+        const second = await tally()
+        expect(second.day_rows_read).toBeGreaterThan(first.day_rows_read)
+        expect(second.day_rows_read).toBeLessThan(first.day_rows_read * 3)
+      })
+
+      it('is not carried over from another day, and a new job with nothing spent starts at nothing', async () => {
+        await saveRules()
+        expect(await startOk()).toMatchObject({ paused: false })
+        expect(await tally()).toEqual({ usage_day: null, day_rows_read: 0, day_rows_written: 0 })
+        await setTally('2020-01-01', DAILY_READ_BUDGET, DAILY_WRITE_BUDGET) // a day long ago, all of it
+        await stop()
+
+        const next = await startOk()
+
+        expect(next).toMatchObject({ paused: false })
+        expect(await tally()).toEqual({ usage_day: null, day_rows_read: 0, day_rows_written: 0 })
+      })
     })
 
     it.each([0, 1, 14, 15, 16, 30, 60, MAX_RULES])('is sized the same in SQL (where the step works it out) and in the page\'s numbers, with %i Rules', async (rules) => {
@@ -1120,5 +1178,72 @@ describe('a small history', () => {
       expect(await res.json()).toEqual({ error: 'Read-only' })
       expect(await snapshot()).toEqual(before)
     })
+  })
+})
+
+describe('a re-run and Transfers', () => {
+  // Pairing (transfers.ts) is done as an Import adds Transactions and reads only dates, amounts and Accounts: not the Rules' result. Whether a
+  // Transaction is a Transfer is worked out when it is read (effective-category.ts), from its pair or else from a Rule's mark. So a re-run that
+  // sets the mark needs no pairing to be done again: it changes what is shown for a Transaction no pair covers, and leaves a pair as it is.
+  beforeEach(resetEverything)
+
+  const row = (payee: string, amountCents: number, uniqueId: string) => ({ date: '2026-10-05', uniqueId, tranType: 'TFR', chequeNumber: null, payee, bankMemo: '', amountCents })
+  const send = async (account: string, rows: unknown[]) => {
+    const res = await call('/api/imports/chunks', {
+      method: 'POST',
+      body: { account: { number: account }, chunk: { index: 0, count: 1 }, file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: '2026-10-01', to: '2026-10-31', ledgerBalance: { cents: 0, date: '2026-10-31' } }, rows },
+    })
+    expect(res.status, JSON.stringify(await res.clone().json())).toBe(200)
+  }
+  type Listed = { id: number; description: string; transfer: 'pair' | 'rule' | null; transferAccountName: string | null; categoryName: string | null }
+  const listed = async (query = '') => ((await (await call(`/api/transactions?limit=200&count=false${query}`)).json()) as { transactions: Listed[] }).transactions
+  const pairing = async () => (await env.DB.prepare('SELECT id, transfer_of FROM transactions ORDER BY id').all<{ id: number; transfer_of: number | null }>()).results
+
+  it('shows an unpaired Transaction a Rule marks as a Transfer, and leaves the pairs as they were', async () => {
+    // Imported before there is any Rule: a pair (money out of one Account, the same in to the other, on one day) and a round-up with no match.
+    await send(ACCOUNTS[0]!, [row('EXAMPLE MOVE', -50_000, 'M1'), row('EXAMPLE ROUND UP', -300, 'R1')])
+    await send(ACCOUNTS[1]!, [row('EXAMPLE MOVE', 50_000, 'M2')])
+    const pairsBefore = await pairing()
+    expect(pairsBefore.filter((p) => p.transfer_of !== null)).toHaveLength(2)
+    const first = await listed()
+    expect(first.filter((t) => t.description === 'EXAMPLE MOVE').map((t) => t.transfer)).toEqual(['pair', 'pair'])
+    expect(first.filter((t) => t.description === 'EXAMPLE ROUND UP').map((t) => t.transfer)).toEqual([null])
+    await addRule({ textContains: 'EXAMPLE', transfer: true }) // matches all three
+
+    await startOk()
+    const done = (await stepToEnd()).at(-1)!
+
+    // The Rule's mark is stored on all three. The round-up, which no pair covers, is a Transfer now; the pair is a pair still, with its matching Transaction named.
+    expect(done).toMatchObject({ status: 'done', doneRows: 3, changedRows: 3 })
+    expect(await countWhere('rule_transfer = 1')).toBe(3)
+    const after = await listed()
+    expect(after.filter((t) => t.description === 'EXAMPLE ROUND UP')).toMatchObject([{ transfer: 'rule', transferAccountName: null, categoryName: null }])
+    const moves = after.filter((t) => t.description === 'EXAMPLE MOVE')
+    expect(moves.map((t) => t.transfer)).toEqual(['pair', 'pair'])
+    expect(moves.map((t) => t.transferAccountName).sort()).toEqual(['Example 1', 'Example 2'])
+    // Nothing was paired or unpaired: the re-run reads and writes no pointer.
+    expect(await pairing()).toEqual(pairsBefore)
+    // And the Transfers filter sees it: all three are Transfers, so none is spending.
+    expect((await listed('&transfers=only')).map((t) => t.description).sort()).toEqual(['EXAMPLE MOVE', 'EXAMPLE MOVE', 'EXAMPLE ROUND UP'])
+    expect(await listed('&transfers=exclude')).toEqual([])
+  })
+
+  it('takes the mark away again when the Rule goes, for the round-up and not for the pair', async () => {
+    await send(ACCOUNTS[0]!, [row('EXAMPLE MOVE', -50_000, 'M1'), row('EXAMPLE ROUND UP', -300, 'R1')])
+    await send(ACCOUNTS[1]!, [row('EXAMPLE MOVE', 50_000, 'M2')])
+    const rule = await addRule({ textContains: 'EXAMPLE', transfer: true })
+    await startOk()
+    await stepToEnd()
+    const pairsBefore = await pairing()
+    await call(`/api/rules/${rule}`, { method: 'DELETE', body: {} })
+
+    await startOk()
+    await stepToEnd()
+
+    expect(await countWhere('rule_transfer IS NOT NULL')).toBe(0)
+    const after = await listed()
+    expect(after.find((t) => t.description === 'EXAMPLE ROUND UP')).toMatchObject({ transfer: null })
+    expect(after.filter((t) => t.description === 'EXAMPLE MOVE').every((t) => t.transfer === 'pair')).toBe(true)
+    expect(await pairing()).toEqual(pairsBefore)
   })
 })
