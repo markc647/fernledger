@@ -93,7 +93,7 @@ What replacing an Account's imported history does with the Admin's Overrides and
 _Avoid_: Migrate, restore, reapply
 
 **Budget**:
-A planned monthly spending amount for a Category, effective from a given month onward; unspent amounts do not carry over.
+A planned monthly spending amount for a Category, effective from a given month onward; unspent amounts do not carry over. Compared each month with what the Category spent: money out less money in, leaving out Transfers and Pending Transactions.
 _Avoid_: Limit, allowance, envelope
 
 ## Accountability
@@ -103,7 +103,7 @@ The record of every change the Admin makes: who, what and when; visible to all M
 _Avoid_: Audit trail, history
 
 **Change type**:
-The kind of thing a Change Log entry changed, such as Settings, Import, Account, Category, Rule or Transaction; Members can filter the Change Log by it. Not a Category.
+The kind of thing a Change Log entry changed, such as Settings, Import, Account, Category, Rule, Budget or Transaction; Members can filter the Change Log by it. Not a Category.
 _Avoid_: Type, kind
 
 **Report**:

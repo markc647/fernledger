@@ -92,7 +92,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/reports', '/reports/transactions']
+  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -249,6 +249,92 @@ test.describe('zoom', () => {
         await sizeButton(page, size).click()
         await expect(page.getByRole('region', { name: 'Balance checks' })).toContainText('Balance differs from bank by $1,234,567.89 since Wed 30 Sept 2026')
         await expect(page.getByRole('region', { name: 'Recent transactions' })).toContainText('EXAMPLE SHOP WITH A LONG ENOUGH NAME')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The Budgets page with its longest content: a long Category name, big amounts, a long list of changes, and the Admin's form open
+  // with every button it can have. The Budgets are stubbed, so this needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/budgets with long content and the form open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        const longName = 'Health and medical costs for the household and the long-term care fees'
+        await page.route(/\/api\/budgets(\?.*)?$/, (route) =>
+          route.fulfill({
+            json: {
+              month: '2026-10',
+              budgets: [
+                {
+                  categoryId: 1,
+                  categoryName: longName,
+                  amountCents: 123456789,
+                  effectiveFrom: '2026-08',
+                  changes: [
+                    { effectiveFrom: '2026-08', amountCents: 123456789 },
+                    { effectiveFrom: '2026-12', amountCents: null },
+                    { effectiveFrom: '2027-03', amountCents: 100000000000 },
+                  ],
+                },
+                { categoryId: 2, categoryName: 'Groceries', amountCents: null, effectiveFrom: '2026-06', changes: [{ effectiveFrom: '2026-06', amountCents: null }] },
+              ],
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/budgets')
+        await sizeButton(page, size).click()
+        await page.getByRole('button', { name: `Change Budget for ${longName}` }).click()
+        await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('1234567.89')
+        await expect(page.getByRole('button', { name: 'End Budget' })).toBeVisible()
+        await page.getByLabel('Monthly Budget in dollars').fill('0')
+        await page.getByRole('button', { name: 'Save Budget' }).click()
+        await expect(page.getByRole('alert')).toContainText('more than $0')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The Summary's Budget vs actual with its longest content: a long Category name, big amounts, and each Status. The data is stubbed.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/ with Budget vs actual at its longest at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        const longName = 'Health and medical costs for the household and the long-term care fees'
+        await page.route(/\/api\/budgets\/vs-actual/, (route) =>
+          route.fulfill({
+            json: {
+              month: '2026-10',
+              rows: [
+                { categoryId: 1, categoryName: longName, budgetCents: 123456789, spentCents: 234567890 },
+                { categoryId: 2, categoryName: 'Groceries', budgetCents: 80000, spentCents: 80000 },
+                { categoryId: 3, categoryName: 'Fuel', budgetCents: 100000000000, spentCents: -123456789 },
+              ],
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/')
+        await sizeButton(page, size).click()
+        const widget = page.getByRole('region', { name: 'Budget vs actual' })
+        await expect(widget).toContainText('Over Budget')
+        await expect(widget).toContainText('On Budget')
+        await expect(widget).toContainText('Under Budget')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))

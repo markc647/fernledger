@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAmount, formatBalance, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, moneyLabel } from './format'
+import { formatAmount, formatBalance, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, moneyLabel } from './format'
 
 describe('formatDateAtTime (when a Report was generated)', () => {
   it.each([
@@ -143,5 +143,21 @@ describe('formatInstantDate (a moment in time, shown as its NZ date)', () => {
   })
   it('refuses an invalid date', () => {
     expect(() => formatInstantDate(new Date('nope'))).toThrow(RangeError)
+  })
+})
+
+describe('formatMonth (an NZ calendar month, such as the one a Budget is effective from)', () => {
+  it.each([
+    ['2026-10', 'October 2026'],
+    ['2026-09', 'September 2026'], // written in full, so there is no short form to disagree about
+    ['2027-01', 'January 2027'],
+    ['2000-12', 'December 2000'],
+  ])('writes %s as "%s"', (month, text) => {
+    expect(formatMonth(month)).toBe(text)
+  })
+
+  it.each(['2026-13', '2026-00', '2026-1', '2026-10-01', '', 'October'])('refuses %j, without echoing it', (value) => {
+    expect(() => formatMonth(value)).toThrow(RangeError)
+    expect(() => formatMonth(value)).toThrow(/^Months are YYYY-MM$/)
   })
 })
