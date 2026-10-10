@@ -584,7 +584,7 @@ describe('new Transactions', () => {
     expect(await rowFor('EXAMPLE SUPER 1')).toMatchObject({ categoryName: null })
   })
 
-  it('can be marked as Transfers by a Rule, which stores the flag for Transfer pairing and gives them no Category', async () => {
+  it('can be marked as Transfers by a Rule, which stores the flag that makes them Transfers and gives them no Category', async () => {
     await addRule({ textContains: 'ROUND UP', transfer: true })
 
     await importRows([{ description: 'EXAMPLE ROUND UP 1' }, { description: 'EXAMPLE OTHER' }])

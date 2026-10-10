@@ -559,7 +559,7 @@ describe('the cost of a request (ADR 0004)', () => {
 
   // The worst last chunk: it replaces history and sets the Cutover Date on an existing Account. The comment on the
   // limits in imports.ts says how many D1 queries that is; a statement in a batch counts as one query each.
-  it('prepares at most 13 D1 statements for the last chunk of a replacing Import', async () => {
+  it('prepares at most 15 D1 statements for the last chunk of a replacing Import', async () => {
     await importFile(september, { ledger: SEPT_30 })
     const prepared: string[] = []
     const countingDb = new Proxy(env.DB, {
@@ -588,9 +588,9 @@ describe('the cost of a request (ADR 0004)', () => {
 
     expect(res.status).toBe(200)
     // find the Account, count the rows to replace, count the new rows, find the highest Transaction ID, then in one batch:
-    // set the Cutover Date, remove the balances, remove the rows, insert, apply the Rules, record the balance, the Change
-    // Log entry; then read and save the check.
-    expect(prepared).toHaveLength(13)
+    // set the Cutover Date, remove the balances, let go of the removed rows' Transfer partners, remove the rows, insert,
+    // apply the Rules, pair the Transfers, record the balance, the Change Log entry; then read and save the check.
+    expect(prepared).toHaveLength(15)
   })
 })
 

@@ -36,6 +36,13 @@ export const MAX_CHUNKS = 20
  */
 export const REPLACE_SLICE = 5000
 
+/**
+ * The IDs of the rows one replace (or one step of clearing) removes: the Account's (?1) oldest Import-sourced rows, at most ?2
+ * of them. The removal and the release of those rows' Transfer partners (transfers.ts) both select with this, so they agree
+ * on which rows go. Only ever Import-sourced rows: Sync-sourced Transactions are never removed here.
+ */
+export const IMPORTED_SLICE = "SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT ?2"
+
 const isText = (value: unknown, max: number) => typeof value === 'string' && value.length <= max
 
 /**

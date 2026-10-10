@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
-import { effectiveCategory, type CategorySource } from './effective-category'
+import { effectiveCategory, type CategorySource, type TransferSource } from './effective-category'
 import { buildSearch, searchQuery, toSearch, type Statement } from './transaction-search'
 import { validate } from './validate'
 
@@ -25,6 +25,9 @@ type TransactionListRow = {
   /** Which source supplied the Category: 'override' for one the Admin set by hand. */
   categorySource: CategorySource | null
   note: string | null
+  transfer: TransferSource | null
+  /** The Account of the Transaction this one is paired with, whether or not an Override makes this one spending; null when unpaired. */
+  transferAccountName: string | null
 }
 
 /**
@@ -51,6 +54,10 @@ type TransactionDetail = {
   categoryName: string | null
   categorySource: CategorySource | null
   note: string | null
+  transfer: TransferSource | null
+  /** The Account and the ID of the Transaction this one is paired with, or null when unpaired. */
+  transferAccountName: string | null
+  transferTransactionId: number | null
   bankTime: string | null
   firstSeenAt: string | null
 }
@@ -98,8 +105,10 @@ export const transactions = new Hono<AppEnv>()
               t.bank_memo AS bankMemo, t.bank_type AS bankType, t.bank_reference AS bankReference,
               t.bank_counterparty_account AS bankCounterpartyAccount, t.bank_card_suffix AS bankCardSuffix, t.bank_particulars AS bankParticulars, t.bank_payment_code AS bankPaymentCode,
               t.source, ${category.id} AS categoryId, ${category.name} AS categoryName, ${category.source} AS categorySource, t.note,
+              ${category.transfer} AS transfer, partner_account.name AS transferAccountName, partner.id AS transferTransactionId,
               CASE WHEN t.has_bank_time = 1 THEN t.akahu_date_raw END AS bankTime, t.akahu_first_seen_at AS firstSeenAt
        FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
+       LEFT JOIN transactions partner ON partner.id = t.transfer_of LEFT JOIN accounts partner_account ON partner_account.id = partner.account_id
        WHERE t.id = ?`,
     )
       .bind(Number(id))

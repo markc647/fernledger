@@ -26,6 +26,8 @@ export const searchQuery = z
     accountId: id,
     categoryId: id,
     uncategorised: z.optional(z.literal('true')),
+    // 'exclude' is the Transactions that count as spending: everything that is not a Transfer (effective-category.ts).
+    transfers: z.optional(z.enum(['only', 'exclude'])),
     from: nzDate,
     to: nzDate,
     text: z.optional(z.string().check(z.trim(), z.maxLength(MAX_TEXT))),
@@ -46,7 +48,10 @@ export type SearchQuery = z.output<typeof searchQuery>
 export type Search = {
   accountId?: number
   categoryId?: number
+  /** Uncategorised leaves out Transfers, which have no Category to give (effective-category.ts). */
   uncategorised: boolean
+  /** Only Transfers, or everything but: the spending. Unset is both. */
+  transfers?: 'only' | 'exclude'
   /** NZ dates, both ends included. */
   from?: string
   to?: string
@@ -82,6 +87,7 @@ export function toSearch(q: SearchQuery): Search {
     accountId: q.accountId === undefined ? undefined : Number(q.accountId),
     categoryId: q.categoryId === undefined ? undefined : Number(q.categoryId),
     uncategorised: q.uncategorised === 'true',
+    transfers: q.transfers,
     from: q.from,
     to: q.to,
     text: q.text || undefined,
@@ -119,6 +125,9 @@ export type Statement = { sql: string; binds: (string | number)[] }
  * once Sync lands), and an Override's index cannot serve it once a Rule can also supply the Category. So a Category filter
  * or sort reads every Transaction the other filters keep, and each join costs a row read on top (ADR 0004: D1 bills rows
  * read). A cached count, or a column kept up to date, is a later ticket's call.
+ * Whether a Transaction is a Transfer comes from the same definition (`category.isTransfer`), so the Transfers filter costs what the
+ * Category filter does. The page also names the Account of a paired Transaction's other half, two more reads for each paired row it
+ * touches and none for the rest.
  */
 export function buildSearch(search: Search): { count: Statement; page: Statement } {
   const category = effectiveCategory()
@@ -132,7 +141,9 @@ export function buildSearch(search: Search): { count: Statement; page: Statement
     where.push(`${category.id} = ?`)
     binds.push(search.categoryId)
   }
-  if (search.uncategorised) where.push(`${category.id} IS NULL`)
+  // A Transfer is not Uncategorised: it is not spending, so there is no Category to choose for it (it is a Transfer unless the Admin has chosen one).
+  if (search.uncategorised) where.push(`${category.id} IS NULL AND NOT ${category.isTransfer}`)
+  if (search.transfers !== undefined) where.push(search.transfers === 'only' ? category.isTransfer : `NOT ${category.isTransfer}`)
   if (search.from !== undefined) {
     where.push('t.date >= ?')
     binds.push(search.from)
@@ -148,8 +159,8 @@ export function buildSearch(search: Search): { count: Statement; page: Statement
     binds.push(...TEXT_COLUMNS.map(() => search.text!))
   }
   const filter = where.length ? `WHERE ${where.join(' AND ')}` : ''
-  // The count joins only what its filters read: the Category's tables, and only when filtering by Category.
-  const filterJoins = search.categoryId !== undefined || search.uncategorised ? category.joins : ''
+  // The count joins only what its filters read: the Category's tables, and only when filtering by Category or Transfer (the Override decides both).
+  const filterJoins = search.categoryId !== undefined || search.uncategorised || search.transfers !== undefined ? category.joins : ''
 
   // Within equal values, newest first, so a page boundary never repeats or skips a Transaction.
   const direction = search.dir === 'asc' ? 'ASC' : 'DESC'
@@ -169,8 +180,10 @@ export function buildSearch(search: Search): { count: Statement; page: Statement
       // Sorted by date (the default) the page is read off the date index and stops after `limit` rows. Any other sort, and any
       // text filter, reads every Transaction the other filters keep (ADR 0004: D1 bills rows read, so those are the dear requests).
       sql: `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.description, t.bank_type AS bankType, t.amount_cents AS amountCents,
-                   ${category.id} AS categoryId, ${category.name} AS categoryName, ${category.source} AS categorySource, t.note
+                   ${category.id} AS categoryId, ${category.name} AS categoryName, ${category.source} AS categorySource, t.note,
+                   ${category.transfer} AS transfer, partner_account.name AS transferAccountName
             FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
+            LEFT JOIN transactions partner ON partner.id = t.transfer_of LEFT JOIN accounts partner_account ON partner_account.id = partner.account_id
             ${filter}
             ORDER BY ${order} LIMIT ? OFFSET ?`,
       binds: [...binds, search.limit, search.offset],

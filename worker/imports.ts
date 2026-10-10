@@ -6,8 +6,9 @@ import { checkAfterRecording, DELETE_IMPORT_BALANCES, recordBalance } from './ba
 import { statusOnRecord } from './balance-rules'
 import { recordChange } from './changelog'
 import { chunkDetail, chunkStatements, chunkSummary, replaceWouldLeaveNothing } from './import-chunk'
-import { badRowField, MAX_CHUNKS, REPLACE_SLICE, serialiseRows, type ImportRow } from './import-rows'
+import { badRowField, IMPORTED_SLICE, MAX_CHUNKS, REPLACE_SLICE, serialiseRows, type ImportRow } from './import-rows'
 import { applyRulesStatement, lastTransactionId } from './rule-apply'
+import { pairTransfersStatement, unpairPartnersOfImportedStatement } from './transfers'
 import { validate } from './validate'
 
 // The browser parses the file (ADR 0004) and sends rows in chunks of about 500. Limits measured and chosen
@@ -18,12 +19,12 @@ import { validate } from './validate'
 //   one INSERT statement with one bound parameter.
 // - A bound string may be 2 MB. Row fields are length-capped (import-rows.ts); 500 worst-case rows measured 335 KB.
 // - 10 ms of CPU: reading, checking and re-serialising 500 typical rows (86 KB) measured about 1-2 ms in Node.
-// - A chunk request costs at most 13 D1 queries (find the Account, count the Import-sourced rows to replace, count the
-//   rows it already holds, find the highest Transaction ID, then one batch of at most 7 statements: set the Cutover Date
-//   (or create the Account), remove the old balances, remove the old rows, insert the rows, apply the Rules to the rows
-//   just added, record the file's ledger balance (last chunk only), write the Change Log entry; then the last chunk's
-//   Balance Check reads and saves in 2 more), well under 50. A statement in a batch counts as one query; balances.test.ts
-//   pins the worst case.
+// - A chunk request costs at most 15 D1 queries (find the Account, count the Import-sourced rows to replace, count the
+//   rows it already holds, find the highest Transaction ID, then one batch of at most 9 statements: set the Cutover Date
+//   (or create the Account), remove the old balances, let go of the Transfer partners of the old rows, remove the old rows,
+//   insert the rows, apply the Rules to the rows just added, pair their Transfers, record the file's ledger balance (last
+//   chunk only), write the Change Log entry; then the last chunk's Balance Check reads and saves in 2 more), well under 50.
+//   A statement in a batch counts as one query; balances.test.ts pins the worst case.
 // - MAX_CHUNKS (import-rows.ts) keeps one Import within the free plan's 100k D1 row writes a day.
 // - Rows dated on or after the Account's Cutover Date are filtered out in SQL (`json_each` rows are compared there),
 //   so the Worker never loops over them.
@@ -97,7 +98,8 @@ const COUNT_IMPORTED_AND_ANNOTATED = `SELECT COUNT(*) AS imported,
 // Only ever Import-sourced rows: Sync-sourced Transactions are never removed here. At most ?2 (REPLACE_SLICE) rows go
 // in one statement, so rows added between the count and the delete can't push one replace past the write budget in
 // ADR 0004: a removed row costs 3 D1 writes (the row and its two indexes), so a slice is 15,000 of the day's 100,000.
-const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT ?2)`
+// A removed row that was paired costs up to 2 more, to let go of its other half (transfers.ts), so at most 25,000.
+const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (${IMPORTED_SLICE})`
 
 type AccountRow = { id: number; name: string; cutover_date: string | null }
 
@@ -140,6 +142,7 @@ export const imports = new Hono<AppEnv>()
         createAccount: () => db.prepare('INSERT INTO accounts (account_number, name, cutover_date) VALUES (?, ?, ?)').bind(number, name, effectiveCutover),
         setCutover: () => db.prepare('UPDATE accounts SET cutover_date = ? WHERE id = ?').bind(cutoverDate, existing!.id),
         clearBalances: () => db.prepare(DELETE_IMPORT_BALANCES).bind(existing!.id),
+        unpairPartners: () => unpairPartnersOfImportedStatement(db, { accountId: existing!.id, limit: REPLACE_SLICE }),
         removeImported: () => db.prepare(DELETE_IMPORTED).bind(existing!.id, REPLACE_SLICE),
         insertRows: () => db.prepare(INSERT_ROWS).bind(number, rowsJson, effectiveCutover),
       },
@@ -150,14 +153,15 @@ export const imports = new Hono<AppEnv>()
     const afterId = await lastTransactionId(db)
     // The Rules are applied in the same batch as the rows, so a chunk and its Rule results commit together or not at all.
     // Applied after the commit, a failure would leave rows no retry gives Rules to: the retry reads the new highest ID.
-    const withRules = [...planned, applyRulesStatement(db, { accountNumber: number, afterId })]
+    // Their Transfers are paired in the same batch, after the Rules, for the same reason (transfers.ts).
+    const afterInsert = [...planned, applyRulesStatement(db, { accountNumber: number, afterId }), pairTransfersStatement(db, { accountNumber: number, afterId })]
     // The file's ledger balance is recorded with its last chunk, once every row is in, so an Import that stops part way
     // doesn't claim a balance. It goes after the insert, which it follows in the batch.
     const lastChunk = chunk.index === chunk.count - 1
     const ledger = file.ledgerBalance
     const statements = lastChunk
-      ? [...withRules, recordBalance(db, { accountNumber: number, asOfDate: ledger.date, bankCents: ledger.cents, source: 'import', status: statusOnRecord({ asOfDate: ledger.date, fileTo: file.to, cutoverDate: effectiveCutover }) })]
-      : withRules
+      ? [...afterInsert, recordBalance(db, { accountNumber: number, asOfDate: ledger.date, bankCents: ledger.cents, source: 'import', status: statusOnRecord({ asOfDate: ledger.date, fileTo: file.to, cutoverDate: effectiveCutover }) })]
+      : afterInsert
     const insertAt = planned.length - 1
     // Every chunk is its own Change Log entry, written in the same batch as its rows.
     const outcome = { accountName: name, replace: replace === true, removed: toRemove, added, dropped, index: chunk.index, count: chunk.count }
@@ -205,7 +209,7 @@ export const imports = new Hono<AppEnv>()
     if (total <= REPLACE_SLICE) return c.json({ error: 'The imported history is small enough to replace in one go', remaining: total }, 409)
     const remaining = total - REPLACE_SLICE
     // The balances of the history being replaced go with its first step: they describe Transactions that are going.
-    await recordChange(db, [db.prepare(DELETE_IMPORT_BALANCES).bind(accountId), db.prepare(DELETE_IMPORTED).bind(accountId, REPLACE_SLICE)], {
+    await recordChange(db, [db.prepare(DELETE_IMPORT_BALANCES).bind(accountId), unpairPartnersOfImportedStatement(db, { accountId, limit: REPLACE_SLICE }), db.prepare(DELETE_IMPORTED).bind(accountId, REPLACE_SLICE)], {
       actor: c.var.member,
       type: 'import',
       summary: `Removed ${REPLACE_SLICE} imported rows from ${account.name} to replace its imported history (${remaining} left)`,

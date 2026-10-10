@@ -62,14 +62,18 @@ export type ChunkPlan = {
 
 /**
  * The statements of a chunk, built from `prepare` (one per kind, in this order): create the Account, set its Cutover
- * Date, remove the old balances, remove the old imported rows, insert the rows. The insert is always last, and the
- * removal of rows, when there is one, is just before it, which is how the handler finds their results.
+ * Date, remove the old balances, let go of the Transfer partners of the old imported rows, remove those rows, insert the
+ * rows. The insert is always last, and the removal of rows, when there is one, is just before it, which is how the handler
+ * finds their results.
  */
-export function chunkStatements<Statement>(plan: ChunkPlan, prepare: { createAccount: () => Statement; setCutover: () => Statement; clearBalances: () => Statement; removeImported: () => Statement; insertRows: () => Statement }): Statement[] {
+export function chunkStatements<Statement>(
+  plan: ChunkPlan,
+  prepare: { createAccount: () => Statement; setCutover: () => Statement; clearBalances: () => Statement; unpairPartners: () => Statement; removeImported: () => Statement; insertRows: () => Statement },
+): Statement[] {
   return [
     ...(plan.newAccount ? [prepare.createAccount()] : []),
     ...(plan.setsCutover && !plan.newAccount ? [prepare.setCutover()] : []),
-    ...(plan.replace && !plan.newAccount ? [prepare.clearBalances(), prepare.removeImported()] : []),
+    ...(plan.replace && !plan.newAccount ? [prepare.clearBalances(), prepare.unpairPartners(), prepare.removeImported()] : []),
     prepare.insertRows(),
   ]
 }

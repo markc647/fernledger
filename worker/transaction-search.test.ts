@@ -26,6 +26,13 @@ describe('toSearch', () => {
     expect(parse({ text: '   ' }).text).toBeUndefined()
   })
 
+  it('takes Transfers only or without Transfers, and refuses anything else', () => {
+    expect(parse({ transfers: 'only' }).transfers).toBe('only')
+    expect(parse({ transfers: 'exclude' }).transfers).toBe('exclude')
+    expect(parse({}).transfers).toBeUndefined()
+    expect(z.safeParse(searchQuery, { transfers: 'both' }).success).toBe(false)
+  })
+
   it('counts on the first page and not on later ones, unless told', () => {
     expect(parse({ offset: '0' }).want).toBe('both')
     expect(parse({ offset: '50' }).want).toBe('page')
@@ -112,6 +119,22 @@ describe('what a request reads from D1', () => {
     expect(r.page).toBeLessThanOrEqual(150)
   })
 
+  // Whether a Transaction is a Transfer is read from its own row and the Override's Category, so leaving Transfers out costs what the
+  // Uncategorised filter does: each Transaction counted once, and a page off the date index when the first ones pass.
+  it('reads each Transaction once to count the spending, and a page of it off the date index', async () => {
+    const r = await reads({ transfers: 'exclude' })
+    expect(r.total).toBe(TRANSACTIONS)
+    expect(r.count).toBeLessThanOrEqual(TRANSACTIONS + 10)
+    expect(r.page).toBeLessThanOrEqual(150)
+  })
+
+  it('reads every Transaction to find a page of Transfers when there are none', async () => {
+    const r = await reads({ transfers: 'only' })
+    expect(r.total).toBe(0)
+    expect(r.count).toBeLessThanOrEqual(TRANSACTIONS + 10)
+    expect(r.page).toBeLessThanOrEqual(TRANSACTIONS * 2 + 10)
+  })
+
   it('reads every Transaction to count a text search, but a page of it, newest first, only as far as its 50th match', async () => {
     const r = await reads({ text: 'cafe' })
     expect(r.total).toBe(TRANSACTIONS / 10)
@@ -125,5 +148,19 @@ describe('what a request reads from D1', () => {
     expect(r.page).toBeLessThanOrEqual(TRANSACTIONS * 3 + 10)
     const text = await reads({ text: 'cafe', sort: 'amount' })
     expect(text.page).toBeLessThanOrEqual(TRANSACTIONS + text.total * 2 + 10) // the scan, then only what matched
+  })
+
+  // A paired Transaction shows the Account of its other half, a lookup by ID for it and one for its Account. An unpaired one costs nothing extra.
+  it('reads two more rows for each paired Transaction it shows, and nothing more for the rest', async () => {
+    const unpaired = await reads({ sort: 'amount' })
+    await env.DB.prepare('UPDATE transactions SET transfer_of = CASE WHEN id % 2 = 1 THEN id + 1 ELSE id - 1 END').run()
+    try {
+      const paired = await reads({ sort: 'amount' })
+      expect(paired.page).toBeLessThanOrEqual(unpaired.page + TRANSACTIONS * 2)
+      // The default list shows 50 of them, off the date index.
+      expect((await reads({})).page).toBeLessThanOrEqual(150 + 50 * 2)
+    } finally {
+      await env.DB.prepare('UPDATE transactions SET transfer_of = NULL').run()
+    }
   })
 })

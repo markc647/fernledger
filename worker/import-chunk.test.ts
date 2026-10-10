@@ -41,7 +41,7 @@ describe('chunkDetail', () => {
 })
 
 describe('chunkStatements', () => {
-  const prepare = { createAccount: () => 'create', setCutover: () => 'cutover', clearBalances: () => 'balances', removeImported: () => 'remove', insertRows: () => 'insert' }
+  const prepare = { createAccount: () => 'create', setCutover: () => 'cutover', clearBalances: () => 'balances', unpairPartners: () => 'unpair', removeImported: () => 'remove', insertRows: () => 'insert' }
   const plan = { newAccount: false, setsCutover: false, replace: false }
 
   it('only inserts for a plain chunk of an existing Account', () => {
@@ -52,8 +52,8 @@ describe('chunkStatements', () => {
     expect(chunkStatements({ newAccount: true, setsCutover: true, replace: true }, prepare)).toEqual(['create', 'insert'])
   })
 
-  it('sets the Cutover Date, then removes the old balances and rows, then inserts, so the insert is last and the removal just before it', () => {
-    expect(chunkStatements({ ...plan, setsCutover: true, replace: true }, prepare)).toEqual(['cutover', 'balances', 'remove', 'insert'])
+  it('sets the Cutover Date, then removes the old balances and rows (letting go of their Transfer partners first), then inserts, so the insert is last and the removal just before it', () => {
+    expect(chunkStatements({ ...plan, setsCutover: true, replace: true }, prepare)).toEqual(['cutover', 'balances', 'unpair', 'remove', 'insert'])
   })
 })
 
