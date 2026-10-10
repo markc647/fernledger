@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Amount } from '@/components/amount'
+import { NotATransfer } from '@/components/not-a-transfer'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import { HttpError } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
-import { transferEditHint, type TransferSource } from '@/lib/transfers'
+import { canMarkNotTransfer, notTransferSaved, transferEditHint, type TransferSource } from '@/lib/transfers'
 
 /** What the panel needs to know about a Transaction: how to name it, and its Override and Note now. */
 export type EditableTransaction = {
@@ -20,14 +21,19 @@ export type EditableTransaction = {
   categorySource: string | null
   /** Set while the Transaction is a Transfer, which an Override turns into spending. */
   transfer: TransferSource | null
+  /** The Account of its matching Transaction, if it is paired, whether or not an Override makes this one spending. */
+  transferAccountName: string | null
   note: string | null
 }
 
 const textareaStyle =
   'block min-h-20 w-full rounded-lg border border-input bg-background px-3 py-2 text-base focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring'
 
-/** Sets a Transaction's Override and Note. Only what changed is sent, so only what changed is logged. */
-export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction; onSaved: () => void; onCancel: () => void }) {
+/**
+ * Sets a Transaction's Override and Note. Only what changed is sent, so only what changed is logged. For a Transfer it also offers Not a Transfer,
+ * which is saved at once and not with the Save button; `onSaved` is then given what to say about it.
+ */
+export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction; onSaved: (message?: string) => void; onCancel: () => void }) {
   const queryClient = useQueryClient()
   const { data: categories, isError } = useQuery(categoriesQuery)
   const startCategory = row.categorySource === 'override' ? row.categoryId : null
@@ -35,6 +41,7 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
   const [note, setNote] = useState(row.note ?? '')
   const param = { id: String(row.id) }
   const transferHint = transferEditHint(row)
+  const unsaved = categoryId !== startCategory || note.trim() !== (row.note ?? '')
 
   const save = useMutation({
     mutationFn: async () => {
@@ -109,6 +116,22 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
         </div>
         {save.isError && <p role="alert" className="font-medium text-destructive">The changes could not be saved. Try again.</p>}
       </form>
+      {canMarkNotTransfer(row) && (
+        <div className="mt-4 border-t-2 pt-4">
+          <h3 className="font-medium">Wrong Transfer?</h3>
+          <p className="mt-1 text-muted-foreground">
+            {row.transferAccountName === null
+              ? 'If a Rule marked this as a Transfer and it is not one, say so here.'
+              : `Fernledger pairs a Transaction with one in another Account on the same date for the same amount. If this is not a Transfer, say so here.`}
+          </p>
+          <NotATransfer
+            id={row.id}
+            transfer={row}
+            extra={unsaved ? "Changes in this panel that you haven't saved will be lost." : undefined}
+            onDone={() => onSaved(notTransferSaved())}
+          />
+        </div>
+      )}
     </section>
   )
 }
