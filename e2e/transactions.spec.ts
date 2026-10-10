@@ -329,9 +329,10 @@ test('a Member downloads the Transactions they searched for as a CSV file, with 
   const byteOrderMark = String.fromCharCode(0xfeff) // so Excel reads the file as UTF-8
   expect(text).toBe(
     [
-      `${byteOrderMark}Date,Account,Description,Category,Note,Amount,Bank type,Bank reference`,
-      `2012-06-01,${savings.name},EXAMPLE ${stamp} PLAIN,Uncategorised,,50.00,EFTPOS,`,
-      `2012-06-02,${savings.name},'=EXAMPLE ${stamp} FORMULA,Uncategorised,,-12.34,EFTPOS,`,
+      `${byteOrderMark}Date,Account,Description,Category,Note,Amount,Bank type,Bank memo,Bank reference,Bank counterparty account,Bank particulars,Bank payment code,Bank card suffix`,
+      // A bank file gives a type and a memo and none of the rest, which are empty cells all the same.
+      `2012-06-01,${savings.name},EXAMPLE ${stamp} PLAIN,Uncategorised,,50.00,EFTPOS,EFTPOS,,,,,`,
+      `2012-06-02,${savings.name},'=EXAMPLE ${stamp} FORMULA,Uncategorised,,-12.34,EFTPOS,EFTPOS,,,,,`,
       '',
       'Totals',
       'Money in,50.00',
@@ -341,6 +342,38 @@ test('a Member downloads the Transactions they searched for as a CSV file, with 
       '',
     ].join('\r\n'),
   )
+})
+
+test('says how many Transactions match, and warns before a download that would stop short, and where saved files are explained', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  const row = { id: 4242, accountId: 1, accountName: 'Example savings', date: '2026-10-08', description: 'EXAMPLE CAFE TOWN', bankType: 'EFTPOS', amountCents: -2345, categoryId: null, categoryName: null, categorySource: null, note: null }
+  let total = 5001
+  await page.route(/\/api\/transactions\?/, (route) => {
+    const countOnly = new URL(route.request().url()).searchParams.get('count') === 'only'
+    return route.fulfill({ json: countOnly ? { total, transactions: [] } : { total: null, transactions: [row] } })
+  })
+  const matches = page.locator('#filter-download-count')
+  const warning = page.getByText('Only the oldest 5,000 will be saved. Set From and To to one year at a time to save the rest.')
+
+  await page.goto('/transactions')
+  await expect(matches).toHaveText('5,001 Transactions match')
+  await expect(warning).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Download CSV' })).toHaveAccessibleDescription(/5,001 Transactions match.*Only the oldest 5,000 will be saved/)
+  await noAxeViolations(page)
+
+  // Exactly the most is not too many, and one is "matches".
+  total = 5000
+  await page.reload()
+  await expect(matches).toHaveText('5,000 Transactions match')
+  await expect(warning).toHaveCount(0)
+  total = 1
+  await page.reload()
+  await expect(matches).toHaveText('1 Transaction matches')
+
+  // What leaves Fernledger's protection is explained where the Member can read it.
+  await page.getByRole('search', { name: 'Search Transactions' }).getByRole('link', { name: 'About your data' }).click()
+  await expect(page).toHaveURL(/\/about-your-data#seen$/)
+  await expect(page.getByText('A file saved from Fernledger, such as a CSV export of Transactions, is outside all of this.')).toBeVisible()
 })
 
 test('Back from a Transaction opened on the Uncategorised page returns to the Uncategorised page, in the same order', async ({ page, context }) => {

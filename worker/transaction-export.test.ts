@@ -1,6 +1,19 @@
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { centsToDecimal, EXPORT_CHUNK_ROWS, EXPORT_HEADER, EXPORT_MAX_ROWS, exportChunk, exportFilename } from './transaction-export'
+import worker from './index'
+import {
+  centsToDecimal,
+  chunkEnd,
+  type Chunk,
+  EXPORT_CHUNK_BYTES,
+  EXPORT_CHUNK_ROWS,
+  EXPORT_HEADER,
+  EXPORT_MAX_BYTES,
+  EXPORT_MAX_ROWS,
+  exportChunk,
+  exportFilename,
+} from './transaction-export'
 
 // Seam 1: the CSV export of the Transactions (ticket 19), through the Worker's exported handler as the local-development
 // Admin or a read-only Member (the dev identity cookie is honoured on localhost only). Everything below is made up.
@@ -10,6 +23,36 @@ type Who = 'admin' | 'member'
 
 const request = (query: string, who: Who = 'member') =>
   exports.default.fetch(new Request(`${origin}/api/transactions/export.csv${query}`, { headers: { Cookie: `fernledger_dev_as=${who}` } }))
+
+/**
+ * Calls the Worker's handler with `db` standing in for D1, to count its queries or make one fail. Called directly, not through
+ * `exports.default.fetch`, because the test changes the Worker's env (CODING_STANDARDS.md: Tests).
+ */
+async function requestWith(db: D1Database, query = '') {
+  const ctx = createExecutionContext()
+  const res = await worker.fetch!(new Request(`${origin}/api/transactions/export.csv${query}`, { headers: { Cookie: 'fernledger_dev_as=member' } }) as never, { ...env, DB: db }, ctx)
+  await waitOnExecutionContext(ctx)
+  return res
+}
+
+/** D1 that counts the statements prepared on it, and lets `onPrepare` throw to make one fail. */
+function watchedDb(onPrepare: (callNumber: number) => void = () => {}) {
+  const watched = { prepared: 0 }
+  const db = new Proxy(env.DB, {
+    get(target, property) {
+      if (property === 'prepare') {
+        return (sql: string) => {
+          watched.prepared += 1
+          onPrepare(watched.prepared)
+          return target.prepare(sql)
+        }
+      }
+      const value = Reflect.get(target, property)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  return { db, watched }
+}
 
 /** RFC 4180: records of cells, where a quoted cell may hold commas, doubled quotes and line breaks. */
 function parseCsv(text: string): string[][] {
@@ -58,15 +101,52 @@ async function download(query = '', who: Who = 'member'): Promise<Exported> {
 const column = (name: (typeof EXPORT_HEADER)[number]) => EXPORT_HEADER.indexOf(name)
 const descriptions = (file: Exported) => file.rows.map((r) => r[column('Description')])
 
-type Added = { date?: string; amountCents?: number; description?: string; note?: string | null; overrideCategory?: number | null; accountId?: number; bankType?: string; bankReference?: string | null }
+type Added = {
+  date?: string
+  amountCents?: number
+  description?: string
+  note?: string | null
+  overrideCategory?: number | null
+  /** The Category a Rule gave it when it was imported. */
+  ruleCategory?: number | null
+  accountId?: number
+  bankType?: string
+  bankMemo?: string
+  bankReference?: string | null
+  /** What Sync supplies and a bank file does not. */
+  counterparty?: string | null
+  particulars?: string | null
+  paymentCode?: string | null
+  cardSuffix?: string | null
+}
 let savings = 0
 let cheque = 0
 let n = 0
 /** Adds a made-up Transaction and returns its ID. Dated 1 October 2026 unless `date` says otherwise. */
 async function add(t: Added = {}) {
   n += 1
-  const { meta } = await env.DB.prepare('INSERT INTO transactions (account_id, date, amount_cents, description, bank_type, bank_reference, source, note, override_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(t.accountId ?? savings, t.date ?? '2026-10-01', t.amountCents ?? -1000, t.description ?? `EXAMPLE SHOP ${n}`, t.bankType ?? 'EFTPOS', t.bankReference ?? null, 'import', t.note ?? null, t.overrideCategory ?? null)
+  const { meta } = await env.DB.prepare(
+    `INSERT INTO transactions (account_id, date, amount_cents, description, bank_type, bank_memo, bank_reference, source, note, override_category, rule_category,
+                               bank_counterparty_account, bank_particulars, bank_payment_code, bank_card_suffix)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      t.accountId ?? savings,
+      t.date ?? '2026-10-01',
+      t.amountCents ?? -1000,
+      t.description ?? `EXAMPLE SHOP ${n}`,
+      t.bankType ?? 'EFTPOS',
+      t.bankMemo ?? '',
+      t.bankReference ?? null,
+      'import',
+      t.note ?? null,
+      t.overrideCategory ?? null,
+      t.ruleCategory ?? null,
+      t.counterparty ?? null,
+      t.particulars ?? null,
+      t.paymentCode ?? null,
+      t.cardSuffix ?? null,
+    )
     .run()
   return meta.last_row_id
 }
@@ -161,18 +241,72 @@ describe('the response', () => {
     expect(descriptions(file)).toEqual(['EXAMPLE CAFE WHĀNGĀREI'])
   })
 
-  it('has the heading, then the Transactions oldest first with their effective Category', async () => {
+  it('has the heading, then the Transactions oldest first with their effective Category and every bank field', async () => {
     const fuel = await addCategory('Fuel')
-    await add({ date: '2026-10-03', amountCents: -4550, description: 'EXAMPLE FUEL STOP', overrideCategory: fuel, note: 'Trip to the lake', bankType: 'EFTPOS', bankReference: 'REF 77' })
+    await add({
+      date: '2026-10-03',
+      amountCents: -4550,
+      description: 'EXAMPLE FUEL STOP',
+      overrideCategory: fuel,
+      note: 'Trip to the lake',
+      bankType: 'EFTPOS',
+      bankMemo: 'EXAMPLE FUEL STOP 12',
+      bankReference: 'REF 77',
+      counterparty: '99-9999-9999999-97',
+      particulars: 'PART',
+      paymentCode: 'CODE',
+      cardSuffix: '1234',
+    })
     await add({ date: '2026-10-01', amountCents: 250000, description: 'EXAMPLE WAGES', accountId: cheque, bankType: 'DIRECT CREDIT' })
 
     const file = await download()
 
-    expect(file.header).toEqual(['Date', 'Account', 'Description', 'Category', 'Note', 'Amount', 'Bank type', 'Bank reference'])
-    expect(file.rows).toEqual([
-      ['2026-10-01', 'Example cheque', 'EXAMPLE WAGES', 'Uncategorised', '', '2500.00', 'DIRECT CREDIT', ''],
-      ['2026-10-03', 'Example savings', 'EXAMPLE FUEL STOP', 'Fuel', 'Trip to the lake', '-45.50', 'EFTPOS', 'REF 77'],
+    expect(file.header).toEqual([
+      'Date',
+      'Account',
+      'Description',
+      'Category',
+      'Note',
+      'Amount',
+      'Bank type',
+      'Bank memo',
+      'Bank reference',
+      'Bank counterparty account',
+      'Bank particulars',
+      'Bank payment code',
+      'Bank card suffix',
     ])
+    // A bank file has none of the counterparty account, particulars, code or card, so those cells are empty; they are still columns.
+    expect(file.rows).toEqual([
+      ['2026-10-01', 'Example cheque', 'EXAMPLE WAGES', 'Uncategorised', '', '2500.00', 'DIRECT CREDIT', '', '', '', '', '', ''],
+      ['2026-10-03', 'Example savings', 'EXAMPLE FUEL STOP', 'Fuel', 'Trip to the lake', '-45.50', 'EFTPOS', 'EXAMPLE FUEL STOP 12', 'REF 77', '99-9999-9999999-97', 'PART', 'CODE', '1234'],
+    ])
+  })
+
+  it('writes the same Category as the list for an Override, a Rule, neither, and a removed Category', async () => {
+    const [override, rule, removed] = [await addCategory('Fuel'), await addCategory('Groceries'), await addCategory('Old category')]
+    await env.DB.prepare("UPDATE categories SET removed_at = '2026-10-02T00:00:00.000Z' WHERE id = ?").bind(removed).run()
+    await add({ date: '2026-10-01', description: 'EXAMPLE OVERRIDE AND RULE', overrideCategory: override, ruleCategory: rule })
+    await add({ date: '2026-10-02', description: 'EXAMPLE RULE ONLY', ruleCategory: rule })
+    await add({ date: '2026-10-03', description: 'EXAMPLE NEITHER' })
+    await add({ date: '2026-10-04', description: 'EXAMPLE REMOVED OVERRIDE FALLS TO RULE', overrideCategory: removed, ruleCategory: rule })
+    await add({ date: '2026-10-05', description: 'EXAMPLE REMOVED RULE', ruleCategory: removed })
+    await add({ date: '2026-10-06', description: 'EXAMPLE REMOVED OVERRIDE ONLY', overrideCategory: removed })
+
+    const file = await download()
+
+    expect(file.rows.map((r) => [r[column('Description')], r[column('Category')]])).toEqual([
+      ['EXAMPLE OVERRIDE AND RULE', 'Fuel'],
+      ['EXAMPLE RULE ONLY', 'Groceries'],
+      ['EXAMPLE NEITHER', 'Uncategorised'],
+      ['EXAMPLE REMOVED OVERRIDE FALLS TO RULE', 'Groceries'],
+      ['EXAMPLE REMOVED RULE', 'Uncategorised'],
+      ['EXAMPLE REMOVED OVERRIDE ONLY', 'Uncategorised'],
+    ])
+    // And the page's list, which the file must never disagree with, says the same.
+    const res = await exports.default.fetch(new Request(`${origin}/api/transactions?sort=date&dir=asc&limit=200`, { headers: { Cookie: 'fernledger_dev_as=member' } }))
+    const list = ((await res.json()) as { transactions: { categoryName: string | null }[] }).transactions.map((t) => t.categoryName ?? 'Uncategorised')
+    expect(file.rows.map((r) => r[column('Category')])).toEqual(list)
   })
 
   it('orders by date, then by ID, whatever order they were added in', async () => {
@@ -238,17 +372,31 @@ describe('cells that would run as a spreadsheet formula', () => {
     expect(row![column('Note')]).toBe('\'@SUM(1+1)*cmd|\' /C calc\'!A0')
   })
 
-  it('escapes every text column: the Account, Category, bank type and bank reference as well', async () => {
+  it('escapes every text column: the Account, Category and each field the bank gave as well', async () => {
     const category = await addCategory('-Example category')
     await env.DB.prepare('UPDATE accounts SET name = ? WHERE id = ?').bind('+Example account', savings).run()
-    await add({ overrideCategory: category, bankType: '=TYPE', bankReference: '@REF' })
+    await add({
+      overrideCategory: category,
+      bankType: '=TYPE',
+      bankMemo: '@MEMO',
+      bankReference: '+REF',
+      counterparty: '-COUNTERPARTY',
+      particulars: '=PARTICULARS',
+      paymentCode: '@CODE',
+      cardSuffix: '+CARD',
+    })
 
     const [row] = (await download()).rows
 
     expect(row![column('Account')]).toBe("'+Example account")
     expect(row![column('Category')]).toBe("'-Example category")
     expect(row![column('Bank type')]).toBe("'=TYPE")
-    expect(row![column('Bank reference')]).toBe("'@REF")
+    expect(row![column('Bank memo')]).toBe("'@MEMO")
+    expect(row![column('Bank reference')]).toBe("'+REF")
+    expect(row![column('Bank counterparty account')]).toBe("'-COUNTERPARTY")
+    expect(row![column('Bank particulars')]).toBe("'=PARTICULARS")
+    expect(row![column('Bank payment code')]).toBe("'@CODE")
+    expect(row![column('Bank card suffix')]).toBe("'+CARD")
   })
 
   it('leaves alone text that only has those characters after its first', async () => {
@@ -430,17 +578,18 @@ describe('a request it refuses', () => {
   })
 })
 
-describe('a long history', () => {
-  /** `count` Transactions, seven to a day from 1 January 2020, in the order they will come out. */
-  const addMany = (count: number) =>
-    env.DB.prepare(
-      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${count})
-       INSERT INTO transactions (account_id, date, amount_cents, description, source) SELECT ?, date('2020-01-01', '+' || (i / 7) || ' days'), -100, 'EXAMPLE ROW ' || i, 'import' FROM seq`,
-    )
-      .bind(savings)
-      .run()
-  const noteOf = (file: Exported) => file.records.find((r) => r[0]?.startsWith('Only the first'))
 
+/** `count` Transactions, seven to a day from 1 January 2020, in the order they will come out. */
+const addMany = (count: number) =>
+  env.DB.prepare(
+    `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${count})
+     INSERT INTO transactions (account_id, date, amount_cents, description, source) SELECT ?, date('2020-01-01', '+' || (i / 7) || ' days'), -100, 'EXAMPLE ROW ' || i, 'import' FROM seq`,
+  )
+    .bind(savings)
+    .run()
+const noteOf = (file: Exported) => file.records.find((r) => r[0]?.startsWith('Only the first'))
+
+describe('a long history', () => {
   it('is exported whole across chunks, in order, with none repeated or missed where a chunk ends part-way through a day', async () => {
     const count = EXPORT_CHUNK_ROWS * 3 + 5
     expect(EXPORT_CHUNK_ROWS % 7).not.toBe(0)
@@ -474,21 +623,146 @@ describe('a long history', () => {
     expect(file.records.at(-1)).toEqual([`Only the first ${EXPORT_MAX_ROWS.toLocaleString('en-NZ')} Transactions are in this file, and more match. The totals cover only those. Narrow the dates or filters, then export again.`])
   })
 
-  it('stays within the 50 D1 queries an invocation gets (ADR 0004), with room left for the sign-in', () => {
-    expect(Math.ceil(EXPORT_MAX_ROWS / EXPORT_CHUNK_ROWS) + 1).toBeLessThanOrEqual(30)
+  it('asks D1 for the chunks and one more query to find out whether there was more, well inside the 50 an invocation gets (ADR 0004)', async () => {
+    await addMany(EXPORT_MAX_ROWS + 1)
+    const { db, watched } = watchedDb()
+
+    const res = await requestWith(db)
+
+    expect(res.status).toBe(200)
+    expect(watched.prepared).toBe(EXPORT_MAX_ROWS / EXPORT_CHUNK_ROWS + 1)
+    expect(watched.prepared).toBeLessThanOrEqual(25)
+  })
+
+  it('is an error and no file when a later query fails, not a file that stops short and looks complete', async () => {
+    await addMany(EXPORT_CHUNK_ROWS * 2 + 1)
+    const { db, watched } = watchedDb((call) => {
+      if (call === 2) throw new Error('D1 is unavailable')
+    })
+
+    const res = await requestWith(db)
+
+    expect(res.status).toBe(500)
+    expect(res.headers.get('Content-Disposition')).toBeNull()
+    expect(res.headers.get('Content-Type')).toContain('application/json')
+    const body = await res.text()
+    expect(JSON.parse(body)).toEqual({ error: 'Something went wrong' })
+    expect(body).not.toContain('EXAMPLE ROW')
+    expect(watched.prepared).toBe(2)
+  })
+})
+
+describe('the limits on bytes', () => {
+  /** `chars` characters of a euro sign, which is three bytes in UTF-8, as SQL (`chars` is even). */
+  const euros = (chars: number) => `replace(hex(zeroblob(${chars / 2})), '0', char(8364))`
+  const bytesOf = (text: string) => new TextEncoder().encode(text).length
+  /** `count` Transactions, seven to a day, each with a Note of `noteChars` euro signs. */
+  const addLong = (count: number, noteChars: number) =>
+    env.DB.prepare(
+      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${count})
+       INSERT INTO transactions (account_id, date, amount_cents, description, note, source)
+       SELECT ?, date('2020-01-01', '+' || (i / 7) || ' days'), -100, 'EXAMPLE ROW ' || i, ${euros(noteChars)}, 'import' FROM seq`,
+    )
+      .bind(savings)
+      .run()
+  const firstChunk = async (limit = EXPORT_CHUNK_ROWS) => {
+    const { sql, binds } = exportChunk({ uncategorised: false }, { date: '', id: 0 }, limit)
+    return (await env.DB.prepare(sql).bind(...binds).first<Chunk>())!
+  }
+
+  it('cut a chunk that would be longer than one query should return, and the next chunk carries on from where it stopped', async () => {
+    // 300 Transactions of about 1.5 KB each is 450 KB: more than a chunk, less than a file.
+    await addLong(300, 500)
+
+    const chunk = await firstChunk()
+    expect(chunk.fetched).toBe(300)
+    expect(chunk.n).toBeLessThan(300)
+    expect(chunk.bytes).toBeLessThanOrEqual(EXPORT_CHUNK_BYTES)
+    expect(bytesOf(chunk.body!) + 2).toBe(chunk.bytes) // the count in SQL is the real UTF-8 length, the last line having no line end after it
+
+    const { db, watched } = watchedDb()
+    const file = await (async () => {
+      const res = await requestWith(db)
+      expect(res.status).toBe(200)
+      const records = parseCsv(await res.text())
+      return records.slice(1, records.findIndex((r) => r.length === 1 && r[0] === ''))
+    })()
+    expect(file.map((r) => r[column('Description')])).toEqual(Array.from({ length: 300 }, (_, i) => `EXAMPLE ROW ${i + 1}`))
+    expect(file.every((r) => r[column('Note')]!.length === 500)).toBe(true)
+    expect(watched.prepared).toBe(2)
+  })
+
+  it('always take the first Transaction, however long, so a file can always move on', async () => {
+    await addLong(3, 100_000) // each 300 KB: longer than a chunk may be
+
+    const chunk = await firstChunk()
+
+    expect(chunk.n).toBe(1)
+    expect(chunk.fetched).toBe(3)
+    expect(bytesOf(chunk.body!) + 2).toBe(chunk.bytes)
+    expect(descriptions(await download())).toEqual(['EXAMPLE ROW 1', 'EXAMPLE ROW 2', 'EXAMPLE ROW 3'])
+  })
+
+  it('keep every field of the longest Transactions, in euro signs, inside a chunk well under the 2 MB D1 allows in one string', async () => {
+    // Every text field, the Sync ones too (they have no length limit yet), 1,000 three-byte characters long, and a Category to match.
+    const category = await addCategory('€'.repeat(40))
+    const long = euros(1000)
+    await env.DB.prepare('UPDATE accounts SET name = ? WHERE id = ?').bind('€'.repeat(60), savings).run()
+    await env.DB.prepare(
+      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < 100)
+       INSERT INTO transactions (account_id, date, amount_cents, description, bank_type, bank_memo, bank_reference, note, override_category,
+                                 bank_counterparty_account, bank_particulars, bank_payment_code, bank_card_suffix, source)
+       SELECT ?, '2026-10-01', -9007199254740991, ${long}, ${long}, ${long}, ${long}, ${long}, ?, ${long}, ${long}, ${long}, ${long}, 'import' FROM seq`,
+    )
+      .bind(savings, category)
+      .run()
+
+    const chunk = await firstChunk()
+
+    expect(chunk.fetched).toBe(100)
+    expect(chunk.n).toBeGreaterThan(1)
+    expect(chunk.n).toBeLessThan(100)
+    expect(chunk.bytes).toBeLessThanOrEqual(EXPORT_CHUNK_BYTES)
+    expect(chunk.bytes).toBeLessThan(2_000_000 / 4)
+    expect(bytesOf(chunk.body!) + 2).toBe(chunk.bytes)
+  })
+
+  it('stop a file at about the most bytes it may have, and say so, though fewer Transactions than the most', async () => {
+    // 600 Transactions of about 1.5 KB each is 900 KB: more than a file may have.
+    await addLong(600, 500)
+    const { db, watched } = watchedDb()
+
+    const res = await requestWith(db)
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    const records = parseCsv(new TextDecoder().decode(bytes.subarray(3)))
+
+    expect(res.status).toBe(200)
+    const rows = records.slice(1, records.findIndex((r) => r.length === 1 && r[0] === ''))
+    expect(rows.length).toBeGreaterThan(EXPORT_MAX_BYTES / 2000)
+    expect(rows.length).toBeLessThan(600)
+    expect(bytes.length).toBeGreaterThanOrEqual(EXPORT_MAX_BYTES)
+    expect(bytes.length).toBeLessThanOrEqual(EXPORT_MAX_BYTES + EXPORT_CHUNK_BYTES + 1000)
+    expect(rows.at(-1)![column('Description')]).toBe(`EXAMPLE ROW ${rows.length}`)
+    expect(records.at(-1)).toEqual([`Only the first ${rows.length.toLocaleString('en-NZ')} Transactions are in this file, and more match. The totals cover only those. Narrow the dates or filters, then export again.`])
+    expect(records).toContainEqual(['Transactions', String(rows.length)])
+    expect(watched.prepared).toBeLessThanOrEqual(8)
   })
 })
 
 describe('what a request reads from D1', () => {
   // ADR 0004: D1 Free bills rows read (5 million a day). The export pages by (date, id), never OFFSET, so reading all of it costs a
   // few reads for each Transaction exported, however far into the history a chunk is; and a date range reads only its dates.
+  // Some Transactions have an Override, some a Rule's Category, some both and some neither: each Category source that supplies one is a read.
   const TRANSACTIONS = 6000
   beforeEach(async () => {
+    const [fuel, groceries] = [await addCategory('Fuel'), await addCategory('Groceries')]
     await env.DB.prepare(
       `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${TRANSACTIONS})
-       INSERT INTO transactions (account_id, date, amount_cents, description, source) SELECT CASE WHEN i % 2 = 0 THEN ? ELSE ? END, date('2020-01-01', '+' || (i / 4) || ' days'), -100, 'EXAMPLE ROW ' || i, 'import' FROM seq`,
+       INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category, rule_category)
+       SELECT CASE WHEN i % 2 = 0 THEN ?1 ELSE ?2 END, date('2020-01-01', '+' || (i / 4) || ' days'), -100, 'EXAMPLE ROW ' || i, 'import',
+              CASE WHEN i % 4 IN (0, 2) THEN ?3 END, CASE WHEN i % 4 IN (1, 2) THEN ?4 END FROM seq`,
     )
-      .bind(savings, cheque)
+      .bind(savings, cheque, fuel, groceries)
       .run()
   })
 
@@ -499,47 +773,29 @@ describe('what a request reads from D1', () => {
     let rows = 0
     for (;;) {
       const { sql, binds } = exportChunk(filters, after, EXPORT_CHUNK_ROWS)
-      const result = await env.DB.prepare(sql).bind(...binds).all<{ n: number; lastDate: string | null; lastId: number | null }>()
+      const result = await env.DB.prepare(sql).bind(...binds).all<Chunk>()
       rowsRead += (result.meta as { rows_read: number }).rows_read
       const chunk = result.results[0]!
       rows += chunk.n
-      if (chunk.n < EXPORT_CHUNK_ROWS) return { rows, rowsRead }
-      after = { date: chunk.lastDate!, id: chunk.lastId! }
+      if (chunk.fetched < EXPORT_CHUNK_ROWS && chunk.n === chunk.fetched) return { rows, rowsRead }
+      after = chunkEnd(chunk)
     }
   }
 
-  // Three reads for each: its place in the date index, the row itself and its Account. Paging with OFFSET would read about six times that here.
-  it('reads each Transaction about three times, for the whole history', async () => {
+  // Three reads for each: its place in the date index, the row itself and its Account; one more for each Category source that
+  // supplies its Category (one on average here); and three more for the sort that the window sizing a chunk needs. Paging with
+  // OFFSET would add the rows skipped each time, about another 12 a row by the end of this history.
+  it('reads each Transaction about seven times, for the whole history', async () => {
     const { rows, rowsRead } = await readAll({ uncategorised: false })
     expect(rows).toBe(TRANSACTIONS)
-    expect(rowsRead).toBeLessThanOrEqual(TRANSACTIONS * 3 + 100)
+    expect(rowsRead).toBeLessThanOrEqual(TRANSACTIONS * 7 + 100)
   })
 
   it('reads only the dates asked for, with or without an Account', async () => {
     for (const accountId of [undefined, cheque]) {
       const { rows, rowsRead } = await readAll({ uncategorised: false, accountId, from: '2021-03-01', to: '2021-03-31' })
       expect(rows).toBeGreaterThan(0)
-      expect(rowsRead).toBeLessThanOrEqual(rows * 3 + 100)
+      expect(rowsRead).toBeLessThanOrEqual(rows * 7 + 100)
     }
-  })
-
-  // The longest a field can be (an Account's name 60, a description 200, a bank type and reference 40, a Note 500), every
-  // character one that is doubled when quoted. Kept well under the 2 MB D1 allows in one string, as the backup's chunk is.
-  it('writes a chunk of the longest-possible Transactions in under half of that', async () => {
-    const quotes = (n: number) => '"'.repeat(n)
-    await env.DB.prepare('DELETE FROM transactions').run()
-    await env.DB.prepare('UPDATE accounts SET name = ? WHERE id = ?').bind(quotes(60), savings).run()
-    await env.DB.prepare(
-      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${EXPORT_CHUNK_ROWS})
-       INSERT INTO transactions (account_id, date, amount_cents, description, bank_type, bank_reference, note, source) SELECT ?, '2026-10-01', -9007199254740991, ?, ?, ?, ?, 'import' FROM seq`,
-    )
-      .bind(savings, quotes(200), quotes(40), quotes(40), quotes(500))
-      .run()
-
-    const { sql, binds } = exportChunk({ uncategorised: false }, { date: '', id: 0 }, EXPORT_CHUNK_ROWS)
-    const chunk = (await env.DB.prepare(sql).bind(...binds).first<{ body: string; n: number }>())!
-
-    expect(chunk.n).toBe(EXPORT_CHUNK_ROWS)
-    expect(new TextEncoder().encode(chunk.body).length).toBeLessThan(1_000_000)
   })
 })

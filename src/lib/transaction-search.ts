@@ -97,7 +97,7 @@ export function filterQuery(search: TransactionSearch): Record<string, string> {
 }
 
 /** The most Transactions a CSV export holds (worker/transaction-export.ts pins the two together in its test). */
-export const EXPORT_MAX_ROWS = 10_000
+export const EXPORT_MAX_ROWS = 5_000
 
 /**
  * Where the CSV export of this search's filters is. The export takes the filters and nothing else, so a sort or page in the

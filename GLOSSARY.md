@@ -107,8 +107,8 @@ A print-formatted view of Transactions over a date range, which any Member can p
 _Avoid_: Statement, export
 
 **CSV export**:
-A spreadsheet file of the Transactions that match the Transactions page's filters, which any Member can download. Cells that would run as a formula are escaped. Not a Report, which is print-formatted.
-_Avoid_: Download, dump, Report
+A spreadsheet file of the Transactions that match the Transactions page's filters.
+_Avoid_: Report
 
 ## Viewing
 

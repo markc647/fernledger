@@ -50,12 +50,11 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Dashboard:** balances, net worth over time, spending by category, budget vs actual.
 - **Printable reports:** spending by category, budget vs actual, income vs spending, balances over time, full transaction listing with notes. Print them or save as PDF from your browser.
 - **CSV export** for any date range: the Transactions page's **Download CSV** button saves the Transactions that match the filters you last searched with (text, account, category, dates), oldest first, to open in a spreadsheet.
-  - **Columns:** date, account, description, category, note, amount, and the bank's type and reference. An amount is dollars as a plain number, with a minus sign for money out, so a spreadsheet can add it up.
-  - **Totals:** Money in, Money out, Net and the number of Transactions come after a blank line, in the second column and not the Amount column, so adding up the Amount column gives the Net.
-  - **Safe to open:** a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return would run as a formula in a spreadsheet, so it gets an apostrophe in front. Amounts are numbers we write ourselves and are never changed.
+  - **Columns:** date, account, description, category, note, amount, and everything the bank supplied: its type, memo, reference, counterparty account, particulars, code and card suffix. A bank file has no counterparty account, particulars, code or card, so those columns are empty until Akahu Sync fills them, and the layout stays the same. An amount is dollars as a plain number, with a minus sign for money out, so a spreadsheet can add it up. A transaction with no category says "Uncategorised".
+  - **Totals:** Money in, Money out, Net and the number of Transactions come after a blank line, in the second column and not the Amount column, so adding up the Amount column gives the Net. An export of all accounts counts both legs of a transfer between your own accounts in Money in and Money out until transfers ship; the Net is the same.
+  - **Formulas are defused with an apostrophe:** a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return would run as a formula in a spreadsheet, so it gets an apostrophe in front ([docs/security.md](docs/security.md)). Amounts are numbers we write ourselves and are never changed.
   - **Opens correctly in Excel:** the file starts with a UTF-8 byte order mark, so macrons (Whāngārei) show properly. A program that reads the file as plain UTF-8 will see an invisible character before the first heading; Python's `utf-8-sig` drops it.
-  - **At most 10,000 Transactions a file**, because the free plan gives a request 10 ms of CPU ([ADR 0004](docs/adr/0004-runs-on-workers-free-plan.md)). A longer history is exported a date range at a time; the file says so when more matched.
-  - **Once saved, a file is outside Fernledger's protection:** no sign-in, no read-only Members, no Change Log. See [docs/privacy.md](docs/privacy.md#what-a-deployment-holds).
+  - **At most 5,000 Transactions (about 0.75 MB) a file**, because the free plan gives a request 10 ms of CPU ([ADR 0004](docs/adr/0004-runs-on-workers-free-plan.md)). The Transactions page says how many match before you download, and the file says so when more matched. Export a year at a time to get a longer history. The limit is an estimate from timings, not a measurement of CPU, and is one number to lower if a request ever fails for CPU.
 - **Change Log** of every edit the Admin makes, visible to everyone: who changed what and when, with the values before and after, newest first. Filter it by type of change and by date.
 - **Light and dark themes.**
 - **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and reports will.
@@ -146,6 +145,7 @@ The breach checklist is in [docs/security.md](docs/security.md#if-something-goes
 - **Each Member's email is their key.** If someone's inbox is compromised, so is their access. Use Google or Microsoft sign-in with MFA for stronger protection.
 - **No app-level encryption.** We rely on Cloudflare's encryption at rest. Encrypting inside the app wouldn't add real protection, because the key would live in the same Worker as the data, and it would make search and reports much harder.
 - **Cloudflare can technically access data in your account,** as with any cloud host. See Cloudflare's [privacy policy](https://www.cloudflare.com/privacypolicy/).
+- **A file you download is on your own.** Once a CSV export is saved, it has no sign-in, can be read by anyone who has it, and isn't in the Change Log. Keep it somewhere private, and delete it when you're done.
 
 ### How the code is kept safe
 
