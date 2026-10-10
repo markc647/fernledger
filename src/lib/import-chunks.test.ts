@@ -44,26 +44,26 @@ describe('countOnOrAfter', () => {
 })
 
 describe('replaceWrites', () => {
-  it('costs 3 writes for each row removed and each row imported', () => {
+  it('costs 4 writes for each row removed and each row imported', () => {
     expect(replaceWrites(0, 0)).toBe(0)
-    expect(replaceWrites(2000, 1000)).toBe(9000)
+    expect(replaceWrites(2000, 1000)).toBe(12_000)
   })
 
-  it('goes over the free plan’s daily allowance beyond about 33,000 rows removed and imported in all', () => {
-    expect(replaceWrites(23_000, 10_000)).toBeLessThanOrEqual(DAILY_ROW_WRITES)
-    expect(replaceWrites(24_000, 10_000)).toBeGreaterThan(DAILY_ROW_WRITES)
+  it('goes over the free plan’s daily allowance beyond about 25,000 rows removed and imported in all', () => {
+    expect(replaceWrites(15_000, 10_000)).toBeLessThanOrEqual(DAILY_ROW_WRITES)
+    expect(replaceWrites(16_000, 10_000)).toBeGreaterThan(DAILY_ROW_WRITES)
   })
 
-  it('adds 7 writes for each Override or Note to carry over, on top of the 3 for each row removed and imported', () => {
-    expect(replaceWrites(2000, 1000, 40)).toBe(9000 + 7 * 40)
-    expect(replaceWrites(23_000, 10_000, 1000)).toBeGreaterThan(DAILY_ROW_WRITES)
+  it('adds 10 writes for each Override, Note or Not a Transfer mark to carry over, at most, on top of the 4 for each row removed and imported', () => {
+    expect(replaceWrites(2000, 1000, 40)).toBe(12_000 + 10 * 40)
+    expect(replaceWrites(15_000, 10_000, 1000)).toBeGreaterThan(DAILY_ROW_WRITES)
   })
 
   it('adds 7 writes for each Transfer: 3 when it is removed (its Transfer index entry and its matching Transaction let go), 4 to write both halves when it comes back', () => {
-    expect(replaceWrites(2000, 1000, 0, 100)).toBe(9000 + 700)
-    // Every row a Transfer: a row costs 6 to remove and 7 to import, so about 7,700 each way fill the day.
-    expect(replaceWrites(7600, 7600, 0, 7600)).toBeLessThanOrEqual(DAILY_ROW_WRITES)
-    expect(replaceWrites(7700, 7700, 0, 7700)).toBeGreaterThan(DAILY_ROW_WRITES)
+    expect(replaceWrites(2000, 1000, 0, 100)).toBe(12_000 + 700)
+    // Every row a Transfer: a row costs 7 to remove and 8 to import, so about 6,600 each way fill the day.
+    expect(replaceWrites(6600, 6600, 0, 6600)).toBeLessThanOrEqual(DAILY_ROW_WRITES)
+    expect(replaceWrites(6700, 6700, 0, 6700)).toBeGreaterThan(DAILY_ROW_WRITES)
   })
 })
 

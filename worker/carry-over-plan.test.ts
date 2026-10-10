@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { carryDetail, carryOutcome, carryStatementsAfterInsert, carrySummary, planCarryOver, type CarryCounts, type CarryOutcome } from './carry-over'
+import { carryDetail, carryOutcome, carryStatements, carrySummary, planCarryOver, type CarryCounts, type CarryOutcome } from './carry-over'
 
 // The decisions about carrying over that need no database: what a chunk does, and what it reports.
 const nothing: CarryCounts = { carried: 0, differing: 0, waiting: 0, heldRows: 0, applied: 0, appliedDiffering: 0, lostRows: '[]' }
@@ -104,47 +104,47 @@ describe('carrySummary and carryDetail', () => {
   })
 
   it('says what a part carried', () => {
-    expect(carrySummary(part, 3)).toBe(', Overrides and Notes carried over for 2 Transactions')
+    expect(carrySummary(part, 3)).toBe(', Overrides, Notes and Not a Transfer marks carried over for 2 Transactions')
     expect(carryDetail(part)).toEqual({ carried: 2 })
   })
 
   it('says at the end of a replace what was carried in all, lost, and given another amount', () => {
-    expect(carrySummary(end, 3)).toBe(', Overrides and Notes carried over for 5 Transactions in all, lost for 2 Transactions')
-    expect(carrySummary(end, 1)).toBe(', Overrides and Notes carried over for 5 Transactions, lost for 2 Transactions')
-    expect(carrySummary({ ...end, differing: 2 }, 1)).toBe(', Overrides and Notes carried over for 5 Transactions (2 with a different amount), lost for 2 Transactions')
-    expect(carrySummary({ ...end, lost: 0 }, 1)).toBe(', Overrides and Notes carried over for 5 Transactions, none lost')
+    expect(carrySummary(end, 3)).toBe(', Overrides, Notes and Not a Transfer marks carried over for 5 Transactions in all, lost for 2 Transactions')
+    expect(carrySummary(end, 1)).toBe(', Overrides, Notes and Not a Transfer marks carried over for 5 Transactions, lost for 2 Transactions')
+    expect(carrySummary({ ...end, differing: 2 }, 1)).toBe(', Overrides, Notes and Not a Transfer marks carried over for 5 Transactions (2 with a different amount), lost for 2 Transactions')
+    expect(carrySummary({ ...end, lost: 0 }, 1)).toBe(', Overrides, Notes and Not a Transfer marks carried over for 5 Transactions, none lost')
     expect(carrySummary({ ...end, carriedTotal: 0, lost: 0 }, 1)).toBe('')
   })
 
   it('lists the lost Transactions in the detail', () => {
-    const listed = [{ date: '2026-09-01', amountCents: -1000, description: 'EXAMPLE', category: null, note: 'Note' }]
+    const listed = [{ date: '2026-09-01', amountCents: -1000, description: 'EXAMPLE', category: null, note: 'Note', notTransfer: false }]
     expect(carryDetail({ ...end, lostRows: listed })).toEqual({ carried: 1, carriedTotal: 5, differingAmount: 0, lost: 2, lostTransactions: listed })
   })
 
   it('says at the end of any other Import how many still wait', () => {
     const waiting: CarryOutcome = { carried: 1, carriedTotal: 3, differing: 0, lost: null, lostRows: [], stillWaiting: 4 }
-    expect(carrySummary(waiting, 2)).toBe(', Overrides and Notes carried over for 3 Transactions in all, 4 still waiting')
+    expect(carrySummary(waiting, 2)).toBe(', Overrides, Notes and Not a Transfer marks carried over for 3 Transactions in all, 4 still waiting')
     expect(carryDetail(waiting)).toEqual({ carried: 1, carriedTotal: 3, differingAmount: 0, stillWaiting: 4 })
     expect(carrySummary({ ...waiting, carriedTotal: 0, stillWaiting: 0 }, 2)).toBe('')
   })
 })
 
-describe('carryStatementsAfterInsert', () => {
+describe('carryStatements', () => {
   const prepare = { apply: () => 'apply', markApplied: () => 'mark', clear: () => 'clear', tidy: () => 'tidy' }
 
-  it('gives out, marks what was given, then clears at the end of a replace', () => {
-    expect(carryStatementsAfterInsert({ holds: true, applies: true, clears: true, tidies: false, involved: true }, prepare)).toEqual(['apply', 'mark', 'clear'])
+  it('gives out and marks what was given before the pairing, then clears after it, at the end of a replace', () => {
+    expect(carryStatements({ holds: true, applies: true, clears: true, tidies: false, involved: true }, prepare)).toEqual({ give: ['apply', 'mark'], finish: ['clear'] })
   })
 
   it('tidies instead at the end of any other Import', () => {
-    expect(carryStatementsAfterInsert({ holds: false, applies: true, clears: false, tidies: true, involved: true }, prepare)).toEqual(['apply', 'mark', 'tidy'])
+    expect(carryStatements({ holds: false, applies: true, clears: false, tidies: true, involved: true }, prepare)).toEqual({ give: ['apply', 'mark'], finish: ['tidy'] })
   })
 
   it('is empty for a chunk that took no part', () => {
-    expect(carryStatementsAfterInsert({ holds: false, applies: false, clears: false, tidies: false, involved: false }, prepare)).toEqual([])
+    expect(carryStatements({ holds: false, applies: false, clears: false, tidies: false, involved: false }, prepare)).toEqual({ give: [], finish: [] })
   })
 
   it('only tidies when everything held was given out before', () => {
-    expect(carryStatementsAfterInsert({ holds: false, applies: false, clears: false, tidies: true, involved: true }, prepare)).toEqual(['tidy'])
+    expect(carryStatements({ holds: false, applies: false, clears: false, tidies: true, involved: true }, prepare)).toEqual({ give: [], finish: ['tidy'] })
   })
 })

@@ -199,9 +199,9 @@ function ImportFlow() {
         )}
         {(step.summary.carried > 0 || step.summary.lost > 0) && (
           <>
-            <dt>Transactions that kept their Override or Note</dt>
+            <dt>Transactions that kept their Override, Note or Not a Transfer mark</dt>
             <dd className="text-right tabular-nums">{step.summary.carried}</dd>
-            <dt>Transactions that lost their Override or Note</dt>
+            <dt>Transactions that lost their Override, Note or Not a Transfer mark</dt>
             <dd className="text-right tabular-nums">{step.summary.lost}</dd>
           </>
         )}
@@ -241,10 +241,10 @@ function ImportFlow() {
   )
 }
 
-/** How many of the Transactions that lost their Override or Note the finished screen lists; the Change Log has up to 20. */
+/** How many of the Transactions that lost their Override, Note or Not a Transfer mark the finished screen lists; the Change Log has up to 20. */
 const SHOWN_LOST = 10
 
-/** Which Transactions lost their Override or Note, so the Admin can set it again by hand. */
+/** Which Transactions lost their Override, Note or Not a Transfer mark, so the Admin can set it again by hand. */
 function LostTransactions({ rows, lost }: { rows: LostTransaction[]; lost: number }) {
   const shown = rows.slice(0, SHOWN_LOST)
   return (
@@ -258,6 +258,7 @@ function LostTransactions({ rows, lost }: { rows: LostTransaction[]; lost: numbe
             {formatDate(row.date)}, {row.description}, <Amount cents={row.amountCents} />
             {row.category && `, Override: ${row.category}`}
             {row.note && `, Note: ${row.note}`}
+            {row.notTransfer && ', Not a Transfer'}
           </li>
         ))}
       </ul>
@@ -280,7 +281,7 @@ function BalanceCheckResult({ outcome }: { outcome: BalanceCheckOutcome }) {
 }
 
 /**
- * Says how many Overrides and Notes a replace that stopped part way is still holding for the Account, before any Import of it,
+ * Says how many Overrides, Notes and Not a Transfer marks a replace that stopped part way is still holding for the Account, before any Import of it,
  * and lets the Admin discard them. An Import gives them to matching Transactions and leaves the rest; only a completed
  * replace or this clears them (worker/carry-over.ts).
  */
@@ -349,7 +350,7 @@ function DiscardDialog(props: { failed: boolean; onDiscard: () => void; onCancel
       <h3 id="discard-heading" className="text-lg font-semibold">
         Discard what is waiting?
       </h3>
-      <p>The Overrides and Notes will be gone for good. The Change Log records which Transactions they were on.</p>
+      <p>The Overrides, Notes and Not a Transfer marks will be gone for good. The Change Log records which Transactions they were on.</p>
       {props.failed && (
         <p role="alert">
           <Status tone="danger">Fernledger could not discard them. Try again.</Status>
@@ -530,11 +531,11 @@ function ReplaceDialog(props: {
   onCancel: () => void
 }) {
   const { data, isError } = useQuery(importedRowsQuery(props.account.id))
-  // The Worker forecasts how many of the Account's Overrides and Notes the file would carry over. Until it has, or if it can't, the
+  // The Worker forecasts how many of the Account's Overrides, Notes and Not a Transfer marks the file would carry over. Until it has, or if it can't, the
   // question says they are carried over and that how many have no match is counted after the Import.
   const { data: preview } = useQuery(carryPreviewQuery(props.account.id, props.previewRows, props.previewKey))
   const imported = data?.imported
-  const withOwnWork = data?.withOverrideOrNote ?? 0
+  const withOwnWork = data?.withOwnWork ?? 0
   const waiting = data?.carryOverWaiting ?? 0
   const paired = data?.paired ?? 0
   const carryText = describeCarryBefore({ withOwnWork, waiting, preview })
@@ -579,7 +580,7 @@ function ReplaceDialog(props: {
             Import stops part way, the part of the old history already removed can't be put back.{' '}
             {overOneDay
               ? `Removing and importing this many Transactions takes more database writes than the free plan allows in a day (${DAILY_ROW_WRITES.toLocaleString('en-NZ')}). Fernledger stops when the limit is reached, and you choose the same file again tomorrow to finish.`
-              : `Each step uses about ${(REPLACE_SLICE * WRITES_PER_ROW).toLocaleString('en-NZ')} of the ${DAILY_ROW_WRITES.toLocaleString('en-NZ')} database writes the free plan allows each day, and a few more for each Override, Note or Transfer it holds.`}
+              : `Each step uses about ${(REPLACE_SLICE * WRITES_PER_ROW).toLocaleString('en-NZ')} of the ${DAILY_ROW_WRITES.toLocaleString('en-NZ')} database writes the free plan allows each day, and a few more for each Override, Note, Not a Transfer mark or Transfer it holds.`}
           </p>
         )}
       </div>

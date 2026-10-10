@@ -18,7 +18,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 ## Structure
 - Business logic lives in pure functions with their own tests. Worker handlers stay thin: authenticate, validate, call the logic, respond.
 - Every `/api` request is authenticated via the Access JWT and fails closed.
-- A Transfer is never spending or income. A query that lists, filters or totals spending (Budgets, Reports, the Summary, a Category total) builds from `effectiveCategory()` in `worker/effective-category.ts` and uses its `isTransfer`, never its own version of "paired, or a Rule marks it", and a test proves a Transfer is left out. Spending and Income, by Category or month, come only from `buildSpending` and `rollUp` in `worker/spending.ts` ([ADR 0012](docs/adr/0012-spending-and-category-kinds.md)); don't total them again somewhere else.
+- A Transfer is never spending or income. A query that lists, filters or totals spending (Budgets, Reports, the Summary, a Category total) builds from `effectiveCategory()` in `worker/effective-category.ts` and uses its `isTransfer`, never its own version of "paired, or a Rule marks it, unless the Admin said Not a Transfer", and a test proves a Transfer is left out. Spending and Income, by Category or month, come only from `buildSpending` and `rollUp` in `worker/spending.ts` ([ADR 0012](docs/adr/0012-spending-and-category-kinds.md)); don't total them again somewhere else. Who can say Not a Transfer comes from `markable` in `effective-category.ts` and reaches the pages as `canMarkNotTransfer`; the pages decide nothing from a pairing or a Rule.
 - A Category shown to a reader (a page, a Report, a CSV file) comes from `effectiveCategory().shown`, never its `id`, `name` or `source`: a Transfer has none, and shows as a Transfer rather than as Uncategorised or under a Rule's Category.
 - A batch that adds Transactions (Import today, Sync when it lands) puts `pairTransfersStatement` (`worker/transfers.ts`) in the same batch, after the insert and the Rules, so a Transfer is never missed. A batch that removes Transactions also lets go of their matching Transactions in the same batch, because a pair's pointer is deliberately not a foreign key (`migrations/1501_transfers.sql`).
 - Every Admin change is written with `recordChange` (`worker/changelog.ts`), which batches it with its Change Log entry. Never write to the Change Log separately. Each entry has a `type` from `CHANGE_TYPES`; a new kind of Admin change adds its type there so Members can filter by it.
@@ -48,6 +48,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 ## Tests
 - Test behaviour at three seams: the Worker boundary, the bank CSV adapters, and the browser (Playwright, kept small). Worker tests go through the real request path (`exports.default.fetch`). Call `worker.fetch` directly only when the test must change the Worker's env.
 - Fixtures are made up and follow the hard rule in `AGENTS.md`. See `docs/bank-formats/` for each layout.
+- A browser spec that creates Accounts takes numbers no other spec uses (the specs and both themes share one database), from the registry in `e2e/account-numbers.json`; `npm run test:scripts` fails on a clash.
 - A test proves something only if it would fail when the code it protects is removed. Reviewers check this for security tests.
 
 ## Dependencies

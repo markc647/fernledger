@@ -249,7 +249,7 @@ export function TransactionList({
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {saved}
       </p>
-      {isAdmin && editing && <EditPanel key={editing.id} row={editing} onSaved={() => finish(editing, `Saved ${editing.description}.`)} onCancel={() => finish(editing, '')} />}
+      {isAdmin && editing && <EditPanel key={editing.id} row={editing} onSaved={(message) => finish(editing, message ?? `Saved ${editing.description}.`)} onCancel={() => finish(editing, '')} />}
       {showFilters && <TransactionFilters search={search} onSearch={onSearch} />}
       {backwards ? (
         <p role="alert" className="mt-4 font-medium">

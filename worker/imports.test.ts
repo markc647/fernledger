@@ -1,5 +1,7 @@
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { serialiseRows, WRITES_PER_ROW } from './import-rows'
+import { INSERT_ROWS } from './imports'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -351,6 +353,23 @@ describe('GET /api/transactions paging', () => {
 
   it('refuses a limit that is not a number', async () => {
     expect((await call('/api/transactions?limit=lots')).status).toBe(400)
+  })
+})
+
+// ADR 0004: the free plan allows 100,000 row writes a day, and the Replace question and the README work out how many rows fit from what one row costs.
+describe('what importing a row writes', () => {
+  it('is WRITES_PER_ROW for each row (the row and its three indexes: date, Account and date, unique ID), and one more for the statement, for the table’s row counter', async () => {
+    await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES (?, 'Example savings')").bind(savings).run()
+    const insert = (rows: ReturnType<typeof rowsFrom>) => env.DB.prepare(INSERT_ROWS).bind(savings, serialiseRows(rows), null).run()
+
+    const one = (await insert(rowsFrom(1, 1))).meta
+    const many = (await insert(rowsFrom(2, 101))).meta
+
+    // The other indexes on a Transaction are partial (a Category, a Transfer, a mark), and a new row is in none of them.
+    const whole = (await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'transactions' AND sql NOT LIKE '%WHERE%' ORDER BY name").all<{ name: string }>()).results
+    expect(whole.map((index) => index.name)).toEqual(['transactions_account_date', 'transactions_date'])
+    expect(one.rows_written).toBe(WRITES_PER_ROW + 1)
+    expect(many.rows_written).toBe(WRITES_PER_ROW * 100 + 1)
   })
 })
 

@@ -479,6 +479,8 @@ describe('GET /api/transactions/:id', () => {
       transferAccountName: null,
       transferTransactionId: null,
       transferPartnerOverridden: false,
+      canMarkNotTransfer: false,
+      notTransfer: false,
       bankTime: null,
       firstSeenAt: null,
     })
@@ -528,5 +530,42 @@ describe('GET /api/transactions/:id', () => {
     const res = await call(`/api/transactions/${id}`)
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'Not found' })
+  })
+})
+
+// The ID in the path is the Transaction it looks like: a number written another way (`1e1` is 10 to Number()) names no Transaction, for every route that
+// takes one, so a write can't land on another Transaction than the one in the address.
+describe('a Transaction ID written another way', () => {
+  const writeAs = (path: string, method: string, body: unknown) =>
+    exports.default.fetch(
+      new Request(`${origin}${path}`, { method, headers: { Cookie: 'fernledger_dev_as=admin', Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    )
+  /** A Transaction with the ID 10, so that '1e1', '10.0' and '010' all parse to one that exists. */
+  const addTen = () =>
+    env.DB.prepare("INSERT INTO transactions (id, account_id, date, amount_cents, description, source) VALUES (10, ?, '2026-10-01', -1000, 'EXAMPLE SHOP TEN', 'import')").bind(savings).run()
+
+  it.each([
+    ['PUT', 'override', () => ({ categoryId: category('Eating out') })],
+    ['PUT', 'note', () => ({ note: 'Written to the wrong Transaction' })],
+    ['POST', 'not-transfer', () => ({})],
+    ['DELETE', 'not-transfer', () => ({})],
+  ] as const)('is Transaction 10 only as 10, for %s …/%s', async (method, route, body) => {
+    await addTen()
+
+    for (const written of ['1e1', '10.0', '010', '+10', '0xa', '10e0', '10%20']) {
+      const res = await writeAs(`/api/transactions/${written}/${route}`, method, body())
+      expect(res.status, `${method} ${written}`).toBe(404)
+    }
+    expect(await env.DB.prepare('SELECT override_category AS overrideCategory, note, not_transfer_with AS mark FROM transactions WHERE id = 10').first()).toEqual({ overrideCategory: null, note: null, mark: null })
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM change_log').first<{ n: number }>())!.n).toBe(0)
+  })
+
+  it('still writes to the Transaction when the ID is written as it is', async () => {
+    await addTen()
+
+    expect((await writeAs('/api/transactions/10/override', 'PUT', { categoryId: category('Eating out') })).status).toBe(200)
+    expect((await writeAs('/api/transactions/10/note', 'PUT', { note: 'Written to Transaction 10' })).status).toBe(200)
+
+    expect(await env.DB.prepare('SELECT override_category AS overrideCategory, note FROM transactions WHERE id = 10').first()).toEqual({ overrideCategory: category('Eating out'), note: 'Written to Transaction 10' })
   })
 })

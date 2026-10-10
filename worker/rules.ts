@@ -5,7 +5,7 @@ import { recordChange } from './changelog'
 import { criteriaBody, describeRule, MAX_RULES, ruleBody, ruleRecord, toCriteria, type Criteria } from './rule-criteria'
 import { previewStatements, type PreviewSample } from './rule-preview'
 import { latestRerun, restartRerun, startRerun, stepRerun, stopRerun } from './rule-rerun'
-import { validate } from './validate'
+import { nothing, validate } from './validate'
 
 // Rules are applied to Transactions an Import adds (rule-apply.ts); saving, changing or removing a Rule here never
 // touches a Transaction that is already stored. The Admin applies the Rules to all of those with a re-run (rule-rerun.ts),
@@ -13,7 +13,6 @@ import { validate } from './validate'
 // to the start, so each change here carries `restartRerun` in its batch. Every change is one Change Log entry of type `rule`.
 
 const orderBody = z.object({ ids: z.array(z.int().check(z.positive())).check(z.maxLength(MAX_RULES)) })
-const nothing = z.object({})
 
 type RuleView = Criteria & { id: number; categoryId: number | null; categoryName: string | null; categoryRemoved: boolean; transfer: boolean }
 type RuleRow = Omit<RuleView, 'categoryRemoved' | 'transfer'> & { categoryRemoved: number; transfer: number }

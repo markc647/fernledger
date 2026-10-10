@@ -1,0 +1,16 @@
+{
+  "specs": {
+    "budgets.spec.ts": [57, 58],
+    "categories.spec.ts": [88, 89],
+    "change-log.spec.ts": [90, 91],
+    "cutover.spec.ts": [92, 93],
+    "import.spec.ts": [94, 95, 96, 97, 99],
+    "report-balances.spec.ts": [51, 52, 53, 54, 55, 56],
+    "reports.spec.ts": [60, 61, 62, 63],
+    "rules.spec.ts": [84, 85],
+    "summary.spec.ts": [86, 87],
+    "transactions.spec.ts": [70, 71, 72, 73],
+    "transfers.spec.ts": [40, 41, 42, 43, 44, 45, 46, 47]
+  },
+  "mentionedOnly": [97]
+}
