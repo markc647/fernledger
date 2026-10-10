@@ -56,6 +56,20 @@ const searchFor = async (page: Page, text: string) => {
 }
 const dataRows = (page: Page) => page.getByRole('row').filter({ has: page.getByRole('cell') })
 
+/**
+ * Waits until a Transaction's details have replaced the list, and returns the part of the page that is the details.
+ * A heading name matches as a substring, so "Transaction" alone is also found in the list's "Transactions" heading, and a
+ * test that clicks straight away then races the navigation (slower on CI). Every row of the list has an "Edit Category and
+ * Note for …" button too, so the buttons are looked for inside the details only.
+ */
+const detailsOpened = async (page: Page) => {
+  await expect(page).toHaveURL(/\/transactions\/\d+/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Transaction', exact: true })).toBeVisible()
+  const details = page.getByRole('main').filter({ has: page.getByRole('region', { name: 'Summary' }) })
+  await expect(details).toBeVisible()
+  return details
+}
+
 test.describe.configure({ mode: 'serial' })
 
 test('a Member finds Transactions by text, Account, Category and dates, and the search is in the address', async ({ page, context, baseURL }, testInfo) => {
@@ -224,7 +238,7 @@ test('a Transaction opens to show its details, and Back returns to the same sear
   await page.goto(`/transactions?q=${stamp}`)
   await page.getByRole('link', { name: names.cafeOne }).click()
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Transaction' })).toBeVisible()
+  await detailsOpened(page)
   const summary = page.getByRole('region', { name: 'Summary' })
   await expect(summary).toContainText('Mon 8 Oct 2012')
   await expect(summary).toContainText(names.cafeOne)
@@ -307,7 +321,7 @@ test('Back from a Transaction opened on the Uncategorised page returns to the Un
 
   await page.goto('/uncategorised?sort=amount')
   await page.getByRole('link', { name: 'EXAMPLE CAFE TOWN' }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Transaction' })).toBeVisible()
+  await detailsOpened(page)
   await page.getByRole('link', { name: 'Back to Uncategorised' }).click()
 
   await expect(page).toHaveURL(/\/uncategorised\?sort=amount$/)
@@ -381,9 +395,10 @@ test('the Admin edits a Transaction from its details and sees the change there',
   const { stamp, names } = await seedFour(context, baseURL!, testInfo.project.name)
   await page.goto(`/transactions?q=${stamp}`)
   await page.getByRole('link', { name: names.hardware }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Transaction' })).toBeVisible()
+  const details = await detailsOpened(page)
+  const editButton = details.getByRole('button', { name: 'Edit Category and Note', exact: true })
 
-  await page.getByRole('button', { name: 'Edit Category and Note' }).click()
+  await editButton.click()
   await expect(page.getByLabel('Category', { exact: true })).toBeFocused()
   await page.getByLabel('Category', { exact: true }).selectOption({ label: 'Home and garden' })
   await page.getByLabel('Note', { exact: true }).fill(`Paint for the fence ${stamp}`)
@@ -395,7 +410,7 @@ test('the Admin edits a Transaction from its details and sees the change there',
   await expect(summary).toContainText('Home and garden')
   await expect(summary).toContainText('Override: set by the Admin')
   await expect(summary).toContainText(`Paint for the fence ${stamp}`)
-  await expect(page.getByRole('button', { name: 'Edit Category and Note' })).toBeFocused()
+  await expect(editButton).toBeFocused()
   await noAxeViolations(page)
 
   // The list sees it too, and can filter by it.
