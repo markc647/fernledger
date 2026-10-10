@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addMonths, budgetStatus, changeLine, monthChoices, savedMessage, spentLine } from './budgets'
+import { addMonths, budgetStatus, capNotice, changeLine, laterChanges, monthChoices, savedMessage, spentText } from './budgets'
 
 describe('budgetStatus', () => {
   it('is under Budget, with what is left, while less than the Budget has been spent', () => {
@@ -26,11 +26,39 @@ describe('budgetStatus', () => {
   })
 })
 
-describe('spentLine', () => {
-  it('writes what was spent, with a minus only when more came in than went out', () => {
-    expect(spentLine(5_550)).toBe('$55.50')
-    expect(spentLine(0)).toBe('$0.00')
-    expect(spentLine(-1_500)).toBe('−$15.00')
+describe('spentText', () => {
+  it('writes what was spent in dollars, and money back as money back rather than as a negative spend', () => {
+    expect(spentText(5_550)).toBe('$55.50')
+    expect(spentText(0)).toBe('$0.00')
+    expect(spentText(-1_500)).toBe('$15.00 back')
+    expect(spentText(-123_456_789)).toBe('$1,234,567.89 back')
+  })
+})
+
+describe('laterChanges', () => {
+  it('keeps the changes that begin after the month, which is where a Budget set from it stops', () => {
+    const changes = [{ effectiveFrom: '2026-08' }, { effectiveFrom: '2026-10' }, { effectiveFrom: '2026-12' }, { effectiveFrom: '2027-03' }]
+
+    expect(laterChanges(changes, '2026-10')).toEqual([{ effectiveFrom: '2026-12' }, { effectiveFrom: '2027-03' }])
+    expect(laterChanges(changes, '2027-03')).toEqual([])
+    expect(laterChanges(changes, '2020-01')).toEqual(changes)
+    expect(laterChanges([], '2026-10')).toEqual([])
+  })
+})
+
+describe('capNotice', () => {
+  it('says nothing while there is plenty of room', () => {
+    expect(capNotice(0, 600)).toBeNull()
+    expect(capNotice(539, 600)).toBeNull()
+  })
+
+  it('says how many are used, and that none can be removed, once the history is nearly full', () => {
+    expect(capNotice(540, 600)).toBe('Fernledger keeps at most 600 Budget changes, for good, and none can be removed. 540 are used.')
+    expect(capNotice(599, 600)).toContain('599 are used')
+  })
+
+  it('says when it is full, and that a month with a change can still be replaced', () => {
+    expect(capNotice(600, 600)).toBe('Fernledger keeps at most 600 Budget changes, for good, and all 600 are used. A month that already has a change can still be replaced.')
   })
 })
 

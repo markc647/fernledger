@@ -376,7 +376,7 @@ test('restore still refuses a database whose Change Log has rows, and leaves the
   assert.equal(r.status, 1)
   assert.match(r.out, /already has rows in change_log/)
   assert.deepEqual(r.loads, [], 'nothing was loaded, so the starter rows were not cleared either')
-  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 22)
+  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 23)
 })
 
 test('a backup from before Categories existed restores and keeps the starter Categories', async () => {
@@ -386,7 +386,7 @@ test('a backup from before Categories existed restores and keeps the starter Cat
 
   assert.equal(r.status, 0, r.out)
   assert.doesNotMatch(r.out, /starter rows/)
-  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 22)
+  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 23)
   assert.equal(s.target.prepare('SELECT count(*) AS n FROM settings').get().n, 2)
 })
 
@@ -406,5 +406,5 @@ test('restore will not clear the starter Categories while a table that refers to
   assert.equal(r.status, 1)
   assert.match(r.out, /already has rows in transactions/)
   assert.deepEqual(r.loads, [])
-  assert.equal(target.prepare('SELECT count(*) AS n FROM categories').get().n, 22)
+  assert.equal(target.prepare('SELECT count(*) AS n FROM categories').get().n, 23)
 })

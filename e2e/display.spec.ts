@@ -272,6 +272,8 @@ test.describe('zoom', () => {
           route.fulfill({
             json: {
               month: '2026-10',
+              changeCount: 595,
+              changeLimit: 600,
               budgets: [
                 {
                   categoryId: 1,
@@ -295,6 +297,9 @@ test.describe('zoom', () => {
         await page.getByRole('button', { name: `Edit Budget for ${longName}` }).click()
         await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('1234567.89')
         await expect(page.getByRole('button', { name: 'End Budget' })).toBeVisible()
+        await expect(page.getByText('This Category already has later changes')).toBeVisible()
+        await expect(page.getByText('From March 2027: $1,000,000,000.00 a month')).toBeVisible()
+        await expect(page.getByText('595 are used')).toBeVisible()
         await page.getByLabel('Monthly Budget in dollars').fill('0')
         await page.getByRole('button', { name: 'Save Budget' }).click()
         await expect(page.getByRole('alert')).toContainText('more than $0')
@@ -307,6 +312,37 @@ test.describe('zoom', () => {
         }))
         expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
       })
+    }
+  }
+
+  // The Categories page with a long Category name and its Admin forms open: the kind form, then the removal question.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      for (const open of ['Set kind of', 'Remove'] as const) {
+        test(`/categories with the ${open === 'Remove' ? 'removal question' : 'kind form'} open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+          await signInAs(context, 'admin')
+          const longName = 'Health and medical costs for the household and the long-term care fees'
+          await page.route(/\/api\/categories$/, (route) =>
+            route.request().method() === 'GET'
+              ? route.fulfill({ json: [{ id: 1, name: longName, kind: 'spending' }, { id: 2, name: 'Wages and salary', kind: 'income' }, { id: 3, name: 'Loans', kind: 'loans' }] })
+              : route.fallback(),
+          )
+          await page.setViewportSize({ width, height })
+          await page.goto('/categories')
+          await sizeButton(page, size).click()
+          await page.getByRole('button', { name: `${open} ${longName}` }).click()
+          if (open === 'Remove') await expect(page.getByText('If it has a Budget, the Budget stops being used')).toBeVisible()
+          else await expect(page.locator('#kind-1')).toBeFocused()
+          // Measure only once the size is applied and the buttons have finished their width transition.
+          await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+          const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            clientWidth: document.documentElement.clientWidth,
+          }))
+          expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        })
+      }
     }
   }
 
@@ -325,6 +361,7 @@ test.describe('zoom', () => {
                 { categoryId: 2, categoryName: 'Groceries', budgetCents: 80000, spentCents: 80000 },
                 { categoryId: 3, categoryName: 'Fuel', budgetCents: 100000000000, spentCents: -123456789 },
               ],
+              otherCents: 123456789012,
             },
           }),
         )
@@ -335,6 +372,9 @@ test.describe('zoom', () => {
         await expect(widget).toContainText('Over Budget')
         await expect(widget).toContainText('On Budget')
         await expect(widget).toContainText('Under Budget')
+        await expect(widget).toContainText('$1,234,567.89 back')
+        await expect(widget).toContainText('Spending outside Budgets')
+        await expect(widget).toContainText('$1,234,567,890.12')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))

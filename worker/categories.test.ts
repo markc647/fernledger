@@ -13,7 +13,7 @@ async function call(path: string, opts: { who?: Who; method?: string; body?: unk
   return exports.default.fetch(new Request(`${origin}${path}`, { method: opts.method ?? 'GET', headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) }))
 }
 
-type Category = { id: number; name: string }
+type Category = { id: number; name: string; kind: string }
 type Row = { id: number; categoryId: number | null; categoryName: string | null; categorySource: string | null; note: string | null; description: string }
 
 const categories = async (who: Who = 'member'): Promise<Category[]> => (await call('/api/categories', { who })).json()
@@ -31,24 +31,24 @@ async function transaction(n: number) {
   return meta.last_row_id
 }
 
-type CategoryRecord = { id: number; name: string }
+type CategoryRecord = { id: number; name: string; kind: string }
 let starters: CategoryRecord[] = []
 beforeAll(async () => {
-  starters = (await env.DB.prepare('SELECT id, name FROM categories WHERE removed_at IS NULL ORDER BY id').all<CategoryRecord>()).results
+  starters = (await env.DB.prepare('SELECT id, name, kind FROM categories WHERE removed_at IS NULL ORDER BY id').all<CategoryRecord>()).results
 })
 
 beforeEach(async () => {
   await env.DB.batch(['transactions', 'accounts', 'change_log', 'categories'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
   // Back to the starter list as migrated, so no test depends on what an earlier one added, renamed or removed.
-  await env.DB.batch(starters.map((c) => env.DB.prepare('INSERT INTO categories (id, name) VALUES (?, ?)').bind(c.id, c.name)))
+  await env.DB.batch(starters.map((c) => env.DB.prepare('INSERT INTO categories (id, name, kind) VALUES (?, ?, ?)').bind(c.id, c.name, c.kind)))
   accountId = (await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-99', 'Example') RETURNING id").first<{ id: number }>())!.id
 })
 
 describe('the starter Categories', () => {
   it('are there from the first request, in plain NZ English, for a Member to read', async () => {
     const names = (await categories('member')).map((c) => c.name)
-    expect(names).toHaveLength(22)
-    expect(names).toEqual(expect.arrayContaining(['Groceries', 'Eating out', 'Rent or mortgage', 'NZ Super and benefits', 'Other income']))
+    expect(names).toHaveLength(23)
+    expect(names).toEqual(expect.arrayContaining(['Groceries', 'Eating out', 'Rent or mortgage', 'NZ Super and benefits', 'Other income', 'Loans']))
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' })))
   })
 
@@ -62,9 +62,9 @@ describe('adding a Category', () => {
     const res = await call('/api/categories', { method: 'POST', body: { name: '  Care Fees ' } })
 
     expect(res.status).toBe(201)
-    expect(await res.json()).toEqual({ id: expect.any(Number), name: 'Care Fees' })
+    expect(await res.json()).toEqual({ id: expect.any(Number), name: 'Care Fees', kind: 'spending' })
     expect((await categories()).map((c) => c.name)).toContain('Care Fees')
-    expect(await changeLog()).toEqual([{ summary: 'Added Category Care Fees', actor: 'admin@example.com', type: 'category', before: null, after: '{"name":"Care Fees"}' }])
+    expect(await changeLog()).toEqual([{ summary: 'Added Category Care Fees', actor: 'admin@example.com', type: 'category', before: null, after: '{"name":"Care Fees","kind":"Spending"}' }])
   })
 
   it('refuses a name that is in use, ignoring case, and writes nothing', async () => {
@@ -144,6 +144,106 @@ describe('renaming a Category', () => {
 
   it.each(['999999', 'abc', '1.5'])('answers 404 for a Category that is not there (%s)', async (id) => {
     expect((await call(`/api/categories/${id}`, { method: 'PATCH', body: { name: 'Anything' } })).status).toBe(404)
+  })
+})
+
+describe('the kind of a Category', () => {
+  const kindOf = async (name: string) => (await categories()).find((c) => c.name === name)?.kind
+  const setKind = (id: number, body: unknown, who: Who = 'admin') => call(`/api/categories/${id}/kind`, { who, method: 'PUT', body })
+
+  it('is Income for the starter income Categories, Loans for the starter Loans Category, and Spending for the rest, for any Member to see', async () => {
+    const all = await categories('member')
+    const named = (kind: string) => all.filter((c) => c.kind === kind).map((c) => c.name).sort()
+
+    expect(named('income')).toEqual(['Interest', 'NZ Super and benefits', 'Other income', 'Wages and salary'])
+    expect(named('loans')).toEqual(['Loans'])
+    expect(named('spending')).toHaveLength(all.length - 5)
+    expect(await kindOf('Groceries')).toBe('spending')
+  })
+
+  it('is Spending for a new Category unless the Admin chooses another, and is logged in words', async () => {
+    const plain = await call('/api/categories', { method: 'POST', body: { name: 'Test Plain' } })
+    const income = await call('/api/categories', { method: 'POST', body: { name: 'Test Pension', kind: 'income' } })
+
+    expect(await plain.json()).toMatchObject({ kind: 'spending' })
+    expect(await income.json()).toMatchObject({ kind: 'income' })
+    expect(await kindOf('Test Pension')).toBe('income')
+    expect((await changeLog()).map((e) => e.after)).toEqual(['{"name":"Test Plain","kind":"Spending"}', '{"name":"Test Pension","kind":"Income"}'])
+  })
+
+  it('is set by the Admin, and logged with the kind before and after', async () => {
+    const id = await idOf('Groceries')
+
+    const res = await setKind(id, { kind: 'income' })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ id, name: 'Groceries', kind: 'income' })
+    expect(await kindOf('Groceries')).toBe('income')
+    expect(await changeLog()).toEqual([
+      {
+        summary: 'Changed the kind of Category Groceries from Spending to Income',
+        actor: 'admin@example.com',
+        type: 'category',
+        before: '{"name":"Groceries","kind":"Spending"}',
+        after: '{"name":"Groceries","kind":"Income"}',
+      },
+    ])
+  })
+
+  it('stays when the Category is renamed', async () => {
+    const id = await idOf('Interest')
+    const res = await call(`/api/categories/${id}`, { method: 'PATCH', body: { name: 'Bank interest' } })
+
+    expect(await res.json()).toEqual({ id, name: 'Bank interest', kind: 'income' })
+    expect(await kindOf('Bank interest')).toBe('income')
+  })
+
+  it('changes nothing, and logs nothing, when the kind is the same', async () => {
+    const res = await setKind(await idOf('Groceries'), { kind: 'spending' })
+
+    expect(res.status).toBe(200)
+    expect(await changeLog()).toEqual([])
+  })
+
+  it.each([
+    ['a kind there is not', { kind: 'savings' }],
+    ['no kind', {}],
+    ['a kind with other capitals', { kind: 'Spending' }],
+    ['a kind that is not text', { kind: 3 }],
+  ])('refuses %s (400), naming only the field, and changes nothing', async (_why, body) => {
+    const id = await idOf('Groceries')
+    const res = await setKind(id, body)
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid request', field: 'kind' })
+    expect(await kindOf('Groceries')).toBe('spending')
+    expect(await changeLog()).toEqual([])
+  })
+
+  it('refuses a new Category of a kind there is not (400)', async () => {
+    const res = await call('/api/categories', { method: 'POST', body: { name: 'Test Odd', kind: 'savings' } })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid request', field: 'kind' })
+  })
+
+  it('cannot be set by a Member (403), and nothing changes', async () => {
+    const res = await setKind(await idOf('Groceries'), { kind: 'income' }, 'member')
+
+    expect(res.status).toBe(403)
+    expect(await kindOf('Groceries')).toBe('spending')
+    expect(await changeLog()).toEqual([])
+  })
+
+  it.each(['999999', 'abc', '1.5'])('answers 404 for a Category that is not there (%s)', async (id) => {
+    expect((await call(`/api/categories/${id}/kind`, { method: 'PUT', body: { kind: 'income' } })).status).toBe(404)
+  })
+
+  it('answers 404 for a Category that was removed', async () => {
+    const id = await add('Test Care Fees')
+    await call(`/api/categories/${id}`, { method: 'DELETE', body: {} })
+
+    expect((await setKind(id, { kind: 'income' })).status).toBe(404)
   })
 })
 

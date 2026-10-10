@@ -46,6 +46,8 @@ export type EffectiveCategory = {
   name: string
   /** SQL for which slot supplied it ('override', ...), NULL when Uncategorised. */
   source: string
+  /** SQL for the Category's kind ('spending', 'income' or 'loans', category-kinds.ts), NULL when Uncategorised. */
+  kind: string
   /**
    * SQL for how the Transaction is a Transfer: 'pair' when it is paired with a Transaction in another Account (transfers.ts),
    * 'rule' when a Rule marks it and nothing paired it (the backstop), NULL when it is not a Transfer. A pair outranks the Rule,
@@ -57,11 +59,11 @@ export type EffectiveCategory = {
   /** SQL that is true when the Transaction is a Transfer, so it is left out of spending. Wrap it in NOT for spending. */
   isTransfer: string
   /**
-   * `id`, `name` and `source` as a list or a Transaction's details show them: none for a Transfer. A Transfer is not spending, so it has
+   * `id`, `name`, `source` and `kind` as a list or a Transaction's details show them: none for a Transfer. A Transfer is not spending, so it has
    * no Category to show, even when a Rule or Akahu would have given it one; showing, sorting or filtering by that Category would make the
    * same Transaction read as a Transfer in one place and as spending in another.
    */
-  shown: { id: string; name: string; source: string }
+  shown: { id: string; name: string; source: string; kind: string }
 }
 
 /** A slot's Category counts only while it is in use: a removed Category falls through to the next slot. */
@@ -74,19 +76,21 @@ export function effectiveCategory(slots: readonly CategorySlot[] = CATEGORY_SLOT
   const transfer = `CASE WHEN ${unlessOverridden} THEN CASE WHEN t.transfer_of IS NOT NULL THEN 'pair' WHEN t.rule_transfer = 1 THEN 'rule' END END`
   const isTransfer = `(${transfer} IS NOT NULL)`
   const unlessTransfer = (sql: string) => `CASE WHEN ${isTransfer} THEN NULL ELSE ${sql} END`
-  if (live.length === 0) return { joins: '', id: 'NULL', name: 'NULL', source: 'NULL', transfer, isTransfer, shown: { id: 'NULL', name: 'NULL', source: 'NULL' } }
+  if (live.length === 0) return { joins: '', id: 'NULL', name: 'NULL', source: 'NULL', kind: 'NULL', transfer, isTransfer, shown: { id: 'NULL', name: 'NULL', source: 'NULL', kind: 'NULL' } }
   // SQLite's COALESCE needs two arguments or more.
-  const first = (field: 'id' | 'name') => (live.length === 1 ? `${alias(live[0]!)}.${field}` : `COALESCE(${live.map((slot) => `${alias(slot)}.${field}`).join(', ')})`)
+  const first = (field: 'id' | 'name' | 'kind') => (live.length === 1 ? `${alias(live[0]!)}.${field}` : `COALESCE(${live.map((slot) => `${alias(slot)}.${field}`).join(', ')})`)
   const id = first('id')
   const name = first('name')
+  const kind = first('kind')
   const source = `CASE ${live.map((slot) => `WHEN ${alias(slot)}.id IS NOT NULL THEN '${slot.source}'`).join(' ')} END`
   return {
     joins: live.map((slot) => `LEFT JOIN categories ${alias(slot)} ON ${alias(slot)}.id = ${slot.column} AND ${alias(slot)}.removed_at IS NULL`).join(' '),
     id,
     name,
     source,
+    kind,
     transfer,
     isTransfer,
-    shown: { id: unlessTransfer(id), name: unlessTransfer(name), source: unlessTransfer(source) },
+    shown: { id: unlessTransfer(id), name: unlessTransfer(name), source: unlessTransfer(source), kind: unlessTransfer(kind) },
   }
 }

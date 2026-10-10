@@ -2,17 +2,30 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { ResponsiveTable } from '@/components/responsive-table'
 import { Status } from '@/components/status'
-import { budgetStatus, spentLine } from '@/lib/budgets'
+import { budgetStatus, spentText } from '@/lib/budgets'
 import { formatBalance, formatMonth } from '@/lib/format'
 import { meQuery } from '@/lib/me'
 import { budgetVsActualQuery } from '@/lib/queries'
 
 const money = 'whitespace-nowrap tabular-nums [font-kerning:none]'
 
-/** Summary widget: this month's Budget for each Category that has one, against what it has spent, and whether it is over or under. */
+/** A Category with a Budget, or the one row for everything that has none. */
+type Row = { key: string; name: string; budgetCents: number | null; spentCents: number }
+
+/**
+ * Summary widget: this month's Budget for each Spending Category that has one, against what it spent, and whether it is over or under,
+ * then what the rest spent. Which Budget a month has and what was spent come from the Worker (ADR 0012); the browser only words how they compare.
+ */
 export function BudgetVsActualWidget() {
   const { data, error } = useQuery(budgetVsActualQuery)
   const { data: me } = useQuery(meQuery)
+  const rows: Row[] =
+    data && data.rows.length > 0
+      ? [
+          ...data.rows.map((row) => ({ key: String(row.categoryId), name: row.categoryName, budgetCents: row.budgetCents, spentCents: row.spentCents })),
+          { key: 'other', name: 'Spending outside Budgets', budgetCents: null, spentCents: data.otherCents },
+        ]
+      : []
   return (
     <section aria-labelledby="budget-heading">
       <h2 id="budget-heading" className="mb-3 text-xl font-semibold">
@@ -24,22 +37,26 @@ export function BudgetVsActualWidget() {
         <p role="status">Loading…</p>
       ) : (
         <>
-          <p className="mb-3 text-muted-foreground">
-            {formatMonth(data.month)}. Each month stands alone: a Budget you don't spend isn't carried over. Transfers between your own Accounts and Pending Transactions aren't counted as spending.
-          </p>
+          {rows.length > 0 && (
+            <p className="mb-3 text-muted-foreground">
+              {formatMonth(data.month)}. Each month stands alone: a Budget you don't spend isn't carried over. Money back, such as a refund, comes off what you spent, so what's left can be more than the Budget.
+              Transfers between your own Accounts, Pending Transactions and Loans aren't counted as spending.
+            </p>
+          )}
           <ResponsiveTable
-            caption={`Budget and spending in ${formatMonth(data.month)} for each Category with a Budget`}
-            rows={data.rows}
-            getRowKey={(row) => row.categoryId}
+            caption={`Budget and spending in ${formatMonth(data.month)} for each Category with a Budget, and the rest`}
+            rows={rows}
+            getRowKey={(row) => row.key}
             emptyMessage={`No Category has a Budget in ${formatMonth(data.month)}.${me?.role === 'admin' ? ' Set one on the Budgets page.' : ''}`}
             columns={[
-              { key: 'category', header: 'Category', cell: (row) => row.categoryName },
-              { key: 'budget', header: 'Budget', align: 'end', cell: (row) => <span className={money}>{formatBalance(row.budgetCents)}</span> },
-              { key: 'spent', header: 'Spent', align: 'end', cell: (row) => <span className={money}>{spentLine(row.spentCents)}</span> },
+              { key: 'category', header: 'Category', cell: (row) => row.name },
+              { key: 'budget', header: 'Budget', align: 'end', cell: (row) => (row.budgetCents === null ? 'No Budget' : <span className={money}>{formatBalance(row.budgetCents)}</span>) },
+              { key: 'spent', header: 'Spent', align: 'end', cell: (row) => <span className={money}>{spentText(row.spentCents)}</span> },
               {
                 key: 'status',
                 header: 'Status',
                 cell: (row) => {
+                  if (row.budgetCents === null) return <Status tone="neutral">Not in a Budget</Status>
                   const status = budgetStatus(row.budgetCents, row.spentCents)
                   return (
                     <span className="inline-flex flex-col items-start">

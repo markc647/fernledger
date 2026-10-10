@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isMonth, monthLabel, monthStart, nextMonth, nzMonth } from './months'
+import { isMonth, monthEnd, monthLabel, monthStart, nextMonth, nzMonth } from './months'
 
 describe('isMonth', () => {
   it.each(['2026-10', '2000-01', '2100-12', '2026-02'])('accepts %s', (value) => {
@@ -19,6 +19,19 @@ describe('monthLabel', () => {
     ['2026-12', 'December 2026'],
   ])('writes %s as %s', (month, label) => {
     expect(monthLabel(month)).toBe(label)
+  })
+})
+
+describe('monthEnd', () => {
+  it.each([
+    ['2026-10', '2026-10-31'],
+    ['2026-09', '2026-09-30'],
+    ['2026-02', '2026-02-28'],
+    ['2028-02', '2028-02-29'], // a leap year
+    ['2100-02', '2100-02-28'], // 2100 is not one
+    ['2026-12', '2026-12-31'],
+  ])('is the last day of %s: %s', (month, last) => {
+    expect(monthEnd(month)).toBe(last)
   })
 })
 

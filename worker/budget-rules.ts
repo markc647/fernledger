@@ -2,16 +2,13 @@
 // spending, and how a change reads in the Change Log. The routes (budgets.ts) and the tests build on these.
 import * as z from 'zod/mini'
 import { isMonth, monthLabel } from './months'
-import { dollars } from './rule-criteria'
-import { spentCents, type SpendingRow } from './spending'
-
-/** The most a Budget can be: $1,000,000,000.00 a month. The Budgets page reads dollars with the Rules page's reader, which stops at the same figure (budget-rules.test.ts checks they agree). */
-export const MAX_BUDGET_CENTS = 100_000_000_000
+import { dollars, MAX_AMOUNT_CENTS } from './rule-criteria'
+import { rollUp, type SpendingRow } from './spending'
 
 /**
- * The most Budget changes the database holds in all (rows of `budgets`). The Budgets page reads every one (ADR 0004: D1 bills rows
- * read), and a Budget is only ever added to or replaced, never removed. 22 starter Categories with a change every month for two
- * years is about 500, far past what a family sets.
+ * The most Budget changes the database holds in all (rows of `budgets`), for good: a change is replaced, never removed. The Budgets
+ * page reads every one (ADR 0004: D1 bills rows read), and 600 is a change every month for two years in 25 Categories, far past what a
+ * family sets. The page says how many are used as it nears the limit.
  */
 export const MAX_BUDGET_CHANGES = 600
 
@@ -21,7 +18,7 @@ export const MAX_BUDGET_CHANGES = 600
  */
 export const budgetBody = z.object({
   effectiveFrom: z.string().check(z.refine(isMonth)),
-  amountCents: z.nullable(z.int().check(z.positive(), z.maximum(MAX_BUDGET_CENTS))),
+  amountCents: z.nullable(z.int().check(z.positive(), z.maximum(MAX_AMOUNT_CENTS))),
 })
 
 /** The month `/api/budgets` and `/api/budgets/vs-actual` are asked about; the current NZ month when left out. */
@@ -42,15 +39,16 @@ export const latestMonth = (category: string, month: string) =>
   `(SELECT effective_from_month FROM budgets WHERE category_id = ${category} AND effective_from_month <= ${month} ORDER BY effective_from_month DESC LIMIT 1)`
 
 /**
- * The Budget in effect in month ?1 for every Category in use. A Category with no row on or before the month has no Budget, and
- * neither has one whose latest row has no amount (it ended). Nothing carries over: only the one row decides the month.
- * The month is only ever bound.
+ * The Budget in effect in month ?1 for every Spending Category in use (Budgets are for those only, ADR 0012). A Category with no row on or
+ * before the month has no Budget, and neither has one whose latest row has no amount (it ended). Nothing carries over: only the one row
+ * decides the month. The month is only ever bound. `budgetInMonth` is the same rule for changes already read; budget-rules.test.ts
+ * checks that the two agree.
  */
 export const IN_EFFECT = `
   SELECT c.id AS categoryId, c.name AS categoryName, b.amount_cents AS amountCents, b.effective_from_month AS effectiveFrom
   FROM categories c
   LEFT JOIN budgets b ON b.category_id = c.id AND b.effective_from_month = ${latestMonth('c.id', '?1')}
-  WHERE c.removed_at IS NULL
+  WHERE c.removed_at IS NULL AND c.kind = 'spending'
   ORDER BY c.name COLLATE NOCASE, c.id`
 
 /** Every Budget change, oldest month first within each Category. Bounded by MAX_BUDGET_CHANGES. */
@@ -65,16 +63,26 @@ export function withChanges(inEffect: InEffect[], changes: Change[]): BudgetView
   return inEffect.map((row) => ({ ...row, changes: byCategory.get(row.categoryId)! }))
 }
 
+/** The Budget a month has, from a Category's changes in any order: the one whose month is the latest on or before it. */
+export function budgetInMonth(changes: { effectiveFrom: string; amountCents: number | null }[], month: string): { amountCents: number | null; effectiveFrom: string | null } {
+  let latest: (typeof changes)[number] | null = null
+  for (const change of changes) if (change.effectiveFrom <= month && (latest === null || change.effectiveFrom > latest.effectiveFrom)) latest = change
+  return latest === null ? { amountCents: null, effectiveFrom: null } : { amountCents: latest.amountCents, effectiveFrom: latest.effectiveFrom }
+}
+
 export type VsActual = { categoryId: number; categoryName: string; budgetCents: number; spentCents: number }
 
 /**
- * Budget vs actual for one month: each Category that has a Budget in it, with what it has spent (spending.ts: money out less money
- * in, Transfers and Pending Transactions left out). `spending` is that one month's rows. Uncategorised spending has no Budget to
- * compare with, so it is not here.
+ * Budget vs actual for one month: each Spending Category that has a Budget in it, with what it spent (ADR 0012; `spending` is that one
+ * month's rows). `otherCents` is what the rest spent: Uncategorised and the Spending Categories with no Budget, so a Member sees the
+ * whole of the spending and not only the part that has a Budget.
  */
-export function budgetVsActual(inEffect: InEffect[], spending: SpendingRow[]): VsActual[] {
-  const spent = new Map(spending.flatMap((row) => (row.categoryId === null ? [] : [[row.categoryId, spentCents(row)] as const])))
-  return inEffect.flatMap((row) => (row.amountCents === null ? [] : [{ categoryId: row.categoryId, categoryName: row.categoryName, budgetCents: row.amountCents, spentCents: spent.get(row.categoryId) ?? 0 }]))
+export function budgetVsActual(inEffect: InEffect[], spending: SpendingRow[]): { rows: VsActual[]; otherCents: number } {
+  const spent = new Map<number | null, number>()
+  for (const figure of rollUp(spending).categories) if (figure.kind === 'spending') spent.set(figure.categoryId, figure.cents)
+  const rows = inEffect.flatMap((row) => (row.amountCents === null ? [] : [{ categoryId: row.categoryId, categoryName: row.categoryName, budgetCents: row.amountCents, spentCents: spent.get(row.categoryId) ?? 0 }]))
+  for (const row of rows) spent.delete(row.categoryId)
+  return { rows, otherCents: [...spent.values()].reduce((sum, cents) => sum + cents, 0) }
 }
 
 /** A change as the Change Log shows it, in plain words and dollars: the page shows what is recorded as it is. `before` is the Budget in effect that month. */

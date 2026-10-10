@@ -1,47 +1,70 @@
-// The one definition of spending: what Budget vs actual, the Reports and the dashboard total, so none of them can disagree.
+// The one place Spending and Income are worked out: what Budget vs actual, the Reports and the dashboard total, so none of them can
+// disagree. The rules, and why, are ADR 0012 (docs/adr/0012-spending-and-category-kinds.md); this file is how they are written.
 //
-// Spending in a Category in an NZ calendar month is every settled Transaction in that Category and month that is not a Transfer:
-//   - Category: the effective Category as a reader sees it (`effectiveCategory().shown`): Override, then Rule, then Akahu, else none
-//     (Uncategorised, `categoryId` null). A removed Category counts as none.
-//   - Not a Transfer: `effectiveCategory().isTransfer`, never a version of "paired, or a Rule marks it" of its own (CODING_STANDARDS.md).
-//     A Transaction the Admin has given a Category by Override is spending in it, even if it was paired (effective-category.ts).
-//   - Not Pending: a Pending Transaction is stored apart from `transactions` (spec #1) and replaced on every Sync, so this never reads one.
-//   - Month: the first seven characters of the Transaction's date, which is already an NZ date (months.ts).
+//   buildSpending  SQL: money out and money in for each NZ month and Category in a date range, for all Accounts or one.
+//   rollUp         turns those rows into Spending and Income figures, per Category and per month. Totals come from here.
 //
-// Money out and money in are kept apart (`outCents`, `inCents`), because the Reports need both (income vs spending by month).
-// What a Category has SPENT is money out less money in (`spentCents`): a refund reduces it, as the Admin expects of a returned
-// purchase, and a Category that took in more than it paid out is below zero. Budget vs actual shows exactly that figure.
-// Only the Transactions that are not Transfers count in either direction, so a payment into the Savings Account is not
-// "money in" and the matching payment out of Everyday is not "money out".
+// Rows for a Loans-kind Category come back from `buildSpending` too, with `kind: 'loans'`: `rollUp` leaves them out of every
+// total, and the Loans Report (#38) reads them straight from the rows.
 //
-// It is SQL, not a function over fetched rows (ADR 0004), and it reads one range of the date index: the Transactions of the months
-// asked for, and nothing of the history around them (spending.test.ts pins the rows read).
+// It is SQL, not a function over fetched rows (ADR 0004), and it reads the date index over the range asked for and nothing
+// of the history around it (spending.test.ts pins the rows read).
+import { UNCATEGORISED_KIND, type CategoryKind } from './category-kinds'
 import { effectiveCategory } from './effective-category'
-import { monthStart, nextMonth } from './months'
 
-/** Both ends included, as `YYYY-MM` NZ months. */
-export type SpendingRange = { fromMonth: string; toMonth: string }
+/** NZ dates, both ends included. `accountId` limits it to one Account. They must have been checked (`isQueryDate`, `isMonth`): they only ever reach SQLite as bound values. */
+export type SpendingRange = { from: string; to: string; accountId?: number }
 
-/** One month in one Category. `categoryId` is null for Uncategorised. A month or Category with nothing in it has no row. */
-export type SpendingRow = { month: string; categoryId: number | null; outCents: number; inCents: number }
-
-/** What the Category spent in the month: money out less money in, in cents. Below zero when more came in than went out. */
-export const spentCents = (row: Pick<SpendingRow, 'outCents' | 'inCents'>) => row.outCents - row.inCents
+/** One month in one Category. `categoryId` is null for Uncategorised, whose kind is Spending. A month or Category with nothing in it has no row. */
+export type SpendingRow = { month: string; categoryId: number | null; kind: CategoryKind; outCents: number; inCents: number }
 
 /**
- * The statement that works out spending for the months in `range`, oldest month first. The caller prepares it with `binds`:
- * `db.prepare(sql).bind(...binds)`. The months must have been checked with `isMonth`; they only ever reach SQLite as bound values.
+ * The statement that works out money out and money in for the range, grouped by NZ month and Category, oldest month first.
+ * Transfers are left out (`isTransfer`), and a Transaction's Category and kind are its effective Category's (`shown`). The caller
+ * prepares it with `binds`: `db.prepare(sql).bind(...binds)`. A Pending Transaction is stored apart from `transactions`, so it is never read.
  */
-export function buildSpending(range: SpendingRange): { sql: string; binds: string[] } {
+export function buildSpending(range: SpendingRange): { sql: string; binds: (string | number)[] } {
   const category = effectiveCategory()
+  const binds: (string | number)[] = [range.from, range.to]
+  // Only the filters asked for are in the SQL, so an index can serve each one: the date index, or the Account's own date index.
+  if (range.accountId !== undefined) binds.push(range.accountId)
   return {
-    sql: `SELECT substr(t.date, 1, 7) AS month, ${category.shown.id} AS categoryId,
+    sql: `SELECT substr(t.date, 1, 7) AS month, ${category.shown.id} AS categoryId, COALESCE(${category.shown.kind}, '${UNCATEGORISED_KIND}') AS kind,
                  COALESCE(SUM(CASE WHEN t.amount_cents < 0 THEN -t.amount_cents END), 0) AS outCents,
                  COALESCE(SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents END), 0) AS inCents
           FROM transactions t ${category.joins}
-          WHERE t.date >= ?1 AND t.date < ?2 AND NOT ${category.isTransfer}
-          GROUP BY month, categoryId
-          ORDER BY month, categoryId`,
-    binds: [monthStart(range.fromMonth), monthStart(nextMonth(range.toMonth))],
+          WHERE t.date >= ?1 AND t.date <= ?2 ${range.accountId === undefined ? '' : 'AND t.account_id = ?3'} AND NOT ${category.isTransfer}
+          -- By position: the joined Categories have a column named kind too.
+          GROUP BY 1, 2, 3
+          ORDER BY 1, 2`,
+    binds,
   }
+}
+
+/** One Category's figure for one month: Spending (money out less money in) or Income (money in less money out). Below zero when the other way round. */
+export type CategoryFigure = { month: string; categoryId: number | null; kind: 'spending' | 'income'; cents: number }
+
+export type MonthTotals = { month: string; spendingCents: number; incomeCents: number }
+
+export type RollUp = {
+  /** Each Spending and Income Category with something in a month, in the order the rows came. A Loans Category is not here. */
+  categories: CategoryFigure[]
+  /** Spending and Income in all, for each month that has any, in the order the rows came. */
+  months: MonthTotals[]
+}
+
+/** Spending and Income from the rows of `buildSpending`. */
+export function rollUp(rows: SpendingRow[]): RollUp {
+  const categories: CategoryFigure[] = []
+  const months = new Map<string, MonthTotals>()
+  for (const row of rows) {
+    if (row.kind === 'loans') continue
+    const cents = row.kind === 'income' ? row.inCents - row.outCents : row.outCents - row.inCents
+    categories.push({ month: row.month, categoryId: row.categoryId, kind: row.kind, cents })
+    const total = months.get(row.month) ?? { month: row.month, spendingCents: 0, incomeCents: 0 }
+    if (row.kind === 'income') total.incomeCents += cents
+    else total.spendingCents += cents
+    months.set(row.month, total)
+  }
+  return { categories, months: [...months.values()] }
 }

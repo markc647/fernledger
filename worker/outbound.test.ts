@@ -70,6 +70,8 @@ const EXERCISES: Exercise[] = [
   { route: 'PUT /api/budgets/:categoryId', path: () => `/api/budgets/${made.categoryId}`, opts: { method: 'PUT', body: { effectiveFrom: '2026-10', amountCents: 50_000 } } },
   { route: 'GET /api/budgets', path: () => '/api/budgets?month=2026-10' },
   { route: 'GET /api/budgets/vs-actual', path: () => '/api/budgets/vs-actual?month=2026-10' },
+  // Last, because once it is Income the Category can have no Budget.
+  { route: 'PUT /api/categories/:id/kind', path: () => `/api/categories/${made.categoryId}/kind`, opts: { method: 'PUT', body: { kind: 'income' } } },
   // The Rules, on that Category: add one, then everything that reads or changes it, and last remove it.
   { route: 'POST /api/rules', path: () => '/api/rules', opts: () => ({ method: 'POST', body: { textContains: 'EXAMPLE', categoryId: made.categoryId } }) },
   { route: 'GET /api/rules', path: () => '/api/rules' },

@@ -22,8 +22,19 @@ export function budgetStatus(budgetCents: number, spentCents: number): BudgetSta
   return { kind: 'under', tone: 'success', words: 'Under Budget', detail: `${formatBalance(budgetCents - spentCents)} left` }
 }
 
-/** What a Category spent: signed only when more came in than went out. */
-export const spentLine = formatBalance
+/** What a Category spent, in words: "$55.50", or "$15.00 back" when more came back than went out (a refund), never a minus sign for spending. */
+export const spentText = (spentCents: number) => (spentCents < 0 ? `${formatBalance(-spentCents)} back` : formatBalance(spentCents))
+
+/** The changes to a Category's Budget that begin after `month`: a Budget set from `month` stops when the first of them starts. */
+export const laterChanges = <T extends { effectiveFrom: string }>(changes: T[], month: string) => changes.filter((change) => change.effectiveFrom > month)
+
+/** A reminder that Budget changes are limited and permanent, once the history is nearly full; null while there is plenty of room. */
+export function capNotice(count: number, limit: number): string | null {
+  if (count < limit * 0.9) return null
+  return count >= limit
+    ? `Fernledger keeps at most ${limit} Budget changes, for good, and all ${limit} are used. A month that already has a change can still be replaced.`
+    : `Fernledger keeps at most ${limit} Budget changes, for good, and none can be removed. ${count} are used.`
+}
 
 /** The month `by` months from `month` (before it when `by` is negative), both `YYYY-MM`. */
 export function addMonths(month: string, by: number): string {

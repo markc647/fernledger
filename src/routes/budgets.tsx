@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
-import { changeLine, monthChoices, savedMessage } from '@/lib/budgets'
+import { capNotice, changeLine, laterChanges, monthChoices, savedMessage } from '@/lib/budgets'
 import { formatBalance, formatMonth } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { budgetsQuery } from '@/lib/queries'
@@ -18,13 +18,15 @@ export const Route = createFileRoute('/budgets')({
 })
 
 const AMOUNT_HINT = 'Enter an amount of more than $0 in dollars, such as 800 or 800.50.'
+/** The amount hint, with how to have no Budget when there is one to end. */
+const amountHint = (canEnd: boolean) => (canEnd ? `${AMOUNT_HINT} To have no Budget, use End Budget.` : AMOUNT_HINT)
 
 /** Why a save failed, in words for the reader. */
 const whyNot = (error: unknown) =>
   error instanceof HttpError && error.status === 400
     ? AMOUNT_HINT
     : error instanceof HttpError && error.status === 409
-      ? 'There are too many Budget changes to add another. Choose a month that already has a change, and replace it.'
+      ? 'Fernledger keeps a limited number of Budget changes, and they cannot be removed, so there is no room to add another. Choose a month that already has a change, and replace it.'
       : 'That did not work. Try again.'
 
 function Budgets() {
@@ -52,6 +54,7 @@ function Budgets() {
 
   type Row = NonNullable<typeof data>['budgets'][number]
   const thisMonth = data?.month
+  const nearLimit = data ? capNotice(data.changeCount, data.changeLimit) : null
   const editingRow = data?.budgets.find((row) => row.categoryId === editing)
   const columns: Column<Row>[] = [
     { key: 'category', header: 'Category', cell: (row) => row.categoryName },
@@ -112,7 +115,7 @@ function Budgets() {
       <h1 className="text-2xl font-semibold">Budgets</h1>
       <p className="mt-2">
         A Budget is the amount you plan to spend on a Category each month. A new Budget applies from the month you choose, and earlier months keep the Budget they had.
-        Each month stands alone: what you don't spend isn't carried over. Transfers between your own Accounts and Pending Transactions aren't counted as spending.{' '}
+        Each month stands alone: what you don't spend isn't carried over. Only Spending Categories have a Budget. Transfers between your own Accounts, Pending Transactions and Loans aren't counted as spending, and money back, such as a refund, comes off what you spent.{' '}
         {isAdmin ? 'Choose Edit on a Category to set or end its Budget.' : 'Only the Admin can change them.'}
       </p>
       {thisMonth && <p className="mt-2">This month is {formatMonth(thisMonth)}, in New Zealand time.</p>}
@@ -120,6 +123,7 @@ function Budgets() {
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {notice}
       </p>
+      {nearLimit && <p className="mt-2 font-medium">{nearLimit}</p>}
       {isAdmin && editingRow && thisMonth && (
         <BudgetPanel
           key={editingRow.categoryId}
@@ -149,7 +153,7 @@ function BudgetPanel({
   onDone,
   onCancel,
 }: {
-  row: { categoryId: number; categoryName: string; amountCents: number | null; changes: { amountCents: number | null }[] }
+  row: { categoryId: number; categoryName: string; amountCents: number | null; changes: { effectiveFrom: string; amountCents: number | null }[] }
   thisMonth: string
   onDone: (message: string) => void
   onCancel: () => void
@@ -170,8 +174,9 @@ function BudgetPanel({
       onDone(savedMessage(row.categoryName, result))
     },
   })
-  // Ending is offered only where there is something to end; the Worker also says so if there is nothing in the month chosen.
-  const canEnd = row.changes.some((change) => change.amountCents !== null)
+  // Ending is offered only while the Category has a Budget now; the Worker also says so if there is nothing to end in the month chosen.
+  const canEnd = row.amountCents !== null
+  const later = laterChanges(row.changes, from)
 
   return (
     <section aria-labelledby={`${id}-heading`} className="mt-4 max-w-xl rounded-xl border-2 p-4">
@@ -206,7 +211,7 @@ function BudgetPanel({
             }}
           />
           <p id={`${id}-hint`} className="mt-1 text-muted-foreground">
-            {AMOUNT_HINT}
+            {amountHint(canEnd)}
           </p>
         </div>
         <div>
@@ -229,8 +234,18 @@ function BudgetPanel({
             ))}
           </Select>
           <p id={`${id}-month-hint`} className="mt-1 text-muted-foreground">
-            Months before the one you choose keep the Budget they had.{canEnd && ' End Budget leaves the month you choose, and the months after it, with no Budget.'}
+            Months before the one you choose keep the Budget they had.{canEnd && ' End Budget leaves the month you choose with no Budget until its next change.'}
           </p>
+          {later.length > 0 && (
+            <div className="mt-1">
+              <p className="text-muted-foreground">This Category already has later changes. They stay as they are, so what you set applies only until the first of them:</p>
+              <ul className="list-disc ps-6">
+                {later.map((change) => (
+                  <li key={change.effectiveFrom}>{changeLine(change)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="submit" size="touch" disabled={save.isPending || !amount.trim()}>
@@ -247,7 +262,7 @@ function BudgetPanel({
         </div>
         {(invalid || save.isError) && (
           <p role="alert" className="font-medium text-destructive">
-            {invalid ? AMOUNT_HINT : whyNot(save.error)}
+            {invalid ? amountHint(canEnd) : whyNot(save.error)}
           </p>
         )}
       </form>

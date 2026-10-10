@@ -17,19 +17,21 @@ async function call(path: string, opts: { who?: Who; method?: string; body?: unk
 }
 
 const ids: Record<string, number> = {}
-const NAMES = ['Groceries', 'Fuel', 'Eating out', 'Travel', 'Wages and salary']
+const NAMES = ['Groceries', 'Fuel', 'Eating out', 'Travel', 'Wages and salary', 'Loans']
 
 type Change = { effectiveFrom: string; amountCents: number | null }
 type BudgetRow = { categoryId: number; categoryName: string; amountCents: number | null; effectiveFrom: string | null; changes: Change[] }
 type VsActual = { categoryId: number; categoryName: string; budgetCents: number; spentCents: number }
 
-const budgets = async (month?: string, who: Who = 'member') => (await (await call(`/api/budgets${month ? `?month=${month}` : ''}`, { who })).json()) as { month: string; budgets: BudgetRow[] }
+const budgets = async (month?: string, who: Who = 'member') =>
+  (await (await call(`/api/budgets${month ? `?month=${month}` : ''}`, { who })).json()) as { month: string; budgets: BudgetRow[]; changeCount: number; changeLimit: number }
 /** The Budget a Category has in a month: `[amount, month it began]`, or `[null, null]` while it has none. */
 const budgetIn = async (name: string, month: string) => {
   const row = (await budgets(month)).budgets.find((b) => b.categoryName === name)!
   return [row.amountCents, row.effectiveFrom] as const
 }
-const vsActual = async (month: string, who: Who = 'member') => (await (await call(`/api/budgets/vs-actual?month=${month}`, { who })).json()) as { month: string; rows: VsActual[] }
+const vsActual = async (month: string, who: Who = 'member') => (await (await call(`/api/budgets/vs-actual?month=${month}`, { who })).json()) as { month: string; rows: VsActual[]; otherCents: number }
+const otherOn = async (month: string) => (await vsActual(month)).otherCents
 const spentOn = async (month: string, name: string) => (await vsActual(month)).rows.find((r) => r.categoryName === name)?.spentCents
 
 const set = (name: string, effectiveFrom: string, amountCents: number | null, who: Who = 'admin') => call(`/api/budgets/${ids[name]}`, { who, method: 'PUT', body: { effectiveFrom, amountCents } })
@@ -125,14 +127,15 @@ describe('the Budget in a month', () => {
     expect(await budgetIn('Groceries', '2027-02')).toEqual([50_000, '2027-02'])
   })
 
-  it('belongs to one Category, and every Category in use is listed whether or not it has one', async () => {
+  it('belongs to one Category, and every Spending Category in use is listed whether or not it has one', async () => {
     await mustSet('Groceries', '2026-08', 80_000)
     await mustSet('Fuel', '2026-09', 9_000)
 
     const { month, budgets: all } = await budgets('2026-10')
 
     expect(month).toBe('2026-10')
-    expect(all).toHaveLength(22)
+    const spendingCategories = (await env.DB.prepare("SELECT COUNT(*) AS n FROM categories WHERE removed_at IS NULL AND kind = 'spending'").first<{ n: number }>())!.n
+    expect(all).toHaveLength(spendingCategories)
     const names = all.map((b) => b.categoryName)
     expect(names).toEqual(names.toSorted((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' })))
     expect(all.filter((b) => b.amountCents !== null).map((b) => [b.categoryName, b.amountCents])).toEqual([['Fuel', 9_000], ['Groceries', 80_000]])
@@ -313,7 +316,7 @@ describe('setting a Budget', () => {
     })
 
     it('when the database already holds as many Budget changes as it allows (409), unless the month being set already has one', async () => {
-      // 22 Categories x 28 months from 2030, cut to the limit: every row sits apart from the ones set below.
+      // Every Category x 28 months from 2030, cut to the limit: every row sits apart from the ones set below.
       await env.DB.prepare(
         `WITH RECURSIVE s(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM s WHERE n < 27)
          INSERT INTO budgets (category_id, effective_from_month, amount_cents)
@@ -322,7 +325,7 @@ describe('setting a Budget', () => {
 
       const refused = await set('Groceries', '2026-10', 5_000)
       expect(refused.status).toBe(409)
-      expect(await refused.json()).toEqual({ error: 'There are too many Budget changes to add another' })
+      expect(await refused.json()).toEqual({ error: `Fernledger keeps at most ${MAX_BUDGET_CHANGES} Budget changes and cannot remove one, so there is no room to add another` })
       expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM budgets').first<{ n: number }>())!.n).toBe(MAX_BUDGET_CHANGES)
       expect(await changeLog()).toEqual([])
 
@@ -391,13 +394,14 @@ describe('budget vs actual', () => {
       row('2026-10-03', -4_000, 'EXAMPLE COUNTDOWN'),
       row('2026-10-20', -1_550, 'EXAMPLE COUNTDOWN'),
       row('2026-10-05', -9_500, 'EXAMPLE BP', 'FUEL1'),
-      row('2026-10-06', -700, 'EXAMPLE DAIRY'), // Uncategorised: no Budget to compare with
+      row('2026-10-06', -700, 'EXAMPLE DAIRY'), // Uncategorised: no Budget to compare with, so it is spending outside Budgets
     ])
     await override('FUEL1', 'Fuel')
 
-    const { month, rows } = await vsActual('2026-10')
+    const { month, rows, otherCents } = await vsActual('2026-10')
 
     expect(month).toBe('2026-10')
+    expect(otherCents).toBe(700)
     expect(rows).toEqual([
       { categoryId: ids['Fuel'], categoryName: 'Fuel', budgetCents: 9_000, spentCents: 9_500 },
       { categoryId: ids['Groceries'], categoryName: 'Groceries', budgetCents: 80_000, spentCents: 5_550 },
@@ -463,6 +467,14 @@ describe('budget vs actual', () => {
       expect(await spentOn('2026-10', 'Groceries')).toBe(1_200)
     })
 
+    it('one a Rule marks as a Transfer, which has no Category, so it is not in the spending outside Budgets either', async () => {
+      await mustSet('Groceries', '2026-08', 80_000)
+      await rule('EXAMPLE SWEEP', { transfer: true })
+      await importInto(EVERYDAY, [row('2026-10-05', -7_000, 'EXAMPLE SWEEP'), row('2026-10-06', -700, 'EXAMPLE DAIRY')])
+
+      expect(await otherOn('2026-10')).toBe(700)
+    })
+
     it('but counts a half the Admin chose a Category for, and still leaves out its matching Transaction', async () => {
       await mustSet('Groceries', '2026-08', 80_000)
       await mustSet('Fuel', '2026-08', 9_000)
@@ -504,6 +516,106 @@ describe('budget vs actual', () => {
   })
 })
 
+describe('spending outside Budgets', () => {
+  it('is what Uncategorised and the Spending Categories with no Budget spent, less their refunds', async () => {
+    await mustSet('Groceries', '2026-08', 80_000)
+    await rule('EXAMPLE COUNTDOWN', { category: 'Groceries' })
+    await rule('EXAMPLE CAFE', { category: 'Eating out' })
+    await importInto(EVERYDAY, [
+      row('2026-10-03', -4_000, 'EXAMPLE COUNTDOWN'),
+      row('2026-10-04', -2_500, 'EXAMPLE CAFE'),
+      row('2026-10-05', 500, 'EXAMPLE CAFE REFUND'),
+      row('2026-10-06', -700, 'EXAMPLE DAIRY'),
+    ])
+
+    const { rows, otherCents } = await vsActual('2026-10')
+
+    expect(rows.map((r) => [r.categoryName, r.spentCents])).toEqual([['Groceries', 4_000]])
+    expect(otherCents).toBe(2_000 + 700)
+  })
+
+  it('moves into a Category when it gets a Budget, and out of the rest', async () => {
+    await rule('EXAMPLE CAFE', { category: 'Eating out' })
+    await importInto(EVERYDAY, [row('2026-10-04', -2_500, 'EXAMPLE CAFE')])
+    expect(await otherOn('2026-10')).toBe(2_500)
+
+    await mustSet('Eating out', '2026-10', 20_000)
+
+    expect(await otherOn('2026-10')).toBe(0)
+    expect(await spentOn('2026-10', 'Eating out')).toBe(2_500)
+  })
+
+  it('is nothing for a month with no Transactions', async () => {
+    expect(await otherOn('2026-10')).toBe(0)
+  })
+})
+
+describe('Category kinds', () => {
+  it('leave Income and Loans out of every figure: neither is spending, and neither has a Budget to compare with', async () => {
+    await mustSet('Groceries', '2026-08', 80_000)
+    await rule('EXAMPLE PAYROLL', { category: 'Wages and salary' })
+    await rule('EXAMPLE FAMILY LOAN', { category: 'Loans' })
+    await importInto(EVERYDAY, [
+      row('2026-10-02', 300_000, 'EXAMPLE PAYROLL'),
+      row('2026-10-03', -50_000, 'EXAMPLE FAMILY LOAN'),
+      row('2026-10-04', 20_000, 'EXAMPLE FAMILY LOAN'),
+      row('2026-10-05', -1_200, 'EXAMPLE COUNTDOWN', 'REAL'),
+    ])
+    await override('REAL', 'Groceries')
+
+    const { rows, otherCents } = await vsActual('2026-10')
+
+    expect(rows).toEqual([{ categoryId: ids['Groceries'], categoryName: 'Groceries', budgetCents: 80_000, spentCents: 1_200 }])
+    expect(otherCents).toBe(0)
+  })
+
+  it('refuse a Budget on an Income or Loans Category (400), naming the Category, and write nothing', async () => {
+    for (const name of ['Wages and salary', 'Loans']) {
+      const res = await set(name, '2026-10', 5_000)
+
+      expect(res.status, name).toBe(400)
+      expect(await res.json()).toEqual({ error: 'Invalid request', field: 'categoryId' })
+    }
+    expect(await budgetRows()).toEqual([])
+    expect(await changeLog()).toEqual([])
+  })
+
+  it('list Spending Categories only, whatever is in the history', async () => {
+    const names = (await budgets('2026-10')).budgets.map((b) => b.categoryName)
+
+    expect(names).toContain('Groceries')
+    for (const other of ['Wages and salary', 'NZ Super and benefits', 'Interest', 'Other income', 'Loans']) expect(names).not.toContain(other)
+  })
+
+  it('take a Budget out of use when the Category stops being Spending, keep it, and bring it back when it is Spending again', async () => {
+    await mustSet('Groceries', '2026-08', 80_000)
+    await rule('EXAMPLE COUNTDOWN', { category: 'Groceries' })
+    await importInto(EVERYDAY, [row('2026-10-03', -4_000, 'EXAMPLE COUNTDOWN')])
+
+    await env.DB.prepare("UPDATE categories SET kind = 'income' WHERE name = 'Groceries'").run()
+    expect((await vsActual('2026-10')).rows).toEqual([])
+    expect(await otherOn('2026-10')).toBe(0)
+    expect((await budgets('2026-10')).budgets.map((b) => b.categoryName)).not.toContain('Groceries')
+    expect(await budgetRows()).toHaveLength(1)
+
+    await env.DB.prepare("UPDATE categories SET kind = 'spending' WHERE name = 'Groceries'").run()
+    expect(await spentOn('2026-10', 'Groceries')).toBe(4_000)
+  })
+})
+
+describe('how full the history of Budget changes is', () => {
+  it('says how many changes there are and how many there can be', async () => {
+    await mustSet('Groceries', '2026-08', 80_000)
+    await mustSet('Fuel', '2026-08', 9_000)
+    await mustSet('Groceries', '2026-11', 90_000)
+
+    const { changeCount, changeLimit } = await budgets('2026-10')
+
+    expect(changeCount).toBe(3)
+    expect(changeLimit).toBe(MAX_BUDGET_CHANGES)
+  })
+})
+
 describe('what a request reads from D1', () => {
   // ADR 0004: D1 Free bills rows read (5 million a day). The Budget in a month is one seek on the primary key for each
   // Category, however long its history is, and the whole history is read only by the Budgets page, which is bounded.
@@ -511,15 +623,15 @@ describe('what a request reads from D1', () => {
     await env.DB.prepare(
       `WITH RECURSIVE s(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM s WHERE n < 23)
        INSERT INTO budgets (category_id, effective_from_month, amount_cents)
-       SELECT c.id, printf('%04d-%02d', 2024 + s.n / 12, s.n % 12 + 1), 100 FROM categories c, s WHERE c.removed_at IS NULL`,
+       SELECT c.id, printf('%04d-%02d', 2024 + s.n / 12, s.n % 12 + 1), 100 FROM categories c, s WHERE c.removed_at IS NULL AND c.kind = 'spending'`,
     ).run()
-    const categories = (await env.DB.prepare('SELECT id FROM categories WHERE removed_at IS NULL').all<{ id: number }>()).results
+    const categories = (await env.DB.prepare("SELECT id FROM categories WHERE removed_at IS NULL AND kind = 'spending'").all<{ id: number }>()).results
 
     const result = await env.DB.prepare(IN_EFFECT).bind('2025-06').all<{ effectiveFrom: string }>()
 
     expect(result.results).toHaveLength(categories.length)
     expect(result.results.every((r) => r.effectiveFrom === '2025-06')).toBe(true)
-    // Per Category: its row, one seek to the latest month and the Budget row itself (66 for 22 Categories when measured).
+    // Per Category: its row, one seek to the latest month and the Budget row itself (3 each when measured).
     expect((result.meta as { rows_read: number }).rows_read).toBeLessThanOrEqual(categories.length * 4)
   })
 })

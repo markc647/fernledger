@@ -11,7 +11,12 @@ const noAxeViolations = async (page: Page) => {
 // out which month that is the way the Worker does (Pacific/Auckland) and imports a Transaction dated its first day. The light and
 // dark projects share one local database, so each makes a Category and an Account of its own.
 const thisMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7)
-const monthWords = new Date(`${thisMonth}-01T00:00:00Z`).toLocaleString('en-NZ', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+const words = (month: string) => new Date(`${month}-01T00:00:00Z`).toLocaleString('en-NZ', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+const monthWords = words(thisMonth)
+const nextMonth = (() => {
+  const index = Number(thisMonth.slice(0, 4)) * 12 + Number(thisMonth.slice(5, 7))
+  return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}`
+})()
 
 /** A Category with one Transaction of $43.21 this month in it (by Override), and the Category's name. */
 async function seed(context: BrowserContext, baseURL: string, projectName: string) {
@@ -87,6 +92,7 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await expect(widgetRow(page, name)).toContainText('Under Budget')
   await expect(widgetRow(page, name)).toContainText('$56.79 left')
   await expect(widgetRow(page, name).locator('svg[aria-hidden="true"]')).toHaveCount(1)
+  await expect(widgetRow(page, 'Spending outside Budgets')).toContainText('Not in a Budget')
   await noAxeViolations(page)
 
   // A lower Budget from this month puts the Category over it.
@@ -107,7 +113,21 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await page.getByRole('button', { name: 'Save Budget' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'so nothing changed' })).toHaveText(`${name} already has a Budget of $40.50 a month in ${monthWords}, so nothing changed.`)
 
-  // Ending it leaves this month and later with no Budget; the Summary stops listing the Category.
+  // A later change stays when a Budget is set from an earlier month, and the panel says so.
+  await page.getByRole('button', { name: `Edit Budget for ${name}` }).click()
+  await page.getByLabel('Monthly Budget in dollars').fill('30')
+  await page.getByLabel('Applies from').selectOption(nextMonth)
+  await page.getByRole('button', { name: 'Save Budget' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'now has a Budget' })).toHaveText(`${name} now has a Budget of $30.00 a month from ${words(nextMonth)}.`)
+  await page.getByRole('button', { name: `Edit Budget for ${name}` }).click()
+  const panel = page.getByRole('region', { name: `Budget for ${name}` })
+  await expect(panel.getByText('This Category already has later changes')).toBeVisible()
+  await expect(panel.getByText(`From ${words(nextMonth)}: $30.00 a month`)).toBeVisible()
+  await expect(panel.getByText('To have no Budget, use End Budget.')).toBeVisible()
+  await panel.getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.getByRole('button', { name: `Edit Budget for ${name}` })).toBeFocused()
+
+  // Ending it leaves this month with no Budget until its next change; the Summary stops listing the Category.
   await page.getByRole('button', { name: `Edit Budget for ${name}` }).click()
   await page.getByRole('button', { name: 'End Budget' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Ended the Budget' })).toHaveText(`Ended the Budget for ${name} from ${monthWords}.`)
