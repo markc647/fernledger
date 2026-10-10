@@ -1,32 +1,48 @@
 import { describe, expect, it } from 'vitest'
-import { describeCarryBefore, describeLost } from './import-carry'
+import { describeCarryBefore, describeDiffering, describeLost, describeWaiting } from './import-carry'
 
 describe('describeCarryBefore', () => {
   it('says nothing when there is nothing of the Admin’s own to carry', () => {
     expect(describeCarryBefore({ withOwnWork: 0, waiting: 0 })).toEqual([])
   })
 
-  it('says the Categories and Notes are carried over to Transactions with the same unique ID, and that the lost can be counted only afterwards', () => {
-    const [text, ...rest] = describeCarryBefore({ withOwnWork: 40, waiting: 0 })
-    expect(rest).toEqual([])
-    expect(text).toContain('40 Transactions have your own Category or a Note.')
-    expect(text).toContain('carried over to the Transactions that come back in this file with the same unique ID from your bank')
-    expect(text).toContain('only count how many have no match after the Import')
-    expect(text).toContain('the Change Log then say how many were lost')
-    expect(text).not.toContain('will be lost')
+  it('says how many carry over and how many won’t, once the Worker has forecast it', () => {
+    const [headline] = describeCarryBefore({ withOwnWork: 40, waiting: 0, preview: { waiting: 40, carries: 38, differing: 0 } })
+    expect(headline).toBe("40 Transactions have an Override (your own Category) or a Note. 38 of them carry over to this file; 2 won't.")
   })
 
   it('agrees with one Transaction', () => {
-    expect(describeCarryBefore({ withOwnWork: 1, waiting: 0 })[0]).toContain('1 Transaction has your own Category or a Note. This is carried over to the Transaction that comes back')
+    expect(describeCarryBefore({ withOwnWork: 1, waiting: 0, preview: { waiting: 1, carries: 1, differing: 0 } })[0]).toBe('1 Transaction has an Override (your own Category) or a Note. It carries over to this file.')
+    expect(describeCarryBefore({ withOwnWork: 1, waiting: 0, preview: { waiting: 1, carries: 0, differing: 0 } })[0]).toContain("It won't carry over to this file.")
   })
 
-  it('says how many an earlier replace that did not finish is still holding', () => {
-    expect(describeCarryBefore({ withOwnWork: 0, waiting: 3 })).toEqual(['3 Categories and Notes are still waiting from an earlier replace that did not finish. They are carried over the same way.'])
-    expect(describeCarryBefore({ withOwnWork: 0, waiting: 1 })).toEqual(['1 Category or Note is still waiting from an earlier replace that did not finish. It is carried over the same way.'])
+  it('says they carry over, and that the unmatched are counted afterwards, until the forecast is known', () => {
+    const [headline] = describeCarryBefore({ withOwnWork: 40, waiting: 0 })
+    expect(headline).toContain('40 Transactions have an Override (your own Category) or a Note. They are carried over')
+    expect(headline).toContain('Fernledger counts how many have no match once the Import has run')
+    expect(headline).not.toContain('will be lost')
   })
 
-  it('gives both paragraphs when there are both', () => {
-    expect(describeCarryBefore({ withOwnWork: 2, waiting: 1 })).toHaveLength(2)
+  it('counts what a stopped replace is holding with the rest, and says so', () => {
+    const paragraphs = describeCarryBefore({ withOwnWork: 2, waiting: 3, preview: { waiting: 5, carries: 4, differing: 0 } })
+    expect(paragraphs[0]).toContain('5 Transactions have')
+    expect(paragraphs[1]).toBe('3 were left by an earlier replace that did not finish.')
+  })
+
+  it('says how many would go to a Transaction with a different amount', () => {
+    const paragraphs = describeCarryBefore({ withOwnWork: 40, waiting: 0, preview: { waiting: 40, carries: 38, differing: 2 } })
+    expect(paragraphs).toContain('2 of those would go to a Transaction with a different amount.')
+  })
+
+  it('explains in plain words that the bank’s own number can be reused when a day is numbered differently', () => {
+    const paragraphs = describeCarryBefore({ withOwnWork: 40, waiting: 0, preview: { waiting: 40, carries: 38, differing: 0 } })
+    expect(paragraphs.at(-1)).toContain("the bank's own number for each Transaction")
+    expect(paragraphs.at(-1)).toContain('can land on a different Transaction')
+    expect(paragraphs.join(' ')).not.toContain('unique ID')
+  })
+
+  it('gives a forecast of what a stopped replace holds even when the Account has none of its own', () => {
+    expect(describeCarryBefore({ withOwnWork: 0, waiting: 0, preview: { waiting: 3, carries: 3, differing: 0 } })[0]).toContain('3 Transactions have')
   })
 })
 
@@ -35,10 +51,35 @@ describe('describeLost', () => {
     expect(describeLost(0)).toBeNull()
   })
 
-  it('says how many Transactions lost their Category or Note, and why', () => {
+  it('says how many Transactions lost their Override or Note, and every reason they might have', () => {
     expect(describeLost(2)).toBe(
-      '2 Transactions had your own Category or a Note, but no Transaction in this file has their unique ID from your bank (or they are dated on or after the Cutover Date), so they are lost. The Change Log records the count.',
+      "2 Transactions lost their Override or Note. The new file has no Transaction with the bank's own number for them, or they are dated on or after the Cutover Date, or a Transaction from Sync now has that number. The Change Log lists them.",
     )
-    expect(describeLost(1)).toContain('1 Transaction had your own Category or a Note, but no Transaction in this file has its unique ID')
+    expect(describeLost(1)).toContain('1 Transaction lost its Override or Note.')
+  })
+})
+
+describe('describeDiffering', () => {
+  it('is null when none went to another amount', () => {
+    expect(describeDiffering(0)).toBeNull()
+  })
+
+  it('says how many did, and to check them', () => {
+    expect(describeDiffering(2)).toBe('2 Transactions now have an Override or Note that was on a Transaction with a different amount. The bank may have numbered that day differently, so check them.')
+    expect(describeDiffering(1)).toContain('1 Transaction now has an Override or Note')
+  })
+})
+
+describe('describeWaiting', () => {
+  it('is null when nothing waits', () => {
+    expect(describeWaiting(0)).toBeNull()
+  })
+
+  it('says what is waiting, how an Import and a replace treat it, and that it can be discarded', () => {
+    const text = describeWaiting(3)!
+    expect(text).toContain('3 Overrides and Notes are waiting from a replace that stopped part way.')
+    expect(text).toContain('what has no match is then lost')
+    expect(text).toContain('discard them')
+    expect(describeWaiting(1)).toContain('1 Override or Note is waiting')
   })
 })

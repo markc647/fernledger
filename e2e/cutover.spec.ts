@@ -94,7 +94,7 @@ test('the Admin replaces imported history after confirming, and the old rows go,
   const dialog = page.getByRole('alertdialog')
   await trigger.click()
   await expect(dialog).toContainText('removes the 2 Transactions that were imported into this Account')
-  await expect(dialog).toContainText('2 Transactions have your own Category or a Note. These are carried over to the Transactions that come back in this file with the same unique ID from your bank.')
+  await expect(dialog).toContainText("2 Transactions have an Override (your own Category) or a Note. 0 of them carry over to this file; 2 won't.")
   await expect(dialog).not.toContainText('will be lost')
   // The safe answer has focus, so Enter or a stray tap doesn't remove anything.
   await expect(page.getByRole('button', { name: 'No, keep what is there' })).toBeFocused()
@@ -114,9 +114,13 @@ test('the Admin replaces imported history after confirming, and the old rows go,
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
   await expect(summaryValue(page, 'Added')).toHaveText('3')
   await expect(summaryValue(page, 'Old imported Transactions removed')).toHaveText('2')
-  await expect(summaryValue(page, 'Transactions that kept their own Category or Note')).toHaveText('0')
-  await expect(summaryValue(page, 'Categories and Notes lost (no matching Transaction)')).toHaveText('2')
-  await expect(page.getByText('2 Transactions had your own Category or a Note, but no Transaction in this file has their unique ID from your bank')).toBeVisible()
+  await expect(summaryValue(page, 'Transactions that kept their Override or Note')).toHaveText('0')
+  await expect(summaryValue(page, 'Transactions that lost their Override or Note')).toHaveText('2')
+  await expect(page.getByText("2 Transactions lost their Override or Note. The new file has no Transaction with the bank's own number for them")).toBeVisible()
+  // They are listed so the Admin can set them again by hand.
+  const lostList = page.getByRole('region', { name: 'Transactions to set again by hand' })
+  await expect(lostList).toContainText('EXAMPLE SHOP 29')
+  await expect(lostList).toContainText('Note: Example note one')
 
   await page.getByRole('link', { name: 'See the transactions' }).click()
   const name = accountName(testInfo)
@@ -133,17 +137,52 @@ test('a Note on an imported Transaction comes back with it when the history is r
   await chooseFile(page, asbFile(suffix(testInfo), ['2026/09/10', '2026/09/11', '2026/09/12', '2026/09/13']))
 
   await page.getByRole('button', { name: 'Replace imported history…' }).click()
-  await expect(page.getByRole('alertdialog')).toContainText('1 Transaction has your own Category or a Note. This is carried over')
+  await expect(page.getByRole('alertdialog')).toContainText('1 Transaction has an Override (your own Category) or a Note. It carries over to this file.')
   await page.getByRole('button', { name: 'Yes, replace imported history' }).click()
 
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
-  await expect(summaryValue(page, 'Transactions that kept their own Category or Note')).toHaveText('1')
-  await expect(summaryValue(page, 'Categories and Notes lost (no matching Transaction)')).toHaveText('0')
-  await expect(page.getByText('had your own Category or a Note, but no Transaction in this file')).toHaveCount(0)
+  await expect(summaryValue(page, 'Transactions that kept their Override or Note')).toHaveText('1')
+  await expect(summaryValue(page, 'Transactions that lost their Override or Note')).toHaveText('0')
+  await expect(page.getByText('lost their Override or Note. The new file has no Transaction')).toHaveCount(0)
 
   await page.getByRole('link', { name: 'See the transactions' }).click()
   await expect(page.getByRole('row').filter({ hasText: name }).filter({ hasText: 'EXAMPLE SHOP 11' }).filter({ hasText: 'Example note kept across a replace' })).toBeVisible()
   await expect(page.getByRole('row').filter({ hasText: name }).filter({ hasText: 'EXAMPLE SHOP 13' }).filter({ hasText: 'Example note kept across a replace' })).toHaveCount(0)
+})
+
+test('a replace that stopped part way leaves its Notes waiting, an Import says so, and the Admin can discard them', async ({ page, context, baseURL }, testInfo) => {
+  await signInAs(context, 'admin')
+  // The previous test left the Account with the Transactions of 10 to 13 September, and a Note on the one of the 11th. A replace
+  // that sends only its first part holds that Note, which is the state a stopped replace leaves.
+  const stopped = await context.request.post('/api/imports/chunks', {
+    headers: { Origin: baseURL! },
+    data: {
+      account: { number: `99-9999-9999999-${suffix(testInfo)}` },
+      chunk: { index: 0, count: 2 },
+      file: { adapterId: 'asb', rowCount: 2, skipped: 0, from: '2026-09-01', to: '2026-10-01', ledgerBalance: { cents: 1000, date: '2026-10-02' } },
+      rows: [{ date: '2026-09-10', uniqueId: '2026091000', tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SHOP 10', bankMemo: 'EFTPOS', amountCents: -100 }],
+      replace: true,
+    },
+  })
+  expect(stopped.ok()).toBe(true)
+
+  await page.goto('/import')
+  await chooseFile(page, asbFile(suffix(testInfo), ['2026/09/10']))
+  await expect(page.getByText('1 Override or Note is waiting from a replace that stopped part way.')).toBeVisible()
+  await page.getByRole('button', { name: 'Discard them…' }).click()
+  const dialog = page.getByRole('alertdialog', { name: 'Discard what is waiting?' })
+  await expect(page.getByRole('button', { name: 'No, keep them' })).toBeFocused()
+  await noAxeViolations(page)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Discard them…' })).toBeFocused()
+
+  await page.getByRole('button', { name: 'Discard them…' }).click()
+  await page.getByRole('button', { name: 'Yes, discard them' }).click()
+
+  await expect(page.getByText('waiting from a replace that stopped part way')).toHaveCount(0)
+  await page.goto('/change-log')
+  await expect(page.getByRole('listitem').filter({ hasText: `Discarded the Overrides and Notes of 1 Transaction that ${accountName(testInfo)} was holding` }).first()).toBeVisible()
 })
 
 test('the Cutover Date checkbox has a touch target of at least 44px', async ({ page, context }, testInfo) => {

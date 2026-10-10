@@ -84,8 +84,8 @@ _Avoid_: Manual category, exception
 Free text the Admin attaches to a single Transaction.
 _Avoid_: Comment, memo
 
-**Carry over**:
-What replacing an Account's imported history does with the Admin's Overrides and Notes: each goes to the re-imported Transaction with the same bank unique ID. One with no match is lost, and the finished Import and the Change Log say how many were carried over and how many lost.
+**Carry over (Overrides and Notes)**:
+What replacing an Account's imported history does with the Admin's Overrides and Notes: each goes to the re-imported Transaction with the same bank unique ID (the bank's own number for it; ASB makes it from the date and a count for the day). One with no match is lost; one that went to a Transaction with a different amount is counted, since the bank may have numbered that day differently. An Import that stops part way leaves them held until a replace completes or the Admin discards them. Not the Budget sense of the words: unspent Budget amounts do not carry over from month to month.
 _Avoid_: Migrate, restore, reapply
 
 **Budget**:

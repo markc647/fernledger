@@ -30,7 +30,7 @@ Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount
 
 ## Rows
 - `Date` is `YYYY/MM/DD`. There's no time of day, so a Bank Time is never set from this file.
-- `Unique Id` is the date plus a 2-digit daily sequence. It's unique within an Account, and Import uses it to recognise rows already held.
+- `Unique Id` is the date plus a 2-digit daily sequence. It's unique within an Account, and Import uses it to recognise rows already held and to carry Overrides and Notes over when imported history is replaced. A day the bank numbers differently in a later export can match a different Transaction, so the Import counts the carried Overrides and Notes that went to a Transaction with a different amount ([README](../../README.md#how-it-works)).
 - `Payee` and `Memo` are quoted, may be empty (`""`), and may have trailing spaces.
 - `Amount` is a signed decimal with no thousands separator. Money out is negative.
 - Transfers between the holder's own ASB accounts appear as `TFR OUT` on one Account and `TFR IN` on the other, on the same date.

@@ -13,7 +13,7 @@ export type Stop = {
 }
 
 /** Said when a replace stopped after removing history: the Admin's own Categories and Notes on it are held, not lost (worker/carry-over.ts). */
-const KEPT = 'Any Category or Note you set on the removed Transactions is kept, and is carried over to the Transactions imported from the file.'
+const KEPT = 'Any Override or Note you set on the removed Transactions is kept. It is carried over to the Transaction with the same number from the bank when the file is imported, and what has no match stays until you discard it.'
 
 /** What happened and what to do, as separate sentences so the screen can set them apart. `kept` is set when history was removed. */
 export function describeStop({ sent, total, replacing, removed, dailyLimit }: Stop): { headline: string; happened: string | null; kept: string | null; next: string } {

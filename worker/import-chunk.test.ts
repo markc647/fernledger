@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import type { CarryOutcome } from './carry-over'
 import { chunkDetail, chunkStatements, chunkSummary, replaceWouldLeaveNothing, type ChunkOutcome } from './import-chunk'
+
+/** What a chunk carried, with the fields it did not report left empty. */
+const carryOf = (part: Partial<CarryOutcome>): CarryOutcome => ({ carried: 0, carriedTotal: null, differing: null, lost: null, lostRows: [], stillWaiting: null, ...part })
 
 const outcome: ChunkOutcome = { accountName: 'Savings', replace: false, removed: 0, added: 3, dropped: 0, index: 0, count: 1 }
 
@@ -17,16 +21,16 @@ describe('chunkSummary', () => {
   })
 
   it('says how many Overrides and Notes a replace carried over and lost, before the part it was', () => {
-    const carry = { carried: 2, carriedTotal: 5, lost: 1 }
+    const carry = carryOf({ carried: 2, carriedTotal: 5, differing: 0, lost: 1 })
     expect(chunkSummary({ ...outcome, replace: true, removed: 7, carry })).toBe('Replaced imported history in Savings: removed 7 rows, imported 3 rows, Overrides and Notes carried over for 5 Transactions, lost for 1 Transaction')
     expect(chunkSummary({ ...outcome, index: 2, count: 3, carry })).toBe('Imported 3 rows into Savings, Overrides and Notes carried over for 5 Transactions in all, lost for 1 Transaction (part 3 of 3)')
   })
 
   it('says only what a part carried when more parts follow, and nothing when it carried none', () => {
-    expect(chunkSummary({ ...outcome, index: 0, count: 2, replace: true, carry: { carried: 1, carriedTotal: null, lost: null } })).toBe(
+    expect(chunkSummary({ ...outcome, index: 0, count: 2, replace: true, carry: carryOf({ carried: 1 }) })).toBe(
       'Replaced imported history in Savings: removed 0 rows, imported 3 rows, Overrides and Notes carried over for 1 Transaction (part 1 of 2)',
     )
-    expect(chunkSummary({ ...outcome, index: 0, count: 2, carry: { carried: 0, carriedTotal: null, lost: null } })).toBe('Imported 3 rows into Savings (part 1 of 2)')
+    expect(chunkSummary({ ...outcome, index: 0, count: 2, carry: carryOf({ carried: 0 }) })).toBe('Imported 3 rows into Savings (part 1 of 2)')
   })
 })
 
@@ -58,13 +62,19 @@ describe('chunkDetail with carrying over', () => {
   const context = { file, rowsInChunk: 3, cutoverDate: null, newAccount: false }
 
   it('records what the chunk carried, and on the last part the total and what was lost', () => {
-    expect(chunkDetail({ ...outcome, carry: { carried: 2, carriedTotal: 5, lost: 1 } }, context)).toMatchObject({ carried: 2, carriedTotal: 5, lost: 1 })
-    expect(chunkDetail({ ...outcome, carry: { carried: 2, carriedTotal: null, lost: null } }, context)).toMatchObject({ carried: 2 })
+    expect(chunkDetail({ ...outcome, carry: carryOf({ carried: 2, carriedTotal: 5, differing: 1, lost: 1, lostRows: [{ date: '2026-09-01', amountCents: -1, description: 'EXAMPLE', category: null, note: 'Note' }] }) }, context)).toMatchObject({
+      carried: 2,
+      carriedTotal: 5,
+      differingAmount: 1,
+      lost: 1,
+      lostTransactions: [{ date: '2026-09-01', amountCents: -1, description: 'EXAMPLE', category: null, note: 'Note' }],
+    })
+    expect(chunkDetail({ ...outcome, carry: carryOf({ carried: 2 }) }, context)).toMatchObject({ carried: 2 })
   })
 
   it('leaves the fields out for a chunk that took no part', () => {
     expect(Object.keys(chunkDetail(outcome, context))).not.toContain('carried')
-    expect(Object.keys(chunkDetail({ ...outcome, carry: { carried: 2, carriedTotal: null, lost: null } }, context))).not.toContain('lost')
+    expect(Object.keys(chunkDetail({ ...outcome, carry: carryOf({ carried: 2 }) }, context))).not.toContain('lost')
   })
 })
 

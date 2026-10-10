@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BankCsvRow } from './bank-csv'
-import { CHUNK_SIZE, countOnOrAfter, DAILY_ROW_WRITES, MAX_CHUNKS, MAX_IMPORT_ROWS, planChunks, replaceWrites } from './import-chunks'
+import { CHUNK_SIZE, countOnOrAfter, DAILY_ROW_WRITES, MAX_CHUNKS, MAX_IMPORT_ROWS, planChunks, previewChunks, replaceWrites } from './import-chunks'
 
 const row = (date: string, uniqueId: string): BankCsvRow => ({ date, uniqueId, tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE', bankMemo: '', amountCents: -100 })
 const many = (n: number) => Array.from({ length: n }, (_, i) => row('2026-10-01', `ID${String(i).padStart(5, '0')}`))
@@ -52,5 +52,32 @@ describe('replaceWrites', () => {
   it('goes over the free plan’s daily allowance beyond about 33,000 rows removed and imported in all', () => {
     expect(replaceWrites(23_000, 10_000)).toBeLessThanOrEqual(DAILY_ROW_WRITES)
     expect(replaceWrites(24_000, 10_000)).toBeGreaterThan(DAILY_ROW_WRITES)
+  })
+
+  it('adds 7 writes for each Override or Note to carry over, on top of the 3 for each row removed and imported', () => {
+    expect(replaceWrites(2000, 1000, 40)).toBe(9000 + 7 * 40)
+    expect(replaceWrites(23_000, 10_000, 1000)).toBeGreaterThan(DAILY_ROW_WRITES)
+  })
+})
+
+describe('previewChunks', () => {
+  it('sends only the bank’s unique ID and the amount, each ID once, oldest first', () => {
+    const rows = [row('2026-09-02', 'B'), row('2026-09-01', 'A'), row('2026-09-02', 'B')]
+    expect(previewChunks(rows, null)).toEqual([
+      [
+        { uniqueId: 'A', amountCents: -100 },
+        { uniqueId: 'B', amountCents: -100 },
+      ],
+    ])
+  })
+
+  it('leaves out the rows on or after the Cutover Date, which are not imported', () => {
+    const rows = [row('2026-09-30', 'A'), row('2026-10-01', 'B'), row('2026-10-02', 'C')]
+    expect(previewChunks(rows, '2026-10-01').flat().map((r) => r.uniqueId)).toEqual(['A'])
+  })
+
+  it('splits into chunks of the size the Worker takes, and sends none for no rows', () => {
+    expect(previewChunks(many(CHUNK_SIZE * 2 + 1), null).map((chunk) => chunk.length)).toEqual([CHUNK_SIZE, CHUNK_SIZE, 1])
+    expect(previewChunks([], null)).toEqual([])
   })
 })

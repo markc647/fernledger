@@ -1,20 +1,22 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { PreviewRow } from '@/generated/api/import-rows'
 import { Amount } from '@/components/amount'
 import { ResponsiveTable } from '@/components/responsive-table'
 import { Status } from '@/components/status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { api } from '@/lib/api'
 import { describeBalanceCheck, type BalanceCheckOutcome } from '@/lib/balance-check'
 import { adapters, BankCsvError, parseBankCsv, type BankCsvResult } from '@/lib/bank-csv'
 import { formatBalance, formatDate } from '@/lib/format'
-import { describeCarryBefore, describeLost } from '@/lib/import-carry'
-import { countOnOrAfter, DAILY_ROW_WRITES, MAX_IMPORT_ROWS, REPLACE_SLICE, replaceWrites, WRITES_PER_ROW } from '@/lib/import-chunks'
+import { describeCarryBefore, describeDiffering, describeLost, describeWaiting } from '@/lib/import-carry'
+import { countOnOrAfter, DAILY_ROW_WRITES, MAX_IMPORT_ROWS, previewChunks, REPLACE_SLICE, replaceWrites, WRITES_PER_ROW } from '@/lib/import-chunks'
 import { describeStop } from '@/lib/import-stop'
 import { meQuery } from '@/lib/me'
-import { accountsQuery, importedRowsQuery } from '@/lib/queries'
-import { ImportStopped, runImport, type ImportSummary } from '@/lib/run-import'
+import { accountsQuery, carryPreviewQuery, importedRowsQuery } from '@/lib/queries'
+import { ImportStopped, runImport, type ImportSummary, type LostTransaction } from '@/lib/run-import'
 
 export const Route = createFileRoute('/import')({
   component: ImportScreen,
@@ -167,6 +169,8 @@ function ImportFlow() {
   }
 
   const lostMessage = describeLost(step.summary.lost)
+  const differingMessage = describeDiffering(step.summary.differing)
+  const waitingMessage = describeWaiting(step.summary.stillWaiting)
   return (
     <section className="mt-4 space-y-4" aria-labelledby="summary-heading">
       <h2 id="summary-heading" className="text-xl font-semibold">
@@ -189,16 +193,33 @@ function ImportFlow() {
         )}
         {(step.summary.carried > 0 || step.summary.lost > 0) && (
           <>
-            <dt>Transactions that kept their own Category or Note</dt>
+            <dt>Transactions that kept their Override or Note</dt>
             <dd className="text-right tabular-nums">{step.summary.carried}</dd>
-            <dt>Categories and Notes lost (no matching Transaction)</dt>
+            <dt>Transactions that lost their Override or Note</dt>
             <dd className="text-right tabular-nums">{step.summary.lost}</dd>
+          </>
+        )}
+        {step.summary.differing > 0 && (
+          <>
+            <dt>Kept, on a Transaction with a different amount</dt>
+            <dd className="text-right tabular-nums">{step.summary.differing}</dd>
           </>
         )}
       </dl>
       {lostMessage && (
         <p role="status" className="max-w-xl">
           <Status tone="warning">{lostMessage}</Status>
+        </p>
+      )}
+      {step.summary.lostTransactions.length > 0 && <LostTransactions rows={step.summary.lostTransactions} lost={step.summary.lost} />}
+      {differingMessage && (
+        <p role="status" className="max-w-xl">
+          <Status tone="warning">{differingMessage}</Status>
+        </p>
+      )}
+      {waitingMessage && (
+        <p role="status" className="max-w-xl">
+          <Status tone="neutral">{waitingMessage}</Status>
         </p>
       )}
       {step.summary.balanceCheck && <BalanceCheckResult outcome={step.summary.balanceCheck} />}
@@ -214,6 +235,31 @@ function ImportFlow() {
   )
 }
 
+/** How many of the Transactions that lost their Override or Note the finished screen lists; the Change Log has up to 20. */
+const SHOWN_LOST = 10
+
+/** Which Transactions lost their Override or Note, so the Admin can set it again by hand. */
+function LostTransactions({ rows, lost }: { rows: LostTransaction[]; lost: number }) {
+  const shown = rows.slice(0, SHOWN_LOST)
+  return (
+    <section aria-labelledby="lost-heading" className="max-w-xl space-y-1">
+      <h3 id="lost-heading" className="font-semibold">
+        Transactions to set again by hand
+      </h3>
+      <ul className="list-disc space-y-1 ps-6">
+        {shown.map((row, index) => (
+          <li key={index}>
+            {formatDate(row.date)}, {row.description}, <Amount cents={row.amountCents} />
+            {row.category && `, Override: ${row.category}`}
+            {row.note && `, Note: ${row.note}`}
+          </li>
+        ))}
+      </ul>
+      {lost > shown.length && <p>And {lost - shown.length} more{lost > rows.length ? `. The Change Log lists the first ${rows.length}.` : ', in the Change Log.'}</p>}
+    </section>
+  )
+}
+
 /** What the Balance Check made of the file's ledger balance. A difference is a warning with the direction in words, never colour alone. */
 function BalanceCheckResult({ outcome }: { outcome: BalanceCheckOutcome }) {
   const { tone, headline, detail } = describeBalanceCheck(outcome)
@@ -223,6 +269,82 @@ function BalanceCheckResult({ outcome }: { outcome: BalanceCheckOutcome }) {
         <Status tone={tone}>{headline}</Status>
       </p>
       {detail && <p>{detail}</p>}
+    </div>
+  )
+}
+
+/**
+ * Says how many Overrides and Notes a replace that stopped part way is still holding for the Account, before any Import of it,
+ * and lets the Admin discard them. An Import gives them to matching Transactions and leaves the rest; only a completed
+ * replace or this clears them (worker/carry-over.ts).
+ */
+function WaitingNotice({ accountId }: { accountId: number }) {
+  const queryClient = useQueryClient()
+  const { data } = useQuery(importedRowsQuery(accountId))
+  const [confirming, setConfirming] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const discardButton = useRef<HTMLButtonElement>(null)
+  const message = describeWaiting(data?.carryOverWaiting ?? 0)
+  if (!message) return null
+
+  async function discard() {
+    const res = await api.imports['discard-held'].$post({ json: { accountId } })
+    setFailed(!res.ok)
+    if (res.ok) {
+      setConfirming(false)
+      await queryClient.invalidateQueries({ queryKey: ['imported-rows'] })
+      await queryClient.invalidateQueries({ queryKey: ['change-log'] })
+    }
+  }
+
+  return (
+    <div className="max-w-xl space-y-2">
+      <p role="status">
+        <Status tone="neutral">{message}</Status>
+      </p>
+      {confirming ? (
+        <section
+          role="alertdialog"
+          aria-labelledby="discard-heading"
+          className="space-y-3 rounded-lg border-2 border-foreground p-4"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setConfirming(false)
+              discardButton.current?.focus()
+            }
+          }}
+        >
+          <h3 id="discard-heading" className="text-lg font-semibold">
+            Discard what is waiting?
+          </h3>
+          <p>The Overrides and Notes will be gone for good. The Change Log records which Transactions they were on.</p>
+          {failed && (
+            <p role="alert" className="font-medium text-destructive">
+              Fernledger could not discard them. Try again.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="touch"
+              className="max-w-full py-2 whitespace-normal"
+              ref={(button) => button?.focus()}
+              onClick={() => {
+                setConfirming(false)
+                discardButton.current?.focus()
+              }}
+            >
+              No, keep them
+            </Button>
+            <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" onClick={() => void discard()}>
+              Yes, discard them
+            </Button>
+          </div>
+        </section>
+      ) : (
+        <Button ref={discardButton} size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" onClick={() => setConfirming(true)}>
+          Discard them…
+        </Button>
+      )}
     </div>
   )
 }
@@ -251,6 +373,8 @@ function Preview(props: {
   // The Worker refuses a replace that would remove the old history and import nothing; the screen says so first.
   const nothingToReplaceWith = count > 0 && countOnOrAfter(file.rows, effectiveCutover) === count
   const firstRows = file.rows.slice(0, PREVIEW_ROWS)
+  // What the Replace question asks the Worker about: the file's bank numbers and amounts, without the rows the Cutover Date drops.
+  const previewRows = useMemo(() => previewChunks(file.rows, effectiveCutover), [file.rows, effectiveCutover])
   return (
     <section aria-labelledby="preview-heading" className="space-y-4">
       <h2 id="preview-heading" className="text-xl font-semibold">
@@ -274,7 +398,10 @@ function Preview(props: {
       </dl>
 
       {existingName !== undefined ? (
-        <p>Existing Account: {existingName}. These transactions will be added to it.</p>
+        <>
+          <p>Existing Account: {existingName}. These transactions will be added to it.</p>
+          <WaitingNotice accountId={existing!.id} />
+        </>
       ) : (
         <div className="max-w-sm">
           <p>New Account. It will be added when you import.</p>
@@ -354,6 +481,8 @@ function Preview(props: {
         <ReplaceDialog
           account={existing}
           incomingRows={count - countOnOrAfter(file.rows, effectiveCutover)}
+          previewRows={previewRows}
+          previewKey={`${file.accountNumber}:${effectiveCutover}:${count}:${file.rows[0]?.uniqueId}:${file.rows.at(-1)?.uniqueId}`}
           onReplace={props.onReplace}
           onCancel={() => {
             props.onConfirmingReplace(false)
@@ -373,15 +502,27 @@ const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en
  * says how many imported Transactions will go. A history of more than REPLACE_SLICE rows goes in final steps, and one
  * too big for a day's database writes (ADR 0004) can't finish today, so the Admin is told that before confirming.
  */
-function ReplaceDialog(props: { account: { id: number; name: string }; incomingRows: number; onReplace: () => void; onCancel: () => void }) {
+function ReplaceDialog(props: {
+  account: { id: number; name: string }
+  incomingRows: number
+  /** The file's bank numbers and amounts, in chunks, for the Worker to forecast what would carry over; `previewKey` says which file. */
+  previewRows: PreviewRow[][]
+  previewKey: string
+  onReplace: () => void
+  onCancel: () => void
+}) {
   const { data, isError } = useQuery(importedRowsQuery(props.account.id))
+  // The Worker forecasts how many of the Account's Overrides and Notes the file would carry over. Until it has, or if it can't, the
+  // question says they are carried over and that how many have no match is counted after the Import.
+  const { data: preview } = useQuery(carryPreviewQuery(props.account.id, props.previewRows, props.previewKey))
   const imported = data?.imported
-  // What the Admin set by hand is carried over to rows with the same bank unique ID; how many don't match is known only afterwards.
-  const carryText = describeCarryBefore({ withOwnWork: data?.withOverrideOrNote ?? 0, waiting: data?.carryOverWaiting ?? 0 })
+  const withOwnWork = data?.withOverrideOrNote ?? 0
+  const waiting = data?.carryOverWaiting ?? 0
+  const carryText = describeCarryBefore({ withOwnWork, waiting, preview })
   const keepButton = useRef<HTMLButtonElement>(null)
   useEffect(() => keepButton.current?.focus(), [])
   const inSteps = imported !== undefined && imported > REPLACE_SLICE
-  const overOneDay = imported !== undefined && replaceWrites(imported, props.incomingRows) > DAILY_ROW_WRITES
+  const overOneDay = imported !== undefined && replaceWrites(imported, props.incomingRows, withOwnWork + waiting) > DAILY_ROW_WRITES
   return (
     <section
       role="alertdialog"
@@ -408,8 +549,8 @@ function ReplaceDialog(props: { account: { id: number; name: string }; incomingR
             Transactions that came from Sync are not touched. It can't be undone, except by importing the old files again. The Change Log records it.
           </p>
         )}
-        {carryText.map((paragraph) => (
-          <p key={paragraph} className="font-semibold">
+        {carryText.map((paragraph, index) => (
+          <p key={paragraph} className={index === 0 ? 'font-semibold' : undefined}>
             {paragraph}
           </p>
         ))}
@@ -419,7 +560,7 @@ function ReplaceDialog(props: { account: { id: number; name: string }; incomingR
             Import stops part way, the part of the old history already removed can't be put back.{' '}
             {overOneDay
               ? `Removing and importing this many Transactions takes more database writes than the free plan allows in a day (${DAILY_ROW_WRITES.toLocaleString('en-NZ')}). Fernledger stops when the limit is reached, and you choose the same file again tomorrow to finish.`
-              : `Each step uses about ${(REPLACE_SLICE * WRITES_PER_ROW).toLocaleString('en-NZ')} of the ${DAILY_ROW_WRITES.toLocaleString('en-NZ')} database writes the free plan allows each day.`}
+              : `Each step uses about ${(REPLACE_SLICE * WRITES_PER_ROW).toLocaleString('en-NZ')} of the ${DAILY_ROW_WRITES.toLocaleString('en-NZ')} database writes the free plan allows each day, and a few more for each Override or Note it holds.`}
           </p>
         )}
       </div>
