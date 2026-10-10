@@ -200,7 +200,7 @@ test.describe('zoom', () => {
         await page.route(/\/api\/transactions\?/, (route) =>
           route.fulfill({
             json: {
-              total: 1234,
+              total: null,
               transactions: [{ id: 1, accountId: 1, accountName: longName, date: '2026-10-08', description: 'EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN', bankType: 'EFTPOS', amountCents: -123456789 }],
             },
           }),
@@ -211,6 +211,56 @@ test.describe('zoom', () => {
         await expect(page.getByRole('region', { name: 'Balance checks' })).toContainText('Balance differs from bank by $1,234,567.89 since Wed 30 Sept 2026')
         await expect(page.getByRole('region', { name: 'Recent transactions' })).toContainText('EXAMPLE SHOP WITH A LONG ENOUGH NAME')
         // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // A Transaction's details with every field filled in and long values, and the Admin's edit panel open: the longest text
+  // that page shows. The Transaction is stubbed, so this needs no data in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/transactions/4242 with every detail filled and the edit panel open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        const long = 'EXAMPLE'.padEnd(80, 'x')
+        await page.route('**/api/transactions/4242', (route) =>
+          route.fulfill({
+            json: {
+              id: 4242,
+              accountId: 1,
+              accountName: 'Example savings account with a long name',
+              date: '2026-10-08',
+              amountCents: -123456789,
+              description: `${long} shop with a long enough name to wrap on a narrow screen`,
+              bankMemo: long,
+              bankType: 'EFTPOS',
+              bankReference: long,
+              bankCounterpartyAccount: '99-9999-9999999-97',
+              bankCardSuffix: '1234',
+              bankParticulars: long,
+              bankPaymentCode: long,
+              source: 'sync',
+              categoryId: 3,
+              categoryName: 'Eating out',
+              categorySource: 'override',
+              note: `${long} note that goes on and on`,
+              bankTime: '2026-10-07T20:15:00.000Z',
+              firstSeenAt: '2026-10-08T06:30:00.000Z',
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/transactions/4242')
+        await sizeButton(page, size).click()
+        await page.getByRole('button', { name: 'Edit Category and Note' }).click()
+        await expect(page.getByRole('region', { name: 'Edit Category and Note' })).toBeVisible()
+        await expect(page.getByRole('region', { name: 'From the bank' })).toContainText('First seen by Akahu')
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
@@ -253,6 +303,27 @@ test.describe('responsive table', () => {
     await expect(cards.first()).toContainText('Thu 8 Oct 2026')
     await expect(cards.first()).toContainText('Example Supermarket')
     await expect(cards.first()).toContainText('−$1,111.11')
+  })
+
+  test('sorts by a column heading on a wide screen and from a menu on cards', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 })
+    await page.goto('/styleguide')
+    const table = page.getByRole('table', { name: 'Sample transactions' })
+    const amount = table.getByRole('columnheader', { name: 'Amount' })
+    await expect(table.getByRole('columnheader', { name: 'Date' })).toHaveAttribute('aria-sort', 'descending')
+
+    await amount.getByRole('button').click()
+    await expect(amount).toHaveAttribute('aria-sort', 'ascending')
+    await expect(table.getByRole('row').nth(1)).toContainText('Example Power Company') // the largest money out
+    await amount.getByRole('button').click()
+    await expect(amount).toHaveAttribute('aria-sort', 'descending')
+    await expect(table.getByRole('row').nth(1)).toContainText('Example Employer wages')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    const menu = page.getByLabel('Sort by')
+    await expect(menu).toHaveValue('amount:descending')
+    await menu.selectOption({ label: 'Description, A to Z' })
+    await expect(page.getByRole('list', { name: 'Sample transactions' }).getByRole('listitem').first()).toContainText('Example Employer wages')
   })
 
   test('builds each cell once, so the page has no duplicate ids, at either width', async ({ page }) => {

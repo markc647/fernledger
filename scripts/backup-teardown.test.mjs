@@ -423,7 +423,9 @@ test('teardown revokes Akahu access by instructions only, and only if Akahu Sync
 
   assert.match(r.out, /If you used Akahu Sync/)
   assert.match(r.out, /revoke/i)
-  assert.ok(!account.calls().some((c) => c.args.join(' ').toLowerCase().includes('akahu')), 'no command touches Akahu')
+  // Every argument is checked except the SQL a call carries: the backup reads every column of every table, and some columns are named for Akahu.
+  const argsScanned = (call) => call.args.filter((arg, i) => !['--command', '--sql'].includes(call.args[i - 1]) && !/^--(command|sql)=/.test(arg))
+  assert.ok(!account.calls().some((c) => argsScanned(c).join(' ').toLowerCase().includes('akahu')), 'no command touches Akahu')
 })
 
 test('teardown needs the account confirmed, and fails closed without a terminal or --yes', () => {

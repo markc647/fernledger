@@ -3,13 +3,8 @@ import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { effectiveCategory, type CategorySource } from './effective-category'
+import { buildSearch, searchQuery, toSearch, type Statement } from './transaction-search'
 import { validate } from './validate'
-
-export const DEFAULT_PAGE_SIZE = 50
-const MAX_PAGE_SIZE = 200
-
-const digits = z.optional(z.string().check(z.regex(/^\d{1,9}$/)))
-const pageQuery = z.object({ limit: digits, offset: digits, uncategorised: z.optional(z.literal('true')) })
 
 /** The Admin's Override: a Category in use, or null to take it off. */
 const overrideBody = z.object({ categoryId: z.nullable(z.int().check(z.positive())) })
@@ -32,6 +27,37 @@ type TransactionListRow = {
   note: string | null
 }
 
+/**
+ * One Transaction in full. The `bank…` fields are the bank's own words, as the bank or Akahu gave them; the ones Sync supplies
+ * are null for an Import. `bankTime` is the bank's time of day, as a UTC instant, and is null unless the bank actually supplied
+ * one (Bank Time), however the raw date looks. `firstSeenAt` is when Akahu first reported the Transaction, as a UTC instant.
+ */
+type TransactionDetail = {
+  id: number
+  accountId: number
+  accountName: string
+  date: string
+  amountCents: number
+  description: string
+  bankMemo: string
+  bankType: string
+  bankReference: string | null
+  bankCounterpartyAccount: string | null
+  bankCardSuffix: string | null
+  bankParticulars: string | null
+  bankPaymentCode: string | null
+  source: 'import' | 'sync'
+  categoryId: number | null
+  categoryName: string | null
+  categorySource: CategorySource | null
+  note: string | null
+  bankTime: string | null
+  firstSeenAt: string | null
+}
+
+/** A Transaction's ID in a path: digits only, no sign, exponent or leading zero, so it is what it looks like. */
+const ID = /^[1-9]\d{0,14}$/
+
 /** Describes a Transaction in a Change Log summary: enough to find it, from its ID, date and description. */
 type Described = { id: number; date: string; description: string }
 const describe = (t: Described) => `Transaction ${t.id} (${t.date}, ${t.description})`
@@ -41,31 +67,45 @@ const findTransaction = (db: D1Database, id: number) =>
     ? db.prepare('SELECT id, date, description, override_category AS overrideCategory, note FROM transactions WHERE id = ?').bind(id).first<Described & { overrideCategory: number | null; note: string | null }>()
     : null
 
-/** Every Member can read the list: newest first, a page at a time. `?uncategorised=true` keeps only Transactions with no effective Category. */
+/**
+ * Every Member can read these. The list is searched, filtered, sorted and paged by the query string (transaction-search.ts);
+ * by default it is every Transaction, newest first, 50 at a time, with the total on the first page (`total` is null when
+ * the request didn't count). `/:id` is one Transaction in full.
+ */
 export const transactions = new Hono<AppEnv>()
-  .get('/', validate('query', pageQuery), async (c) => {
-    const query = c.req.valid('query')
-    const limit = Math.min(Math.max(Number(query.limit ?? DEFAULT_PAGE_SIZE), 1), MAX_PAGE_SIZE)
-    const offset = Number(query.offset ?? 0)
+  .get('/', validate('query', searchQuery), async (c) => {
     const db = c.env.DB
+    // The count reads every Transaction the filters keep, so it runs only when asked for or on the first page (`want`); the
+    // page reads little more than itself when its order is the date index's (ADR 0004: D1 bills rows read). A date range is
+    // served by the (date, id) index, and an Override Category by its own index. An Account filter wants (account_id, date, id):
+    // the balances ticket's migration 1002 adds it and this ticket adds none. A text filter, or a sort on any column but date,
+    // reads every Transaction the other filters keep. When Rules arrive the effective Category is worked out per Transaction,
+    // so a Category filter should be revisited then.
+    const search = toSearch(c.req.valid('query'))
+    const { count, page } = buildSearch(search)
+    const run = ({ sql, binds }: Statement) => db.prepare(sql).bind(...binds)
+    const counting = search.want !== 'page'
+    const paging = search.want !== 'count'
+    const results = await db.batch([...(counting ? [run(count)] : []), ...(paging ? [run(page)] : [])])
+    const total = counting ? (results.shift()!.results[0] as { total: number }).total : null
+    return c.json({ total, transactions: paging ? (results[0]!.results as TransactionListRow[]) : [] })
+  })
+  .get('/:id', async (c) => {
+    const id = c.req.param('id')
+    if (!ID.test(id)) return c.json({ error: 'Not found' }, 404)
     const category = effectiveCategory()
-    const from = `FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}`
-    const where = query.uncategorised ? `WHERE ${category.id} IS NULL` : ''
-    // The COUNT re-evaluates the effective Category for every Transaction when `?uncategorised=true` filters on it, so the
-    // scan grows with the history (ADR 0004: 10 ms CPU, and D1 rows read are billed). Fine while only Overrides exist, since the
-    // rest of the joins have no column yet; the Rules ticket should revisit it (a cached count, or a column kept up to date).
-    const [count, page] = await db.batch([
-      db.prepare(`SELECT COUNT(*) AS total ${from} ${where}`),
-      db
-        .prepare(
-          `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.description, t.bank_type AS bankType, t.amount_cents AS amountCents,
-                  ${category.id} AS categoryId, ${category.name} AS categoryName, ${category.source} AS categorySource, t.note
-           ${from} ${where}
-           ORDER BY t.date DESC, t.id DESC LIMIT ? OFFSET ?`,
-        )
-        .bind(limit, offset),
-    ])
-    return c.json({ total: (count!.results[0] as { total: number }).total, transactions: page!.results as TransactionListRow[] })
+    const transaction = await c.env.DB.prepare(
+      `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.amount_cents AS amountCents, t.description,
+              t.bank_memo AS bankMemo, t.bank_type AS bankType, t.bank_reference AS bankReference,
+              t.bank_counterparty_account AS bankCounterpartyAccount, t.bank_card_suffix AS bankCardSuffix, t.bank_particulars AS bankParticulars, t.bank_payment_code AS bankPaymentCode,
+              t.source, ${category.id} AS categoryId, ${category.name} AS categoryName, ${category.source} AS categorySource, t.note,
+              CASE WHEN t.has_bank_time = 1 THEN t.akahu_date_raw END AS bankTime, t.akahu_first_seen_at AS firstSeenAt
+       FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
+       WHERE t.id = ?`,
+    )
+      .bind(Number(id))
+      .first<TransactionDetail>()
+    return transaction ? c.json(transaction) : c.json({ error: 'Not found' }, 404)
   })
   // The guard in app.ts has already required the Admin, so these only validate the body's shape.
   .put('/:id/override', validate('json', overrideBody), async (c) => {

@@ -83,7 +83,7 @@ test('a Member lands on a Summary with balances, recent Transactions and the Bal
   await expect(newest).toContainText('Mon 6 Oct 2031')
   await expect(newest).toContainText('+$4.00')
   await expect(newest).toContainText(name)
-  await expect(recent.getByRole('link', { name: /See all [\d,]+ transactions/ })).toBeVisible()
+  await expect(recent.getByRole('link', { name: 'See all transactions' })).toBeVisible()
 
   // A Member sees none of the Admin's controls.
   await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Import' })).toHaveCount(0)
