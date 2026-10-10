@@ -8,6 +8,7 @@ import { formatDate, formatDateTime } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { transactionQuery } from '@/lib/queries'
 import type { DetailOrigin, TransactionSearch } from '@/lib/transaction-search'
+import { transferExplanation } from '@/lib/transfers'
 
 const linkStyle = 'inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
@@ -88,6 +89,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
   // An Import's reference is a cheque number. It doesn't stand in for the payment details a bank file lacks, so it doesn't count as one.
   const imported = t.source === 'import'
   const paymentDetails = [t.bankCounterpartyAccount, t.bankCardSuffix, t.bankParticulars, t.bankPaymentCode, imported ? null : t.bankReference].some((value) => value !== null && value.trim() !== '')
+  const transferNote = transferExplanation(t)
 
   return (
     <>
@@ -141,9 +143,21 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
           <Fact label="Description">{t.description}</Fact>
           <Fact label="Account">{t.accountName}</Fact>
           <Fact label="Category">
-            {t.categoryName ?? <span className="text-muted-foreground">Uncategorised</span>}
+            {t.categoryName ?? <span className="text-muted-foreground">{t.transfer === null ? 'Uncategorised' : 'None, as this is a Transfer'}</span>}
             {t.categorySource === 'override' && <span className="block text-muted-foreground">Override: set by the Admin</span>}
           </Fact>
+          {transferNote !== null && (
+            <Fact label="Transfer">
+              {transferNote}
+              {t.transferTransactionId !== null && (
+                <span className="block">
+                  <Link to="/transactions/$id" params={{ id: String(t.transferTransactionId) }} search={{ ...back, origin }} className={linkStyle}>
+                    See the matching Transaction
+                  </Link>
+                </span>
+              )}
+            </Fact>
+          )}
           <Fact label="Note">{t.note ? <span className="whitespace-pre-line">{t.note}</span> : <span className="text-muted-foreground">No Note</span>}</Fact>
         </dl>
       </section>

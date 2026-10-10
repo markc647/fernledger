@@ -67,8 +67,8 @@ beforeEach(async () => {
   n = 0
 })
 
-/** What an Import has no more of: nothing the bank said about the payment. */
-const bankless = { source: 'import', bankReference: null, bankCounterpartyAccount: null, bankCardSuffix: null, bankParticulars: null, bankPaymentCode: null }
+/** What an Import has no more of: nothing the bank said about the payment. Neither of these is a Transfer. */
+const bankless = { source: 'import', transfer: null, bankReference: null, bankCounterpartyAccount: null, bankCardSuffix: null, bankParticulars: null, bankPaymentCode: null }
 
 describe('what a Report lists', () => {
   it('lists the Account\'s Transactions in the range, oldest first, with the Note and the effective Category', async () => {

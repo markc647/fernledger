@@ -5,7 +5,7 @@ let n = 0
 const NO_BANK_DETAILS = { source: 'import', bankReference: null, bankCounterpartyAccount: null, bankCardSuffix: null, bankParticulars: null, bankPaymentCode: null } as const
 const row = (over: Partial<ReportRow> = {}): ReportRow => {
   n += 1
-  return { id: n, date: '2026-10-01', description: `EXAMPLE ${n}`, amountCents: -1000, categoryName: null, note: null, ...NO_BANK_DETAILS, ...over }
+  return { id: n, date: '2026-10-01', description: `EXAMPLE ${n}`, amountCents: -1000, categoryName: null, transfer: null, note: null, ...NO_BANK_DETAILS, ...over }
 }
 
 /** A pretend API: each Account holds `rows`, served `limit` at a time after the place `next` named. Records every request. */

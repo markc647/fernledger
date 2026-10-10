@@ -2,9 +2,10 @@ import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
-import { effectiveCategory, type CategorySource } from './effective-category'
+import { effectiveCategory, type CategorySource, type TransferSource } from './effective-category'
 import { exportQuery, exportResponse } from './transaction-export'
 import { buildSearch, searchQuery, toFilters, toSearch, type Statement } from './transaction-search'
+import { PARTNER_JOIN } from './transfers'
 import { validate } from './validate'
 
 /** The Admin's Override: a Category in use, or null to take it off. */
@@ -26,6 +27,9 @@ type TransactionListRow = {
   /** Which source supplied the Category: 'override' for one the Admin set by hand. */
   categorySource: CategorySource | null
   note: string | null
+  transfer: TransferSource | null
+  /** The Account of the matching Transaction (the one this is paired with), whether or not an Override makes this one spending; null when unpaired. */
+  transferAccountName: string | null
 }
 
 /**
@@ -52,6 +56,12 @@ type TransactionDetail = {
   categoryName: string | null
   categorySource: CategorySource | null
   note: string | null
+  transfer: TransferSource | null
+  /** The Account and the ID of the matching Transaction (the one this is paired with), or null when unpaired. */
+  transferAccountName: string | null
+  transferTransactionId: number | null
+  /** True when the matching Transaction has an Override with a Category in use, so it counts as spending although this one is a Transfer. */
+  transferPartnerOverridden: boolean
   bankTime: string | null
   firstSeenAt: string | null
 }
@@ -100,14 +110,17 @@ export const transactions = new Hono<AppEnv>()
       `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.amount_cents AS amountCents, t.description,
               t.bank_memo AS bankMemo, t.bank_type AS bankType, t.bank_reference AS bankReference,
               t.bank_counterparty_account AS bankCounterpartyAccount, t.bank_card_suffix AS bankCardSuffix, t.bank_particulars AS bankParticulars, t.bank_payment_code AS bankPaymentCode,
-              t.source, ${category.id} AS categoryId, ${category.name} AS categoryName, ${category.source} AS categorySource, t.note,
+              t.source, ${category.shown.id} AS categoryId, ${category.shown.name} AS categoryName, ${category.shown.source} AS categorySource, t.note,
+              ${category.transfer} AS transfer, partner_account.name AS transferAccountName, partner.id AS transferTransactionId,
+              EXISTS (SELECT 1 FROM categories partner_override WHERE partner_override.id = partner.override_category AND partner_override.removed_at IS NULL) AS transferPartnerOverridden,
               CASE WHEN t.has_bank_time = 1 THEN t.akahu_date_raw END AS bankTime, t.akahu_first_seen_at AS firstSeenAt
        FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
+       ${PARTNER_JOIN}
        WHERE t.id = ?`,
     )
       .bind(Number(id))
-      .first<TransactionDetail>()
-    return transaction ? c.json(transaction) : c.json({ error: 'Not found' }, 404)
+      .first<Omit<TransactionDetail, 'transferPartnerOverridden'> & { transferPartnerOverridden: number }>()
+    return transaction ? c.json({ ...transaction, transferPartnerOverridden: transaction.transferPartnerOverridden === 1 }) : c.json({ error: 'Not found' }, 404)
   })
   // The guard in app.ts has already required the Admin, so these only validate the body's shape.
   .put('/:id/override', validate('json', overrideBody), async (c) => {

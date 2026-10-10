@@ -16,5 +16,5 @@ export const Route = createFileRoute('/transactions_/$id')({
 function Detail() {
   const { id } = Route.useParams()
   const { origin, ...back } = Route.useSearch()
-  return <TransactionDetail id={id} back={back} origin={origin} />
+  return <TransactionDetail key={id} id={id} back={back} origin={origin} />
 }

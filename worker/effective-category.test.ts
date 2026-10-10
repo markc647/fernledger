@@ -79,3 +79,49 @@ describe('the effective Category', () => {
     expect(await resolve(null, null, null, [{ source: 'override', column: null }])).toEqual({ id: null, name: null, source: null })
   })
 })
+
+// The one definition of a Transfer, read from the Transaction's stored pair and Rule flag, and cut off by an Override.
+describe('whether a Transaction is a Transfer', () => {
+  const resolveTransfer = async (transferOf: number | null, ruleTransfer: number | null, override: string | null, slots: readonly CategorySlot[] = CATEGORY_SLOTS) => {
+    const effective = effectiveCategory(slots)
+    return env.DB.prepare(
+      `SELECT ${effective.transfer} AS transfer, ${effective.isTransfer} AS isTransfer FROM (SELECT ? AS transfer_of, ? AS rule_transfer, ? AS override_category, NULL AS rule_category) t ${effective.joins}`,
+    )
+      .bind(transferOf, ruleTransfer, override === null ? null : ids[override]!)
+      .first<{ transfer: string | null; isTransfer: number }>()
+  }
+
+  it('is a pair when the Transaction is paired', async () => {
+    expect(await resolveTransfer(7, null, null)).toEqual({ transfer: 'pair', isTransfer: 1 })
+  })
+
+  it('is the Rule when a Rule marks it and nothing paired it', async () => {
+    expect(await resolveTransfer(null, 1, null)).toEqual({ transfer: 'rule', isTransfer: 1 })
+  })
+
+  it('is a pair, not the Rule, when both apply', async () => {
+    expect(await resolveTransfer(7, 1, null)).toEqual({ transfer: 'pair', isTransfer: 1 })
+  })
+
+  it('is not a Transfer when it is neither paired nor marked', async () => {
+    expect(await resolveTransfer(null, null, null)).toEqual({ transfer: null, isTransfer: 0 })
+  })
+
+  it('is not a Transfer when the Admin has set an Override, however it is paired or marked', async () => {
+    expect(await resolveTransfer(7, 1, 'Precedence Override')).toEqual({ transfer: null, isTransfer: 0 })
+    expect(await resolveTransfer(null, 1, 'Precedence Override')).toEqual({ transfer: null, isTransfer: 0 })
+  })
+
+  it('is a Transfer again when the Override is of a Category that has been removed', async () => {
+    await env.DB.prepare("UPDATE categories SET removed_at = '2026-10-01T00:00:00.000Z' WHERE name = 'Precedence Override'").run()
+    try {
+      expect(await resolveTransfer(7, null, 'Precedence Override')).toEqual({ transfer: 'pair', isTransfer: 1 })
+    } finally {
+      await env.DB.prepare("UPDATE categories SET removed_at = NULL WHERE name = 'Precedence Override'").run()
+    }
+  })
+
+  it('has no Override to defer to when no slot supplies one', async () => {
+    expect(await resolveTransfer(7, null, null, [{ source: 'override', column: null }])).toEqual({ transfer: 'pair', isTransfer: 1 })
+  })
+})

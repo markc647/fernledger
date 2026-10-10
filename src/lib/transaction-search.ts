@@ -8,6 +8,10 @@ export const SORT_KEYS = ['date', 'account', 'description', 'category', 'amount'
 export type SortKey = (typeof SORT_KEYS)[number]
 export type SortDirection = 'asc' | 'desc'
 
+/** What the API's `transfers` filter accepts (worker/transaction-search.ts). */
+export const TRANSFERS_FILTERS = ['only', 'exclude'] as const
+export type TransfersFilter = (typeof TRANSFERS_FILTERS)[number]
+
 /** The longest text the API searches for (worker/transaction-search.test.ts pins the two together). */
 export const MAX_TEXT = 100
 /** The last page the address accepts: 100,000 pages of 50 is 5 million Transactions, far past any history the app is built for. */
@@ -18,6 +22,8 @@ export type TransactionSearch = {
   account?: number
   /** A Category's ID, or 'uncategorised' for those with none. */
   category?: number | 'uncategorised'
+  /** Only Transfers, or everything but (the spending). Left out for both. */
+  transfers?: TransfersFilter
   /** NZ dates, YYYY-MM-DD, both ends included. */
   from?: string
   to?: string
@@ -46,6 +52,7 @@ export function tidy(search: TransactionSearch): TransactionSearch {
   const tidied: TransactionSearch = {
     account: search.account,
     category: search.category,
+    transfers: search.transfers,
     from: search.from || undefined,
     to: search.to || undefined,
     q: search.q || undefined,
@@ -72,6 +79,7 @@ export function parseTransactionSearch(raw: Record<string, unknown>): Transactio
   return tidy({
     account: positiveInteger(raw.account, 999_999_999),
     category: raw.category === 'uncategorised' ? 'uncategorised' : positiveInteger(raw.category, 999_999_999),
+    transfers: TRANSFERS_FILTERS.find((filter) => filter === raw.transfers),
     from: searchDate(raw.from),
     to: searchDate(raw.to),
     q: text,
@@ -82,7 +90,7 @@ export function parseTransactionSearch(raw: Record<string, unknown>): Transactio
 }
 
 /** The search's filters alone, which are all that decide how many Transactions match: no sort, no page. */
-export const filtersOf = ({ account, category, from, to, q }: TransactionSearch): TransactionSearch => tidy({ account, category, from, to, q })
+export const filtersOf = ({ account, category, transfers, from, to, q }: TransactionSearch): TransactionSearch => tidy({ account, category, transfers, from, to, q })
 
 /** The API's parameters for the filters alone. Blank ones are left out. */
 export function filterQuery(search: TransactionSearch): Record<string, string> {
@@ -90,6 +98,7 @@ export function filterQuery(search: TransactionSearch): Record<string, string> {
   if (search.account !== undefined) query.accountId = String(search.account)
   if (search.category === 'uncategorised') query.uncategorised = 'true'
   else if (search.category !== undefined) query.categoryId = String(search.category)
+  if (search.transfers) query.transfers = search.transfers
   if (search.from) query.from = search.from
   if (search.to) query.to = search.to
   if (search.q) query.text = search.q

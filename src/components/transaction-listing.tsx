@@ -28,7 +28,7 @@ const columns: Column<ReportRow>[] = [
       )
     },
   },
-  { key: 'category', header: 'Category', className: `${PAPER} [overflow-wrap:break-word]`, cell: (row) => row.categoryName ?? 'Uncategorised' },
+  { key: 'category', header: 'Category', className: `${PAPER} [overflow-wrap:break-word]`, cell: (row) => (row.transfer ? 'Transfer' : (row.categoryName ?? 'Uncategorised')) },
   {
     key: 'note',
     header: 'Note',
