@@ -9,7 +9,7 @@ The one Member who can change Categories, Rules, Budgets, Overrides and Notes, a
 _Avoid_: Super user, owner, editor
 
 **Member**:
-A person granted access to the dashboard; read-only unless they are the Admin.
+A person granted access to Fernledger; read-only unless they are the Admin.
 _Avoid_: User, viewer, household
 
 **Deployer**:
@@ -137,8 +137,20 @@ _Avoid_: Report
 ## Viewing
 
 **Summary**:
-The page every Member lands on: the balance of each Account, Budget vs actual for this month, the newest Transactions and any Balance Check warnings.
-_Avoid_: Dashboard, home page
+The page every Member lands on, except the Admin, who lands on the Dashboard: the balance of each Account, Budget vs actual for this month, the newest Transactions and any Balance Check warnings, with a link to the Charts. The Dashboard has all of these parts too.
+_Avoid_: Home page
+
+**Dashboard**:
+The page the Admin lands on: shortcuts to the work only the Admin does (Import, Uncategorised, Rules, Categories, Budgets, Settings), then every part of the Summary, then the Charts. Where the Summary is for a Member, the Dashboard is for the Admin; the address is the same and the Admin's navigation calls it the Dashboard.
+_Avoid_: Home page, admin panel
+
+**Charts**:
+The page any Member can open, and the part of the Dashboard, that draws trends: net worth over time, and spending by Category for a period. Each chart is a picture of figures that are also written out in a table.
+_Avoid_: Graphs, analytics
+
+**Net worth**:
+The balance of every tracked Account added up at the end of each month, worked out from each Account's balance history. It is not assets or investments entered by hand, which Fernledger does not track (README, What it doesn't do). A chart of it is on the Charts page; the Reports page's balances over time lists each Account's own.
+_Avoid_: Total balance, wealth
 
 ## Configuration
 

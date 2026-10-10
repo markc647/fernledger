@@ -309,4 +309,13 @@
     background-color: Highlight;
     color: HighlightText;
   }
+  /* A chart's line and bars are drawn in theme colours, which the reader's palette may not keep. Draw them in the text colour; the
+     figures beside the chart say the rest. */
+  [data-slot="chart"] :is(.recharts-line-curve, .recharts-dot, .recharts-rectangle) {
+    fill: CanvasText;
+    stroke: CanvasText;
+  }
+  [data-slot="chart"] .recharts-line-curve {
+    fill: none;
+  }
 }

@@ -8,6 +8,7 @@ import { authConfigFromEnv, authenticate, devMember } from './auth'
 import { balanceChecks, balances } from './balances'
 import { budgets } from './budgets'
 import { categories } from './categories'
+import { charts } from './charts'
 import { isDailyLimitError } from './d1-errors'
 import { changeLogList } from './changelog-list'
 import { FEATURES, featureStatuses } from './features'
@@ -63,6 +64,7 @@ export const app = new Hono<AppEnv>()
   .route('/api/budgets', budgets)
   .route('/api/categories', categories)
   .route('/api/change-log', changeLogList)
+  .route('/api/charts', charts)
   .route('/api/imports', imports)
   .route('/api/reports', reports)
   .route('/api/rules', rules)

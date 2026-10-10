@@ -84,8 +84,8 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await expect(rowFor(page, name)).toContainText(`From ${monthWords}: $100.00 a month`)
   await noAxeViolations(page)
 
-  // The Summary: $43.21 spent of $100.00, with the status as an icon and words.
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Summary' }).click()
+  // The Dashboard (the Admin's Summary): $43.21 spent of $100.00, with the status as an icon and words.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Dashboard' }).click()
   await expect(page.getByRole('heading', { level: 2, name: 'Budget vs actual' })).toBeVisible()
   await expect(widgetRow(page, name)).toContainText('$100.00')
   await expect(widgetRow(page, name)).toContainText('$43.21')

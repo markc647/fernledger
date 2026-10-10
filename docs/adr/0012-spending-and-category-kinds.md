@@ -12,7 +12,7 @@ The starter Categories Wages and salary, NZ Super and benefits, Interest and Oth
 
 An Override outranks a Transfer, so a Transfer half the Admin gives a Category counts under that Category's kind, which is not always Spending. Lending to a child's tracked Account, with a Loans Category on both halves, is neither Spending nor Income.
 
-`worker/spending.ts` is the only place these are written down in code: `buildSpending` reads money out and money in for a range of NZ dates, for all Accounts or one, `rollUp` turns the rows into Spending and Income by month and by Category, and `isLoan` picks out the Transactions in Loans Categories. Budget vs actual uses them now. The Dashboard (#18), Spending by Category (#21), the Budget vs actual Report (#22), Income vs spending (#23) and the Loans Report (#38) will, so none can disagree. A query that totals spending anywhere else is a bug.
+`worker/spending.ts` is the only place these are written down in code: `buildSpending` reads money out and money in for a range of NZ dates, for all Accounts or one, `rollUp` turns the rows into Spending and Income by month and by Category, and `isLoan` picks out the Transactions in Loans Categories. Budget vs actual and the Dashboard's Spending by Category chart (`worker/chart-spending.ts`, which adds a period's months with `rollUp`'s `byCategory`) use them now. The Spending by Category Report (#21), the Budget vs actual Report (#22), Income vs spending (#23) and the Loans Report (#38) will, so none can disagree. A query that totals spending anywhere else is a bug.
 
 ## Consequences
 

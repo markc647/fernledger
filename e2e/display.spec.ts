@@ -92,7 +92,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances']
+  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -413,6 +413,71 @@ test.describe('zoom', () => {
         }))
         expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
       })
+    }
+  }
+
+  // The charts with their longest content, on the Charts page (a Member's) and on the Dashboard (the Admin's): ten years of months, big amounts, Accounts
+  // and Categories with long names, a Category below zero, and the figures open. The charts' data is stubbed, so this needs nothing in the database.
+  const longChartName = 'Health and medical costs for the household and the long-term care fees'
+  const stubCharts = async (page: Page) => {
+    await page.route('**/api/charts/net-worth', (route) =>
+      route.fulfill({
+        json: {
+          counted: [{ accountId: 1, accountName: longChartName }],
+          notCounted: [{ accountId: 2, accountName: `${longChartName} credit card` }, { accountId: 3, accountName: 'Example savings' }],
+          points: Array.from({ length: 120 }, (_, i) => ({ date: new Date(Date.UTC(2017, i + 1, 0)).toISOString().slice(0, 10), cents: 123_456_789_012 - i * 2_000_000_000 })),
+          tooManyAccounts: null,
+        },
+      }),
+    )
+    await page.route(/\/api\/charts\/spending\?/, (route) =>
+      route.fulfill({
+        json: {
+          from: '2026-10-01',
+          to: '2026-10-31',
+          totalCents: 123_456_789_012,
+          categories: [
+            ...Array.from({ length: 13 }, (_, i) => ({ categoryId: i + 1, name: `${longChartName} ${i + 1}`, cents: 123_456_789_012 - i * 9_000_000_000 })),
+            { categoryId: null, name: 'Uncategorised', cents: 5000 },
+            { categoryId: 99, name: 'Fuel', cents: -123_456_789 },
+          ],
+        },
+      }),
+    )
+  }
+  for (const { path, role } of [{ path: '/charts', role: 'member' }, { path: '/', role: 'admin' }] as const) {
+    for (const { name, width, height } of zoomLevels) {
+      for (const size of ['A', 'A++'] as const) {
+        test(`${path} with long charts (${role}) at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+          await signInAs(context, role)
+          await stubCharts(page)
+          await page.setViewportSize({ width, height })
+          await page.goto(path)
+          await sizeButton(page, size).click()
+          const netWorth = page.getByRole('region', { name: 'Net worth over time' })
+          const spending = page.getByRole('region', { name: 'Spending by Category' })
+          await expect(netWorth.getByRole('img', { name: /^Line chart of net worth by month/ }).locator('svg.recharts-surface')).toBeVisible()
+          await expect(spending.getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
+          await expect(netWorth).toContainText('Not counted yet:')
+          await netWorth.getByText('Show the figures').click()
+          await expect(spending).toContainText('The chart shows the biggest 12 Categories. The table has the other 2 too.')
+          await expect(spending).toContainText('$1,234,567.89 back')
+          // Measure only once the size is applied and the buttons have finished their width transition.
+          await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+          const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            clientWidth: document.documentElement.clientWidth,
+          }))
+          expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+          // The pictures fit the window too, and keep a size worth reading: no chart is squeezed to nothing.
+          for (const svg of await page.locator('[data-slot="chart"] svg.recharts-surface').all()) {
+            const box = await svg.boundingBox()
+            expect(box!.width).toBeLessThanOrEqual(clientWidth)
+            expect(box!.width).toBeGreaterThan(100)
+          }
+        })
+      }
     }
   }
 

@@ -58,6 +58,18 @@ export function formatMonth(month: string) {
   return `${MONTH_NAMES[Number(match[2]) - 1]} ${match[1]}`
 }
 
+/** An NZ calendar month as stored ("2026-10") in short form, for a chart's axis: "Oct 2026". Its names are the dates' ("Sept", not "Sep"). */
+export function formatMonthShort(month: string) {
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month)
+  if (!match) throw new RangeError('Months are YYYY-MM')
+  return `${MONTHS[Number(match[2]) - 1]} ${match[1]}`
+}
+
+/** A balance in whole dollars, for the numbers along a chart's axis: "$12,000" or "−$1,200". Rounded, so it is not for reading an amount: use `formatBalance`. */
+export function formatAxisDollars(cents: number) {
+  return formatBalance(Math.round(cents / 100) * 100).replace(/\.00$/, '')
+}
+
 /** A moment in time (such as when a Sync last ran) shown as its New Zealand day: "Thu 8 Oct 2026". */
 export function formatInstantDate(instant: Date | number) {
   const date = new Date(instant)

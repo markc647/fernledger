@@ -2,9 +2,10 @@ import { AxeBuilder } from '@axe-core/playwright'
 import { expect, signInAs, test } from './fixtures'
 
 const pages = [
-  { role: 'admin', path: '/', heading: 'Summary' },
+  { role: 'admin', path: '/', heading: 'Dashboard' },
   { role: 'admin', path: '/settings', heading: 'Settings' },
   { role: 'member', path: '/', heading: 'Summary' },
+  { role: 'member', path: '/charts', heading: 'Charts' },
   { role: 'member', path: '/styleguide', heading: 'Styleguide' },
 ] as const
 
