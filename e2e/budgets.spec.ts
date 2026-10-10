@@ -54,8 +54,13 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await expect(page.getByText('Each month stands alone')).toBeVisible()
   await expect(rowFor(page, name)).toContainText('No Budget')
 
+  // WCAG 2.5.3: the button's accessible name contains the text it shows, so voice control can say what it sees.
+  const edit = page.getByRole('button', { name: `Edit Budget for ${name}` })
+  expect(await edit.getAttribute('aria-label')).toContain((await edit.innerText()).trim())
+
   // An amount that is not a Budget is explained, not sent.
-  await page.getByRole('button', { name: `Change Budget for ${name}` }).click()
+  await edit.click()
+  await expect(page.getByRole('heading', { level: 2, name: `Budget for ${name}` })).toBeVisible()
   await expect(page.getByLabel('Monthly Budget in dollars')).toBeFocused()
   await expect(page.getByLabel('Applies from')).toHaveValue(thisMonth)
   await expect(page.getByRole('button', { name: 'End Budget' })).toHaveCount(0) // there is no Budget to end yet
@@ -69,7 +74,7 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   // Focus returns to the button that opened the form, and the message says what happened.
   const message = page.getByRole('status').filter({ hasText: 'now has a Budget' })
   await expect(message).toHaveText(`${name} now has a Budget of $100.00 a month from ${monthWords}.`)
-  await expect(page.getByRole('button', { name: `Change Budget for ${name}` })).toBeFocused()
+  await expect(page.getByRole('button', { name: `Edit Budget for ${name}` })).toBeFocused()
   await expect(rowFor(page, name)).toContainText('$100.00 a month')
   await expect(rowFor(page, name)).toContainText(`From ${monthWords}: $100.00 a month`)
   await noAxeViolations(page)
@@ -86,7 +91,7 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
 
   // A lower Budget from this month puts the Category over it.
   await page.getByRole('link', { name: 'Set or change Budgets' }).click()
-  await page.getByRole('button', { name: `Change Budget for ${name}` }).click()
+  await page.getByRole('button', { name: `Edit Budget for ${name}` }).click()
   await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('100.00')
   await page.getByLabel('Monthly Budget in dollars').fill('40.50')
   await page.getByRole('button', { name: 'Save Budget' }).click()
@@ -97,13 +102,13 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
 
   // Setting what the month already has changes nothing, and says so.
   await page.goto('/budgets')
-  await page.getByRole('button', { name: `Change Budget for ${name}` }).click()
+  await page.getByRole('button', { name: `Edit Budget for ${name}` }).click()
   await page.getByLabel('Monthly Budget in dollars').fill('40.50')
   await page.getByRole('button', { name: 'Save Budget' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'so nothing changed' })).toHaveText(`${name} already has a Budget of $40.50 a month in ${monthWords}, so nothing changed.`)
 
   // Ending it leaves this month and later with no Budget; the Summary stops listing the Category.
-  await page.getByRole('button', { name: `Change Budget for ${name}` }).click()
+  await page.getByRole('button', { name: `Edit Budget for ${name}` }).click()
   await page.getByRole('button', { name: 'End Budget' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Ended the Budget' })).toHaveText(`Ended the Budget for ${name} from ${monthWords}.`)
   await expect(rowFor(page, name)).toContainText('No Budget')
@@ -141,7 +146,7 @@ test('a Member sees the Budgets and how spending compares, and cannot change the
   await expect(page.getByRole('heading', { level: 1, name: 'Budgets' })).toBeVisible()
   await expect(page.getByText('Only the Admin can change them.')).toBeVisible()
   await expect(rowFor(page, name)).toContainText('$50.00 a month')
-  await expect(page.getByRole('button', { name: /Change Budget/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Edit Budget/ })).toHaveCount(0)
   await expect(page.getByRole('columnheader', { name: 'Actions' })).toHaveCount(0)
   await noAxeViolations(page)
 

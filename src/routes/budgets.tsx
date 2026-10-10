@@ -35,7 +35,7 @@ function Budgets() {
   // Until `me` arrives nobody is the Admin: the controls fail closed. The API refuses a Member's write whatever the page shows.
   const isAdmin = me?.role === 'admin'
 
-  // Back to the button that opened the form (or, if that is gone, the message), so keyboard focus is never lost.
+  // Back to the button that opened the panel (or, if that is gone, the message), so keyboard focus is never lost.
   const status = useRef<HTMLParagraphElement>(null)
   const focusAfter = useRef<{ id?: string } | null>(null)
   useEffect(() => {
@@ -52,11 +52,12 @@ function Budgets() {
 
   type Row = NonNullable<typeof data>['budgets'][number]
   const thisMonth = data?.month
+  const editingRow = data?.budgets.find((row) => row.categoryId === editing)
   const columns: Column<Row>[] = [
     { key: 'category', header: 'Category', cell: (row) => row.categoryName },
     {
       key: 'budget',
-      header: 'Budget this month',
+      header: 'This month',
       cell: (row) =>
         row.amountCents === null ? (
           <>
@@ -65,7 +66,7 @@ function Budgets() {
           </>
         ) : (
           <>
-            <span className="font-medium whitespace-nowrap tabular-nums">{formatBalance(row.amountCents)} a month</span>
+            <span className="font-medium tabular-nums">{formatBalance(row.amountCents)} a month</span>
             <span className="block text-muted-foreground">from {formatMonth(row.effectiveFrom!)}</span>
           </>
         ),
@@ -85,20 +86,25 @@ function Budgets() {
         ),
     },
   ]
-  if (isAdmin && thisMonth)
+  if (isAdmin)
     columns.push({
       key: 'actions',
       header: 'Actions',
-      cell: (row) =>
-        editing === row.categoryId ? (
-          <BudgetForm row={row} thisMonth={thisMonth} onDone={(message) => done(message, `budget-${row.categoryId}-button`)} onCancel={() => done('', `budget-${row.categoryId}-button`)} />
-        ) : (
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button id={`budget-${row.categoryId}-button`} size="touch" variant="outline" aria-label={`Change Budget for ${row.categoryName}`} onClick={() => { setNotice(''); setEditing(row.categoryId) }}>
-              Change Budget
-            </Button>
-          </div>
-        ),
+      cell: (row) => (
+        <Button
+          id={`budget-${row.categoryId}-button`}
+          size="touch"
+          variant="outline"
+          aria-label={`Edit Budget for ${row.categoryName}`}
+          aria-expanded={editing === row.categoryId}
+          onClick={() => {
+            setNotice('')
+            setEditing(row.categoryId)
+          }}
+        >
+          Edit
+        </Button>
+      ),
     })
 
   return (
@@ -107,13 +113,22 @@ function Budgets() {
       <p className="mt-2">
         A Budget is the amount you plan to spend on a Category each month. A new Budget applies from the month you choose, and earlier months keep the Budget they had.
         Each month stands alone: what you don't spend isn't carried over. Transfers between your own Accounts and Pending Transactions aren't counted as spending.{' '}
-        {isAdmin ? 'Choose Change Budget on a Category to set or end its Budget.' : 'Only the Admin can change them.'}
+        {isAdmin ? 'Choose Edit on a Category to set or end its Budget.' : 'Only the Admin can change them.'}
       </p>
       {thisMonth && <p className="mt-2">This month is {formatMonth(thisMonth)}, in New Zealand time.</p>}
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {notice}
       </p>
+      {isAdmin && editingRow && thisMonth && (
+        <BudgetPanel
+          key={editingRow.categoryId}
+          row={editingRow}
+          thisMonth={thisMonth}
+          onDone={(message) => done(message, `budget-${editingRow.categoryId}-button`)}
+          onCancel={() => done('', `budget-${editingRow.categoryId}-button`)}
+        />
+      )}
       <div className="mt-6">
         {error ? (
           <p role="alert">Fernledger couldn't load the Budgets. Reload the page to try again.</p>
@@ -127,7 +142,8 @@ function Budgets() {
   )
 }
 
-function BudgetForm({
+/** Sets or ends one Category's Budget from a month. A panel of its own above the list, not a form inside a row, so it has the whole width on a phone. */
+function BudgetPanel({
   row,
   thisMonth,
   onDone,
@@ -158,62 +174,83 @@ function BudgetForm({
   const canEnd = row.changes.some((change) => change.amountCents !== null)
 
   return (
-    <form
-      aria-label={`Budget for ${row.categoryName}`}
-      className="flex flex-wrap items-end justify-end gap-2 text-start"
-      onSubmit={(event) => {
-        event.preventDefault()
-        const typed = readDollars(amount)
-        if (!typed.valid || typed.cents === null || typed.cents <= 0) return setInvalid(true)
-        save.mutate(typed.cents)
-      }}
-    >
-      <div>
-        <label htmlFor={`${id}-amount`} className="block font-medium">
-          Monthly Budget in dollars
-        </label>
-        <Input
-          id={`${id}-amount`}
-          inputMode="decimal"
-          autoComplete="off"
-          value={amount}
-          required
-          autoFocus
-          aria-describedby={`${id}-hint`}
-          onChange={(event) => { setAmount(event.target.value); setInvalid(false); save.reset() }}
-        />
-      </div>
-      <div>
-        <label htmlFor={`${id}-month`} className="block font-medium">
-          Applies from
-        </label>
-        <Select id={`${id}-month`} value={from} aria-describedby={`${id}-hint`} onChange={(event) => { setFrom(event.target.value); save.reset() }}>
-          {monthChoices(thisMonth).map((choice) => (
-            <option key={choice.value} value={choice.value}>
-              {choice.label}
-            </option>
-          ))}
-        </Select>
-      </div>
-      <Button type="submit" size="touch" disabled={save.isPending || !amount.trim()}>
-        Save Budget
-      </Button>
-      {canEnd && (
-        <Button type="button" size="touch" variant="outline" disabled={save.isPending} aria-describedby={`${id}-hint`} onClick={() => save.mutate(null)}>
-          End Budget
-        </Button>
-      )}
-      <Button type="button" size="touch" variant="outline" onClick={onCancel}>
-        Cancel
-      </Button>
-      <p id={`${id}-hint`} className="basis-full text-muted-foreground">
-        {AMOUNT_HINT} Months before the one you choose keep the Budget they had.{canEnd && ' End Budget leaves the month you choose, and the months after it, with no Budget.'}
-      </p>
-      {(invalid || save.isError) && (
-        <p role="alert" className="basis-full font-medium text-destructive">
-          {invalid ? AMOUNT_HINT : whyNot(save.error)}
-        </p>
-      )}
-    </form>
+    <section aria-labelledby={`${id}-heading`} className="mt-4 max-w-xl rounded-xl border-2 p-4">
+      <h2 id={`${id}-heading`} className="text-lg font-semibold break-words">
+        Budget for {row.categoryName}
+      </h2>
+      <form
+        className="mt-3 space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          const typed = readDollars(amount)
+          if (!typed.valid || typed.cents === null || typed.cents <= 0) return setInvalid(true)
+          save.mutate(typed.cents)
+        }}
+      >
+        <div>
+          <label htmlFor={`${id}-amount`} className="block font-medium">
+            Monthly Budget in dollars
+          </label>
+          <Input
+            id={`${id}-amount`}
+            inputMode="decimal"
+            autoComplete="off"
+            value={amount}
+            required
+            autoFocus
+            aria-describedby={`${id}-hint`}
+            onChange={(event) => {
+              setAmount(event.target.value)
+              setInvalid(false)
+              save.reset()
+            }}
+          />
+          <p id={`${id}-hint`} className="mt-1 text-muted-foreground">
+            {AMOUNT_HINT}
+          </p>
+        </div>
+        <div>
+          <label htmlFor={`${id}-month`} className="block font-medium">
+            Applies from
+          </label>
+          <Select
+            id={`${id}-month`}
+            value={from}
+            aria-describedby={`${id}-month-hint`}
+            onChange={(event) => {
+              setFrom(event.target.value)
+              save.reset()
+            }}
+          >
+            {monthChoices(thisMonth).map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+          </Select>
+          <p id={`${id}-month-hint`} className="mt-1 text-muted-foreground">
+            Months before the one you choose keep the Budget they had.{canEnd && ' End Budget leaves the month you choose, and the months after it, with no Budget.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" size="touch" disabled={save.isPending || !amount.trim()}>
+            Save Budget
+          </Button>
+          {canEnd && (
+            <Button type="button" size="touch" variant="outline" disabled={save.isPending} aria-describedby={`${id}-month-hint`} onClick={() => save.mutate(null)}>
+              End Budget
+            </Button>
+          )}
+          <Button type="button" size="touch" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+        {(invalid || save.isError) && (
+          <p role="alert" className="font-medium text-destructive">
+            {invalid ? AMOUNT_HINT : whyNot(save.error)}
+          </p>
+        )}
+      </form>
+    </section>
   )
 }

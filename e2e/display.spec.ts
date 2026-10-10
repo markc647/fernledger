@@ -292,7 +292,7 @@ test.describe('zoom', () => {
         await page.setViewportSize({ width, height })
         await page.goto('/budgets')
         await sizeButton(page, size).click()
-        await page.getByRole('button', { name: `Change Budget for ${longName}` }).click()
+        await page.getByRole('button', { name: `Edit Budget for ${longName}` }).click()
         await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('1234567.89')
         await expect(page.getByRole('button', { name: 'End Budget' })).toBeVisible()
         await page.getByLabel('Monthly Budget in dollars').fill('0')
