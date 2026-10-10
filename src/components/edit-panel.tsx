@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Amount } from '@/components/amount'
+import { NotATransfer, TreatAsTransferAgain } from '@/components/not-a-transfer'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import { HttpError } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
-import { transferEditHint, type TransferSource } from '@/lib/transfers'
+import { NOT_TRANSFER_NOTE, notTransferSaved, transferEditHint, treatAsTransferAgainSaved, type TransferSource } from '@/lib/transfers'
 
 /** What the panel needs to know about a Transaction: how to name it, and its Override and Note now. */
 export type EditableTransaction = {
@@ -20,14 +21,22 @@ export type EditableTransaction = {
   categorySource: string | null
   /** Set while the Transaction is a Transfer, which an Override takes out of the Transfers. */
   transfer: TransferSource | null
+  /** The Account of its matching Transaction, if it is paired, whether or not an Override or Not a Transfer means this one is no longer a Transfer. */
+  transferAccountName: string | null
+  /** What the Worker says the Admin can do about its Transfer: say Not a Transfer, or take it off if they have. */
+  canMarkNotTransfer: boolean
+  notTransfer: boolean
   note: string | null
 }
 
 const textareaStyle =
   'block min-h-20 w-full rounded-lg border border-input bg-background px-3 py-2 text-base focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring'
 
-/** Sets a Transaction's Override and Note. Only what changed is sent, so only what changed is logged. */
-export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction; onSaved: () => void; onCancel: () => void }) {
+/**
+ * Sets a Transaction's Override and Note. Only what changed is sent, so only what changed is logged. For a Transfer it also offers Not a Transfer
+ * (and its undo), which is saved at once and not with the Save button; `onSaved` is then given what to say about it.
+ */
+export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction; onSaved: (message?: string) => void; onCancel: () => void }) {
   const queryClient = useQueryClient()
   const { data: categories, isError } = useQuery(categoriesQuery)
   const startCategory = row.categorySource === 'override' ? row.categoryId : null
@@ -35,6 +44,9 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
   const [note, setNote] = useState(row.note ?? '')
   const param = { id: String(row.id) }
   const transferHint = transferEditHint(row)
+  const unsaved = categoryId !== startCategory || note.trim() !== (row.note ?? '')
+  /** Saying Not a Transfer, or taking it off, saves at once and closes the panel, so what has been typed in it and not saved goes. */
+  const unsavedWarning = unsaved ? "Changes in this panel that you haven't saved will be lost." : undefined
 
   const save = useMutation({
     mutationFn: async () => {
@@ -109,6 +121,28 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
         </div>
         {save.isError && <p role="alert" className="font-medium text-destructive">The changes could not be saved. Try again.</p>}
       </form>
+      {(row.canMarkNotTransfer || row.notTransfer) && (
+        <div className="mt-4 border-t-2 pt-4">
+          <h3 className="font-medium">Not a Transfer</h3>
+          <p className="mt-1 text-muted-foreground">
+            {row.notTransfer
+              ? NOT_TRANSFER_NOTE
+              : row.transferAccountName === null
+                ? 'A Rule marks this as a Transfer. If that is wrong, choose Not a Transfer.'
+                : 'Fernledger pairs a Transaction with one in another Account on the same date for the same amount. If that is wrong, choose Not a Transfer.'}
+          </p>
+          {row.notTransfer ? (
+            <TreatAsTransferAgain id={row.id} warning={unsavedWarning} onDone={(paired) => onSaved(treatAsTransferAgainSaved(paired))} />
+          ) : (
+            <NotATransfer
+              id={row.id}
+              transfer={row}
+              extra={unsavedWarning}
+              onDone={() => onSaved(notTransferSaved())}
+            />
+          )}
+        </div>
+      )}
     </section>
   )
 }

@@ -129,7 +129,7 @@ describe('Replace imported history: carrying Overrides and Notes over', () => {
       withoutAnnotations('A5'),
     ])
     expect(await waiting()).toEqual([])
-    expect((await lastEntry()).summary).toBe(`Replaced imported history in ${savings}: removed 4 rows, imported 5 rows, Overrides and Notes carried over for 3 Transactions (3 with a different amount), none lost`)
+    expect((await lastEntry()).summary).toBe(`Replaced imported history in ${savings}: removed 4 rows, imported 5 rows, Overrides, Notes and Not a Transfer marks carried over for 3 Transactions (3 with a different amount), none lost`)
   })
 
   it('counts the Transactions that went to another amount over every chunk, not only the last', async () => {
@@ -274,7 +274,7 @@ describe('Replace imported history: carrying Overrides and Notes over', () => {
     await call('/api/imports/clear-history', { method: 'POST', body: { accountId: id } })
 
     const step = await lastEntry()
-    expect(step.summary).toBe(`Removed 5000 imported rows from ${savings} to replace its imported history (201 left), keeping the Overrides and Notes of 2 Transactions to carry over`)
+    expect(step.summary).toBe(`Removed 5000 imported rows from ${savings} to replace its imported history (201 left), keeping the Overrides, Notes and Not a Transfer marks of 2 Transactions to carry over`)
     expect(step.after).toEqual({ removed: 5000, remaining: 201, heldForCarryOver: 2 })
     expect(await waiting()).toHaveLength(2)
 
@@ -363,7 +363,7 @@ describe('Replace imported history: Overrides and Notes with no match are report
     expect(await waiting()).toEqual([])
     expect(await changeLog()).toEqual([
       {
-        summary: `Replaced imported history in ${savings}: removed 4 rows, imported 2 rows, Overrides and Notes carried over for 1 Transaction, lost for 2 Transactions`,
+        summary: `Replaced imported history in ${savings}: removed 4 rows, imported 2 rows, Overrides, Notes and Not a Transfer marks carried over for 1 Transaction, lost for 2 Transactions`,
         type: 'import',
         after: expect.any(String),
       },
@@ -419,9 +419,9 @@ describe('Replace imported history: Overrides and Notes with no match are report
     await importOk([row('X9')], { index: 2, count: 3, completes: true })
 
     expect((await changeLog()).map((e) => e.summary)).toEqual([
-      `Replaced imported history in ${savings}: removed 3 rows, imported 1 rows, Overrides and Notes carried over for 1 Transaction (part 1 of 3)`,
-      `Imported 1 rows into ${savings}, Overrides and Notes carried over for 1 Transaction (part 2 of 3)`,
-      `Imported 1 rows into ${savings}, Overrides and Notes carried over for 2 Transactions in all, lost for 1 Transaction (part 3 of 3)`,
+      `Replaced imported history in ${savings}: removed 3 rows, imported 1 rows, Overrides, Notes and Not a Transfer marks carried over for 1 Transaction (part 1 of 3)`,
+      `Imported 1 rows into ${savings}, Overrides, Notes and Not a Transfer marks carried over for 1 Transaction (part 2 of 3)`,
+      `Imported 1 rows into ${savings}, Overrides, Notes and Not a Transfer marks carried over for 2 Transactions in all, lost for 1 Transaction (part 3 of 3)`,
     ])
     expect((await lastEntry()).after).toMatchObject({ part: 3, carried: 0, carriedTotal: 2, lost: 1 })
   })
@@ -523,7 +523,7 @@ describe('Replace imported history: when it does not complete', () => {
     // What was given out is dropped; what still waits stays for a replace to finish or the Admin to discard.
     expect(await waiting()).toMatchObject([{ id: 'A3', note: 'Not in this file', applied: 0 }])
     expect(await imported(await accountId())).toMatchObject({ carryOverWaiting: 1 })
-    expect((await changeLog()).at(-1)!.summary).toBe(`Imported 1 rows into ${savings}, Overrides and Notes carried over for 2 Transactions in all, 1 still waiting (part 2 of 2)`)
+    expect((await changeLog()).at(-1)!.summary).toBe(`Imported 1 rows into ${savings}, Overrides, Notes and Not a Transfer marks carried over for 2 Transactions in all, 1 still waiting (part 2 of 2)`)
     expect((await lastEntry()).after).toMatchObject({ carried: 1, carriedTotal: 2, stillWaiting: 1 })
     expect((await lastEntry()).after).not.toHaveProperty('lost')
   })
@@ -624,7 +624,7 @@ describe('Replace imported history: when it does not complete', () => {
     await annotate('A1', { note: 'Waiting' })
     await importOk([row('B1')], { replace: true, count: 2 })
 
-    expect(await imported(await accountId())).toMatchObject({ imported: 1, withOverrideOrNote: 0, carryOverWaiting: 1 })
+    expect(await imported(await accountId())).toMatchObject({ imported: 1, withOwnWork: 0, carryOverWaiting: 1 })
     expect(await imported(await accountId(current))).toMatchObject({ carryOverWaiting: 0 })
   })
 })
@@ -762,7 +762,7 @@ describe('Replace imported history: more than one Account', () => {
 
     await call('/api/imports/clear-history', { method: 'POST', body: { accountId: id } })
 
-    expect((await lastEntry()).summary).toContain('keeping the Overrides and Notes of 1 Transaction to carry over')
+    expect((await lastEntry()).summary).toContain('keeping the Overrides, Notes and Not a Transfer marks of 1 Transaction to carry over')
     expect(await heldFor(current)).toEqual([])
   })
 
@@ -881,12 +881,12 @@ describe('POST /api/imports/discard-held', () => {
     expect(await res.json()).toEqual({ discarded: 2 })
     expect(await waiting()).toEqual([])
     const entry = await lastEntry()
-    expect(entry.summary).toBe(`Discarded the Overrides and Notes of 2 Transactions that ${savings} was holding from a replace that did not finish`)
+    expect(entry.summary).toBe(`Discarded the Overrides, Notes and Not a Transfer marks of 2 Transactions that ${savings} was holding from a replace that did not finish`)
     expect(entry.after).toEqual({
       discarded: 2,
       lostTransactions: [
-        { date: '2026-09-01', amountCents: -1000, description: 'EXAMPLE SHOP A2', category: 'Fuel', note: null },
-        { date: '2026-09-01', amountCents: -1000, description: 'EXAMPLE SHOP A3', category: 'Groceries', note: 'Three' },
+        { date: '2026-09-01', amountCents: -1000, description: 'EXAMPLE SHOP A2', category: 'Fuel', note: null, notTransfer: false },
+        { date: '2026-09-01', amountCents: -1000, description: 'EXAMPLE SHOP A3', category: 'Groceries', note: 'Three', notTransfer: false },
       ],
     })
     expect((await changeLog()).map((e) => e.type)).toEqual(['import'])

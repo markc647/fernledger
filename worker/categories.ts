@@ -4,7 +4,7 @@ import type { AppEnv } from './app-env'
 import { CATEGORY_KINDS, KIND_LABELS, type CategoryKind } from './category-kinds'
 import { recordChange } from './changelog'
 import { restartRerun } from './rule-rerun'
-import { validate } from './validate'
+import { nothing, validate } from './validate'
 
 type CategoryRow = { id: number; name: string; kind: CategoryKind }
 
@@ -16,7 +16,6 @@ const body = z.object({ name: categoryName })
 /** A new Category is Spending unless the Admin says otherwise (ADR 0012). */
 const addBody = z.object({ name: categoryName, kind: z.optional(kind) })
 const kindBody = z.object({ kind })
-const nothing = z.object({})
 
 const isDuplicateName = (error: unknown) => error instanceof Error && error.message.includes('UNIQUE constraint failed')
 const alreadyThere = { error: 'A Category with that name already exists' }

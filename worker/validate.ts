@@ -1,6 +1,9 @@
 import { validator } from 'hono/validator'
 import * as z from 'zod/mini'
 
+/** The body of a change with nothing to say: the guard (app.ts) wants a JSON body, so the browser sends `{}`, and anything more is refused. */
+export const nothing = z.strictObject({})
+
 /**
  * Validates a request's JSON body or query string against a zod schema before the handler runs.
  * A refusal names the field, never its value (values can be Transaction data).

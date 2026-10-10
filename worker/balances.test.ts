@@ -589,8 +589,9 @@ describe('the cost of a request (ADR 0004)', () => {
     expect(res.status).toBe(200)
     // find the Account, count the rows to replace, count the new rows (and what will be carried over), find the highest
     // Transaction ID, then in one batch: set the Cutover Date, remove the balances, forget what an earlier attempt gave out,
-    // hold the Overrides and Notes of the rows that go, let go of their matching Transactions, remove the rows, insert, apply the
-    // Rules, pair the Transfers, give the new rows what is held, mark it given, clear what is left, record the balance, the
+    // hold the Overrides, Notes and Not a Transfer marks of the rows that go, let go of their matching Transactions, remove the rows, insert, apply the
+    // Rules, give the new rows what is held (before they are paired, so a mark is on a row when pairing looks at it), mark it given, pair the Transfers,
+    // clear what is left, record the balance, the
     // Change Log entry; then read and save the check. Carrying over (ticket 36) added five statements to the 13 of the Rules
     // (ticket 13), and Transfers (ticket 15) two more.
     expect(prepared).toHaveLength(20)

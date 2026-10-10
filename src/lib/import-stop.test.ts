@@ -26,7 +26,7 @@ describe('describeStop', () => {
   it('says part of the old history has been removed, for a replace that stopped while clearing it, and to use Replace again', () => {
     const result = describeStop({ sent: 0, total: 3, replacing: true, removed: 5000, dailyLimit: true })
     expect(result.happened).toBe('Part of the old history has been removed.')
-    expect(result.kept).toContain('Any Override or Note you set on the removed Transactions is kept')
+    expect(result.kept).toContain('Any Override, Note or Not a Transfer mark you set on the removed Transactions is kept')
     expect(result.next).toContain('use "Replace imported history"')
     expect(result.next).toContain('tomorrow')
   })

@@ -3,13 +3,14 @@ import { Link } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Amount } from '@/components/amount'
 import { EditPanel } from '@/components/edit-panel'
+import { NotATransfer, TreatAsTransferAgain } from '@/components/not-a-transfer'
 import { Button } from '@/components/ui/button'
 import { KIND_NOTES } from '@/lib/category-kinds'
 import { formatDate, formatDateTime } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { transactionQuery } from '@/lib/queries'
 import type { DetailOrigin, TransactionSearch } from '@/lib/transaction-search'
-import { transferExplanation } from '@/lib/transfers'
+import { notTransferSaved, transferExplanation, treatAsTransferAgainSaved } from '@/lib/transfers'
 
 const linkStyle = 'inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
@@ -63,6 +64,15 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
     edit.current?.focus()
   }, [editing, t])
 
+  // Not a Transfer, and its undo, replace the control that was pressed, so focus goes to the status line that says what happened.
+  const status = useRef<HTMLParagraphElement>(null)
+  const announcing = useRef(false)
+  useEffect(() => {
+    if (!announcing.current) return
+    announcing.current = false
+    status.current?.focus()
+  }, [saved, t])
+
   if (error instanceof HttpError && error.status === 404)
     return (
       <>
@@ -100,7 +110,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
         {formatDate(t.date)}, {t.description}, <Amount cents={t.amountCents} />
       </p>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
-      <p role="status" className="mt-2 font-medium">
+      <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {saved}
       </p>
       {isAdmin && !editing && (
@@ -120,9 +130,9 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
       {isAdmin && editing && (
         <EditPanel
           row={t}
-          onSaved={() => {
+          onSaved={(message) => {
             returning.current = true
-            setSaved('Saved.')
+            setSaved(message ?? 'Saved.')
             setEditing(false)
           }}
           onCancel={() => {
@@ -157,6 +167,25 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
                     See the matching Transaction
                   </Link>
                 </span>
+              )}
+              {isAdmin && t.canMarkNotTransfer && (
+                <NotATransfer
+                  id={t.id}
+                  transfer={t}
+                  onDone={() => {
+                    announcing.current = true
+                    setSaved(notTransferSaved())
+                  }}
+                />
+              )}
+              {isAdmin && t.notTransfer && (
+                <TreatAsTransferAgain
+                  id={t.id}
+                  onDone={(paired) => {
+                    announcing.current = true
+                    setSaved(treatAsTransferAgainSaved(paired))
+                  }}
+                />
               )}
             </Fact>
           )}

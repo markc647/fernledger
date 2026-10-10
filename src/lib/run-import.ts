@@ -4,8 +4,8 @@ import type { BalanceCheckOutcome } from './balance-check'
 import { planChunks } from './import-chunks'
 import { HttpError } from './me'
 
-/** A Transaction that lost its Override or Note, as the Worker reports it. */
-export type LostTransaction = { date: string; amountCents: number; description: string; category: string | null; note: string | null }
+/** A Transaction that lost its Override, Note or Not a Transfer mark, as the Worker reports it. */
+export type LostTransaction = { date: string; amountCents: number; description: string; category: string | null; note: string | null; notTransfer: boolean }
 
 export type ImportSummary = {
   added: number
@@ -19,15 +19,15 @@ export type ImportSummary = {
   removed: number
   /** Pairs of Transactions matched as Transfers with another Account's, over every part (worker/transfers.ts). A pair is counted once. */
   paired: number
-  /** Transactions given the Override or Note of the removed Transaction with the same bank unique ID (worker/carry-over.ts), over every part. */
+  /** Transactions given the Override, Note or Not a Transfer mark of the removed Transaction with the same bank unique ID (worker/carry-over.ts), over every part. */
   carried: number
   /** Of those, how many went to a Transaction whose amount is not the removed one's. */
   differing: number
-  /** Overrides and Notes of removed Transactions that no Transaction in the file claimed, which are gone (a replace that finished). */
+  /** Overrides, Notes and Not a Transfer marks of removed Transactions that no Transaction in the file claimed, which are gone (a replace that finished). */
   lost: number
   /** The Transactions they were on, up to 20 (the Change Log has the same). */
   lostTransactions: LostTransaction[]
-  /** Overrides and Notes still waiting after an Import that was not a replace. */
+  /** Overrides, Notes and Not a Transfer marks still waiting after an Import that was not a replace. */
   stillWaiting: number
   /** How the file's ledger balance compared with the Transactions held, once the last part is saved. */
   balanceCheck: BalanceCheckOutcome | null
@@ -61,7 +61,7 @@ export class ImportStopped extends Error {
 
 /**
  * Steps of clearing a very large history before the first chunk (5,000 rows each, so more than any Account will hold).
- * Each step is final, and uses 15,000 of the free plan's 100,000 D1 writes a day (a removed row costs 3), so a big
+ * Each step is final, and uses 20,000 of the free plan's 100,000 D1 writes a day (a removed row costs 4), so a big
  * history can hit the daily limit part way; the Worker then answers 429 and the Import stops with a daily-limit message.
  */
 const MAX_CLEAR_STEPS = 40
