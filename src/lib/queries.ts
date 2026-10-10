@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import { api } from './api'
 import { HttpError } from './me'
+import { loadListing } from './report-transactions'
 import { apiQuery, filterQuery, filtersOf, type TransactionSearch } from './transaction-search'
 
 export const PAGE_SIZE = 50
@@ -71,6 +72,29 @@ export const transactionQuery = (id: string) =>
       if (!res.ok) throw new HttpError(res.status)
       return res.json()
     },
+  })
+
+/**
+ * The Transaction listing Report's data: every Transaction of `accounts` in the range, a page at a time (loadListing), up to
+ * the cap. The pages are read once and kept: a Report is a snapshot ("Generated … at …" is when the data arrived), so a refocused
+ * window doesn't read thousands of rows again.
+ */
+export const reportListingQuery = (accounts: { id: number; name: string }[], from: string, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'transactions', accounts.map((a) => a.id), from, to],
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: () =>
+      loadListing({
+        accounts,
+        from,
+        to,
+        fetchPage: async ({ accountId, after, limit, ...range }) => {
+          const res = await api.reports.transactions.$get({ query: { accountId: String(accountId), ...range, limit: String(limit), ...(after === undefined ? {} : { after }) } })
+          if (!res.ok) throw new HttpError(res.status)
+          return res.json()
+        },
+      }),
   })
 
 /** The Categories in use, by name. */

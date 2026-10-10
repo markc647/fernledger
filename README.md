@@ -14,6 +14,7 @@
 - [What you need](#what-you-need)
 - [What it costs](#what-it-costs)
 - [How it works](#how-it-works)
+- [Reports](#reports)
 - [Security and privacy](#security-and-privacy)
 - [Where your data is stored](#where-your-data-is-stored)
 - [Reliability](#reliability)
@@ -48,11 +49,11 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Monthly budgets** per category. Unspent amounts don't carry over, and changing a budget doesn't rewrite past months.
 - **A Summary for every Member:** the balance of each account, the newest transactions and any balance warnings, on the page Members land on.
 - **Dashboard:** balances, net worth over time, spending by category, budget vs actual.
-- **Printable reports:** spending by category, budget vs actual, income vs spending, balances over time, full transaction listing with notes. Print them or save as PDF from your browser.
+- **Printable reports:** the full transaction listing, with each transaction's category and note, for any date range, laid out for paper: print it or save it as a PDF from your browser ([how Reports work](#reports)). Spending by category, budget vs actual, income vs spending by month and balances over time will join it.
 - **CSV export** for any date range.
 - **Change Log** of every edit the Admin makes, visible to everyone: who changed what and when, with the values before and after, newest first. Filter it by type of change and by date.
 - **Light and dark themes.**
-- **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and reports will.
+- **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and so does the top of every report.
 - **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications. The icon's label comes from a fixed file, so it is normally "Fernledger" whatever title the Admin sets, though some iOS versions use the page title instead. You can rename it when you add it.
 
 ## What it doesn't do
@@ -111,6 +112,15 @@ R2 may ask for a payment method on file even within the free allowance (unconfir
 - **Import and Sync never overlap.** Each account has a Cutover Date: imported CSV rows cover the period before it, and Akahu will cover it onwards. Nothing is guessed or fuzzy-matched across the two sources (ADR 0003). The Admin sets it in Settings, or takes up the offer of the last date in the file when importing (nothing is set unless the Admin ticks it); an Import then skips rows dated on or after it and says how many. Until accounts can be linked to Akahu, any account can have one; limiting it to linked accounts will ship with that feature.
 - **A bad import can be replaced.** On the Import screen, "Replace imported history" removes an account's imported Transactions, never the ones from Sync, and imports the new file in their place, after the Admin confirms and is told how many will go. The Change Log records it. A history of more than 5,000 imported rows is removed in final steps of 5,000. Each removed or imported row costs 3 of the free plan's 100,000 database writes a day, so one day covers about 33,000 rows removed and imported together. Beyond that Fernledger stops with "Daily limit reached" and says part of the old history has been removed; choose the same file again the next day to finish.
 - **Category precedence:** a hand-set override beats a rule, which beats Akahu's suggestion. Rules apply to all history but never replace an override.
+
+## Reports
+
+A report is a page laid out for paper. It opens in a new window from the Reports page, or from the Transactions page, which carries the account and dates you were looking at. Print it or save it as a PDF from your browser. Nothing is made on the server, and every Member can open every report.
+
+- **Transaction listing.** Every transaction in the dates you choose, account by account and oldest first, with its category, its note and the amount in or out, then totals for each account and for all of them. It is the record to hand to the family, a lawyer or the court. The other four reports will use the same layout.
+- **Every report says what it is.** The top of the first page has the app title, the report's name, the account and the dates, and "Generated Thu 8 Oct 2026 at 3:42 pm by" the email of the person who opened it. Text is black on white and at least 12pt. Table headings come back at the top of every page, and a row is never split across two pages.
+- **Page numbers.** Each page is numbered "Page 2 of 5", and every page after the first carries the report's name, account and dates and the "generated" line in its margins, so a loose page still says what it is. These lines are drawn in the page margins by CSS "margin boxes", which only Chrome, Edge, Opera and Brave (version 131 and later) support. Firefox and Safari don't draw them: they print the same report without those lines, and number the pages in their own header and footer. If a printout has no page numbers, turn on "Headers and footers" in the print window, as the report says on screen.
+- **A report lists at most 10,000 transactions.** It reads them 500 at a time, so no request goes past the free plan's 10 ms of CPU (ADR 0004), and it stops at 10,000 across all accounts, which is about 27 a day for a year. If a range has more, the report says so at the top and again before the end, and its totals count only what it lists. Choose a shorter range, or one account, to see the rest.
 
 ## Security and privacy
 
@@ -228,7 +238,7 @@ Fernledger is often used by families where some members are older, and by people
 - **Respects your device:** follows your light/dark setting, reduced-motion preference and Windows high-contrast mode.
 - **A calm home page for Members:** read-only Members land on a simple Summary. It shows each account's balance, recent transactions and any balance warnings; this month's spending against budget and when the data was last updated will join them. Charts and filters are one click away.
 - **Phones and tablets:** large touch targets (at least 44px), and tables become cards on narrow screens. Tested on iPad Safari and Android.
-- **Printed reports for any reader:** at least 12pt text, page numbers ("Page 2 of 5"), table headings repeated on every page, and a header showing the account, date range and who generated the report and when.
+- **Printed reports for any reader:** at least 12pt text, black on white, page numbers ("Page 2 of 5"), table headings repeated on every page, and a header showing the account, date range and who generated the report and when. Which browsers print the page numbers themselves is under [Reports](#reports).
 - **Help signing in:** a one-page printable "How to sign in" guide for family members.
 
 ## Getting your history in
@@ -324,7 +334,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Transaction search and details | Done |
 | Rules, transfers, budgets | Planned |
 | Dashboard | Planned |
-| Reports and export | Planned |
+| Reports and export | In progress: the print layout and the transaction listing are done; the other four reports and CSV export are planned |
 | Backups and teardown | Done |
 | Release process, update pull requests, upgrade tests | Done |
 | Security audit, Deploy button, v1.0 | Planned |
