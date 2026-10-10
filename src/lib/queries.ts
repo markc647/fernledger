@@ -106,6 +106,9 @@ export const carryPreviewQuery = (accountId: number, chunks: PreviewRow[][], key
   queryOptions({
     queryKey: ['carry-preview', accountId, key],
     gcTime: 0,
+    // Not re-asked on window focus or while open: each ask reads the Account's history (ADR 0004). Discarding refetches it.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<CarryPreview> => {
       const preview: CarryPreview = { waiting: 0, carries: 0, differing: 0 }
       for (const rows of chunks) {

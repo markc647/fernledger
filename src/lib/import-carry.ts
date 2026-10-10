@@ -50,9 +50,15 @@ export function describeDiffering(differing: number): string | null {
   return `${transactions(differing)} now ${one ? 'has' : 'have'} an Override or Note that was on a Transaction with a different amount. The bank may have numbered that day differently, so check ${one ? 'it' : 'them'}.`
 }
 
-/** Overrides and Notes a replace that stopped is still holding: before another Import of the Account, and after one that finished. */
-export function describeWaiting(waiting: number): string | null {
+/**
+ * Overrides and Notes a replace that stopped is still holding: before another Import of the Account, and after one that finished.
+ * `afterImport` says where to find the Discard button on the finished screen, which does not have it: the Import screen shows it
+ * only on the Preview of a file for this Account.
+ */
+export function describeWaiting(waiting: number, afterImport = false): string | null {
   if (waiting === 0) return null
   const one = waiting === 1
-  return `${plural(waiting, 'Override or Note is', 'Overrides and Notes are')} waiting from a replace that stopped part way. An Import gives ${one ? 'it' : 'them'} to the Transaction with the same number from the bank. Replacing the imported history with the right file finishes the job, and what has no match is then lost. Or you can discard ${one ? 'it' : 'them'}.`
+  const them = one ? 'it' : 'them'
+  const discard = afterImport ? `Choose the file again to see ${them}, or discard ${them}, on the next preview.` : `Or you can discard ${them}.`
+  return `${plural(waiting, 'Override or Note is', 'Overrides and Notes are')} waiting from a replace that stopped part way. An Import gives ${them} to the Transaction with the same number from the bank. Replacing the imported history with the right file finishes the job, and what has no match is then lost. ${discard}`
 }

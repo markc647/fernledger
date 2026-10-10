@@ -176,6 +176,29 @@ describe('Replace imported history: carrying Overrides and Notes over', () => {
     expect(page.transactions).toMatchObject([{ description: 'EXAMPLE SHOP A1', categoryName: 'Groceries', categorySource: 'override', note: 'Weekly shop' }])
   })
 
+  it('carries an Override and Note to a row an active Rule also matches, in the same chunk: the Rule still applies to every row and the carry is counted', async () => {
+    await importOk([row('A1'), row('A2')])
+    await annotate('A1', { category: 'Groceries', note: 'Weekly shop' })
+    const rule = await call('/api/rules', { method: 'POST', body: { textContains: 'EXAMPLE SHOP', categoryId: await categoryId('Fuel') } })
+    expect(rule.status).toBe(201)
+    const ruleId = ((await rule.json()) as { id: number }).id
+
+    const result = await importOk([row('A1'), row('A2')], { replace: true })
+
+    expect(result).toMatchObject({ added: 2, carried: 1, carriedTotal: 1, differingAmount: 0, lost: 0 })
+    const applied = await env.DB.prepare('SELECT t.bank_unique_id AS id, t.rule_id AS ruleId, c.name AS ruleCategory FROM transactions t LEFT JOIN categories c ON c.id = t.rule_category ORDER BY t.bank_unique_id').all()
+    expect(applied.results).toEqual([
+      { id: 'A1', ruleId, ruleCategory: 'Fuel' },
+      { id: 'A2', ruleId, ruleCategory: 'Fuel' },
+    ])
+    const page = (await (await call('/api/transactions')).json()) as { transactions: { description: string; categoryName: string | null; categorySource: string | null; note: string | null }[] }
+    // Newest first: A2 is listed above A1.
+    expect(page.transactions).toMatchObject([
+      { description: 'EXAMPLE SHOP A2', categoryName: 'Fuel', categorySource: 'rule', note: null },
+      { description: 'EXAMPLE SHOP A1', categoryName: 'Groceries', categorySource: 'override', note: 'Weekly shop' },
+    ])
+  })
+
   it('carries over to the Account it came from, and no other Account that happens to hold the same bank ID', async () => {
     await importOk([row('A1'), row('A2')])
     await importOk([row('A1'), row('A2')], { number: current })

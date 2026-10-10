@@ -82,4 +82,9 @@ describe('describeWaiting', () => {
     expect(text).toContain('discard them')
     expect(describeWaiting(1)).toContain('1 Override or Note is waiting')
   })
+
+  it('says where to find the discard on the finished screen, which has no Discard button', () => {
+    expect(describeWaiting(2, true)).toContain('Choose the file again to see them, or discard them, on the next preview.')
+    expect(describeWaiting(1, true)).toContain('Choose the file again to see it, or discard it, on the next preview.')
+  })
 })

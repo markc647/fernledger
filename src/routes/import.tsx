@@ -170,7 +170,7 @@ function ImportFlow() {
 
   const lostMessage = describeLost(step.summary.lost)
   const differingMessage = describeDiffering(step.summary.differing)
-  const waitingMessage = describeWaiting(step.summary.stillWaiting)
+  const waitingMessage = describeWaiting(step.summary.stillWaiting, true)
   return (
     <section className="mt-4 space-y-4" aria-labelledby="summary-heading">
       <h2 id="summary-heading" className="text-xl font-semibold">
@@ -288,13 +288,20 @@ function WaitingNotice({ accountId }: { accountId: number }) {
   if (!message) return null
 
   async function discard() {
-    const res = await api.imports['discard-held'].$post({ json: { accountId } })
-    setFailed(!res.ok)
-    if (res.ok) {
-      setConfirming(false)
-      await queryClient.invalidateQueries({ queryKey: ['imported-rows'] })
-      await queryClient.invalidateQueries({ queryKey: ['change-log'] })
+    // A network error and a server error both keep the dialog open with the message, so the Admin can try again.
+    let ok: boolean
+    try {
+      ok = (await api.imports['discard-held'].$post({ json: { accountId } })).ok
+    } catch {
+      ok = false
     }
+    setFailed(!ok)
+    if (!ok) return
+    setConfirming(false)
+    await queryClient.invalidateQueries({ queryKey: ['imported-rows'] })
+    await queryClient.invalidateQueries({ queryKey: ['change-log'] })
+    // The Replace question's forecast counted what is discarded.
+    await queryClient.invalidateQueries({ queryKey: ['carry-preview'] })
   }
 
   return (
@@ -338,8 +345,8 @@ function DiscardDialog(props: { failed: boolean; onDiscard: () => void; onCancel
       </h3>
       <p>The Overrides and Notes will be gone for good. The Change Log records which Transactions they were on.</p>
       {props.failed && (
-        <p role="alert" className="font-medium text-destructive">
-          Fernledger could not discard them. Try again.
+        <p role="alert">
+          <Status tone="danger">Fernledger could not discard them. Try again.</Status>
         </p>
       )}
       <div className="flex flex-wrap gap-2">
