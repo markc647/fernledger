@@ -14,6 +14,7 @@
 - [What you need](#what-you-need)
 - [What it costs](#what-it-costs)
 - [How it works](#how-it-works)
+- [Reports](#reports)
 - [Security and privacy](#security-and-privacy)
 - [Where your data is stored](#where-your-data-is-stored)
 - [Reliability](#reliability)
@@ -48,7 +49,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Monthly budgets** per category. Unspent amounts don't carry over, and changing a budget doesn't rewrite past months.
 - **A Summary for every Member:** the balance of each account, the newest transactions and any balance warnings, on the page Members land on.
 - **Dashboard:** balances, net worth over time, spending by category, budget vs actual.
-- **Printable reports:** spending by category, budget vs actual, income vs spending, balances over time, full transaction listing with notes. Print them or save as PDF from your browser.
+- **Printable reports:** the full transaction listing, with each transaction's category and note, for any date range, laid out for paper: print it or save it as a PDF from your browser ([how Reports work](#reports)). Spending by category, budget vs actual, income vs spending by month and balances over time will join it.
 - **CSV export** for any date range: the Transactions page's **Download CSV** button saves the Transactions that match the filters you last searched with (text, account, category, dates), oldest first, to open in a spreadsheet.
   - **Columns:** date, account, description, category, note, amount, and everything the bank supplied: its type, memo, reference, counterparty account, particulars, code and card suffix. A bank file has no counterparty account, particulars, code or card, so those columns are empty until Akahu Sync fills them, and the layout stays the same. An amount is dollars as a plain number, with a minus sign for money out, so a spreadsheet can add it up. A transaction with no category says "Uncategorised".
   - **Totals:** Money in, Money out, Net and the number of Transactions come after a blank line, in the second column and not the Amount column, so adding up the Amount column gives the Net. An export of all accounts counts both legs of a transfer between your own accounts in Money in and Money out until transfers ship; the Net is the same.
@@ -57,7 +58,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
   - **Up to 5,000 Transactions a file** (fewer if Notes are long), because a file stops at about 0.75 MB of text and the free plan gives a request 10 ms of CPU ([ADR 0004](docs/adr/0004-runs-on-workers-free-plan.md)). A file can overshoot that by up to one chunk (about 0.25 MB), so about 1 MB at most. The Transactions page says how many match before you download, and the file says so when more matched. Export a year at a time to get a longer history. Both limits are estimates from timings, not measurements of CPU: if a request ever fails for CPU, lower the 5,000-row limit, the 0.75 MB limit or both.
 - **Change Log** of every edit the Admin makes, visible to everyone: who changed what and when, with the values before and after, newest first. Filter it by type of change and by date.
 - **Light and dark themes.**
-- **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and reports will.
+- **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and so does the top of every report.
 - **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications. The icon's label comes from a fixed file, so it is normally "Fernledger" whatever title the Admin sets, though some iOS versions use the page title instead. You can rename it when you add it.
 
 ## What it doesn't do
@@ -117,6 +118,15 @@ R2 may ask for a payment method on file even within the free allowance (unconfir
 - **A bad import can be replaced.** On the Import screen, "Replace imported history" removes an account's imported Transactions, never the ones from Sync, and imports the new file in their place, after the Admin confirms and is told how many will go. The Change Log records it. Overrides and Notes the Admin set on the removed Transactions are carried over to the Transactions that come back with the same number from the bank (ASB makes it from the date and a count for that day). Before the Admin confirms, Fernledger forecasts how many carry over and how many won't. Afterwards the finished screen and the Change Log say how many were carried over, list the first Transactions that lost theirs so they can be set again by hand, and say how many went to a Transaction with a different amount. That last count is the check on the match: if the bank has numbered a day differently since the old export, an Override or Note can land on a different Transaction. While an Import runs Fernledger holds the Overrides and Notes of the removed Transactions. If an Import stops part way they stay held: a plain Import of that account gives them to matching Transactions and leaves the rest waiting, and the Import screen says how many are waiting and lets the Admin discard them. Only a replace that completes clears them, and those with no match are then lost. A history of more than 5,000 imported rows is removed in final steps of 5,000. Each removed or imported row costs 3 of the free plan's 100,000 database writes a day, and each Override or Note carried over up to 7 more, so one day covers about 33,000 rows removed and imported together when few of them have either. Beyond that Fernledger stops with "Daily limit reached" and says part of the old history has been removed; choose the same file again the next day to finish.
 - **Category precedence:** a hand-set override beats a rule, which beats Akahu's suggestion. A rule never replaces an override.
 - **Rules:** the first rule in the Admin's order that matches a transaction wins, and a rule whose category has been removed is skipped. Text matching looks in the description and the bank's memo and ignores capital letters A to Z; a letter with an accent or macron, such as Ā, has to match as typed. A transaction type matches in full (EFTPOS, not part of it). An amount range is on the size of the amount, so $50 covers $50 in and $50 out; the rule can also be limited to money in or money out. Saving, changing, reordering or removing a rule changes no stored transaction: a rule's result is stored with each new transaction as an Import adds it, in the same step, and applying rules to existing history will ship later. A rule can mark transfers instead of choosing a category; transfer pairing will ship later and will use that mark.
+
+## Reports
+
+A report is a page laid out for paper. It opens in a new window from the Reports page, or from the Transactions page, which carries the account and dates you were looking at. Print it or save it as a PDF from your browser. Nothing is made on the server, and every Member can open every report.
+
+- **Transaction listing.** Every transaction in the dates you choose, account by account (each with its bank number) and oldest first, with its category, its note and the amount in or out. Under each description is what the bank said about the payment, with what is missing left out: the cheque number or reference, the counterparty's account, the card, the particulars and the code. Each account has its totals, and so do all of them together. It is the record to hand to the family, a lawyer or the court. The other four reports will use the same layout. Transfers between your own accounts are listed like any other transaction; once Transfers ship, the money in and money out of all accounts together will mark them.
+- **Every report says what it is, on every page.** The top of the first page has the app title, the report's name, the account and the dates, and "Generated Thu 8 Oct 2026 at 3:42 pm by" the email of the person who opened it. Each table's heading repeats those lines at the top of every page it runs onto, in every browser, so a loose page still says what it is and who made it. The page title is the same words, so "Save as PDF" names the file after them. Text is black on white and at least 12pt, and a row is never split across two pages.
+- **Page numbers depend on the browser.** Chrome and Edge (version 131 and later) number each page "Page 2 of 5" in the page margin, using CSS "margin boxes". Firefox and Safari don't draw margin boxes, so they print the report without those numbers. They can number the pages in the browser's own header and footer if that is turned on in the print window, and the report says so on screen. Everything else on this list is the same in every browser.
+- **A report lists at most 10,000 transactions.** It reads them 200 at a time, the largest page the Transactions page uses, so no single request is large (ADR 0004), and it stops at 10,000 across all accounts, which is about 27 a day for a year. The form says so before you open a report. If a range has more, the report says so at the top and again before the end, marks the account where it stopped as partly listed and every account after it as not listed (never as having nothing in the dates), and its totals count only what it lists. Choose a shorter range, or one account, to see the rest.
 
 ## Security and privacy
 
@@ -235,7 +245,7 @@ Fernledger is often used by families where some members are older, and by people
 - **Respects your device:** follows your light/dark setting, reduced-motion preference and Windows high-contrast mode.
 - **A calm home page for Members:** read-only Members land on a simple Summary. It shows each account's balance, recent transactions and any balance warnings; this month's spending against budget and when the data was last updated will join them. Charts and filters are one click away.
 - **Phones and tablets:** large touch targets (at least 44px), and tables become cards on narrow screens. Tested on iPad Safari and Android.
-- **Printed reports for any reader:** at least 12pt text, page numbers ("Page 2 of 5"), table headings repeated on every page, and a header showing the account, date range and who generated the report and when.
+- **Printed reports for any reader:** at least 12pt text, black on white, page numbers ("Page 2 of 5"), table headings repeated on every page, and a header showing the account, date range and who generated the report and when. Page numbers ("Page 2 of 5") are printed by Chrome and Edge 131 and later; other browsers number pages only in their own header and footer, if that is turned on (see [Reports](#reports)).
 - **Help signing in:** a one-page printable "How to sign in" guide for family members.
 
 ## Getting your history in
@@ -333,7 +343,7 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Rules over existing history, transfers, budgets | Planned |
 | Dashboard | Planned |
 | CSV export | Done |
-| Reports | Planned |
+| Reports | In progress: the print layout and the transaction listing are done; the other four reports are planned |
 | Backups and teardown | Done |
 | Release process, update pull requests, upgrade tests | Done |
 | Security audit, Deploy button, v1.0 | Planned |
