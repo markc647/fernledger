@@ -191,6 +191,12 @@ function ImportFlow() {
             <dd className="text-right tabular-nums">{step.summary.removed}</dd>
           </>
         )}
+        {step.summary.paired > 0 && (
+          <>
+            <dt>Transfers matched with other Accounts</dt>
+            <dd className="text-right tabular-nums">{step.summary.paired}</dd>
+          </>
+        )}
         {(step.summary.carried > 0 || step.summary.lost > 0) && (
           <>
             <dt>Transactions that kept their Override or Note</dt>
@@ -530,11 +536,12 @@ function ReplaceDialog(props: {
   const imported = data?.imported
   const withOwnWork = data?.withOverrideOrNote ?? 0
   const waiting = data?.carryOverWaiting ?? 0
+  const paired = data?.paired ?? 0
   const carryText = describeCarryBefore({ withOwnWork, waiting, preview })
   const keepButton = useRef<HTMLButtonElement>(null)
   useEffect(() => keepButton.current?.focus(), [])
   const inSteps = imported !== undefined && imported > REPLACE_SLICE
-  const overOneDay = imported !== undefined && replaceWrites(imported, props.incomingRows, withOwnWork + waiting) > DAILY_ROW_WRITES
+  const overOneDay = imported !== undefined && replaceWrites(imported, props.incomingRows, withOwnWork + waiting, paired) > DAILY_ROW_WRITES
   return (
     <section
       role="alertdialog"
@@ -572,7 +579,7 @@ function ReplaceDialog(props: {
             Import stops part way, the part of the old history already removed can't be put back.{' '}
             {overOneDay
               ? `Removing and importing this many Transactions takes more database writes than the free plan allows in a day (${DAILY_ROW_WRITES.toLocaleString('en-NZ')}). Fernledger stops when the limit is reached, and you choose the same file again tomorrow to finish.`
-              : `Each step uses about ${(REPLACE_SLICE * WRITES_PER_ROW).toLocaleString('en-NZ')} of the ${DAILY_ROW_WRITES.toLocaleString('en-NZ')} database writes the free plan allows each day, and a few more for each Override or Note it holds.`}
+              : `Each step uses about ${(REPLACE_SLICE * WRITES_PER_ROW).toLocaleString('en-NZ')} of the ${DAILY_ROW_WRITES.toLocaleString('en-NZ')} database writes the free plan allows each day, and a few more for each Override, Note or Transfer it holds.`}
           </p>
         )}
       </div>

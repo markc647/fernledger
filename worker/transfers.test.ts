@@ -53,7 +53,10 @@ type Listed = {
   date: string
   description: string
   amountCents: number
+  categoryId: number | null
   categoryName: string | null
+  categorySource: string | null
+  note: string | null
   transfer: 'pair' | 'rule' | null
   transferAccountName: string | null
 }
@@ -66,7 +69,7 @@ const pairs = async () =>
     await env.DB.prepare('SELECT a.bank_unique_id AS a, b.bank_unique_id AS b FROM transactions a JOIN transactions b ON b.id = a.transfer_of WHERE a.id < b.id ORDER BY a.id').all<{ a: string; b: string }>()
   ).results.map((p) => [p.a, p.b])
 const unpaired = async () => (await env.DB.prepare('SELECT bank_unique_id AS id FROM transactions WHERE transfer_of IS NULL ORDER BY id').all<{ id: string }>()).results.map((r) => r.id)
-/** Every pointer is answered by the other half, in the other Account, for the opposite amount on the same day. The invariant that makes a pair a pair. */
+/** Every pointer is answered by the matching Transaction, in the other Account, for the opposite amount on the same day. The invariant that makes a pair a pair. */
 async function expectWholePairs() {
   const broken = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM transactions a
@@ -114,6 +117,14 @@ describe('pairing Transactions as Transfers', () => {
     await importInto(BILLS, [row(NEXT_DAY, -700, 'a', 'B-OUT'), row(NEXT_DAY, 300, 'b', 'B-IN')])
     await importInto(EVERYDAY, [row(NEXT_DAY, 700, 'c', 'E-IN')])
     expect(await pairs()).toEqual([['IN', 'OUT'], ['B-OUT', 'E-IN']])
+  })
+
+  it('tells the Import how many pairs each chunk matched, counting a pair once', async () => {
+    const paired = async (res: Response) => ((await res.json()) as { paired: number }).paired
+    expect(await paired(await sendChunk(EVERYDAY, [row(DAY, -5000, 'a', 'OUT'), row(DAY, -700, 'b', 'OUT2')]))).toBe(0)
+
+    expect(await paired(await sendChunk(SAVINGS, [row(DAY, 5000, 'c', 'IN'), row(DAY, 700, 'd', 'IN2'), row(DAY, 123, 'e', 'LONE')]))).toBe(2)
+    expect(await paired(await sendChunk(SAVINGS, [row(DAY, 456, 'f', 'MORE')]))).toBe(0)
   })
 
   it('goes by date and amount, not by what the bank calls them', async () => {
@@ -223,7 +234,7 @@ describe('identical Transactions on the same day (round-ups and repeat payments)
     await expectWholePairs()
   })
 
-  it('pairs the one that was left out when its other half turns up in a later Import', async () => {
+  it('pairs the one that was left out when its matching Transaction turns up in a later Import', async () => {
     await importInto(EVERYDAY, repeat(3, DAY, -5000))
     await importInto(SAVINGS, repeat(2, DAY, 5000))
     await importInto(SAVINGS, [row(DAY, 5000)])
@@ -269,7 +280,7 @@ describe('identical Transactions on the same day (round-ups and repeat payments)
     await expectWholePairs()
   })
 
-  it('pairs a repeat that is split across the chunks of a file, with the other half already imported', async () => {
+  it('pairs a repeat that is split across the chunks of a file, with the matching Transaction already imported', async () => {
     await importInto(SAVINGS, repeat(3, DAY, 5000))
     const out = repeat(3, DAY, -5000)
     await importInto(EVERYDAY, out.slice(0, 2), { index: 0, count: 2 })
@@ -281,7 +292,7 @@ describe('identical Transactions on the same day (round-ups and repeat payments)
     await expectWholePairs()
   })
 
-  it('pairs a repeat that is split across the chunks of a file, with the other half imported between them', async () => {
+  it('pairs a repeat that is split across the chunks of a file, with the matching Transaction imported between them', async () => {
     const out = repeat(3, DAY, -5000)
     await importInto(EVERYDAY, out.slice(0, 2), { index: 0, count: 2 })
     await importInto(SAVINGS, repeat(3, DAY, 5000))
@@ -318,7 +329,7 @@ describe('a Rule that marks Transfers, as a backstop', () => {
     expect(await pairs()).toEqual([])
   })
 
-  it('is a Transfer by pairing, not by the Rule, when it also finds its other half', async () => {
+  it('is a Transfer by pairing, not by the Rule, when it also finds its matching Transaction', async () => {
     await transferRule('ROUND UP')
     await importInto(EVERYDAY, [row(DAY, -50, 'ROUND UP TO SAVINGS', 'ROUND')])
     await importInto(SAVINGS, [row(DAY, 50, 'CREDIT', 'CREDIT')])
@@ -414,7 +425,7 @@ describe('what is left out of spending', () => {
 })
 
 describe('an Override', () => {
-  it('outranks a pairing on its own Transaction, which then counts as spending in its Category, while the other half stays a Transfer', async () => {
+  it('outranks a pairing on its own Transaction, which then counts as spending in its Category, while the matching Transaction stays a Transfer', async () => {
     await importInto(EVERYDAY, [row(DAY, -5000, 'TFR TO SAVINGS', 'OUT')])
     await importInto(SAVINGS, [row(DAY, 5000, 'TFR FROM EVERYDAY', 'IN')])
     await override('OUT', await categoryId('Gifts and donations'))
@@ -462,7 +473,7 @@ describe('an Override', () => {
 
     await override('OUT', await categoryId('Gifts and donations'))
 
-    // It has a Category now, so it is not Uncategorised either; the other half is still a Transfer.
+    // It has a Category now, so it is not Uncategorised either; the matching Transaction is still a Transfer.
     expect(await described('&uncategorised=true')).toEqual([])
     expect(await described('&categoryId=' + (await categoryId('Gifts and donations')))).toHaveLength(1)
   })
@@ -495,7 +506,50 @@ describe("a Transaction's details", () => {
     expect(t).toMatchObject({ transfer: null, transferAccountName: null, transferTransactionId: null })
   })
 
-  it('still say where the other half is when an Override makes this one spending', async () => {
+  it('say the matching Transaction counts as spending when it has an Override, and that both do when each has one', async () => {
+    await importInto(EVERYDAY, [row(DAY, -5000, 'OUT', 'OUT')])
+    await importInto(SAVINGS, [row(DAY, 5000, 'IN', 'IN')])
+    const detail = async (uniqueId: string) => (await (await call(`/api/transactions/${await idOf(uniqueId)}`)).json()) as Record<string, unknown>
+    expect(await detail('IN')).toMatchObject({ transfer: 'pair', transferPartnerOverridden: false })
+
+    await override('OUT', await categoryId('Gifts and donations'))
+    expect(await detail('IN')).toMatchObject({ transfer: 'pair', transferPartnerOverridden: true })
+    expect(await detail('OUT')).toMatchObject({ transfer: null, transferPartnerOverridden: false })
+
+    await override('IN', await categoryId('Gifts and donations'))
+    expect(await detail('OUT')).toMatchObject({ transfer: null, transferPartnerOverridden: true })
+  })
+
+  it('do not count a matching Transaction whose Override is of a Category that has been removed', async () => {
+    const created = await call('/api/categories', { method: 'POST', body: { name: 'Example Partner Override' } })
+    const { id } = (await created.json()) as { id: number }
+    await importInto(EVERYDAY, [row(DAY, -5000, 'OUT', 'OUT')])
+    await importInto(SAVINGS, [row(DAY, 5000, 'IN', 'IN')])
+    await override('OUT', id)
+    expect((await call(`/api/categories/${id}`, { method: 'DELETE', body: {} })).status).toBe(200)
+
+    const t = (await (await call(`/api/transactions/${await idOf('IN')}`)).json()) as Record<string, unknown>
+
+    expect(t).toMatchObject({ transfer: 'pair', transferPartnerOverridden: false })
+  })
+
+  it('give a Transfer no Category, even when a Rule would give it one, and leave it out of that Category', async () => {
+    const groceries = await categoryId('Groceries')
+    expect((await call('/api/rules', { method: 'POST', body: { textContains: 'GROC', categoryId: groceries } })).status).toBe(201)
+    await importInto(EVERYDAY, [row(DAY, -5000, 'GROC TFR', 'OUT'), row(DAY, -2000, 'GROC SHOP', 'SHOP')])
+    await importInto(SAVINGS, [row(DAY, 5000, 'GROC TFR IN', 'IN')])
+
+    const rows = await described()
+    expect(rows.find((t) => t.description === 'GROC TFR')).toMatchObject({ transfer: 'pair', categoryId: null, categoryName: null, categorySource: null })
+    expect(rows.find((t) => t.description === 'GROC SHOP')).toMatchObject({ transfer: null, categoryId: groceries, categoryName: 'Groceries', categorySource: 'rule' })
+    expect(await call(`/api/transactions/${await idOf('OUT')}`).then((res) => res.json())).toMatchObject({ transfer: 'pair', categoryId: null, categoryName: null, categorySource: null })
+    // Not under Groceries in the filter or the count, and sorted with the rows that have no Category.
+    expect((await described(`&categoryId=${groceries}`)).map((t) => t.description)).toEqual(['GROC SHOP'])
+    expect((await list(`&categoryId=${groceries}&count=only`)).total).toBe(1)
+    expect((await described('&sort=category')).map((t) => t.description)[0]).toBe('GROC SHOP')
+  })
+
+  it('still say where the matching Transaction is when an Override makes this one spending', async () => {
     await importInto(EVERYDAY, [row(DAY, -5000, 'OUT', 'OUT')])
     await importInto(SAVINGS, [row(DAY, 5000, 'IN', 'IN')])
     await override('OUT', await categoryId('Gifts and donations'))
@@ -509,7 +563,7 @@ describe("a Transaction's details", () => {
 describe('replacing imported history', () => {
   const REPLACE = (rows: unknown[]) => sendChunk(EVERYDAY, rows, { replace: true })
 
-  it('takes the Transfer status from the other half when its partner goes, and gives it back when the replacement has a match', async () => {
+  it('takes the Transfer status from the matching Transaction when it goes, and gives it back when the replacement has a match', async () => {
     await importInto(EVERYDAY, [row(DAY, -5000, 'OUT', 'OUT')])
     await importInto(SAVINGS, [row(DAY, 5000, 'IN', 'IN')])
 
@@ -526,7 +580,7 @@ describe('replacing imported history', () => {
     await expectWholePairs()
   })
 
-  it('pairs the new rows with the other half in the same Import that removes the old ones', async () => {
+  it('pairs the new rows with the matching Transaction in the same Import that removes the old ones', async () => {
     await importInto(EVERYDAY, repeat(2, DAY, -5000))
     await importInto(SAVINGS, repeat(2, DAY, 5000))
 
@@ -549,7 +603,7 @@ describe('replacing imported history', () => {
     await expectWholePairs()
   })
 
-  it('also lets go of the other halves when a large history is cleared in steps', async () => {
+  it('also lets go of the matching Transactions when a large history is cleared in steps', async () => {
     await importInto(EVERYDAY, [row(DAY, -5000, 'OUT', 'OUT')])
     await importInto(SAVINGS, [row(DAY, 5000, 'IN', 'IN')])
     const everyday = (await env.DB.prepare('SELECT id FROM accounts WHERE name = ?').bind('Everyday').first<{ id: number }>())!.id
@@ -567,6 +621,43 @@ describe('replacing imported history', () => {
     expect(await idOf('IN')).toBeGreaterThan(0)
     expect((await described()).find((t) => t.description === 'IN')).toMatchObject({ transfer: null, transferAccountName: null })
     await expectWholePairs()
+  })
+})
+
+describe('Rules, pairs and carried Notes in one chunk', () => {
+  const putNote = async (uniqueId: string, note: string) => expect((await call(`/api/transactions/${await idOf(uniqueId)}/note`, { method: 'PUT', body: { note } })).status).toBe(200)
+
+  it('gives a replacing chunk its Rule results, its pairs and the Notes carried over from the history it replaces, all in the one batch', async () => {
+    await transferRule('ROUND UP')
+    const file = () => [row(DAY, -5000, 'TFR TO SAVINGS', 'OUT'), row(DAY, -50, 'ROUND UP', 'ROUND'), row(NEXT_DAY, -2000, 'EXAMPLE SHOP', 'SHOP'), row(NEXT_DAY, -450, 'EXAMPLE CAFE', 'CAFE')]
+    await importInto(EVERYDAY, file())
+    await importInto(SAVINGS, [row(DAY, 5000, 'TFR FROM EVERYDAY', 'IN')])
+    await putNote('OUT', 'Moved to savings')
+    await putNote('SHOP', 'Lunch')
+    await putNote('CAFE', 'Coffee')
+
+    const res = await sendChunk(EVERYDAY, file(), { replace: true })
+
+    expect(res.status).toBe(200)
+    // Three Notes carried, one pair matched (two rows changed). The count of Notes carried is read from the statement after the pairing,
+    // so it is right only if the pairing sits where it should.
+    expect(await res.json()).toMatchObject({ added: 4, removed: 4, carried: 3, paired: 1 })
+    const rows = await described()
+    expect(rows.find((t) => t.description === 'TFR TO SAVINGS')).toMatchObject({ transfer: 'pair', transferAccountName: 'Savings', note: 'Moved to savings' })
+    expect(rows.find((t) => t.description === 'ROUND UP')).toMatchObject({ transfer: 'rule', transferAccountName: null })
+    expect(rows.find((t) => t.description === 'EXAMPLE SHOP')).toMatchObject({ transfer: null, note: 'Lunch' })
+    expect(await pairs()).toEqual([['IN', 'OUT']])
+    await expectWholePairs()
+  })
+
+  it("tells the Replace question how many of an Account's imported rows are half of a Transfer", async () => {
+    await importInto(EVERYDAY, [row(DAY, -5000, 'OUT', 'OUT'), row(DAY, -2000, 'SHOP', 'SHOP')])
+    await importInto(SAVINGS, [row(DAY, 5000, 'IN', 'IN')])
+    const everyday = (await env.DB.prepare('SELECT id FROM accounts WHERE name = ?').bind('Everyday').first<{ id: number }>())!.id
+
+    const counts = (await (await call(`/api/imports/imported/${everyday}`)).json()) as Record<string, number>
+
+    expect(counts).toMatchObject({ imported: 2, paired: 1 })
   })
 })
 
@@ -676,27 +767,27 @@ describe('what pairing reads and writes (ADR 0004: free plan limits)', () => {
     expect(again.meta.rows_written).toBe(0)
   })
 
-  it('lets go of partners by the Transfer index, not by reading every Transaction', async () => {
+  it('lets go of matching Transactions by the Transfer index, not by reading every Transaction', async () => {
     const reads = (await plan(UNPAIR_PARTNERS, 1, 5000)).filter((detail) => /^(SCAN|SEARCH) transactions\b/.test(detail))
 
     expect(reads.join('\n')).toMatch(/USING (COVERING )?INDEX transactions_transfer_of/)
     expect(reads.some((detail) => detail.startsWith('SCAN transactions') && !/INDEX/.test(detail))).toBe(false)
   })
 
-  it('releases only the other halves of the rows being removed, not the rows themselves', async () => {
+  it('releases only the matching Transactions of the rows being removed, not the rows themselves', async () => {
     await importInto(EVERYDAY, repeat(3, DAY, -5000))
     await importInto(SAVINGS, repeat(3, DAY, 5000))
     const everyday = await accountId('Everyday')
 
     const { meta } = await unpairPartnersOfImportedStatement(env.DB, { accountId: everyday, limit: 5000 }).run()
 
-    // Three partners are written. The removed rows are about to go, so they are not touched: they still point at their halves.
+    // Three matching Transactions are written. The removed rows are about to go, so they are not touched: they still point at their halves.
     expect(meta.changes).toBe(3)
     expect(meta.rows_written).toBeLessThanOrEqual(6)
     expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE account_id = ? AND transfer_of IS NOT NULL').bind(everyday).first<{ n: number }>())!.n).toBe(3)
   })
 
-  it('releases the partners of only the first rows by ID, the same ones the removal takes', async () => {
+  it('releases the matching Transactions of only the first rows by ID, the same ones the removal takes', async () => {
     await importInto(EVERYDAY, repeat(3, DAY, -5000))
     await importInto(SAVINGS, repeat(3, DAY, 5000))
     const everyday = await accountId('Everyday')

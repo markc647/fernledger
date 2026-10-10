@@ -58,6 +58,13 @@ describe('replaceWrites', () => {
     expect(replaceWrites(2000, 1000, 40)).toBe(9000 + 7 * 40)
     expect(replaceWrites(23_000, 10_000, 1000)).toBeGreaterThan(DAILY_ROW_WRITES)
   })
+
+  it('adds 6 writes for each Transfer: 2 to let go of its matching Transaction when it is removed, 4 to write both halves when it comes back', () => {
+    expect(replaceWrites(2000, 1000, 0, 100)).toBe(9000 + 600)
+    // Every row a Transfer: a row costs 5 to remove and 7 to import, so about 8,300 each way fill the day.
+    expect(replaceWrites(8300, 8300, 0, 8300)).toBeLessThanOrEqual(DAILY_ROW_WRITES)
+    expect(replaceWrites(8400, 8400, 0, 8400)).toBeGreaterThan(DAILY_ROW_WRITES)
+  })
 })
 
 describe('previewChunks', () => {

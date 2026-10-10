@@ -42,7 +42,7 @@ import { validate } from './validate'
 // - A chunk request costs at most 20 D1 queries (find the Account, count the Import-sourced rows to replace, count the
 //   rows it already holds and the Overrides and Notes it will carry over, find the highest Transaction ID, then one batch
 //   of at most 14 statements: set the Cutover Date (or create the Account), remove the old balances, forget what an
-//   earlier attempt gave out, hold the Overrides and Notes of the rows that go, let go of the Transfer partners of the rows
+//   earlier attempt gave out, hold the Overrides and Notes of the rows that go, let go of the matching Transactions of the rows
 //   that go, remove the old rows, insert the rows, apply the Rules to the rows just added, pair their Transfers, give the new
 //   rows what is held, mark what was given, clear what is left (or, in an Import that is not a replace, tidy what is
 //   finished with), record the file's ledger balance (last chunk only), write the Change Log entry; then the last chunk's
@@ -127,8 +127,9 @@ export const COUNT_NEW_ROWS = `
 const COUNT_IMPORTED = "SELECT COUNT(*) AS n FROM transactions WHERE account_id = ? AND source = 'import'"
 
 // `waiting` is what a replace that did not finish still has to give back (carry-over.ts).
+// `paired` is how many of those are one half of a Transfer, which a replace has to let go of and pair again (transfers.ts).
 const COUNT_IMPORTED_AND_ANNOTATED = `SELECT COUNT(*) AS imported,
-         COUNT(CASE WHEN ${annotated('transactions')} THEN 1 END) AS annotated,
+         COUNT(CASE WHEN ${annotated('transactions')} THEN 1 END) AS annotated, COUNT(transfer_of) AS paired,
          (SELECT COUNT(*) FROM carry_over WHERE account_id = ?1 AND applied = 0 AND ${annotated('carry_over')}) AS waiting
   FROM transactions WHERE account_id = ?1 AND source = 'import'`
 
@@ -136,7 +137,7 @@ const COUNT_IMPORTED_AND_ANNOTATED = `SELECT COUNT(*) AS imported,
 // in one statement, so rows added between the count and the delete can't push one replace past the write budget in
 // ADR 0004: a removed row costs 3 D1 writes (the row and its two indexes), so a slice is 15,000 of the day's 100,000, and
 // each of its rows that has an Override or Note costs 2 more to hold (the row and its key): at worst 10,000 more. A removed
-// row that was paired costs up to 2 more, to let go of its other half (transfers.ts): at worst 10,000 more again.
+// row that was paired costs up to 2 more, to let go of its matching Transaction (transfers.ts): at worst 10,000 more again.
 const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (${IMPORTED_SLICE})`
 
 type AccountRow = { id: number; name: string; cutover_date: string | null }
@@ -227,6 +228,8 @@ export const imports = new Hono<AppEnv>()
         : []),
     ]
     const insertAt = planned.length - 1
+    // The pairing follows the Rules, which follow the insert: its count of rows changed is two for each pair made.
+    const pairAt = planned.length + 1
     // The statement that marked the held rows given out is the second after the Rules' and the pairing (`withRules` ends with
     // them): its count is what was carried.
     const markAt = withRules.length + 1
@@ -251,6 +254,9 @@ export const imports = new Hono<AppEnv>()
       duplicates: rows.length - dropped - inserted,
       dropped,
       removed: replace && existing ? results[insertAt - 1]!.meta.changes : 0,
+      // Pairs of Transactions this chunk matched as Transfers with another Account's, counting both halves once. The Change Log entry
+      // was written with the rows, before there was a count to put in it.
+      paired: results[pairAt]!.meta.changes / 2,
       // Transactions this chunk gave an Override or Note from the replaced history. On the last chunk of an Import that took
       // part (carry-over.ts), also the total over all its chunks and how many went to a Transaction with another amount,
       // and how many Overrides and Notes found no Transaction (lost, with the Transactions they were on, when a replace
@@ -267,14 +273,15 @@ export const imports = new Hono<AppEnv>()
   // How many Import-sourced rows an Account holds, and how many of those carry the Admin's own work (an Override to a
   // Category in use, or a Note), so the Admin is told what a replace will carry over before confirming. A removed
   // Category's Override doesn't count: the Admin was told when they removed it that the Transactions lose it. Also how many
-  // Overrides and Notes an earlier replace that stopped part way is still holding for the Account.
+  // Overrides and Notes an earlier replace that stopped part way is still holding for the Account, and how many of the rows are
+  // half of a Transfer, which cost more writes to remove and to import again (import-rows.ts: WRITES_PER_PAIRED_REMOVED).
   .get('/imported/:accountId', async (c) => {
     const accountId = Number(c.req.param('accountId'))
     const db = c.env.DB
     const account = Number.isSafeInteger(accountId) ? await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first() : null
     if (!account) return c.json({ error: 'Not found' }, 404)
-    const counts = await db.prepare(COUNT_IMPORTED_AND_ANNOTATED).bind(accountId).first<{ imported: number; annotated: number; waiting: number }>()
-    return c.json({ imported: counts?.imported ?? 0, withOverrideOrNote: counts?.annotated ?? 0, carryOverWaiting: counts?.waiting ?? 0 })
+    const counts = await db.prepare(COUNT_IMPORTED_AND_ANNOTATED).bind(accountId).first<{ imported: number; annotated: number; paired: number; waiting: number }>()
+    return c.json({ imported: counts?.imported ?? 0, withOverrideOrNote: counts?.annotated ?? 0, paired: counts?.paired ?? 0, carryOverWaiting: counts?.waiting ?? 0 })
   })
   // One step of clearing a history too big to replace in a single chunk (more than REPLACE_SLICE rows): the Admin's
   // browser calls it until the rest fits, then sends the first chunk with `replace`. Each step is logged. It refuses

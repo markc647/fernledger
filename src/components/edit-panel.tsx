@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import { HttpError } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
+import { transferEditHint, type TransferSource } from '@/lib/transfers'
 
 /** What the panel needs to know about a Transaction: how to name it, and its Override and Note now. */
 export type EditableTransaction = {
@@ -18,7 +19,7 @@ export type EditableTransaction = {
   /** 'override' while the Category is the Admin's own choice. */
   categorySource: string | null
   /** Set while the Transaction is a Transfer, which an Override turns into spending. */
-  transfer?: 'pair' | 'rule' | null
+  transfer: TransferSource | null
   note: string | null
 }
 
@@ -33,6 +34,7 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
   const [categoryId, setCategoryId] = useState<number | null>(startCategory)
   const [note, setNote] = useState(row.note ?? '')
   const param = { id: String(row.id) }
+  const transferHint = transferEditHint(row)
 
   const save = useMutation({
     mutationFn: async () => {
@@ -86,7 +88,7 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
           </Select>
           <p id="edit-category-hint" className="mt-1 text-muted-foreground">
             Choosing a Category sets an Override: it is this Transaction's Category, whatever else would apply.
-            {row.transfer ? ' This Transaction is a Transfer, so choosing a Category also makes it count as spending.' : ''}
+            {transferHint && ` ${transferHint}`}
           </p>
           {isError && <p role="alert" className="mt-1 font-medium text-destructive">The Categories could not be loaded. Reload the page to try again.</p>}
         </div>

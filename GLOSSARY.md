@@ -31,8 +31,8 @@ A Transaction the bank has reported but not yet settled; it may still change or 
 _Avoid_: Unsettled, provisional
 
 **Transfer**:
-A Transaction moving money between two tracked Accounts, found as one of a pair in different Accounts or marked by a Rule; it is not spending and is excluded from Budgets. How pairs are found is in README [How it works](README.md#how-it-works).
-_Avoid_: Internal payment, sweep
+A Transaction moving money between two tracked Accounts, found as one of a pair in different Accounts or marked by a Rule; it is not spending and is excluded from Budgets. The other Transaction of a pair is its matching Transaction. How pairs are found is in README [How it works](README.md#how-it-works).
+_Avoid_: Internal payment, sweep, other half
 
 ## Sources
 

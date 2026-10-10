@@ -64,7 +64,7 @@ function CategoryCell({ row }: { row: Row }) {
   )
 }
 
-const hasFilter = (search: TransactionSearch) => search.account !== undefined || search.category !== undefined || !!search.from || !!search.to || !!search.q
+const hasFilter = (search: TransactionSearch) => search.account !== undefined || search.category !== undefined || search.transfers !== undefined || !!search.from || !!search.to || !!search.q
 
 /**
  * Transactions, a page at a time, with their Category and Note. `search` is what is asked for (filters, sort, page) and

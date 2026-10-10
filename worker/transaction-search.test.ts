@@ -1,8 +1,8 @@
 import { env } from 'cloudflare:workers'
 import { beforeAll, describe, expect, it } from 'vitest'
 import * as z from 'zod/mini'
-import { MAX_TEXT as PAGE_MAX_TEXT, SORT_KEYS as PAGE_SORT_KEYS } from '../src/lib/transaction-search'
-import { buildSearch, MAX_LIMIT, MAX_TEXT, searchQuery, SORT_KEYS, toSearch, type Search } from './transaction-search'
+import { MAX_TEXT as PAGE_MAX_TEXT, SORT_KEYS as PAGE_SORT_KEYS, TRANSFERS_FILTERS as PAGE_TRANSFERS_FILTERS } from '../src/lib/transaction-search'
+import { buildSearch, MAX_LIMIT, MAX_TEXT, searchQuery, SORT_KEYS, toSearch, TRANSFERS_FILTERS, type Search } from './transaction-search'
 
 const search = (over: Partial<Search> = {}): Search => ({ uncategorised: false, sort: 'date', dir: 'desc', limit: 50, offset: 0, want: 'both', ...over })
 const parse = (query: Record<string, string | string[]>) => toSearch(z.parse(searchQuery, query))
@@ -46,6 +46,10 @@ describe('the Transactions page', () => {
   // The page keeps its own copies (it can't import Worker code), so this is what stops them drifting apart.
   it('offers exactly the sorts the API accepts', () => {
     expect([...PAGE_SORT_KEYS]).toEqual([...SORT_KEYS])
+  })
+
+  it('offers exactly the Transfers filters the API accepts', () => {
+    expect([...PAGE_TRANSFERS_FILTERS]).toEqual([...TRANSFERS_FILTERS])
   })
 
   it('stops typing at the length of text the API accepts', () => {
@@ -150,7 +154,7 @@ describe('what a request reads from D1', () => {
     expect(text.page).toBeLessThanOrEqual(TRANSACTIONS + text.total * 2 + 10) // the scan, then only what matched
   })
 
-  // A paired Transaction shows the Account of its other half, a lookup by ID for it and one for its Account. An unpaired one costs nothing extra.
+  // A paired Transaction shows the Account of its matching Transaction, a lookup by ID for it and one for its Account. An unpaired one costs nothing extra.
   it('reads two more rows for each paired Transaction it shows, and nothing more for the rest', async () => {
     const unpaired = await reads({ sort: 'amount' })
     await env.DB.prepare('UPDATE transactions SET transfer_of = CASE WHEN id % 2 = 1 THEN id + 1 ELSE id - 1 END').run()

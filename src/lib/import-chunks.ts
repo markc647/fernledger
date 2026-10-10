@@ -5,6 +5,8 @@ import type {
   PreviewRow,
   REPLACE_SLICE as WORKER_REPLACE_SLICE,
   WRITES_PER_CARRIED as WORKER_WRITES_PER_CARRIED,
+  WRITES_PER_PAIRED_IMPORTED as WORKER_WRITES_PER_PAIRED_IMPORTED,
+  WRITES_PER_PAIRED_REMOVED as WORKER_WRITES_PER_PAIRED_REMOVED,
   WRITES_PER_ROW as WORKER_WRITES_PER_ROW,
 } from '@/generated/api/import-rows'
 import type { BankCsvRow } from './bank-csv'
@@ -20,12 +22,20 @@ export const DAILY_ROW_WRITES: typeof WORKER_DAILY_ROW_WRITES = 100_000
 export const WRITES_PER_ROW: typeof WORKER_WRITES_PER_ROW = 3
 /** What carrying one Transaction's Override or Note over costs at most, on top of its row. */
 export const WRITES_PER_CARRIED: typeof WORKER_WRITES_PER_CARRIED = 7
+/** What a Transfer costs on top of its row: more to import (both halves are written) and to remove (the matching Transaction is let go of). */
+export const WRITES_PER_PAIRED_IMPORTED: typeof WORKER_WRITES_PER_PAIRED_IMPORTED = 4
+export const WRITES_PER_PAIRED_REMOVED: typeof WORKER_WRITES_PER_PAIRED_REMOVED = 2
 
 /** The most rows one Import can carry. */
 export const MAX_IMPORT_ROWS = CHUNK_SIZE * MAX_CHUNKS
 
-/** About how many of the day's D1 writes it takes to remove `imported` rows and import `incoming` rows, with up to `carried` Overrides and Notes to carry over. */
-export const replaceWrites = (imported: number, incoming: number, carried = 0): number => WRITES_PER_ROW * (imported + incoming) + WRITES_PER_CARRIED * carried
+/**
+ * About how many of the day's D1 writes it takes to remove `imported` rows and import `incoming` rows, with up to `carried` Overrides
+ * and Notes to carry over. `paired` is how many of the imported rows are half of a Transfer: the file that replaces them is
+ * taken to bring the same ones back, so each costs to be removed and to be imported again.
+ */
+export const replaceWrites = (imported: number, incoming: number, carried = 0, paired = 0): number =>
+  WRITES_PER_ROW * (imported + incoming) + WRITES_PER_CARRIED * carried + (WRITES_PER_PAIRED_REMOVED + WRITES_PER_PAIRED_IMPORTED) * paired
 
 /** How many rows are dated on or after the Cutover Date, so the preview can say how many an Import will drop. ISO dates compare as text. */
 export const countOnOrAfter = (rows: readonly BankCsvRow[], cutoverDate: string | null | undefined): number =>

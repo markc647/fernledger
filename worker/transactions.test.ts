@@ -477,6 +477,7 @@ describe('GET /api/transactions/:id', () => {
       transfer: null,
       transferAccountName: null,
       transferTransactionId: null,
+      transferPartnerOverridden: false,
       bankTime: null,
       firstSeenAt: null,
     })

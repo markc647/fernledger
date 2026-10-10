@@ -12,6 +12,13 @@ describe('parseTransactionSearch', () => {
     expect(parseTransactionSearch({ category: 'uncategorised' })).toEqual({ category: 'uncategorised' })
   })
 
+  it('reads the Transfers filter, and leaves out a value it does not know', () => {
+    expect(parseTransactionSearch({ transfers: 'only' })).toEqual({ transfers: 'only' })
+    expect(parseTransactionSearch({ transfers: 'exclude' })).toEqual({ transfers: 'exclude' })
+    expect(parseTransactionSearch({ transfers: 'both' })).toEqual({})
+    expect(parseTransactionSearch({ transfers: true })).toEqual({})
+  })
+
   it('reads numbers the router left as text, and text it turned into numbers', () => {
     // The router parses ?q=2026 as the number 2026 and ?account=2 as 2.
     expect(parseTransactionSearch({ account: '2', page: '4', q: 2026 })).toEqual({ account: 2, page: 4, q: '2026' })
@@ -93,6 +100,11 @@ describe('apiQuery', () => {
     expect(apiQuery({ category: 'uncategorised' }, 50)).toEqual({ uncategorised: 'true', limit: '50', offset: '0' })
   })
 
+  it('asks for only Transfers, or for the spending, with transfers=only and transfers=exclude', () => {
+    expect(apiQuery({ transfers: 'only' }, 50)).toEqual({ transfers: 'only', limit: '50', offset: '0' })
+    expect(apiQuery({ transfers: 'exclude' }, 50)).toEqual({ transfers: 'exclude', limit: '50', offset: '0' })
+  })
+
   it('always says which way to sort when it sorts', () => {
     expect(apiQuery({ sort: 'description' }, 50)).toMatchObject({ sort: 'description', dir: 'asc' })
     expect(apiQuery({}, 50)).not.toHaveProperty('sort')
@@ -104,6 +116,8 @@ describe('filtersOf and filterQuery', () => {
     const search = { account: 2, category: 7, from: '2026-01-01', to: '2026-03-31', q: 'cafe' } as const
     expect(filtersOf({ ...search, sort: 'amount', dir: 'asc', page: 3 })).toEqual(search)
     expect(filtersOf({ sort: 'amount', page: 2 })).toEqual({})
+    expect(filtersOf({ transfers: 'exclude', page: 2 })).toEqual({ transfers: 'exclude' })
+    expect(filterQuery({ transfers: 'only' })).toEqual({ transfers: 'only' })
     expect(filterQuery({ ...search, sort: 'amount', page: 3 })).toEqual({ accountId: '2', categoryId: '7', from: '2026-01-01', to: '2026-03-31', text: 'cafe' })
   })
 })

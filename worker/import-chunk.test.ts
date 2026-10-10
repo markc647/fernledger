@@ -99,7 +99,7 @@ describe('chunkStatements', () => {
     expect(chunkStatements({ newAccount: true, setsCutover: true, replace: true }, prepare)).toEqual(['create', 'insert'])
   })
 
-  it('sets the Cutover Date, then removes the old balances, holds the Overrides and Notes of the rows that go and lets go of their Transfer partners, removes them, then inserts, so the insert is last and the removal just before it', () => {
+  it('sets the Cutover Date, then removes the old balances, holds the Overrides and Notes of the rows that go and lets go of their matching Transactions, removes them, then inserts, so the insert is last and the removal just before it', () => {
     expect(chunkStatements({ ...plan, setsCutover: true, replace: true }, prepare)).toEqual(['cutover', 'balances', 'forget', 'hold', 'unpair', 'remove', 'insert'])
   })
 })

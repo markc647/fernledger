@@ -30,7 +30,7 @@ import { IMPORTED_SLICE } from './import-rows'
  * - The other Accounts' rows are found through the date index, one lookup per distinct date in the chunk, so their history on
  *   other days is never read. Rows with another amount on those days are read and dropped.
  *
- * What it writes: the other half's ID on each half of each pair, and nothing when there are no pairs. The one statement reads the
+ * What it writes: the matching Transaction's ID on each half of each pair, and nothing when there are no pairs. The one statement reads the
  * rows to pair before it writes any (UPDATE ... FROM collects its rows first), so a row paired by this statement is not paired twice.
  *
  * A Pending Transaction is stored apart from `transactions` (spec #1), so it is never a candidate here.
@@ -57,6 +57,13 @@ export const PAIR = `
   WHERE transactions.id = link.id`
 
 /**
+ * LEFT JOINs that give a Transaction (aliased `t`) its matching Transaction (`partner`) and that one's Account (`partner_account`):
+ * the list and the details name the Account the money went to or came from. A Transaction with no pair has a NULL `transfer_of`,
+ * which finds nothing and reads nothing.
+ */
+export const PARTNER_JOIN = 'LEFT JOIN transactions partner ON partner.id = t.transfer_of LEFT JOIN accounts partner_account ON partner_account.id = partner.account_id'
+
+/**
  * The statement that pairs the Account's Transactions with an ID above `afterId`. It is not run here: put it in the batch that
  * adds the Transactions (after the insert and the Rules), so they and their pairs commit together. The Account is named by its
  * normalised number, as the Import's insert does, because a first chunk creates the Account in the same batch.
@@ -64,12 +71,12 @@ export const PAIR = `
 export const pairTransfersStatement = (db: D1Database, scope: { accountNumber: string; afterId: number }) => db.prepare(PAIR).bind(scope.afterId, scope.accountNumber)
 
 /**
- * Lets go of the other halves of the rows a replace (or a step of clearing) is about to remove: ?1 is the Account, ?2 the most
- * rows removed, as `IMPORTED_SLICE` (import-rows.ts) selects them. A row's half is never in the same Account, so the removed rows
- * are not written, only their partners, which are Transactions of other Accounts that stay and are paired again when the
+ * Lets go of the matching Transactions of the rows a replace (or a step of clearing) is about to remove: ?1 is the Account, ?2 the most
+ * rows removed, as `IMPORTED_SLICE` (import-rows.ts) selects them. A row's matching Transaction is never in the same Account, so the removed rows
+ * are not written, only their matching Transactions, which are Transactions of other Accounts that stay and are paired again when the
  * replacement has a match. Without this a half would stay a Transfer of a Transaction that no longer exists.
  *
- * Whatever else removes Transactions must do the same in its own batch. Each partner costs two writes (its row and its entry in
+ * Whatever else removes Transactions must do the same in its own batch. Each matching Transaction costs two writes (its row and its entry in
  * the partial Transfer index), up to twice the slice in all, on top of the removal's own (import-rows.ts: REPLACE_SLICE).
  */
 export const UNPAIR_PARTNERS = `UPDATE transactions SET transfer_of = NULL WHERE transfer_of IN (${IMPORTED_SLICE})`

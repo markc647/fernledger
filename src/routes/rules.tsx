@@ -436,7 +436,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
           {error('target') && <p id="rule-target-error" role="alert" className="mt-1 font-medium text-destructive">{error('target')}</p>}
           {values.target === 'transfer' && (
             <p id="rule-transfer-note" className="mt-1 text-muted-foreground">
-              A Transaction this Rule marks is a Transfer even if no matching Transaction is found in another Account, so it is not counted as spending. Only new Transactions get the mark.
+              A Transaction this Rule marks is a Transfer even if no matching Transaction is found in another Account, so it is not counted as spending. Only new Transactions get the mark. If the banks date the two halves of a Transfer on different days, write a Rule that marks them as a Transfer.
             </p>
           )}
           {categoriesFailed && <p role="alert" className="mt-1 font-medium text-destructive">The Categories could not be loaded. Reload the page to try again.</p>}

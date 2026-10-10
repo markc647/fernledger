@@ -85,6 +85,40 @@ test('Transfers are not Uncategorised: filtering by Uncategorised leaves them ou
   await expect(page.getByRole('link', { name: `PAYMENT TO A FRIEND ${stamp}` })).toBeVisible()
 })
 
+test('the Transfers filter shows all, only Transfers, or everything but them, and the search is in the address', async ({ page, context, baseURL }, testInfo) => {
+  const { everyday, savings } = accountsFor(testInfo.project.name)
+  const stamp = `${testInfo.project.name}${Date.now()}`
+  await seed(context, baseURL!, [
+    { account: everyday, rows: [{ description: `TFR TO SAVINGS ${stamp}`, amountCents: -7324 }, { description: `PAYMENT TO A FRIEND ${stamp}`, amountCents: -2114 }] },
+    { account: savings, rows: [{ description: `TFR FROM EVERYDAY ${stamp}`, amountCents: 7324 }] },
+  ])
+  await signInAs(context, 'member')
+  await page.goto(`/transactions?q=${stamp}`)
+  await expect(dataRows(page)).toHaveCount(3)
+  const transfers = page.getByLabel('Transfers', { exact: true })
+  await expect(transfers).toHaveValue('')
+
+  await transfers.selectOption({ label: 'Only Transfers' })
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(dataRows(page)).toHaveCount(2)
+  await expect(page).toHaveURL(/transfers=only/)
+  await expect(page.getByRole('link', { name: `PAYMENT TO A FRIEND ${stamp}` })).toHaveCount(0)
+  await noAxeViolations(page)
+
+  await transfers.selectOption({ label: 'Leave out Transfers' })
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(dataRows(page)).toHaveCount(1)
+  await expect(page.getByRole('link', { name: `PAYMENT TO A FRIEND ${stamp}` })).toBeVisible()
+
+  // It survives a reload, and Clear filters puts everything back.
+  await page.reload()
+  await expect(page.getByLabel('Transfers', { exact: true })).toHaveValue('exclude')
+  await expect(dataRows(page)).toHaveCount(1)
+  await page.getByRole('button', { name: 'Clear filters' }).click()
+  await expect(page.getByLabel('Transfers', { exact: true })).toHaveValue('')
+  await expect(page).not.toHaveURL(/transfers=/)
+})
+
 test('the Admin can count one half of a Transfer as spending by choosing a Category for it', async ({ page, context, baseURL }, testInfo) => {
   const { everyday, savings } = accountsFor(testInfo.project.name)
   const stamp = `${testInfo.project.name}${Date.now()}`
@@ -109,4 +143,38 @@ test('the Admin can count one half of a Transfer as spending by choosing a Categ
   await expect(outRow).toContainText('Gifts and donations')
   await expect(outRow).not.toContainText('Transfer')
   await expect(dataRows(page).filter({ hasText: into })).toContainText(`Transfer from ${everyday.name}`)
+
+  // The details of the half that is still a Transfer say the other counts as spending, and how to undo the pairing.
+  await page.getByRole('link', { name: into }).click()
+  await expect(page.getByText('The matching Transaction counts as spending, because the Admin chose a Category for it.')).toBeVisible()
+  await expect(page.getByText('Set a Category on this one too if the pairing is wrong.')).toBeVisible()
+  await noAxeViolations(page)
+})
+
+test('the Import screen says how many Transfers it matched with other Accounts', async ({ page, context, baseURL }, testInfo) => {
+  const { everyday, savings } = accountsFor(testInfo.project.name)
+  const stamp = `${testInfo.project.name}${Date.now()}`
+  await seed(context, baseURL!, [
+    { account: everyday, rows: [{ description: `TFR TO SAVINGS ${stamp}`, amountCents: -7323 }] },
+    { account: savings, rows: [{ description: `SEEDED ${stamp}`, amountCents: 100 }] },
+  ])
+  const csv = [
+    'Created date / time : 2 October 2026 / 18:55:26',
+    `Bank 99; Branch 9999; Account 9999999-${savings.number.slice(-2)} (Example)`,
+    'From date 20110601',
+    'To date 20110630',
+    'Avail Bal : 10.00 as of 20260930',
+    'Ledger Balance : 10.00 as of 20261002',
+    'Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount',
+    '',
+    `2011/06/15,201106150001,TFR,,"TFR FROM EVERYDAY ${stamp}","TFR",73.23`,
+  ].join('\n')
+  await page.goto('/import')
+  await page.getByLabel('Bank export file').setInputFiles({ name: 'savings.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
+
+  await page.getByRole('button', { name: /^Import 1 transactions?$/ }).click()
+
+  await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
+  await expect(page.getByText('Transfers matched with other Accounts').locator('xpath=following-sibling::dd[1]')).toHaveText('1')
+  await noAxeViolations(page)
 })
