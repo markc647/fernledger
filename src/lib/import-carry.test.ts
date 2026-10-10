@@ -8,17 +8,17 @@ describe('describeCarryBefore', () => {
 
   it('says how many carry over and how many won’t, once the Worker has forecast it', () => {
     const [headline] = describeCarryBefore({ withOwnWork: 40, waiting: 0, preview: { waiting: 40, carries: 38, differing: 0 } })
-    expect(headline).toBe("40 Transactions have an Override (your own Category) or a Note. 38 of them carry over to this file; 2 won't.")
+    expect(headline).toBe("40 Transactions have an Override (your own Category), a Note or a Not a Transfer mark. 38 of them carry over to this file; 2 won't.")
   })
 
   it('agrees with one Transaction', () => {
-    expect(describeCarryBefore({ withOwnWork: 1, waiting: 0, preview: { waiting: 1, carries: 1, differing: 0 } })[0]).toBe('1 Transaction has an Override (your own Category) or a Note. It carries over to this file.')
+    expect(describeCarryBefore({ withOwnWork: 1, waiting: 0, preview: { waiting: 1, carries: 1, differing: 0 } })[0]).toBe('1 Transaction has an Override (your own Category), a Note or a Not a Transfer mark. It carries over to this file.')
     expect(describeCarryBefore({ withOwnWork: 1, waiting: 0, preview: { waiting: 1, carries: 0, differing: 0 } })[0]).toContain("It won't carry over to this file.")
   })
 
   it('says they carry over, and that the unmatched are counted afterwards, until the forecast is known', () => {
     const [headline] = describeCarryBefore({ withOwnWork: 40, waiting: 0 })
-    expect(headline).toContain('40 Transactions have an Override (your own Category) or a Note. They are carried over')
+    expect(headline).toContain('40 Transactions have an Override (your own Category), a Note or a Not a Transfer mark. They are carried over')
     expect(headline).toContain('Fernledger counts how many have no match once the Import has run')
     expect(headline).not.toContain('will be lost')
   })
@@ -53,9 +53,9 @@ describe('describeLost', () => {
 
   it('says how many Transactions lost their Override or Note, and every reason they might have', () => {
     expect(describeLost(2)).toBe(
-      "2 Transactions lost their Override or Note. The new file has no Transaction with the bank's own number for them, or they are dated on or after the Cutover Date, or a Transaction from Sync now has that number. The Change Log lists them.",
+      "2 Transactions lost their Override, Note or Not a Transfer mark. The new file has no Transaction with the bank's own number for them, or they are dated on or after the Cutover Date, or a Transaction from Sync now has that number. The Change Log lists them.",
     )
-    expect(describeLost(1)).toContain('1 Transaction lost its Override or Note.')
+    expect(describeLost(1)).toContain('1 Transaction lost its Override, Note or Not a Transfer mark.')
   })
 })
 
@@ -65,8 +65,8 @@ describe('describeDiffering', () => {
   })
 
   it('says how many did, and to check them', () => {
-    expect(describeDiffering(2)).toBe('2 Transactions now have an Override or Note that was on a Transaction with a different amount. The bank may have numbered that day differently, so check them.')
-    expect(describeDiffering(1)).toContain('1 Transaction now has an Override or Note')
+    expect(describeDiffering(2)).toBe('2 Transactions now have an Override, Note or Not a Transfer mark that was on a Transaction with a different amount. The bank may have numbered that day differently, so check them.')
+    expect(describeDiffering(1)).toContain('1 Transaction now has an Override, Note or Not a Transfer mark')
   })
 })
 
@@ -77,10 +77,10 @@ describe('describeWaiting', () => {
 
   it('says what is waiting, how an Import and a replace treat it, and that it can be discarded', () => {
     const text = describeWaiting(3)!
-    expect(text).toContain('3 Overrides and Notes are waiting from a replace that stopped part way.')
+    expect(text).toContain('3 Overrides, Notes and Not a Transfer marks are waiting from a replace that stopped part way.')
     expect(text).toContain('what has no match is then lost')
     expect(text).toContain('discard them')
-    expect(describeWaiting(1)).toContain('1 Override or Note is waiting')
+    expect(describeWaiting(1)).toContain('1 Override, Note or Not a Transfer mark is waiting')
   })
 
   it('says where to find the discard on the finished screen, which has no Discard button', () => {

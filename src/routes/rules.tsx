@@ -169,7 +169,7 @@ function AdminRules() {
     <>
       <p className="mt-2">
         A Rule puts the Transactions that match it into a Category, or marks them as Transfers. Rules are checked from the top of the list, and the first one that matches is used. A Category you set by hand
-        on a Transaction (an Override) always beats a Rule, and a Rule beats the category Akahu suggests, if you use Akahu Sync.
+        on a Transaction (an Override) always beats a Rule, and a Rule beats the category Akahu suggests, if you use Akahu Sync. So does Not a Transfer, which the Admin chooses on a Transaction a Rule wrongly marks as a Transfer.
       </p>
       <p className="mt-2">{INTRO}</p>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
@@ -626,7 +626,7 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
           {error('target') && <p id="rule-target-error" role="alert" className="mt-1 font-medium text-destructive">{error('target')}</p>}
           {values.target === 'transfer' && (
             <p id="rule-transfer-note" className="mt-1 text-muted-foreground">
-              A Transaction this Rule marks is a Transfer even if no matching Transaction is found in another Account, so it is not counted as spending. The mark goes on new Transactions as they are imported, and on the ones you already have when you apply the Rules to all Transactions. If the banks date the two halves of a Transfer on different days, write a Rule that marks them as a Transfer.
+              A Transaction this Rule marks is a Transfer even if no matching Transaction is found in another Account, so it is not counted as spending. The mark goes on new Transactions as they are imported, and on the ones you already have when you apply the Rules to all Transactions. If the banks date the two halves of a Transfer on different days, write a Rule that marks them as a Transfer. If it marks something that is not a Transfer, choose Not a Transfer on that Transaction: it outranks this Rule, and applying the Rules again leaves it alone.
             </p>
           )}
           {categoriesFailed && <p role="alert" className="mt-1 font-medium text-destructive">The Categories could not be loaded. Reload the page to try again.</p>}

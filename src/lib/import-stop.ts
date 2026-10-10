@@ -12,8 +12,8 @@ export type Stop = {
   dailyLimit: boolean
 }
 
-/** Said when a replace stopped after removing history: the Admin's own Categories and Notes on it are held, not lost (worker/carry-over.ts). */
-const KEPT = 'Any Override or Note you set on the removed Transactions is kept. It is carried over to the Transaction with the same number from the bank when the file is imported, and what has no match stays until you discard it.'
+/** Said when a replace stopped after removing history: the Admin's own Categories, Notes and Not a Transfer marks on it are held, not lost (worker/carry-over.ts). */
+const KEPT = 'Any Override, Note or Not a Transfer mark you set on the removed Transactions is kept. It is carried over to the Transaction with the same number from the bank when the file is imported, and what has no match stays until you discard it.'
 
 /** What happened and what to do, as separate sentences so the screen can set them apart. `kept` is set when history was removed. */
 export function describeStop({ sent, total, replacing, removed, dailyLimit }: Stop): { headline: string; happened: string | null; kept: string | null; next: string } {

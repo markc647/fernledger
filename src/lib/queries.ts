@@ -122,7 +122,7 @@ export const importedRowsQuery = (accountId: number) =>
   })
 
 /**
- * What a replace with this file would do with the Account's Overrides and Notes: asked of the Worker a chunk of the file's
+ * What a replace with this file would do with the Account's Overrides, Notes and Not a Transfer marks: asked of the Worker a chunk of the file's
  * IDs and amounts at a time (the Worker takes at most CHUNK_SIZE in a request), and added up. Nothing is changed. `key` says
  * which file and Cutover Date the chunks are of. Read fresh each time it's asked.
  */

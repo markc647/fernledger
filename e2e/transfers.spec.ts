@@ -165,19 +165,31 @@ test('the Admin can say Not a Transfer to a wrong pairing from its details, and 
   await page.getByRole('link', { name: out }).click()
   await expect(page.getByText(`Money moved to ${savings.name}. It is not counted as spending.`)).toBeVisible()
 
+  // Two questions can be open at once, the Edit panel's and the page's, and no id is used twice.
+  await page.getByRole('button', { name: 'Edit Category and Note' }).click()
+  await page.getByRole('button', { name: 'Not a Transfer', exact: true }).first().click()
+  await page.getByRole('button', { name: 'Not a Transfer', exact: true }).click()
+  await expect(page.getByRole('group', { name: 'Mark as Not a Transfer?' })).toHaveCount(2)
+  const repeated = await page.evaluate(() => {
+    const ids = [...document.querySelectorAll('[id]')].map((element) => element.id)
+    return ids.filter((id, index) => ids.indexOf(id) !== index)
+  })
+  expect(repeated).toEqual([])
+  await noAxeViolations(page)
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+
   // It asks first, naming the matching Transaction, and keeping the Transfer changes nothing.
-  await page.getByRole('button', { name: 'Not a Transfer' }).click()
-  await expect(page.getByRole('group', { name: 'Is this not a Transfer?' })).toContainText(`its matching Transaction in ${savings.name} will both stop being a Transfer`)
+  await expect(page.getByRole('group', { name: 'Mark as Not a Transfer?' })).toContainText(`its matching Transaction in ${savings.name} will both stop being a Transfer`)
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Keep as a Transfer' }).click()
   await expect(page.getByRole('button', { name: 'Not a Transfer' })).toBeFocused()
   await expect(page.getByText(`Money moved to ${savings.name}.`)).toBeVisible()
 
-  // Saying yes unpairs both halves, and says so.
-  await page.getByRole('button', { name: 'Not a Transfer' }).click()
-  await page.getByRole('button', { name: 'Yes, not a Transfer' }).click()
-  await expect(page.getByRole('status').filter({ hasText: 'Marked as not a Transfer.' })).toBeFocused()
-  await expect(page.getByText('The Admin has said this is not a Transfer, so it is counted as spending and is not paired with another Transaction.')).toBeVisible()
+  // Saying yes marks both halves, and says so.
+  await page.getByRole('button', { name: 'Not a Transfer', exact: true }).click()
+  await page.getByRole('button', { name: 'Yes, mark Not a Transfer' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Marked Not a Transfer.' })).toBeFocused()
+  await expect(page.getByText('The Admin marked this Not a Transfer, so it counts as spending and is not paired with another Transaction.')).toBeVisible()
   await expect(page.getByText('None, as this is a Transfer')).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'See the matching Transaction' })).toHaveCount(0)
   await noAxeViolations(page)
@@ -191,7 +203,7 @@ test('the Admin can say Not a Transfer to a wrong pairing from its details, and 
   await signInAs(context, 'member')
   await page.reload()
   await page.getByRole('link', { name: into }).click()
-  await expect(page.getByText('The Admin has said this is not a Transfer')).toBeVisible()
+  await expect(page.getByText('The Admin marked this Not a Transfer')).toBeVisible()
   await expect(page.getByRole('button', { name: /Transfer/ })).toHaveCount(0)
 
   // The Admin can undo it from either half, and they are paired again.
@@ -224,17 +236,86 @@ test('the Admin can say Not a Transfer from the edit panel, and is told what an 
   // The panel points to Not a Transfer rather than a Category on each half.
   await expect(page.getByText('If the pairing is wrong, use Not a Transfer instead.')).toBeVisible()
   await page.locator('#edit-note').fill('Typed but not saved')
-  await page.getByRole('button', { name: 'Not a Transfer' }).click()
-  await expect(page.getByRole('group', { name: 'Is this not a Transfer?' })).toContainText("Changes in this panel that you haven't saved will be lost.")
+  await page.getByRole('button', { name: 'Not a Transfer', exact: true }).click()
+  await expect(page.getByRole('group', { name: 'Mark as Not a Transfer?' })).toContainText("Changes in this panel that you haven't saved will be lost.")
   await noAxeViolations(page)
-  await page.getByRole('button', { name: 'Yes, not a Transfer' }).click()
+  await page.getByRole('button', { name: 'Yes, mark Not a Transfer' }).click()
 
   // The panel closes, the page says so, and neither half is a Transfer. The unsaved Note was not saved.
-  await expect(page.getByRole('status').filter({ hasText: 'Marked as not a Transfer.' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Marked Not a Transfer.' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Edit Category and Note' })).toHaveCount(0)
   await expect(outRow).toContainText('Uncategorised')
   await expect(dataRows(page).filter({ hasText: into })).toContainText('Uncategorised')
   await expect(outRow).not.toContainText('Typed but not saved')
+
+  // The list knows it is marked, so the panel offers the undo.
+  await outRow.getByRole('button', { name: /^Edit Category and Note/ }).click()
+  await expect(page.getByText('The Admin marked this Not a Transfer, so it counts as spending')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Not a Transfer', exact: true })).toHaveCount(0)
+  await noAxeViolations(page)
+  await page.getByRole('button', { name: 'Undo: treat as a Transfer again' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Treated as a Transfer again. It is paired with its matching Transaction.' })).toBeVisible()
+  await expect(outRow).toContainText(`Transfer to ${savings.name}`)
+  await expect(dataRows(page).filter({ hasText: into })).toContainText(`Transfer from ${everyday.name}`)
+})
+
+test('Not a Transfer comes back with its Transaction when the history is replaced, so the wrong pair does not return', async ({ page, context, baseURL }, testInfo) => {
+  // Accounts of its own: replacing imported history removes every imported Transaction the Account has.
+  const dark = testInfo.project.name === 'dark'
+  const everyday = { number: `99-9999-9999999-${dark ? '52' : '50'}`, name: `Carry everyday ${testInfo.project.name}` }
+  const savingsNumber = `9999999-${dark ? '53' : '51'}`
+  const savingsName = `Carry savings ${testInfo.project.name}`
+  const stamp = `${testInfo.project.name}${Date.now()}`
+  const out = `TFR TO SAVINGS ${stamp}`
+  const into = `TFR FROM EVERYDAY ${stamp}`
+  const file = [
+    'Created date / time : 2 October 2026 / 18:55:26',
+    `Bank 99; Branch 9999; Account ${savingsNumber} (Example)`,
+    'From date 20110601',
+    'To date 20110630',
+    'Avail Bal : 10.00 as of 20260930',
+    'Ledger Balance : 10.00 as of 20261002',
+    'Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount',
+    '',
+    `2011/06/15,201106150001,TFR,,"${into}","TFR",73.40`,
+  ].join('\n')
+  const chooseFile = () => page.getByLabel('Bank export file').setInputFiles({ name: 'savings.csv', mimeType: 'text/csv', buffer: Buffer.from(file) })
+
+  // The Savings side is imported from a bank file, as a replace needs, and pairs with the Everyday side when it arrives.
+  await seed(context, baseURL!, [{ account: everyday, rows: [{ description: out, amountCents: -7340 }] }])
+  await page.goto('/import')
+  await chooseFile()
+  await page.getByLabel('Account name').fill(savingsName)
+  await page.getByRole('button', { name: /^Import 1 transactions?$/ }).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
+  const listed = async () => ((await (await context.request.get(`/api/transactions?text=${stamp}&limit=200`)).json()) as { transactions: { id: number; description: string; transfer: string | null }[] }).transactions
+  expect((await listed()).map((t) => t.transfer)).toEqual(['pair', 'pair'])
+
+  // The Admin says it is wrong.
+  const wrong = (await listed()).find((t) => t.description === out)!
+  const marked = await context.request.post(`/api/transactions/${wrong.id}/not-transfer`, { headers: { Origin: baseURL! }, data: {} })
+  expect(marked.ok()).toBe(true)
+
+  // Replacing the Savings history with the same file counts the mark with the Overrides and Notes, and carries it.
+  await page.goto('/import')
+  await chooseFile()
+  await page.getByRole('button', { name: 'Replace imported history…' }).click()
+  await expect(page.getByRole('alertdialog')).toContainText('1 Transaction has an Override (your own Category), a Note or a Not a Transfer mark. It carries over to this file.')
+  await page.getByRole('button', { name: 'Yes, replace imported history' }).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
+  await expect(page.getByText('Transactions that kept their Override, Note or Not a Transfer mark', { exact: true }).locator('xpath=following-sibling::dd[1]')).toHaveText('1')
+  await expect(page.getByText('Transfers matched with other Accounts')).toHaveCount(0)
+
+  // The Transaction that came back is marked, and the pair did not form again.
+  expect((await listed()).map((t) => t.transfer)).toEqual([null, null])
+  await page.goto(`/transactions?q=${stamp}`)
+  await page.getByRole('link', { name: into }).click()
+  await expect(page.getByText('The Admin marked this Not a Transfer, so it counts as spending')).toBeVisible()
+
+  // Undoing it from the Transaction that came back clears the half that stayed too.
+  await page.getByRole('button', { name: 'Undo: treat as a Transfer again' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Treated as a Transfer again. It is paired with its matching Transaction.' })).toBeVisible()
+  expect((await listed()).map((t) => t.transfer)).toEqual(['pair', 'pair'])
 })
 
 test('the Import screen says how many Transfers it matched with other Accounts', async ({ page, context, baseURL }, testInfo) => {

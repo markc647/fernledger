@@ -1,18 +1,5 @@
--- Not a Transfer (ticket 37): the Admin's answer to a pairing that is wrong. Automatic pairing (1501_transfers.sql) matches on date and
--- amount alone, so two unrelated Transactions can pair by coincidence, and a Rule can mark a Transaction a Transfer that is not one.
---
---   not_transfer_with  NULL while nothing has been said. Once the Admin has said "Not a Transfer", the ID of the Transaction it was
---                      unpaired from: both halves are marked together and each holds the other's ID, which is how treating them as a
---                      Transfer again finds both. A Transaction marked alone (a Rule marked it and nothing was paired with it) holds its own ID.
---
--- A marked Transaction is not a Transfer, whatever else says it is: pairing leaves it out, as the Transaction to pair and as the one to pair
--- it with (worker/transfers.ts), and neither a pair nor a Rule's Transfer flag makes it one (worker/effective-category.ts). Marking also
--- clears `transfer_of` on both halves, so a marked Transaction is never paired. The Rule's own result (`rule_transfer`) is left as it was,
--- so treating the Transaction as a Transfer again hands it back without applying the Rules again.
---
--- Like `transfer_of` it is deliberately not a foreign key, and it is not indexed: it is read with the row it is on, and the one lookup that
--- follows it is by ID. Replacing an Account's imported history removes rows without touching what points at them. A mark whose other half
--- was removed that way stays on the half that is left, which is still not a Transfer; treating that one as a Transfer again clears it and
--- pairs it with whatever matches now. Transaction IDs are never reused (AUTOINCREMENT), so a pointer can't land on the wrong row. The
--- marker is not carried over to the Transactions a replace imports, as Overrides and Notes are (ticket 36), so those pair like any new ones.
+-- Not a Transfer (ticket 37): the Admin's answer to a pairing, or a Rule's Transfer flag, that is wrong.
+--   not_transfer_with  NULL until the Admin says so. Then a number that both halves of a pair share (the lower of their two IDs), or
+--                      a Transaction's own ID when it was marked alone, so that Undo finds the other half by it. Not a foreign key.
+-- A marked Transaction is not a Transfer (worker/effective-category.ts) and is left out of pairing (worker/transfers.ts).
 ALTER TABLE transactions ADD COLUMN not_transfer_with INTEGER;

@@ -3,7 +3,7 @@ import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { restartRerun } from './rule-rerun'
-import { validate } from './validate'
+import { nothing, validate } from './validate'
 
 type CategoryRow = { id: number; name: string }
 
@@ -11,7 +11,6 @@ type CategoryRow = { id: number; name: string }
 export const categoryName = z.string().check(z.trim(), z.minLength(1), z.maxLength(40))
 
 const body = z.object({ name: categoryName })
-const nothing = z.object({})
 
 const isDuplicateName = (error: unknown) => error instanceof Error && error.message.includes('UNIQUE constraint failed')
 const alreadyThere = { error: 'A Category with that name already exists' }

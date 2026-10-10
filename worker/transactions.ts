@@ -6,14 +6,12 @@ import { effectiveCategory, type CategorySource, type TransferSource } from './e
 import { exportQuery, exportResponse } from './transaction-export'
 import { buildSearch, categoryProbe, isFewInCategory, needsCategoryProbe, searchQuery, toFilters, toSearch, type Statement } from './transaction-search'
 import { clearNotTransferStatement, markNotTransferStatement, pairOneStatement, PARTNER_JOIN } from './transfers'
-import { validate } from './validate'
+import { nothing, validate } from './validate'
 
 /** The Admin's Override: a Category in use, or null to take it off. */
 const overrideBody = z.object({ categoryId: z.nullable(z.int().check(z.positive())) })
 /** A Note, trimmed. Blank takes the Note off. */
 const noteBody = z.object({ note: z.string().check(z.trim(), z.maxLength(500)) })
-/** Nothing to say: the change-request guard wants a JSON body, so the browser sends `{}`. */
-const nothing = z.object({})
 
 type TransactionListRow = {
   id: number
@@ -32,6 +30,9 @@ type TransactionListRow = {
   transfer: TransferSource | null
   /** The Account of the matching Transaction (the one this is paired with), whether or not an Override makes this one spending; null when unpaired. */
   transferAccountName: string | null
+  /** The Admin can say Not a Transfer (effective-category.ts `markable`), and the Admin has said it. */
+  canMarkNotTransfer: boolean
+  notTransfer: boolean
 }
 
 /**
@@ -64,7 +65,8 @@ type TransactionDetail = {
   transferTransactionId: number | null
   /** True when the matching Transaction has an Override with a Category in use, so it counts as spending although this one is a Transfer. */
   transferPartnerOverridden: boolean
-  /** True when the Admin has said this is Not a Transfer: it is not paired, and neither a pairing nor a Rule makes it a Transfer (see transfers.ts). */
+  /** The Admin can say Not a Transfer (effective-category.ts `markable`), and the Admin has said it: it is not paired, and neither a pairing nor a Rule makes it a Transfer. */
+  canMarkNotTransfer: boolean
   notTransfer: boolean
   bankTime: string | null
   firstSeenAt: string | null
@@ -82,30 +84,44 @@ const findTransaction = (db: D1Database, id: number) =>
     ? db.prepare('SELECT id, date, description, override_category AS overrideCategory, note FROM transactions WHERE id = ?').bind(id).first<Described & { overrideCategory: number | null; note: string | null }>()
     : null
 
-/** What the Not a Transfer routes need to know about a Transaction, and the Transaction it is paired or marked with. */
+/** What the Not a Transfer routes need to know about a Transaction, and the one it is paired or marked with, with each one's Account. */
 type TransferState = Described & {
+  accountName: string
   transferOf: number | null
-  ruleTransfer: number | null
-  /** The ID it was marked Not a Transfer together with, its own ID when it was marked alone, null while it is not marked. */
-  notTransferWith: number | null
-  /** The Transaction it is paired with, or else the one it was marked with, when that one is still there. */
-  matching: Described | null
+  /** The Admin can say Not a Transfer (effective-category.ts), which is not the case once they have. */
+  markable: boolean
+  /** The number it shares with the Transaction it was marked with, null while it is not marked. */
+  mark: number | null
+  /** The Transaction it is paired with, or else the one it shares its mark with, when that one is still there. */
+  matching: (Described & { accountName: string }) | null
 }
 
 async function findTransferState(db: D1Database, id: number): Promise<TransferState | null> {
-  if (!Number.isSafeInteger(id)) return null
   const t = await db
     .prepare(
-      `SELECT t.id, t.date, t.description, t.transfer_of AS transferOf, t.rule_transfer AS ruleTransfer, t.not_transfer_with AS notTransferWith,
-              matching.id AS matchingId, matching.date AS matchingDate, matching.description AS matchingDescription
-       FROM transactions t LEFT JOIN transactions matching ON matching.id = COALESCE(t.transfer_of, NULLIF(t.not_transfer_with, t.id))
+      `SELECT t.id, t.date, t.description, a.name AS accountName, t.transfer_of AS transferOf, ${effectiveCategory().markable} AS markable, t.not_transfer_with AS mark,
+              m.id AS matchingId, m.date AS matchingDate, m.description AS matchingDescription, ma.name AS matchingAccountName
+       FROM transactions t JOIN accounts a ON a.id = t.account_id
+       LEFT JOIN transactions m ON m.id = COALESCE(t.transfer_of, (SELECT x.id FROM transactions x WHERE x.not_transfer_with = t.not_transfer_with AND x.id <> t.id))
+       LEFT JOIN accounts ma ON ma.id = m.account_id
        WHERE t.id = ?`,
     )
     .bind(id)
-    .first<Described & Omit<TransferState, keyof Described | 'matching'> & { matchingId: number | null; matchingDate: string | null; matchingDescription: string | null }>()
+    .first<
+      Described & {
+        accountName: string
+        transferOf: number | null
+        markable: number
+        mark: number | null
+        matchingId: number | null
+        matchingDate: string | null
+        matchingDescription: string | null
+        matchingAccountName: string | null
+      }
+    >()
   if (!t) return null
-  const { matchingId, matchingDate, matchingDescription, ...rest } = t
-  return { ...rest, matching: matchingId === null ? null : { id: matchingId, date: matchingDate!, description: matchingDescription! } }
+  const { matchingId, matchingDate, matchingDescription, matchingAccountName, markable, ...rest } = t
+  return { ...rest, markable: markable === 1, matching: matchingId === null ? null : { id: matchingId, date: matchingDate!, description: matchingDescription!, accountName: matchingAccountName! } }
 }
 
 /**
@@ -135,7 +151,9 @@ export const transactions = new Hono<AppEnv>()
     const paging = search.want !== 'count'
     const results = await db.batch([...(counting ? [run(count)] : []), ...(paging ? [run(page)] : [])])
     const total = counting ? (results.shift()!.results[0] as { total: number }).total : null
-    return c.json({ total, transactions: paging ? (results[0]!.results as TransactionListRow[]) : [] })
+    // SQLite answers its yes-or-no columns with 0 and 1; a page is at most 200 rows.
+    const rows = paging ? (results[0]!.results as (Omit<TransactionListRow, 'canMarkNotTransfer' | 'notTransfer'> & { canMarkNotTransfer: number; notTransfer: number })[]) : []
+    return c.json({ total, transactions: rows.map((r): TransactionListRow => ({ ...r, canMarkNotTransfer: r.canMarkNotTransfer === 1, notTransfer: r.notTransfer === 1 })) })
   })
   // The same filters as the list, as a CSV file (transaction-export.ts). Ahead of '/:id', which would take "export.csv" for an ID.
   .get('/export.csv', validate('query', exportQuery), (c) => exportResponse(c.env.DB, toFilters(c.req.valid('query'))))
@@ -150,16 +168,21 @@ export const transactions = new Hono<AppEnv>()
               t.source, ${category.shown.id} AS categoryId, ${category.shown.name} AS categoryName, ${category.shown.source} AS categorySource, t.note,
               ${category.transfer} AS transfer, partner_account.name AS transferAccountName, partner.id AS transferTransactionId,
               EXISTS (SELECT 1 FROM categories partner_override WHERE partner_override.id = partner.override_category AND partner_override.removed_at IS NULL) AS transferPartnerOverridden,
-              t.not_transfer_with IS NOT NULL AS notTransfer,
+              ${category.markable} AS canMarkNotTransfer, t.not_transfer_with IS NOT NULL AS notTransfer,
               CASE WHEN t.has_bank_time = 1 THEN t.akahu_date_raw END AS bankTime, t.akahu_first_seen_at AS firstSeenAt
        FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
        ${PARTNER_JOIN}
        WHERE t.id = ?`,
     )
       .bind(Number(id))
-      .first<Omit<TransactionDetail, 'transferPartnerOverridden' | 'notTransfer'> & { transferPartnerOverridden: number; notTransfer: number }>()
+      .first<Omit<TransactionDetail, 'transferPartnerOverridden' | 'canMarkNotTransfer' | 'notTransfer'> & { transferPartnerOverridden: number; canMarkNotTransfer: number; notTransfer: number }>()
     return transaction
-      ? c.json({ ...transaction, transferPartnerOverridden: transaction.transferPartnerOverridden === 1, notTransfer: transaction.notTransfer === 1 })
+      ? c.json({
+          ...transaction,
+          transferPartnerOverridden: transaction.transferPartnerOverridden === 1,
+          canMarkNotTransfer: transaction.canMarkNotTransfer === 1,
+          notTransfer: transaction.notTransfer === 1,
+        })
       : c.json({ error: 'Not found' }, 404)
   })
   // The guard in app.ts has already required the Admin, so these only validate the body's shape.
@@ -213,58 +236,63 @@ export const transactions = new Hono<AppEnv>()
     })
     return c.json({ id, note })
   })
-  // "Not a Transfer": a pairing is wrong (or a Rule made a Transfer of something that is not one). Both halves are unpaired and marked in one batch with
-  // their Change Log entry, and pairing and Rules leave them alone from then on (transfers.ts). Treating it as a Transfer again undoes that. The guard in
-  // app.ts has already required the Admin, so these only look the Transaction up.
+  // "Not a Transfer": a pairing is wrong, or a Rule made a Transfer of something that is not one. Both halves are marked, and so stop being paired, in one batch
+  // with the Change Log entry, and pairing and the Rules leave them alone from then on (transfers.ts). Undo takes the marks off and pairs them again. The guard
+  // in app.ts has already required the Admin. A request that finds nothing to do writes no entry (`onlyIfChanged`).
   .post('/:id/not-transfer', validate('json', nothing), async (c) => {
-    const id = Number(c.req.param('id'))
+    const raw = c.req.param('id')
+    if (!ID.test(raw)) return c.json({ error: 'Not found' }, 404)
+    const id = Number(raw)
     const db = c.env.DB
     const transaction = await findTransferState(db, id)
     if (!transaction) return c.json({ error: 'Not found' }, 404)
-    if (transaction.notTransferWith !== null) return c.json({ id, notTransfer: true })
-    // A Transaction is the Admin's to mark when something makes it a Transfer, even if an Override hides that: a pairing, or a Rule's flag.
-    const pairedWith = transaction.transferOf
-    if (pairedWith === null && transaction.ruleTransfer !== 1) return c.json({ error: 'This Transaction is not a Transfer' }, 409)
+    if (transaction.mark !== null) return c.json({ id, notTransfer: true })
+    if (!transaction.markable) return c.json({ error: 'This Transaction is not a Transfer' }, 409)
 
-    const matching = transaction.matching
-    const [update] = await recordChange(db, markNotTransferStatement(db, { id, matchingId: pairedWith }), {
+    const { matching } = transaction
+    const named = `${describe(transaction)} in ${transaction.accountName}`
+    const [update] = await recordChange(db, markNotTransferStatement(db, { id, matchingId: transaction.transferOf }), {
       actor: c.var.member,
       type: 'transfer',
       summary: matching
-        ? `Marked ${describe(transaction)} and its matching ${describe(matching)} as Not a Transfer`
-        : `Marked ${describe(transaction)} as Not a Transfer, so the Rule that marks it as a Transfer no longer applies to it`,
-      before: { notTransfer: false, pairedWith, ruleTransfer: transaction.ruleTransfer === 1 },
-      after: { notTransfer: true },
+        ? `Marked ${named} and its matching ${describe(matching)} in ${matching.accountName} as Not a Transfer`
+        : `Marked ${named} as Not a Transfer, so the Rule that marks it as a Transfer no longer applies to it`,
+      before: { transfer: matching ? `Transfer between ${transaction.accountName} and ${matching.accountName}` : 'Marked by a Rule' },
+      after: { transfer: 'Not a Transfer' },
+      onlyIfChanged: true,
     })
-    // Only if an Import moved the pairing on between the read and the write: the entry above then records an attempt that changed nothing.
+    // Only if an Import moved the pairing on between the read and the write, and then no entry was written.
     if (update!.meta.changes === 0) return c.json({ error: 'This Transaction has changed. Reload the page and try again' }, 409)
     return c.json({ id, notTransfer: true })
   })
   .delete('/:id/not-transfer', validate('json', nothing), async (c) => {
-    const id = Number(c.req.param('id'))
+    const raw = c.req.param('id')
+    if (!ID.test(raw)) return c.json({ error: 'Not found' }, 404)
+    const id = Number(raw)
     const db = c.env.DB
     const transaction = await findTransferState(db, id)
     if (!transaction) return c.json({ error: 'Not found' }, 404)
-    if (transaction.notTransferWith === null) return c.json({ id, notTransfer: false, paired: false })
+    const token = transaction.mark
+    if (token === null) return c.json({ id, notTransfer: false, paired: false })
 
-    // The marks come off both halves, then each is paired again with what matches now, the Transaction it was marked with first if it still does. An
-    // Import pairs only the rows it adds, so without this the two would never be looked at again.
-    const markedWith = transaction.notTransferWith === id ? null : transaction.notTransferWith
-    const matching = transaction.matching
+    // Each half is paired with what matches now, the Transaction it was marked with first, and then the marks come off: last, so that a second request that
+    // finds them off changes nothing and writes no entry.
+    const { matching } = transaction
     const results = await recordChange(
       db,
       [
-        clearNotTransferStatement(db, { id, matchingId: markedWith }),
-        pairOneStatement(db, { id, prefer: markedWith }),
-        ...(matching ? [pairOneStatement(db, { id: matching.id, prefer: id })] : []),
+        pairOneStatement(db, { id, prefer: matching?.id ?? null, token }),
+        ...(matching ? [pairOneStatement(db, { id: matching.id, prefer: id, token })] : []),
+        clearNotTransferStatement(db, { token }),
       ],
       {
         actor: c.var.member,
         type: 'transfer',
-        summary: matching ? `Treated ${describe(transaction)} and ${describe(matching)} as a Transfer again` : `Treated ${describe(transaction)} as a Transfer again`,
-        before: { notTransfer: true, markedWith },
-        after: { notTransfer: false },
+        summary: `Took Not a Transfer off ${describe(transaction)} in ${transaction.accountName}${matching ? ` and ${describe(matching)} in ${matching.accountName}` : ''}`,
+        before: { transfer: 'Not a Transfer' },
+        after: { transfer: 'Can be a Transfer again' },
+        onlyIfChanged: true,
       },
     )
-    return c.json({ id, notTransfer: false, paired: results.slice(1).some((result) => result.meta.changes > 0) })
+    return c.json({ id, notTransfer: false, paired: results.slice(0, -1).some((result) => result.meta.changes > 0) })
   })

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { canMarkNotTransfer, notTransferQuestion, notTransferSaved, transferEditHint, transferExplanation, transferLabel, treatAsTransferAgainSaved } from './transfers'
+import { notTransferQuestion, notTransferSaved, transferEditHint, transferExplanation, transferLabel, treatAsTransferAgainSaved } from './transfers'
 
-const paired = { transfer: 'pair' as const, transferAccountName: 'Savings', transferPartnerOverridden: false, notTransfer: false }
-const spending = { transfer: null, transferAccountName: null, transferPartnerOverridden: false, notTransfer: false }
+const paired = { transfer: 'pair' as const, transferAccountName: 'Savings', transferPartnerOverridden: false, notTransfer: false, canMarkNotTransfer: true }
+const spending = { transfer: null, transferAccountName: null, transferPartnerOverridden: false, notTransfer: false, canMarkNotTransfer: false }
 
 describe('transferLabel', () => {
   it('names the other Account, to for money out and from for money in', () => {
@@ -53,7 +53,7 @@ describe('transferExplanation', () => {
   })
 
   it('says the Admin marked it Not a Transfer, which is why it is spending and has no matching Transaction', () => {
-    expect(transferExplanation({ ...spending, notTransfer: true, amountCents: -5000 })).toBe('The Admin has said this is not a Transfer, so it is counted as spending and is not paired with another Transaction.')
+    expect(transferExplanation({ ...spending, notTransfer: true, amountCents: -5000 })).toBe('The Admin marked this Not a Transfer, so it counts as spending and is not paired with another Transaction.')
   })
 })
 
@@ -75,44 +75,30 @@ describe('transferEditHint', () => {
   })
 })
 
-describe('canMarkNotTransfer', () => {
-  it('is true for a Transfer, whether a pairing or a Rule makes it one', () => {
-    expect(canMarkNotTransfer(paired)).toBe(true)
-    expect(canMarkNotTransfer({ ...spending, transfer: 'rule' })).toBe(true)
-  })
-
-  it('is true for a paired Transaction that an Override made spending, whose matching Transaction is still a Transfer', () => {
-    expect(canMarkNotTransfer({ ...spending, transferAccountName: 'Savings' })).toBe(true)
-  })
-
-  it('is false for spending, and for what the Admin has already marked', () => {
-    expect(canMarkNotTransfer(spending)).toBe(false)
-    expect(canMarkNotTransfer({ ...spending, notTransfer: true })).toBe(false)
-  })
-})
-
 describe('notTransferQuestion', () => {
-  it('names the matching Transaction by its Account, says both stop being a Transfer, and that it can be undone', () => {
+  it('names the matching Transaction by its Account, says both stop being a Transfer and that neither is paired with any other, and that it can be undone', () => {
     expect(notTransferQuestion({ transferAccountName: 'Savings' })).toBe(
-      "This Transaction and its matching Transaction in Savings will both stop being a Transfer and count as spending. Fernledger won't pair them again. You can undo this.",
+      "This Transaction and its matching Transaction in Savings will both stop being a Transfer and count as spending. Fernledger won't pair them, or either one with any other Transaction. You can undo this.",
     )
   })
 
   it('says only this Transaction changes when a Rule marks it and nothing is paired with it', () => {
-    expect(notTransferQuestion({ transferAccountName: null })).toBe("A Rule marks this as a Transfer. It will stop being a Transfer and count as spending, whatever the Rule says. You can undo this.")
+    expect(notTransferQuestion({ transferAccountName: null })).toBe(
+      "A Rule marks this as a Transfer. It will stop being a Transfer and count as spending, whatever the Rule says, and Fernledger won't pair it with another Transaction. You can undo this.",
+    )
   })
 })
 
 describe('what the page says after Not a Transfer and after undoing it', () => {
   it('says it is saved', () => {
-    expect(notTransferSaved()).toBe('Marked as not a Transfer.')
+    expect(notTransferSaved()).toBe('Marked Not a Transfer.')
   })
 
   it('says when it paired with its matching Transaction again', () => {
     expect(treatAsTransferAgainSaved(true)).toBe('Treated as a Transfer again. It is paired with its matching Transaction.')
   })
 
-  it('says when there was no match to pair with, and when it will be a Transfer', () => {
-    expect(treatAsTransferAgainSaved(false)).toBe('Treated as a Transfer again. It is a Transfer only if a Rule marks it, or when a matching Transaction is imported.')
+  it('says when there was no match to pair with, without saying it is a Transfer again, and when it will be one', () => {
+    expect(treatAsTransferAgainSaved(false)).toBe('Took Not a Transfer off. It is a Transfer only if a Rule marks it, or when a matching Transaction is imported.')
   })
 })

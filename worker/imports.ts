@@ -8,8 +8,9 @@ import {
   annotated,
   APPLY_HELD,
   CARRY_PREVIEW,
+  CARRIED,
   carryOutcome,
-  carryStatementsAfterInsert,
+  carryStatements,
   CLEAR_HELD,
   COUNT_COLUMNS,
   COUNT_REMOVED_ANNOTATED,
@@ -42,9 +43,9 @@ import { validate } from './validate'
 // - A chunk request costs at most 20 D1 queries (find the Account, count the Import-sourced rows to replace, count the
 //   rows it already holds and the Overrides and Notes it will carry over, find the highest Transaction ID, then one batch
 //   of at most 14 statements: set the Cutover Date (or create the Account), remove the old balances, forget what an
-//   earlier attempt gave out, hold the Overrides and Notes of the rows that go, let go of the matching Transactions of the rows
-//   that go, remove the old rows, insert the rows, apply the Rules to the rows just added, pair their Transfers, give the new
-//   rows what is held, mark what was given, clear what is left (or, in an Import that is not a replace, tidy what is
+//   earlier attempt gave out, hold the Overrides, Notes and Not a Transfer marks of the rows that go, let go of the matching Transactions of the rows
+//   that go, remove the old rows, insert the rows, apply the Rules to the rows just added, give the new
+//   rows what is held, mark what was given, pair their Transfers, clear what is left (or, in an Import that is not a replace, tidy what is
 //   finished with), record the file's ledger balance (last chunk only), write the Change Log entry; then the last chunk's
 //   Balance Check reads and saves in 2 more), well under 50. A statement in a batch counts as one query; balances.test.ts
 //   pins the worst case. Only a replace, or an Import of an Account a replace left holding Overrides and Notes, has the
@@ -126,7 +127,7 @@ export const COUNT_NEW_ROWS = `
 
 const COUNT_IMPORTED = "SELECT COUNT(*) AS n FROM transactions WHERE account_id = ? AND source = 'import'"
 
-// `waiting` is what a replace that did not finish still has to give back (carry-over.ts).
+// `annotated` counts the rows a replace would carry over (an Override, a Note or a Not a Transfer mark), and `waiting` what a replace that did not finish still has to give back (carry-over.ts).
 // `paired` is how many of those are one half of a Transfer, which a replace has to let go of and pair again (transfers.ts).
 const COUNT_IMPORTED_AND_ANNOTATED = `SELECT COUNT(*) AS imported,
          COUNT(CASE WHEN ${annotated('transactions')} THEN 1 END) AS annotated, COUNT(transfer_of) AS paired,
@@ -207,12 +208,10 @@ export const imports = new Hono<AppEnv>()
     const afterId = await lastTransactionId(db)
     // The Rules are applied in the same batch as the rows, so a chunk and its Rule results commit together or not at all.
     // Applied after the commit, a failure would leave rows no retry gives Rules to: the retry reads the new highest ID.
-    // Their Transfers are paired in the same batch, after the Rules, for the same reason (transfers.ts). The pairing is part of
-    // `withRules` so that it sits before the carry-over statements, which `markAt` counts from the end of it.
-    const withRules = [...planned, applyRulesStatement(db, { accountNumber: number, afterId }), pairTransfersStatement(db, { accountNumber: number, afterId })]
-    // What was held for the new rows is given to them after the insert. The last chunk of a replace clears what nothing
-    // claimed; the last chunk of any other Import only drops what it has finished with.
-    const afterInsert = carryStatementsAfterInsert(carryPlan, {
+    // What was held for the new rows is given to them next, before they are paired, so a Transaction that comes back marked Not a Transfer is
+    // never paired (transfers.ts); and their Transfers are paired in the same batch, for the same reason as the Rules. The last chunk of a replace
+    // clears what nothing claimed after that; the last chunk of any other Import only drops what it has finished with.
+    const { give, finish } = carryStatements(carryPlan, {
       apply: () => db.prepare(APPLY_HELD).bind(existing!.id, rowsJson),
       markApplied: () => db.prepare(MARK_APPLIED).bind(existing!.id, rowsJson),
       clear: () => db.prepare(CLEAR_HELD).bind(existing!.id),
@@ -222,18 +221,20 @@ export const imports = new Hono<AppEnv>()
     // doesn't claim a balance. It goes after the insert, which it follows in the batch.
     const ledger = file.ledgerBalance
     const statements = [
-      ...withRules,
-      ...afterInsert,
+      ...planned,
+      applyRulesStatement(db, { accountNumber: number, afterId }),
+      ...give,
+      pairTransfersStatement(db, { accountNumber: number, afterId }),
+      ...finish,
       ...(lastChunk
         ? [recordBalance(db, { accountNumber: number, asOfDate: ledger.date, bankCents: ledger.cents, source: 'import', status: statusOnRecord({ asOfDate: ledger.date, fileTo: file.to, cutoverDate: effectiveCutover }) })]
         : []),
     ]
     const insertAt = planned.length - 1
-    // The pairing follows the Rules, which follow the insert: its count of rows changed is two for each pair made.
-    const pairAt = planned.length + 1
-    // The statement that marked the held rows given out is the second after the Rules' and the pairing (`withRules` ends with
-    // them): its count is what was carried.
-    const markAt = withRules.length + 1
+    // The Rules follow the insert, then come what is given out (and the statement that marks it given: its count is what was carried), then the
+    // pairing, whose count of rows changed is two for each pair made.
+    const markAt = planned.length + 2
+    const pairAt = planned.length + 1 + give.length
     // Every chunk is its own Change Log entry, written in the same batch as its rows.
     const outcome = { accountName: name, replace: replace === true, removed: toRemove, added, dropped, index: chunk.index, count: chunk.count, carry }
     const results = await recordChange(db, statements, {
@@ -282,7 +283,7 @@ export const imports = new Hono<AppEnv>()
     const account = Number.isSafeInteger(accountId) ? await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first() : null
     if (!account) return c.json({ error: 'Not found' }, 404)
     const counts = await db.prepare(COUNT_IMPORTED_AND_ANNOTATED).bind(accountId).first<{ imported: number; annotated: number; paired: number; waiting: number }>()
-    return c.json({ imported: counts?.imported ?? 0, withOverrideOrNote: counts?.annotated ?? 0, paired: counts?.paired ?? 0, carryOverWaiting: counts?.waiting ?? 0 })
+    return c.json({ imported: counts?.imported ?? 0, withOwnWork: counts?.annotated ?? 0, paired: counts?.paired ?? 0, carryOverWaiting: counts?.waiting ?? 0 })
   })
   // One step of clearing a history too big to replace in a single chunk (more than REPLACE_SLICE rows): the Admin's
   // browser calls it until the rest fits, then sends the first chunk with `replace`. Each step is logged. It refuses
@@ -298,7 +299,7 @@ export const imports = new Hono<AppEnv>()
     const remaining = total - REPLACE_SLICE
     // The Overrides and Notes of the rows this step removes are held for the Import that follows (carry-over.ts).
     const held = (await db.prepare(COUNT_REMOVED_ANNOTATED).bind(accountId, REPLACE_SLICE).first<{ n: number }>())?.n ?? 0
-    const kept = held > 0 ? `, keeping the Overrides and Notes of ${held} ${held === 1 ? 'Transaction' : 'Transactions'} to carry over` : ''
+    const kept = held > 0 ? `, keeping the ${CARRIED} of ${held} ${held === 1 ? 'Transaction' : 'Transactions'} to carry over` : ''
     // The balances of the history being replaced go with its first step: they describe Transactions that are going.
     await recordChange(
       db,
@@ -344,7 +345,7 @@ export const imports = new Hono<AppEnv>()
     await recordChange(db, db.prepare(CLEAR_HELD).bind(accountId), {
       actor: c.var.member,
       type: 'import',
-      summary: `Discarded the Overrides and Notes of ${waiting.n} ${waiting.n === 1 ? 'Transaction' : 'Transactions'} that ${account.name} was holding from a replace that did not finish`,
+      summary: `Discarded the ${CARRIED} of ${waiting.n} ${waiting.n === 1 ? 'Transaction' : 'Transactions'} that ${account.name} was holding from a replace that did not finish`,
       after: { discarded: waiting.n, lostTransactions: parseLostRows(waiting.listed) },
     })
     return c.json({ discarded: waiting.n })

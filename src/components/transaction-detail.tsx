@@ -9,7 +9,7 @@ import { formatDate, formatDateTime } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { transactionQuery } from '@/lib/queries'
 import type { DetailOrigin, TransactionSearch } from '@/lib/transaction-search'
-import { canMarkNotTransfer, notTransferSaved, transferExplanation, treatAsTransferAgainSaved } from '@/lib/transfers'
+import { notTransferSaved, transferExplanation, treatAsTransferAgainSaved } from '@/lib/transfers'
 
 const linkStyle = 'inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
@@ -166,7 +166,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
                   </Link>
                 </span>
               )}
-              {isAdmin && canMarkNotTransfer(t) && (
+              {isAdmin && t.canMarkNotTransfer && (
                 <NotATransfer
                   id={t.id}
                   transfer={t}

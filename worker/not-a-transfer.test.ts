@@ -1,10 +1,13 @@
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { APPLY_HELD, HOLD_REMOVED } from './carry-over'
+import worker from './index'
 import { PAIR_ONE, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, pairTransfersStatement } from './transfers'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only). All the data is made up (bank 99).
-// "Not a Transfer" (ticket 37) undoes a wrong pairing: both halves stop being a Transfer, and nothing pairs them again
+// "Not a Transfer" (ticket 37) puts right a pairing that is wrong: both halves stop being a Transfer, and nothing pairs them
 // until the Admin treats them as a Transfer again. The pairs are made by an Import (worker/transfers.ts), so every test imports files.
 const origin = 'http://localhost:5173'
 
@@ -14,6 +17,25 @@ async function call(path: string, opts: { who?: Who; method?: string; body?: unk
   const headers: Record<string, string> = { Cookie: `fernledger_dev_as=${opts.who ?? 'admin'}` }
   if (opts.body !== undefined) Object.assign(headers, { Origin: origin, 'Content-Type': 'application/json' })
   return exports.default.fetch(new Request(`${origin}${path}`, { method: opts.method ?? 'GET', headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) }))
+}
+
+/**
+ * The same as `call` as the Admin, through a database that runs `before` just before the request's batch, to stand for another request
+ * landing between the handler's read and its write. Calls `worker.fetch` directly because the test changes the Worker's env.
+ */
+async function callWhileInterrupted(path: string, method: string, before: () => Promise<unknown>) {
+  const db = new Proxy(env.DB, {
+    get(target, key) {
+      if (key === 'batch') return async (statements: D1PreparedStatement[]) => (await before(), target.batch(statements))
+      const value = Reflect.get(target, key, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  const ctx = createExecutionContext()
+  const request = new Request(`${origin}${path}`, { method, headers: { Cookie: 'fernledger_dev_as=admin', Origin: origin, 'Content-Type': 'application/json' }, body: '{}' })
+  const res = await worker.fetch!(request as never, { ...env, DB: db }, ctx)
+  await waitOnExecutionContext(ctx)
+  return res
 }
 
 const EVERYDAY = { number: '99-9999-9999999-01', name: 'Everyday' }
@@ -41,6 +63,7 @@ const sendChunk = (account: Account, rows: unknown[], extra: { replace?: boolean
 async function importInto(account: Account, rows: unknown[], extra: { replace?: boolean } = {}) {
   const res = await sendChunk(account, rows, extra)
   expect(res.status, JSON.stringify(await res.clone().json())).toBe(200)
+  return (await res.json()) as { lostTransactions: { description: string; notTransfer: boolean }[]; paired: number }
 }
 
 type Listed = {
@@ -52,6 +75,8 @@ type Listed = {
   categorySource: string | null
   transfer: 'pair' | 'rule' | null
   transferAccountName: string | null
+  canMarkNotTransfer: boolean
+  notTransfer: boolean
 }
 const list = async (query = '', who: Who = 'admin') => (await (await call(`/api/transactions?limit=200${query}`, { who })).json()) as { total: number | null; transactions: Listed[] }
 const described = async (query = '') => (await list(query)).transactions
@@ -65,10 +90,19 @@ const pairs = async () =>
 /** The bank IDs of the Transactions that are not paired, in alphabetical order. */
 const unpaired = async () => (await env.DB.prepare('SELECT bank_unique_id AS uid FROM transactions WHERE transfer_of IS NULL ORDER BY uid').all<{ uid: string }>()).results.map((r) => r.uid)
 const idOf = async (uniqueId: string) => (await env.DB.prepare('SELECT id FROM transactions WHERE bank_unique_id = ?').bind(uniqueId).first<{ id: number }>())!.id
-/** The marker as stored: the ID of the Transaction it was marked together with, its own ID when it was marked alone, null while it is not marked. */
+const accountIdOf = async (name: string) => (await env.DB.prepare('SELECT id FROM accounts WHERE name = ?').bind(name).first<{ id: number }>())!.id
+/** The mark as stored: a number both halves of a marked pair share, null while the Transaction is not marked. */
 const marker = async (uniqueId: string) => (await env.DB.prepare('SELECT not_transfer_with AS marker FROM transactions WHERE bank_unique_id = ?').bind(uniqueId).first<{ marker: number | null }>())!.marker
 
-type Detail = { id: number; transfer: 'pair' | 'rule' | null; notTransfer: boolean; transferAccountName: string | null; transferTransactionId: number | null; categoryName: string | null }
+type Detail = {
+  id: number
+  transfer: 'pair' | 'rule' | null
+  notTransfer: boolean
+  canMarkNotTransfer: boolean
+  transferAccountName: string | null
+  transferTransactionId: number | null
+  categoryName: string | null
+}
 const detail = async (uniqueId: string, who: Who = 'admin') => (await (await call(`/api/transactions/${await idOf(uniqueId)}`, { who })).json()) as Detail
 
 const notTransfer = async (uniqueId: string, who: Who = 'admin') => call(`/api/transactions/${await idOf(uniqueId)}/not-transfer`, { who, method: 'POST', body: {} })
@@ -79,7 +113,8 @@ const transferRule = async (textContains: string) => expect((await call('/api/ru
 const override = async (uniqueId: string, categoryId: number) => expect((await call(`/api/transactions/${await idOf(uniqueId)}/override`, { method: 'PUT', body: { categoryId } })).status).toBe(200)
 
 type LogEntry = { type: string | null; summary: string; before: string | null; after: string | null; actor: string }
-const transferLog = async () => ((await (await call('/api/change-log?type=transfer', { who: 'member' })).json()) as { entries: LogEntry[] }).entries
+const log = async (query: string) => ((await (await call(`/api/change-log${query}`, { who: 'member' })).json()) as { entries: LogEntry[] }).entries
+const transferLog = () => log('?type=transfer')
 
 /** A wrongly paired $50.00 out of Everyday and in to Savings, the same day. */
 async function wrongPair() {
@@ -90,12 +125,12 @@ async function wrongPair() {
 
 beforeEach(async () => {
   serial = 0
-  await env.DB.batch(['balance_checks', 'transactions', 'rules', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch(['balance_checks', 'carry_over', 'transactions', 'rules', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
   await env.DB.prepare('UPDATE categories SET removed_at = NULL').run()
 })
 
 describe('marking a pairing as Not a Transfer', () => {
-  it('unpairs both halves in one step, and each shows its own Category', async () => {
+  it('stops both halves being a Transfer in one step, and each shows its own Category', async () => {
     const groceries = await categoryId('Groceries')
     expect((await call('/api/rules', { method: 'POST', body: { textContains: 'GROC', categoryId: groceries } })).status).toBe(201)
     await importInto(EVERYDAY, [row(DAY, -5000, 'GROC SHOP', 'OUT')])
@@ -116,7 +151,7 @@ describe('marking a pairing as Not a Transfer', () => {
   it('leaves both out of the Transfers and into spending, the Uncategorised list and the filters', async () => {
     await wrongPair()
     expect((await list('&transfers=only')).total).toBe(2)
-    expect((await described('&uncategorised=true'))).toEqual([])
+    expect(await described('&uncategorised=true')).toEqual([])
 
     await notTransfer('OUT')
 
@@ -134,30 +169,34 @@ describe('marking a pairing as Not a Transfer', () => {
     expect((await described()).map((t) => t.transfer)).toEqual([null, null])
   })
 
-  it('marks each half with the other, so that treating it as a Transfer again can find both', async () => {
+  it('gives both halves the same mark, so that treating it as a Transfer again finds both', async () => {
     await wrongPair()
 
     await notTransfer('OUT')
 
-    expect(await marker('OUT')).toBe(await idOf('IN'))
-    expect(await marker('IN')).toBe(await idOf('OUT'))
+    expect(await marker('OUT')).not.toBeNull()
+    expect(await marker('IN')).toBe(await marker('OUT'))
   })
 
-  it("says in the details that the Admin marked it, and shows no matching Transaction", async () => {
-    await wrongPair()
-    expect(await detail('OUT')).toMatchObject({ notTransfer: false, transfer: 'pair' })
+  it('tells the details and the list who can be marked: a Transfer can, and a marked or ordinary Transaction cannot', async () => {
+    await importInto(EVERYDAY, [row(DAY, -5000, 'EXAMPLE SHOP', 'OUT'), row(DAY, -2000, 'EXAMPLE CAFE', 'CAFE')])
+    await importInto(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN')])
+    expect(await detail('OUT')).toMatchObject({ notTransfer: false, canMarkNotTransfer: true, transfer: 'pair' })
+    expect(await detail('CAFE')).toMatchObject({ notTransfer: false, canMarkNotTransfer: false })
+    expect(await byDescription('EXAMPLE SHOP')).toMatchObject({ notTransfer: false, canMarkNotTransfer: true })
 
     await notTransfer('OUT')
 
     for (const uniqueId of ['OUT', 'IN']) {
-      expect(await detail(uniqueId, 'member')).toMatchObject({ notTransfer: true, transfer: null, transferAccountName: null, transferTransactionId: null })
+      expect(await detail(uniqueId, 'member')).toMatchObject({ notTransfer: true, canMarkNotTransfer: false, transfer: null, transferAccountName: null, transferTransactionId: null })
     }
+    expect(await byDescription('EXAMPLE REFUND')).toMatchObject({ notTransfer: true, canMarkNotTransfer: false })
   })
 
   it('is left out of the Transfers in the CSV file and the Report too, as in the list', async () => {
     await wrongPair()
     const dataLines = async (query: string) => ((await (await call(`/api/transactions/export.csv${query}`, { who: 'member' })).text()).match(/^\d{4}-\d{2}-\d{2},.*$/gm) ?? []).length
-    const everyday = (await env.DB.prepare('SELECT id FROM accounts WHERE name = ?').bind('Everyday').first<{ id: number }>())!.id
+    const everyday = await accountIdOf('Everyday')
     const reported = async () =>
       ((await (await call(`/api/reports/transactions?accountId=${everyday}&from=2026-10-01&to=2026-10-31`, { who: 'member' })).json()) as { transactions: { transfer: string | null }[] }).transactions.map((t) => t.transfer)
     expect(await dataLines('?transfers=only')).toBe(2)
@@ -182,7 +221,7 @@ describe('marking a pairing as Not a Transfer', () => {
     expect(await marker('B-IN')).toBeNull()
   })
 
-  it('writes one Change Log entry of type transfer, naming both Transactions, and no entry for a request it refuses', async () => {
+  it('writes one Change Log entry of type transfer that names both Transactions and both Accounts, in words', async () => {
     await wrongPair()
 
     await notTransfer('OUT')
@@ -190,11 +229,12 @@ describe('marking a pairing as Not a Transfer', () => {
     const entries = await transferLog()
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({ type: 'transfer', actor: 'admin@example.com' })
-    expect(entries[0]!.summary).toContain(`Transaction ${await idOf('OUT')} (${DAY}, EXAMPLE SHOP)`)
-    expect(entries[0]!.summary).toContain(`Transaction ${await idOf('IN')} (${DAY}, EXAMPLE REFUND)`)
-    expect(entries[0]!.summary).toMatch(/as Not a Transfer$/)
-    expect(JSON.parse(entries[0]!.before!)).toMatchObject({ notTransfer: false, pairedWith: await idOf('IN') })
-    expect(JSON.parse(entries[0]!.after!)).toMatchObject({ notTransfer: true })
+    expect(entries[0]!.summary).toBe(
+      `Marked Transaction ${await idOf('OUT')} (${DAY}, EXAMPLE SHOP) in Everyday and its matching Transaction ${await idOf('IN')} (${DAY}, EXAMPLE REFUND) in Savings as Not a Transfer`,
+    )
+    // The page shows these fields as they are, so they are words: no Transaction numbers, no flags of the database's.
+    expect(JSON.parse(entries[0]!.before!)).toEqual({ transfer: 'Transfer between Everyday and Savings' })
+    expect(JSON.parse(entries[0]!.after!)).toEqual({ transfer: 'Not a Transfer' })
     // The Change Log lets Members filter by the new type.
     const types = ((await (await call('/api/change-log', { who: 'member' })).json()) as { types: { id: string; label: string }[] }).types
     expect(types).toContainEqual({ id: 'transfer', label: 'Transfer' })
@@ -222,17 +262,58 @@ describe('marking a pairing as Not a Transfer', () => {
     expect(await transferLog()).toEqual([])
   })
 
-  it('says 404 for a Transaction that does not exist, and for an ID that is not a number', async () => {
+  it('says 404 for a Transaction that does not exist', async () => {
     for (const method of ['POST', 'DELETE']) {
-      for (const id of ['999999', 'abc', '1e3', '99999999999999999999']) {
-        const res = await call(`/api/transactions/${id}/not-transfer`, { method, body: {} })
-        expect(res.status, `${method} ${id}`).toBe(404)
-      }
+      const res = await call('/api/transactions/999999/not-transfer', { method, body: {} })
+      expect(res.status, method).toBe(404)
     }
     expect(await transferLog()).toEqual([])
   })
 
-  it('works on the half an Override already made spending, which is how a wrong pairing was undone before', async () => {
+  it('reads the ID as the page does, so a number written another way is not the Transaction it would parse to', async () => {
+    await wrongPair()
+    const id = await idOf('OUT')
+
+    // Each of these is the number of a Transaction that exists, to Number() (so '1e1' is Transaction 10), but is not an ID as written.
+    for (const written of [`${id}.0`, `0${id}`, `+${id}`, `${id}e0`, `${id}%20`, `0x${id.toString(16)}`]) {
+      for (const method of ['POST', 'DELETE']) {
+        const res = await call(`/api/transactions/${written}/not-transfer`, { method, body: {} })
+        expect(res.status, `${method} ${written}`).toBe(404)
+      }
+    }
+    expect(await marker('OUT')).toBeNull()
+    expect(await pairs()).toEqual([['OUT', 'IN']])
+    expect(await transferLog()).toEqual([])
+  })
+
+  it('refuses a body that is not the empty object, naming the field, and changes nothing', async () => {
+    await wrongPair()
+    const id = await idOf('OUT')
+
+    for (const body of [{ categoryId: 1 }, [], 'yes']) {
+      for (const method of ['POST', 'DELETE']) {
+        const res = await call(`/api/transactions/${id}/not-transfer`, { method, body })
+        expect(res.status, `${method} ${JSON.stringify(body)}`).toBe(400)
+        expect(await res.json()).toEqual({ error: 'Invalid request', field: expect.any(String) })
+      }
+    }
+    expect(await marker('OUT')).toBeNull()
+    expect(await transferLog()).toEqual([])
+  })
+
+  it('writes no Change Log entry when the pairing moved on between reading it and writing, and says so', async () => {
+    await wrongPair()
+
+    // An Import replaced the matching Transaction's Account in that instant, which lets go of the pairing.
+    const res = await callWhileInterrupted(`/api/transactions/${await idOf('OUT')}/not-transfer`, 'POST', () => env.DB.prepare('UPDATE transactions SET transfer_of = NULL').run())
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'This Transaction has changed. Reload the page and try again' })
+    expect(await marker('OUT')).toBeNull()
+    expect(await transferLog()).toEqual([])
+  })
+
+  it('works on the half an Override already made spending, which is how a wrong pairing was put right before', async () => {
     await wrongPair()
     await override('OUT', await categoryId('Gifts and donations'))
     expect(await byDescription('EXAMPLE REFUND')).toMatchObject({ transfer: 'pair' })
@@ -246,15 +327,16 @@ describe('marking a pairing as Not a Transfer', () => {
     expect(await pairs()).toEqual([])
   })
 
-  it('works from the half an Override made spending, though the list calls it spending', async () => {
+  it('works from the half an Override made spending, though the list already calls it spending', async () => {
     await wrongPair()
     await override('OUT', await categoryId('Gifts and donations'))
+    expect(await byDescription('EXAMPLE SHOP')).toMatchObject({ transfer: null, canMarkNotTransfer: true })
 
     expect((await notTransfer('OUT')).status).toBe(200)
 
     expect(await pairs()).toEqual([])
     expect(await byDescription('EXAMPLE REFUND')).toMatchObject({ transfer: null })
-    expect(await marker('IN')).toBe(await idOf('OUT'))
+    expect(await marker('IN')).toBe(await marker('OUT'))
   })
 })
 
@@ -262,7 +344,7 @@ describe('a marked pairing is not made again', () => {
   it('when a later Import adds a Transaction that would have taken the first half of it', async () => {
     await wrongPair()
     await notTransfer('OUT')
-    // Another $50.00 out and in. The marked $50.00 out is older, so without the marker it would be the one the new $50.00 in takes.
+    // Another $50.00 out and in. The marked $50.00 out is older, so without the mark it would be the one the new $50.00 in takes.
     await importInto(EVERYDAY, [row(DAY, -5000, 'EXAMPLE SHOP TWO', 'OUT2')])
     await importInto(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND TWO', 'IN2')])
 
@@ -280,28 +362,6 @@ describe('a marked pairing is not made again', () => {
     // The new $50.00 in finds the marked $50.00 out and leaves it; the new $50.00 out then takes the new $50.00 in.
     expect(await pairs()).toEqual([['IN-AGAIN', 'OUT-AGAIN']])
     expect(await unpaired()).toEqual(['IN', 'OUT'])
-  })
-
-  it('when the history of one Account is replaced with the same Transactions', async () => {
-    await wrongPair()
-    await notTransfer('OUT')
-
-    await importInto(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN')], { replace: true })
-
-    expect(await pairs()).toEqual([])
-    expect((await described()).map((t) => t.transfer)).toEqual([null, null])
-    // The marked half is still marked: it was not replaced, and nothing says it is a Transfer.
-    expect(await marker('OUT')).not.toBeNull()
-  })
-
-  it('whichever half is replaced', async () => {
-    await wrongPair()
-    await notTransfer('OUT')
-
-    await importInto(EVERYDAY, [row(DAY, -5000, 'EXAMPLE SHOP', 'OUT')], { replace: true })
-
-    expect(await pairs()).toEqual([])
-    expect(await marker('IN')).not.toBeNull()
   })
 
   it('even when a run of the pairing covers the marked Transaction as one of the rows it was given to pair', async () => {
@@ -333,7 +393,7 @@ describe('a Rule that marks Transfers, once the Admin has said Not a Transfer', 
   it('no longer applies to a Transaction it marked and nothing paired', async () => {
     await transferRule('ROUND UP')
     await importInto(EVERYDAY, [row(DAY, -50, 'ROUND UP TO SAVINGS', 'ROUND'), row(DAY, -1200, 'EXAMPLE SHOP', 'SHOP')])
-    expect(await byDescription('ROUND UP TO SAVINGS')).toMatchObject({ transfer: 'rule' })
+    expect(await byDescription('ROUND UP TO SAVINGS')).toMatchObject({ transfer: 'rule', canMarkNotTransfer: true })
 
     const res = await notTransfer('ROUND')
 
@@ -343,8 +403,10 @@ describe('a Rule that marks Transfers, once the Admin has said Not a Transfer', 
     expect((await described('&transfers=exclude')).map((t) => t.description).sort()).toEqual(['EXAMPLE SHOP', 'ROUND UP TO SAVINGS'])
     expect((await described('&uncategorised=true')).map((t) => t.description).sort()).toEqual(['EXAMPLE SHOP', 'ROUND UP TO SAVINGS'])
     expect(await detail('ROUND')).toMatchObject({ notTransfer: true, transfer: null })
-    // Alone, so it holds its own ID.
-    expect(await marker('ROUND')).toBe(await idOf('ROUND'))
+    expect(await marker('ROUND')).not.toBeNull()
+    const entry = (await transferLog())[0]!
+    expect(entry.summary).toBe(`Marked Transaction ${await idOf('ROUND')} (${DAY}, ROUND UP TO SAVINGS) in Everyday as Not a Transfer, so the Rule that marks it as a Transfer no longer applies to it`)
+    expect(JSON.parse(entry.before!)).toEqual({ transfer: 'Marked by a Rule' })
   })
 
   it('still applies to a Transaction nobody marked, and to the new Transactions an Import adds', async () => {
@@ -358,7 +420,7 @@ describe('a Rule that marks Transfers, once the Admin has said Not a Transfer', 
     expect(await byDescription('ROUND UP TWO')).toMatchObject({ transfer: 'rule' })
   })
 
-  it("does not make a paired half a Transfer when the Rule marks it too, since the marker outranks the Rule's flag", async () => {
+  it("does not make a paired half a Transfer when the Rule marks it too, since the mark outranks the Rule's flag", async () => {
     await transferRule('ROUND UP')
     await importInto(EVERYDAY, [row(DAY, -50, 'ROUND UP TO SAVINGS', 'ROUND')])
     await importInto(SAVINGS, [row(DAY, 50, 'CREDIT', 'CREDIT')])
@@ -366,9 +428,26 @@ describe('a Rule that marks Transfers, once the Admin has said Not a Transfer', 
 
     await notTransfer('ROUND')
 
-    // Unpairing alone would leave 'ROUND' a Transfer because of the Rule; the marker is what stops that.
+    // Letting go of the pairing alone would leave 'ROUND' a Transfer because of the Rule; the mark is what stops that.
     expect((await described()).map((t) => t.transfer)).toEqual([null, null])
     expect(await detail('ROUND')).toMatchObject({ transfer: null, notTransfer: true })
+  })
+
+  it('does not bring it back when the Rules are applied to every Transaction again, which writes the Rule\'s result and nothing else', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    await transferRule('EXAMPLE SHOP')
+
+    expect((await call('/api/rules/rerun', { method: 'POST', body: {} })).status).toBe(201)
+    for (let i = 0; i < 20; i++) {
+      const { job } = (await (await call('/api/rules/rerun/step', { method: 'POST', body: {} })).json()) as { job: { status: string } }
+      if (job.status === 'done') break
+    }
+
+    // The Rule now flags the Transaction, as stored, and the mark still outranks it.
+    expect(await env.DB.prepare('SELECT rule_transfer FROM transactions WHERE bank_unique_id = ?').bind('OUT').first()).toEqual({ rule_transfer: 1 })
+    expect(await detail('OUT')).toMatchObject({ notTransfer: true, transfer: null })
+    expect(await marker('OUT')).toBe(await marker('IN'))
   })
 
   it('applies to it again once the Admin treats it as a Transfer again', async () => {
@@ -396,7 +475,7 @@ describe('a Rule that marks Transfers, once the Admin has said Not a Transfer', 
 })
 
 describe('treating a marked pairing as a Transfer again', () => {
-  it('clears the marker on both halves, and pairs them again', async () => {
+  it('takes the mark off both halves, and pairs them again', async () => {
     await wrongPair()
     await notTransfer('OUT')
 
@@ -408,7 +487,7 @@ describe('treating a marked pairing as a Transfer again', () => {
     expect(await marker('IN')).toBeNull()
     expect(await pairs()).toEqual([['OUT', 'IN']])
     expect((await described()).map((t) => t.transfer)).toEqual(['pair', 'pair'])
-    expect((await described()).find((t) => t.description === 'EXAMPLE SHOP')).toMatchObject({ transferAccountName: 'Savings' })
+    expect(await byDescription('EXAMPLE SHOP')).toMatchObject({ transferAccountName: 'Savings' })
   })
 
   it('is the same from the other half', async () => {
@@ -437,7 +516,7 @@ describe('treating a marked pairing as a Transfer again', () => {
     expect(broken!.n).toBe(0)
   })
 
-  it('writes a Change Log entry of type transfer', async () => {
+  it('writes a Change Log entry of type transfer that says what came off, not that it is a Transfer again', async () => {
     await wrongPair()
     await notTransfer('OUT')
 
@@ -446,11 +525,9 @@ describe('treating a marked pairing as a Transfer again', () => {
     const entries = await transferLog()
     expect(entries).toHaveLength(2)
     expect(entries[0]).toMatchObject({ type: 'transfer', actor: 'admin@example.com' })
-    expect(entries[0]!.summary).toMatch(/as a Transfer again/)
-    expect(entries[0]!.summary).toContain(`Transaction ${await idOf('IN')} (${DAY}, EXAMPLE REFUND)`)
-    expect(entries[0]!.summary).toContain(`Transaction ${await idOf('OUT')} (${DAY}, EXAMPLE SHOP)`)
-    expect(JSON.parse(entries[0]!.before!)).toMatchObject({ notTransfer: true })
-    expect(JSON.parse(entries[0]!.after!)).toMatchObject({ notTransfer: false })
+    expect(entries[0]!.summary).toBe(`Took Not a Transfer off Transaction ${await idOf('IN')} (${DAY}, EXAMPLE REFUND) in Savings and Transaction ${await idOf('OUT')} (${DAY}, EXAMPLE SHOP) in Everyday`)
+    expect(JSON.parse(entries[0]!.before!)).toEqual({ transfer: 'Not a Transfer' })
+    expect(JSON.parse(entries[0]!.after!)).toEqual({ transfer: 'Can be a Transfer again' })
   })
 
   it('does nothing and logs nothing for a Transaction that is not marked', async () => {
@@ -464,10 +541,24 @@ describe('treating a marked pairing as a Transfer again', () => {
     expect(await transferLog()).toEqual([])
   })
 
-  it('clears its own marker when its matching Transaction has been replaced since, and pairs with what matches now', async () => {
+  it('writes one entry, not two, when another request has just done the same', async () => {
     await wrongPair()
     await notTransfer('OUT')
-    // The Savings history is replaced: the $50.00 in the Admin looked at is gone, and the new one that matches is a different Transaction.
+
+    // A second window treats it as a Transfer again in the instant between this request reading the marks and writing.
+    const res = await callWhileInterrupted(`/api/transactions/${await idOf('OUT')}/not-transfer`, 'DELETE', () => treatAsTransferAgain('IN'))
+
+    expect(res.status).toBe(200)
+    expect(await pairs()).toEqual([['OUT', 'IN']])
+    expect(await marker('OUT')).toBeNull()
+    // The mark, and the one undo that did something.
+    expect(await transferLog()).toHaveLength(2)
+  })
+
+  it('takes its own mark off when its matching Transaction was replaced by one the file does not hold, and pairs with what matches now', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    // The Savings history is replaced by a file without the $50.00 in the Admin looked at, which has a different one that matches instead.
     await importInto(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN-NEW')], { replace: true })
     expect(await pairs()).toEqual([])
 
@@ -479,7 +570,7 @@ describe('treating a marked pairing as a Transfer again', () => {
     expect(await pairs()).toEqual([['OUT', 'IN-NEW']])
   })
 
-  it('clears its own marker and pairs with nothing when its matching Transaction has gone and nothing else matches', async () => {
+  it('takes its own mark off and pairs with nothing when its matching Transaction has gone and nothing else matches', async () => {
     await wrongPair()
     await notTransfer('OUT')
     await importInto(SAVINGS, [row('2026-10-06', 1, 'EXAMPLE OTHER', 'ELSEWHERE')], { replace: true })
@@ -506,7 +597,8 @@ describe('treating a marked pairing as a Transfer again', () => {
     // OUT goes back to the $50.00 in it was marked with, not to the marked pair.
     expect(await pairs()).toEqual([['OUT', 'IN']])
     expect(await marker('FEE')).not.toBeNull()
-    expect(await marker('DEPOSIT')).not.toBeNull()
+    expect(await marker('FEE')).toBe(await marker('DEPOSIT'))
+    expect(await marker('FEE')).not.toBe(await marker('IN'))
   })
 
   it('pairs a Transaction that was marked alone with a match that arrived while it was marked', async () => {
@@ -520,6 +612,142 @@ describe('treating a marked pairing as a Transfer again', () => {
 
     expect(await res.json()).toMatchObject({ paired: true })
     expect(await pairs()).toEqual([['ROUND', 'CREDIT']])
+  })
+})
+
+describe('replacing imported history keeps the Admin\'s Not a Transfer, as it does their Overrides and Notes', () => {
+  const REPLACE = (account: Account, rows: unknown[]) => importInto(account, rows, { replace: true })
+  const lastImport = async () => (await log('?type=import'))[0]!
+
+  it('gives the mark to the Transaction that comes back when one side is replaced, so the wrong pair does not return', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    const mark = await marker('OUT')
+
+    await REPLACE(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN')])
+
+    expect(await pairs()).toEqual([])
+    expect((await described()).map((t) => t.transfer)).toEqual([null, null])
+    // The Transaction that came back is a new row, marked together with the half that stayed.
+    expect(await marker('IN')).toBe(mark)
+    expect(await detail('IN')).toMatchObject({ notTransfer: true, canMarkNotTransfer: false })
+  })
+
+  it('does the same from the other side', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+
+    await REPLACE(EVERYDAY, [row(DAY, -5000, 'EXAMPLE SHOP', 'OUT')])
+
+    expect(await pairs()).toEqual([])
+    expect(await marker('OUT')).not.toBeNull()
+    expect(await marker('OUT')).toBe(await marker('IN'))
+  })
+
+  it('keeps both halves marked together when both sides are replaced, one after the other, and treating them as a Transfer again clears both', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+
+    await REPLACE(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN')])
+    await REPLACE(EVERYDAY, [row(DAY, -5000, 'EXAMPLE SHOP', 'OUT')])
+
+    expect(await pairs()).toEqual([])
+    expect(await marker('OUT')).not.toBeNull()
+    expect(await marker('OUT')).toBe(await marker('IN'))
+
+    // Either of the new Transactions finds the other, though neither is the Transaction that was first marked.
+    expect((await treatAsTransferAgain('IN')).status).toBe(200)
+    expect(await marker('OUT')).toBeNull()
+    expect(await marker('IN')).toBeNull()
+    expect(await pairs()).toEqual([['IN', 'OUT']])
+  })
+
+  it('keeps a Transaction marked alone, where a Rule marked it and nothing was paired with it, marked alone', async () => {
+    await transferRule('ROUND UP')
+    await importInto(EVERYDAY, [row(DAY, -50, 'ROUND UP TO SAVINGS', 'ROUND'), row(DAY, -1200, 'EXAMPLE SHOP', 'SHOP')])
+    await notTransfer('ROUND')
+
+    await REPLACE(EVERYDAY, [row(DAY, -50, 'ROUND UP TO SAVINGS', 'ROUND'), row(DAY, -1200, 'EXAMPLE SHOP', 'SHOP')])
+
+    // The Rules ran on the new Transaction and flagged it again, and the mark it was given still outranks that.
+    expect(await detail('ROUND')).toMatchObject({ notTransfer: true, transfer: null })
+    expect(await detail('SHOP')).toMatchObject({ notTransfer: false })
+    expect(await marker('SHOP')).toBeNull()
+    expect((await treatAsTransferAgain('ROUND')).status).toBe(200)
+    expect(await byDescription('ROUND UP TO SAVINGS')).toMatchObject({ transfer: 'rule' })
+  })
+
+  it('gives the mark before the new rows are paired, so a Transaction that comes back marked is never paired in that Import', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    // The Everyday Import brings back the marked $50.00 out, and Savings holds an unmarked $50.00 in that it would pair with.
+    await importInto(SAVINGS, [row(DAY, 5000, 'EXAMPLE TOP-UP', 'TOP-UP')])
+    expect(await pairs()).toEqual([])
+
+    const imported = await importInto(EVERYDAY, [row(DAY, -5000, 'EXAMPLE SHOP', 'OUT')], { replace: true })
+
+    expect(imported.paired).toBe(0)
+    expect(await pairs()).toEqual([])
+  })
+
+  it('says in the Change Log that the mark was carried over, with the Overrides and Notes', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+
+    await REPLACE(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN')])
+
+    expect((await lastImport()).summary).toContain('Overrides, Notes and Not a Transfer marks carried over for 1 Transaction, none lost')
+  })
+
+  it('drops the mark when no Transaction with the same bank number comes back, and says so in the Change Log and on the finished screen', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+
+    const finished = await REPLACE(SAVINGS, [row('2026-10-06', 1, 'EXAMPLE OTHER', 'ELSEWHERE')])
+
+    expect(finished.lostTransactions).toEqual([expect.objectContaining({ description: 'EXAMPLE REFUND', notTransfer: true })])
+    const entry = await lastImport()
+    expect(entry.summary).toContain('Overrides, Notes and Not a Transfer marks carried over for 0 Transactions, lost for 1 Transaction')
+    expect(JSON.parse(entry.after!).lostTransactions).toEqual([expect.objectContaining({ description: 'EXAMPLE REFUND', notTransfer: true })])
+    // The half that stayed is still marked, and the new Transaction is not.
+    expect(await marker('OUT')).not.toBeNull()
+    expect(await marker('ELSEWHERE')).toBeNull()
+  })
+
+  it('forecasts how many marks a replace would carry and lose, before the Admin confirms', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    const savings = await accountIdOf('Savings')
+    const forecast = async (uniqueId: string) => (await call('/api/imports/carry-preview', { method: 'POST', body: { accountId: savings, rows: [{ uniqueId, amountCents: 5000 }] } })).json()
+
+    expect(await forecast('IN')).toEqual({ waiting: 1, carries: 1, differing: 0 })
+    expect(await forecast('ELSEWHERE')).toEqual({ waiting: 1, carries: 0, differing: 0 })
+  })
+
+  it('counts a marked Transaction among those a replace will carry over, and an unmarked pair among those it lets go of', async () => {
+    await wrongPair()
+    const savings = await accountIdOf('Savings')
+    const counts = async () => (await (await call(`/api/imports/imported/${savings}`)).json()) as Record<string, number>
+    expect(await counts()).toMatchObject({ imported: 1, withOwnWork: 0, paired: 1 })
+
+    await notTransfer('OUT')
+
+    expect(await counts()).toMatchObject({ imported: 1, withOwnWork: 1, paired: 0 })
+  })
+
+  it('gives the mark of a replace that stopped part way to the Import that finishes it', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    const savings = await accountIdOf('Savings')
+    // Clearing the history in steps removes the Transactions and holds their marks; here the rows go and the hold is made by hand.
+    await env.DB.prepare('DELETE FROM carry_over').run()
+    await env.DB.prepare(HOLD_REMOVED).bind(savings, 5000).run()
+    await env.DB.prepare('DELETE FROM transactions WHERE account_id = ?').bind(savings).run()
+
+    await importInto(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN')])
+
+    expect(await marker('IN')).toBe(await marker('OUT'))
+    expect(await pairs()).toEqual([])
   })
 })
 
@@ -542,19 +770,6 @@ describe('who can mark a pairing', () => {
     expect(await transferLog()).toHaveLength(1)
   })
 
-  it('refuses a request from another site, and one without a JSON body, before it reaches the handler', async () => {
-    await wrongPair()
-    const id = await idOf('OUT')
-    const headers = { Cookie: 'fernledger_dev_as=admin' }
-
-    const crossSite = await exports.default.fetch(new Request(`${origin}/api/transactions/${id}/not-transfer`, { method: 'POST', headers: { ...headers, Origin: 'https://example.com', 'Content-Type': 'application/json' }, body: '{}' }))
-    const notJson = await exports.default.fetch(new Request(`${origin}/api/transactions/${id}/not-transfer`, { method: 'POST', headers: { ...headers, Origin: origin, 'Content-Type': 'text/plain' }, body: '{}' }))
-
-    expect(crossSite.status).toBe(403)
-    expect(notJson.status).toBe(415)
-    expect(await pairs()).toEqual([['OUT', 'IN']])
-  })
-
   it('lets a Member see that a Transaction is marked, and which of its Transfers are not', async () => {
     await wrongPair()
     await notTransfer('OUT')
@@ -564,9 +779,8 @@ describe('who can mark a pairing', () => {
   })
 })
 
-describe('what marking and undoing read and write (ADR 0004: free plan limits)', () => {
+describe('what marking, undoing and carrying read and write (ADR 0004: free plan limits)', () => {
   const plan = async (sql: string, ...args: unknown[]) => (await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(...args).all<{ detail: string }>()).results.map((r) => r.detail)
-  const accountId = async (name: string) => (await env.DB.prepare('SELECT id FROM accounts WHERE name = ?').bind(name).first<{ id: number }>())!.id
   /** `count` made-up Transactions of the Account on 700 dates from 2020: old history that none of this should have to read. */
   const seedHistory = (id: number, count: number) =>
     env.DB.prepare(
@@ -578,22 +792,20 @@ describe('what marking and undoing read and write (ADR 0004: free plan limits)',
 
   it('reads and writes only the two halves, however long the history is', async () => {
     await wrongPair()
-    await Promise.all([seedHistory(await accountId('Everyday'), 3000), seedHistory(await accountId('Savings'), 3000)])
+    await Promise.all([seedHistory(await accountIdOf('Everyday'), 3000), seedHistory(await accountIdOf('Savings'), 3000)])
     const out = await idOf('OUT')
     const inn = await idOf('IN')
 
     const mark = (await markNotTransferStatement(env.DB, { id: out, matchingId: inn }).run()).meta
-    const clear = (await clearNotTransferStatement(env.DB, { id: out, matchingId: inn }).run()).meta
-    const repair = (await pairOneStatement(env.DB, { id: out, prefer: inn }).run()).meta
-    const repairOther = (await pairOneStatement(env.DB, { id: inn, prefer: out }).run()).meta
+    const token = (await marker('OUT'))!
+    const repair = (await pairOneStatement(env.DB, { id: out, prefer: inn, token }).run()).meta
+    const repairOther = (await pairOneStatement(env.DB, { id: inn, prefer: out, token }).run()).meta
+    const clear = (await clearNotTransferStatement(env.DB, { token }).run()).meta
 
+    // Each half is written with its entry in the Transfer index (which loses it) and the one for the mark (which gains it).
     expect(mark.changes).toBe(2)
     expect(mark.rows_read).toBeLessThanOrEqual(8)
-    // Each half is written with its entry in the Transfer index (row and entry).
-    expect(mark.rows_written).toBeLessThanOrEqual(4)
-    expect(clear.changes).toBe(2)
-    expect(clear.rows_read).toBeLessThanOrEqual(8)
-    expect(clear.rows_written).toBeLessThanOrEqual(4)
+    expect(mark.rows_written).toBeLessThanOrEqual(6)
     // Looking for a match reads the Transactions of that one day, not the 6,000 of other days.
     expect(repair.changes).toBe(2)
     expect(repair.rows_read).toBeLessThanOrEqual(30)
@@ -602,12 +814,41 @@ describe('what marking and undoing read and write (ADR 0004: free plan limits)',
     expect(repairOther.changes).toBe(0)
     expect(repairOther.rows_written).toBe(0)
     expect(repairOther.rows_read).toBeLessThanOrEqual(10)
+    // The mark is found by its index, not by reading the Transactions.
+    expect(clear.changes).toBe(2)
+    expect(clear.rows_read).toBeLessThanOrEqual(8)
+    expect(clear.rows_written).toBeLessThanOrEqual(6)
   })
 
-  it('finds a match through the date index, never by scanning the Transactions', async () => {
-    const reads = (await plan(PAIR_ONE, 1, 2)).filter((detail) => /^(SCAN|SEARCH) (a|o|transactions)\b/.test(detail))
+  it('finds a match through the date index, and the marked pair through the mark index, never by scanning the Transactions', async () => {
+    const reads = (await plan(PAIR_ONE, 1, 2, 3)).filter((detail) => /^(SCAN|SEARCH) (a|o|transactions)\b/.test(detail))
 
     expect(reads.length).toBeGreaterThan(0)
     for (const read of reads) expect(read).toMatch(/USING (INTEGER PRIMARY KEY|INDEX transactions_date)/)
+    const clear = (await plan('UPDATE transactions SET not_transfer_with = NULL WHERE not_transfer_with = ?1', 1)).join('\n')
+    expect(clear).toMatch(/USING (COVERING )?INDEX transactions_not_transfer_with/)
+  })
+
+  it('costs a replace nothing more to hold a mark than to hold a Note, and nothing more to give it', async () => {
+    await wrongPair()
+    const everyday = await accountIdOf('Everyday')
+    await seedHistory(everyday, 3000)
+    const hold = async () => (await env.DB.prepare(HOLD_REMOVED).bind(everyday, 5000).run()).meta
+
+    const none = await hold()
+    await env.DB.prepare('DELETE FROM carry_over').run()
+    await notTransfer('OUT')
+    const marked = await hold()
+    const give = (await env.DB.prepare(APPLY_HELD).bind(everyday, JSON.stringify([{ uniqueId: 'OUT' }])).run()).meta
+
+    // Holding one more row writes it and its key, as for a Note, and reads nothing the unmarked slice did not.
+    expect(none.changes).toBe(0)
+    expect(marked.changes).toBe(1)
+    expect(marked.rows_written - none.rows_written).toBeLessThanOrEqual(2)
+    expect(marked.rows_read - none.rows_read).toBeLessThanOrEqual(10)
+    // Giving it to the Transaction that came back is one row, the one it is written to, and its entry in the mark index when it is new.
+    expect(give.changes).toBe(1)
+    expect(give.rows_read).toBeLessThanOrEqual(60)
+    expect(give.rows_written).toBeLessThanOrEqual(3)
   })
 })

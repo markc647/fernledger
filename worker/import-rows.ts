@@ -28,8 +28,8 @@ export const DAILY_ROW_WRITES = 100_000
 export const WRITES_PER_ROW = 3
 
 /**
- * What carrying one Transaction's Override or Note over costs, at most: holding it (the row and its key, 2), giving it to
- * the new row (the row, and its Category index, 2), marking it given (1) and clearing it (2). A replace of rows that
+ * What carrying one Transaction's Override, Note or Not a Transfer mark over costs, at most: holding it (the row and its key, 2), giving it to
+ * the new row (the row, and its Category index or the mark index, 2), marking it given (1) and clearing it (2). A mark also costs the removed row 1 more, for its entry in that index. A replace of rows that
  * mostly have neither adds little to the 6 per pair above; one where every row has one adds 7 for each pair.
  */
 export const WRITES_PER_CARRIED = 7

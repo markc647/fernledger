@@ -281,7 +281,8 @@ export function buildSearch(search: Search, slots: readonly CategorySlot[] = CAT
       // text filter, reads every Transaction the other filters keep (ADR 0004: D1 bills rows read, so those are the dear requests).
       sql: `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.description, t.bank_type AS bankType, t.amount_cents AS amountCents,
                    ${category.shown.id} AS categoryId, ${category.shown.name} AS categoryName, ${category.shown.source} AS categorySource, t.note,
-                   ${category.transfer} AS transfer, partner_account.name AS transferAccountName
+                   ${category.transfer} AS transfer, partner_account.name AS transferAccountName,
+                   ${category.markable} AS canMarkNotTransfer, t.not_transfer_with IS NOT NULL AS notTransfer
             FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
             ${PARTNER_JOIN}
             ${paging.sql}

@@ -5,7 +5,7 @@ A self-hosted tracker for NZ bank accounts, synced via Akahu, that one Admin man
 ## People
 
 **Admin**:
-The one Member who can change Categories, Rules, Budgets, Overrides and Notes, and who owns the Akahu connection.
+The one Member who can change Categories, Rules, Budgets, Overrides, Notes and Not a Transfer marks, and who owns the Akahu connection.
 _Avoid_: Super user, owner, editor
 
 **Member**:
@@ -35,7 +35,7 @@ A Transaction moving money between two tracked Accounts, found as one of a pair 
 _Avoid_: Internal payment, sweep, other half
 
 **Not a Transfer**:
-The Admin's answer to a Transaction that a pairing or a Rule has made a Transfer but is not one. A pair loses both halves at once; neither is paired again, and a Rule's Transfer flag no longer applies to them, until the Admin treats them as a Transfer again.
+The Admin's answer to a Transaction that a pairing or a Rule has made a Transfer but is not one. A pair loses both halves at once; neither is paired with another Transaction either, and a Rule's Transfer flag no longer applies to them, until the Admin treats them as a Transfer again. It is carried over when imported history is replaced.
 _Avoid_: Unpair, false match, exception
 
 ## Sources
@@ -96,8 +96,8 @@ _Avoid_: Manual category, exception
 Free text the Admin attaches to a single Transaction.
 _Avoid_: Comment, memo
 
-**Carry over (Overrides and Notes)**:
-What replacing an Account's imported history does with the Admin's Overrides and Notes: each goes to the re-imported Transaction with the same bank unique ID (the bank's own number for it; ASB makes it from the date and a count for the day). One with no match is lost; one that went to a Transaction with a different amount is counted, since the bank may have numbered that day differently. An Import that stops part way leaves them held until a replace completes or the Admin discards them. Not the Budget sense of the words: unspent Budget amounts do not carry over from month to month.
+**Carry over (Overrides, Notes and Not a Transfer marks)**:
+What replacing an Account's imported history does with the Admin's Overrides, Notes and Not a Transfer marks: each goes to the re-imported Transaction with the same bank unique ID (the bank's own number for it; ASB makes it from the date and a count for the day). One with no match is lost; one that went to a Transaction with a different amount is counted, since the bank may have numbered that day differently. An Import that stops part way leaves them held until a replace completes or the Admin discards them. Not the Budget sense of the words: unspent Budget amounts do not carry over from month to month.
 _Avoid_: Migrate, restore, reapply
 
 **Budget**:

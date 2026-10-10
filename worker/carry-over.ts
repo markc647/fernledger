@@ -1,5 +1,5 @@
-// Carrying Overrides and Notes over when an Account's imported history is replaced (ticket 36). The rows that go are
-// copied into `carry_over` (migrations/3601_carry_over.sql) by the statement that removes them; each chunk of the Import
+// Carrying Overrides, Notes and Not a Transfer marks (ticket 37) over when an Account's imported history is replaced (ticket 36). The rows that go are
+// copied into `carry_over` (migrations/3601_carry_over.sql, 3702_not_a_transfer_carry_over.sql) by the statement that removes them; each chunk of the Import
 // gives the rows it saves what is held under the same bank unique ID; the last chunk of a completed replace empties the
 // Account's held rows, and the ones nothing claimed are the ones lost.
 //
@@ -15,31 +15,34 @@
 
 import { IMPORTED_SLICE } from './import-rows'
 
+/** What a replace carries over, as the Change Log and the pages name it. */
+export const CARRIED = 'Overrides, Notes and Not a Transfer marks'
+
 /** Categories in use. A removed Category counts as none (GLOSSARY: Uncategorised), so its Override is never carried. */
 const IN_USE = 'SELECT id FROM categories WHERE removed_at IS NULL'
 
 /**
- * SQL for "has an Override to a Category in use, or a Note": what a replace carries over, and what the Replace dialog
- * counts. `alias` is a `transactions` or `carry_over` table in the query (both have these two columns). It is NULL, not
- * false, for a row with neither: use it in a WHERE, or wrap it in COALESCE before negating it.
+ * SQL for "has an Override to a Category in use, a Note or a Not a Transfer mark": what a replace carries over, and what the Replace dialog
+ * counts. `alias` is a `transactions` or `carry_over` table in the query (both have these three columns). It is NULL, not
+ * false, for a row with none: use it in a WHERE, or wrap it in COALESCE before negating it.
  */
-export const annotated = (alias: string) => `(${alias}.note IS NOT NULL OR ${alias}.override_category IN (${IN_USE}))`
+export const annotated = (alias: string) => `(${alias}.note IS NOT NULL OR ${alias}.override_category IN (${IN_USE}) OR ${alias}.not_transfer_with IS NOT NULL)`
 
 /** The Override to keep: the Category, but only while it is in use. */
 const liveOverride = (alias: string) => `CASE WHEN ${alias}.override_category IN (${IN_USE}) THEN ${alias}.override_category END`
 
-// Copies the Overrides and Notes of the Account's first ?2 Import-sourced rows (by ID: the rows DELETE_IMPORTED removes
+// Copies the Overrides, Notes and marks of the Account's first ?2 Import-sourced rows (by ID: the rows DELETE_IMPORTED removes
 // in the same batch, imports.ts; both select them with IMPORTED_SLICE) into the holding table, with what is needed to say what they were on. A row already
 // held (from a replace that did not finish) is brought up to date and made waiting again, so what the Account holds is
 // always what it last had. ?1 = the Account.
 export const HOLD_REMOVED = `
-  INSERT INTO carry_over (account_id, bank_unique_id, override_category, note, date, amount_cents, description, category_name)
-  SELECT t.account_id, t.bank_unique_id, c.id, t.note, t.date, t.amount_cents, t.description, c.name
+  INSERT INTO carry_over (account_id, bank_unique_id, override_category, note, not_transfer_with, date, amount_cents, description, category_name)
+  SELECT t.account_id, t.bank_unique_id, c.id, t.note, t.not_transfer_with, t.date, t.amount_cents, t.description, c.name
   FROM transactions t LEFT JOIN categories c ON c.id = t.override_category AND c.removed_at IS NULL
   WHERE t.id IN (${IMPORTED_SLICE})
     AND t.bank_unique_id IS NOT NULL AND ${annotated('t')}
   ON CONFLICT (account_id, bank_unique_id) DO UPDATE SET
-    override_category = excluded.override_category, note = excluded.note, date = excluded.date, amount_cents = excluded.amount_cents,
+    override_category = excluded.override_category, note = excluded.note, not_transfer_with = excluded.not_transfer_with, date = excluded.date, amount_cents = excluded.amount_cents,
     description = excluded.description, category_name = excluded.category_name, applied = 0, differs = 0`
 
 /** How many of those rows have something to hold, for the Change Log entry of a step that removes them. Same ?1 and ?2. */
@@ -57,9 +60,12 @@ export const FORGET_APPLIED = 'DELETE FROM carry_over WHERE account_id = ? AND a
 // starts from the chunk's IDs and looks each up in the holding table by its key, so its cost follows the chunk, not
 // how much is held. A held Category that has been removed since is dropped here, which is why it is not revived. A row
 // already given out (`applied`) is never given again, so a Note the Admin has edited since is not written over.
+// The mark is copied as it is: both halves of a marked pair hold the same number, so neither needs pointing at the other's new row. It runs before the
+// chunk's rows are paired (imports.ts), so a Transaction that comes back marked is never paired, and a row that is paired already is not marked.
 export const APPLY_HELD = `
   UPDATE transactions
-  SET override_category = ${liveOverride('h')}, note = h.note
+  SET override_category = ${liveOverride('h')}, note = h.note,
+      not_transfer_with = CASE WHEN transactions.transfer_of IS NULL THEN COALESCE(transactions.not_transfer_with, h.not_transfer_with) ELSE transactions.not_transfer_with END
   FROM carry_over h
   WHERE h.account_id = ?1 AND h.applied = 0 AND ${annotated('h')}
     AND h.bank_unique_id IN (SELECT json_extract(value, '$.uniqueId') FROM json_each(?2))
@@ -91,8 +97,8 @@ export const LISTED_LOST = 20
 // the Transactions they were on (as JSON, oldest first), for the Admin to see before discarding them. ?1 = the Account.
 export const WAITING_LIST = `
   SELECT COUNT(*) AS n,
-         (SELECT json_group_array(json_object('date', date, 'amountCents', amount_cents, 'description', description, 'category', category_name, 'note', note))
-          FROM (SELECT date, amount_cents, description, category_name, note FROM carry_over
+         (SELECT json_group_array(json_object('date', date, 'amountCents', amount_cents, 'description', description, 'category', category_name, 'note', note, 'notTransfer', json(CASE WHEN marked THEN 'true' ELSE 'false' END)))
+          FROM (SELECT date, amount_cents, description, category_name, note, not_transfer_with IS NOT NULL AS marked FROM carry_over
                 WHERE account_id = ?1 AND applied = 0 AND ${annotated('carry_over')} ORDER BY date, bank_unique_id LIMIT ${LISTED_LOST})) AS listed
   FROM carry_over WHERE account_id = ?1 AND applied = 0 AND ${annotated('carry_over')}`
 
@@ -111,11 +117,12 @@ export const INCOMING_CTE = `
 // A row held and a row about to be held for the same ID are one: the hold would bring the held one up to date.
 export const PENDING_CTE = `
   pending AS (
-    SELECT t.bank_unique_id AS id, t.amount_cents AS cents, t.date AS date, t.description AS description, c.name AS category, t.note AS note
+    SELECT t.bank_unique_id AS id, t.amount_cents AS cents, t.date AS date, t.description AS description, c.name AS category, t.note AS note,
+           t.not_transfer_with IS NOT NULL AS marked
     FROM transactions t LEFT JOIN categories c ON c.id = t.override_category AND c.removed_at IS NULL
     WHERE t.account_id = ?5 AND t.source = 'import' AND t.bank_unique_id IS NOT NULL AND ${annotated('t')}
     UNION ALL
-    SELECT h.bank_unique_id, h.amount_cents, h.date, h.description, h.category_name, h.note
+    SELECT h.bank_unique_id, h.amount_cents, h.date, h.description, h.category_name, h.note, h.not_transfer_with IS NOT NULL
     FROM carry_over h
     WHERE h.account_id = ?4 AND h.applied = 0 AND ${annotated('h')}
       AND NOT EXISTS (SELECT 1 FROM transactions x WHERE x.account_id = ?5 AND x.source = 'import' AND x.bank_unique_id = h.bank_unique_id))`
@@ -137,8 +144,8 @@ export const COUNT_COLUMNS = `
   (SELECT COUNT(*) FROM carry_over WHERE account_id = ?4) AS heldRows,
   (SELECT COUNT(*) FROM carry_over WHERE account_id = ?4 AND applied = 1 AND ?5 IS NULL) AS applied,
   (SELECT COUNT(*) FROM carry_over WHERE account_id = ?4 AND applied = 1 AND differs = 1 AND ?5 IS NULL) AS appliedDiffering,
-  (SELECT json_group_array(json_object('date', date, 'amountCents', cents, 'description', description, 'category', category, 'note', note))
-   FROM (SELECT p.date, p.cents, p.description, p.category, p.note FROM pending p
+  (SELECT json_group_array(json_object('date', date, 'amountCents', cents, 'description', description, 'category', category, 'note', note, 'notTransfer', json(CASE WHEN marked THEN 'true' ELSE 'false' END)))
+   FROM (SELECT p.date, p.cents, p.description, p.category, p.note, p.marked FROM pending p
          WHERE ?6 = 1 AND NOT (p.id IN (SELECT id FROM incoming) AND NOT ${heldBySync('p.id')})
          ORDER BY p.date, p.id LIMIT ${LISTED_LOST})) AS lostRows`
 
@@ -149,8 +156,8 @@ export const COUNT_COLUMNS = `
  */
 export const CARRY_PREVIEW = `WITH ${INCOMING_CTE}, ${PENDING_CTE} SELECT ${COUNT_COLUMNS}`
 
-/** A Transaction whose Override or Note was lost, as the finished screen and the Change Log list it. */
-export type LostRow = { date: string; amountCents: number; description: string; category: string | null; note: string | null }
+/** A Transaction whose Override, Note or Not a Transfer mark was lost, as the finished screen and the Change Log list it. */
+export type LostRow = { date: string; amountCents: number; description: string; category: string | null; note: string | null; notTransfer: boolean }
 
 /** What the row-count query says about carrying. `lostRows` is JSON text (parseLostRows). */
 export type CarryCounts = { carried: number; differing: number; waiting: number; heldRows: number; applied: number; appliedDiffering: number; lostRows: string }
@@ -222,11 +229,15 @@ export function carryOutcome(plan: CarryPlan, counts: CarryCounts, lastChunk: bo
 }
 
 /**
- * The statements of a chunk that give out and clear what is held, in the order they run after the insert. The chunk's
- * `prepare` makes each one; the order is the point: give, mark what was given, then clear or tidy.
+ * The statements of a chunk that give out and clear what is held. The chunk's `prepare` makes each one. `give` runs straight after the insert and the
+ * Rules and before the rows are paired, so a mark is on a row before pairing looks at it: give, then mark what was given. `finish` runs after the
+ * pairing: clear or tidy.
  */
-export function carryStatementsAfterInsert<Statement>(plan: CarryPlan, prepare: { apply: () => Statement; markApplied: () => Statement; clear: () => Statement; tidy: () => Statement }): Statement[] {
-  return [...(plan.applies ? [prepare.apply(), prepare.markApplied()] : []), ...(plan.clears ? [prepare.clear()] : plan.tidies ? [prepare.tidy()] : [])]
+export function carryStatements<Statement>(
+  plan: CarryPlan,
+  prepare: { apply: () => Statement; markApplied: () => Statement; clear: () => Statement; tidy: () => Statement },
+): { give: Statement[]; finish: Statement[] } {
+  return { give: plan.applies ? [prepare.apply(), prepare.markApplied()] : [], finish: plan.clears ? [prepare.clear()] : plan.tidies ? [prepare.tidy()] : [] }
 }
 
 const transactions = (n: number) => `${n} ${n === 1 ? 'Transaction' : 'Transactions'}`
@@ -238,13 +249,13 @@ const transactions = (n: number) => `${n} ${n === 1 ? 'Transaction' : 'Transacti
  */
 export function carrySummary(carry: CarryOutcome | null, parts: number): string {
   if (!carry) return ''
-  if (carry.carriedTotal === null) return carry.carried > 0 ? `, Overrides and Notes carried over for ${transactions(carry.carried)}` : ''
+  if (carry.carriedTotal === null) return carry.carried > 0 ? `, ${CARRIED} carried over for ${transactions(carry.carried)}` : ''
   const total = carry.carriedTotal
   const unclaimed = carry.lost ?? carry.stillWaiting ?? 0
   if (total === 0 && unclaimed === 0) return ''
   const rest = carry.lost === null ? (unclaimed > 0 ? `, ${unclaimed} still waiting` : '') : unclaimed > 0 ? `, lost for ${transactions(unclaimed)}` : ', none lost'
   const different = carry.differing ? ` (${carry.differing} with a different amount)` : ''
-  return `, Overrides and Notes carried over for ${transactions(total)}${parts > 1 ? ' in all' : ''}${different}${rest}`
+  return `, ${CARRIED} carried over for ${transactions(total)}${parts > 1 ? ' in all' : ''}${different}${rest}`
 }
 
 /** The fields of a Change Log entry's detail about carrying over (none for a chunk that took no part). */

@@ -58,6 +58,12 @@ export type EffectiveCategory = {
   /** SQL that is true when the Transaction is a Transfer, so it is left out of spending. Wrap it in NOT for spending. */
   isTransfer: string
   /**
+   * SQL that is true when the Admin can say Not a Transfer: a pairing or a Rule makes it one (so also when an Override has made it
+   * spending) and the Admin has not said so already. The only place that says "paired, or a Rule marks it" besides `transfer`, which
+   * it shares that with; the pages get the answer from the API (`canMarkNotTransfer`) and decide nothing themselves. Reads `t` only.
+   */
+  markable: string
+  /**
    * `id`, `name` and `source` as a list or a Transaction's details show them: none for a Transfer. A Transfer is not spending, so it has
    * no Category to show, even when a Rule or Akahu would have given it one; showing, sorting or filtering by that Category would make the
    * same Transaction read as a Transfer in one place and as spending in another.
@@ -73,10 +79,12 @@ export function effectiveCategory(slots: readonly CategorySlot[] = CATEGORY_SLOT
   // So does the Admin's "Not a Transfer", which also stops the pairing and the Rule's flag from making it one again (transfers.ts).
   const override = live.find((slot) => slot.source === 'override')
   const unlessOverridden = override ? `${alias(override)}.id IS NULL` : '1'
-  const transfer = `CASE WHEN ${unlessOverridden} AND t.not_transfer_with IS NULL THEN CASE WHEN t.transfer_of IS NOT NULL THEN 'pair' WHEN t.rule_transfer = 1 THEN 'rule' END END`
+  const pairedOrRule = `CASE WHEN t.transfer_of IS NOT NULL THEN 'pair' WHEN t.rule_transfer = 1 THEN 'rule' END`
+  const transfer = `CASE WHEN ${unlessOverridden} AND t.not_transfer_with IS NULL THEN ${pairedOrRule} END`
   const isTransfer = `(${transfer} IS NOT NULL)`
+  const markable = `(t.not_transfer_with IS NULL AND ${pairedOrRule} IS NOT NULL)`
   const unlessTransfer = (sql: string) => `CASE WHEN ${isTransfer} THEN NULL ELSE ${sql} END`
-  if (live.length === 0) return { joins: '', id: 'NULL', name: 'NULL', source: 'NULL', transfer, isTransfer, shown: { id: 'NULL', name: 'NULL', source: 'NULL' } }
+  if (live.length === 0) return { joins: '', id: 'NULL', name: 'NULL', source: 'NULL', transfer, isTransfer, markable, shown: { id: 'NULL', name: 'NULL', source: 'NULL' } }
   // SQLite's COALESCE needs two arguments or more.
   const first = (field: 'id' | 'name') => (live.length === 1 ? `${alias(live[0]!)}.${field}` : `COALESCE(${live.map((slot) => `${alias(slot)}.${field}`).join(', ')})`)
   const id = first('id')
@@ -89,6 +97,7 @@ export function effectiveCategory(slots: readonly CategorySlot[] = CATEGORY_SLOT
     source,
     transfer,
     isTransfer,
+    markable,
     shown: { id: unlessTransfer(id), name: unlessTransfer(name), source: unlessTransfer(source) },
   }
 }
