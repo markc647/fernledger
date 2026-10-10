@@ -31,7 +31,7 @@ async function seed(context: BrowserContext, baseURL: string, projectName: strin
   const imported = await context.request.post('/api/imports/chunks', {
     headers,
     data: {
-      account: { number: projectName === 'dark' ? '99-9999-9999999-51' : '99-9999-9999999-50' },
+      account: { number: projectName === 'dark' ? '99-9999-9999999-58' : '99-9999-9999999-57' },
       chunk: { index: 0, count: 1 },
       file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: `${thisMonth}-01`, to: `${thisMonth}-01`, ledgerBalance: { cents: 0, date: `${thisMonth}-01` } },
       rows: [{ date: `${thisMonth}-01`, uniqueId: `BG${stamp}`, tranType: 'EFTPOS', chequeNumber: null, payee: description, bankMemo: 'EFTPOS', amountCents: -4321 }],
