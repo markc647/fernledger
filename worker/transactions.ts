@@ -75,14 +75,15 @@ type TransactionDetail = {
 /** A Transaction's ID in a path: digits only, no sign, exponent or leading zero, so it is what it looks like. */
 const ID = /^[1-9]\d{0,14}$/
 
+/** The Transaction a path names, or null when the path is not an ID as written (`1e1` is 10 to Number(), and is not Transaction 10): the routes answer 404. */
+const transactionId = (raw: string) => (ID.test(raw) ? Number(raw) : null)
+
 /** Describes a Transaction in a Change Log summary: enough to find it, from its ID, date and description. */
 type Described = { id: number; date: string; description: string }
 const describe = (t: Described) => `Transaction ${t.id} (${t.date}, ${t.description})`
 
 const findTransaction = (db: D1Database, id: number) =>
-  Number.isSafeInteger(id)
-    ? db.prepare('SELECT id, date, description, override_category AS overrideCategory, note FROM transactions WHERE id = ?').bind(id).first<Described & { overrideCategory: number | null; note: string | null }>()
-    : null
+  db.prepare('SELECT id, date, description, override_category AS overrideCategory, note FROM transactions WHERE id = ?').bind(id).first<Described & { overrideCategory: number | null; note: string | null }>()
 
 /** What the Not a Transfer routes need to know about a Transaction, and the one it is paired or marked with, with each one's Account. */
 type TransferState = Described & {
@@ -158,8 +159,8 @@ export const transactions = new Hono<AppEnv>()
   // The same filters as the list, as a CSV file (transaction-export.ts). Ahead of '/:id', which would take "export.csv" for an ID.
   .get('/export.csv', validate('query', exportQuery), (c) => exportResponse(c.env.DB, toFilters(c.req.valid('query'))))
   .get('/:id', async (c) => {
-    const id = c.req.param('id')
-    if (!ID.test(id)) return c.json({ error: 'Not found' }, 404)
+    const id = transactionId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const category = effectiveCategory()
     const transaction = await c.env.DB.prepare(
       `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.amount_cents AS amountCents, t.description,
@@ -174,7 +175,7 @@ export const transactions = new Hono<AppEnv>()
        ${PARTNER_JOIN}
        WHERE t.id = ?`,
     )
-      .bind(Number(id))
+      .bind(id)
       .first<Omit<TransactionDetail, 'transferPartnerOverridden' | 'canMarkNotTransfer' | 'notTransfer'> & { transferPartnerOverridden: number; canMarkNotTransfer: number; notTransfer: number }>()
     return transaction
       ? c.json({
@@ -187,7 +188,8 @@ export const transactions = new Hono<AppEnv>()
   })
   // The guard in app.ts has already required the Admin, so these only validate the body's shape.
   .put('/:id/override', validate('json', overrideBody), async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = transactionId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const { categoryId } = c.req.valid('json')
     const db = c.env.DB
     const transaction = await findTransaction(db, id)
@@ -219,7 +221,8 @@ export const transactions = new Hono<AppEnv>()
     return c.json({ id, categoryId: category?.id ?? null })
   })
   .put('/:id/note', validate('json', noteBody), async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = transactionId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const note = c.req.valid('json').note || null
     const db = c.env.DB
     const transaction = await findTransaction(db, id)
@@ -240,9 +243,8 @@ export const transactions = new Hono<AppEnv>()
   // with the Change Log entry, and pairing and the Rules leave them alone from then on (transfers.ts). Undo takes the marks off and pairs them again. The guard
   // in app.ts has already required the Admin. A request that finds nothing to do writes no entry (`onlyIfChanged`).
   .post('/:id/not-transfer', validate('json', nothing), async (c) => {
-    const raw = c.req.param('id')
-    if (!ID.test(raw)) return c.json({ error: 'Not found' }, 404)
-    const id = Number(raw)
+    const id = transactionId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const db = c.env.DB
     const transaction = await findTransferState(db, id)
     if (!transaction) return c.json({ error: 'Not found' }, 404)
@@ -266,9 +268,8 @@ export const transactions = new Hono<AppEnv>()
     return c.json({ id, notTransfer: true })
   })
   .delete('/:id/not-transfer', validate('json', nothing), async (c) => {
-    const raw = c.req.param('id')
-    if (!ID.test(raw)) return c.json({ error: 'Not found' }, 404)
-    const id = Number(raw)
+    const id = transactionId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const db = c.env.DB
     const transaction = await findTransferState(db, id)
     if (!transaction) return c.json({ error: 'Not found' }, 404)
