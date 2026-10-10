@@ -72,9 +72,11 @@ const EXERCISES: Exercise[] = [
   { route: 'POST /api/rules/preview', path: () => '/api/rules/preview', opts: { method: 'POST', body: { textContains: 'EXAMPLE' } } },
   { route: 'PUT /api/rules/:id', path: () => `/api/rules/${made.ruleId}`, opts: { method: 'PUT', body: { textContains: 'EXAMPLE SHOP', transfer: true } } },
   { route: 'PUT /api/rules/order', path: () => '/api/rules/order', opts: () => ({ method: 'PUT', body: { ids: [made.ruleId] } }) },
-  // Applying the Rules to the Transaction on file: start the run, read it, and do its one step (a single Transaction is one chunk).
+  // Applying the Rules to the Transaction on file: start the run, read it, stop it while it runs (a stop that finds none running is
+  // refused), and do a step, which answers with the run it finds.
   { route: 'POST /api/rules/rerun', path: () => '/api/rules/rerun', opts: { method: 'POST', body: {} } },
   { route: 'GET /api/rules/rerun', path: () => '/api/rules/rerun' },
+  { route: 'POST /api/rules/rerun/stop', path: () => '/api/rules/rerun/stop', opts: { method: 'POST', body: {} } },
   { route: 'POST /api/rules/rerun/step', path: () => '/api/rules/rerun/step', opts: { method: 'POST', body: {} } },
   { route: 'DELETE /api/rules/:id', path: () => `/api/rules/${made.ruleId}`, opts: { method: 'DELETE', body: {} } },
   { route: 'DELETE /api/categories/:id', path: () => `/api/categories/${made.categoryId}`, opts: { method: 'DELETE', body: {} } },

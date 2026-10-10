@@ -4,7 +4,7 @@ import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { criteriaBody, describeRule, MAX_RULES, ruleBody, ruleRecord, toCriteria, type Criteria } from './rule-criteria'
 import { previewStatements, type PreviewSample } from './rule-preview'
-import { latestRerun, restartRerun, startRerun, stepRerun } from './rule-rerun'
+import { latestRerun, restartRerun, startRerun, stepRerun, stopRerun } from './rule-rerun'
 import { validate } from './validate'
 
 // Rules are applied to Transactions an Import adds (rule-apply.ts); saving, changing or removing a Rule here never
@@ -146,10 +146,15 @@ export const rules = new Hono<AppEnv>()
     return c.json({ id })
   })
   // Applying the Rules to the Transactions already on file (rule-rerun.ts): start a run, then step it, one chunk a request, until
-  // it says it is done. The Rules page does both. The latest run, running or done, is readable by every Member like the Rules.
+  // it says it is done (or paused until D1's day changes), or stop it. The Rules page does all of it. The latest run, running or
+  // ended, is readable by every Member like the Rules.
   .get('/rerun', async (c) => c.json({ job: await latestRerun(c.env.DB) }))
   .post('/rerun', validate('json', nothing), async (c) => {
     const job = await startRerun(c.env.DB, c.var.member)
     return job ? c.json({ job }, 201) : c.json({ error: 'A re-run is already in progress' }, 409)
   })
   .post('/rerun/step', validate('json', nothing), async (c) => c.json({ job: await stepRerun(c.env.DB) }))
+  .post('/rerun/stop', validate('json', nothing), async (c) => {
+    const job = await stopRerun(c.env.DB, c.var.member)
+    return job ? c.json({ job }) : c.json({ error: 'No re-run is in progress' }, 409)
+  })

@@ -81,7 +81,7 @@ An Admin-defined pattern that gives matching Transactions a Category, or marks t
 _Avoid_: Filter, mapping
 
 **Re-run**:
-Applying the Rules as they are now to every Transaction already on file, in steps that keep their place, so a Rule change reaches the past as well as new Imports. It gives each Transaction the result of the first Rule that matches, or none, and never touches an Override or a Note. How it runs is in README [How it works](README.md#how-it-works).
+Applying the Rules as they are now to every Transaction already on file, in steps that keep their place, so a Rule change reaches the past as well as new Imports. It gives each Transaction the result of the first Rule that matches, or none, and never touches an Override or a Note. The Rules page's button for it says "Apply the Rules to all Transactions", which is the same thing in the words an Admin would use. How it runs is in README [How it works](README.md#how-it-works).
 _Avoid_: Reapply, backfill, refresh
 
 **Override**:

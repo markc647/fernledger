@@ -26,6 +26,12 @@ export type ChangeEntry = {
   summary: string
   before?: unknown
   after?: unknown
+  /**
+   * For a mutation that may find, when it runs, that there is nothing for it to do (it ends a job that another request
+   * has already ended): the entry is written only if the mutation's last statement changed a row. Without it the entry is
+   * always written.
+   */
+  onlyIfChanged?: boolean
 }
 
 const json = (value: unknown) => (value === undefined ? null : JSON.stringify(value))
@@ -38,8 +44,13 @@ const json = (value: unknown) => (value === undefined ? null : JSON.stringify(va
  */
 export async function recordChange(db: D1Database, mutation: D1PreparedStatement | D1PreparedStatement[], entry: ChangeEntry): Promise<D1Result[]> {
   const statements = Array.isArray(mutation) ? mutation : [mutation]
+  // `changes()` is the row count of the statement just before this one in the batch.
   const log = db
-    .prepare('INSERT INTO change_log (actor, type, summary, before, after) VALUES (?, ?, ?, ?, ?)')
+    .prepare(
+      entry.onlyIfChanged
+        ? 'INSERT INTO change_log (actor, type, summary, before, after) SELECT ?, ?, ?, ?, ? WHERE changes() > 0'
+        : 'INSERT INTO change_log (actor, type, summary, before, after) VALUES (?, ?, ?, ?, ?)',
+    )
     .bind(entry.actor.email, entry.type, entry.summary, json(entry.before), json(entry.after))
   return (await db.batch([...statements, log])).slice(0, statements.length)
 }

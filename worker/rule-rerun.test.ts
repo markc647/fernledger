@@ -3,8 +3,9 @@ import { env, exports } from 'cloudflare:workers'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import worker from './index'
 import { applyRulesStatement } from './rule-apply'
+import { BACKUP_CRON } from './backup'
 import { MAX_RULES } from './rule-criteria'
-import { continueRerun, CRON_CHUNKS, RERUN_CHUNK, stepRerun } from './rule-rerun'
+import { BACKUP_CHUNKS, chunkFor, continueRerun, CRON_CHUNKS, cronQueries, DAILY_READ_BUDGET, DAILY_WRITE_BUDGET, ESTIMATED_STEP_READS, ESTIMATED_WRITES_PER_ROW, MIN_CHUNK, QUERIES_PER_CHUNK, QUERIES_TO_FINISH, READS_PER_ROW, restartRerun, RERUN_CHUNK, startRerun, STEP_READS, stepRerun, stopRerun, utcDay } from './rule-rerun'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member (the dev identity
 // cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -23,10 +24,25 @@ async function call(path: string, opts: { who?: Who; method?: string; body?: unk
   return exports.default.fetch(new Request(`${origin}${path}`, { method: opts.method ?? 'GET', headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) }))
 }
 
-type Job = { id: number; status: 'running' | 'done'; startedAt: string; updatedAt: string; finishedAt: string | null; totalRows: number; doneRows: number; changedRows: number; restarts: number }
+type Job = {
+  id: number
+  status: 'running' | 'done' | 'stopped'
+  startedAt: string
+  updatedAt: string
+  finishedAt: string | null
+  totalRows: number
+  doneRows: number
+  changedRows: number
+  percent: number
+  restarts: number
+  stepRows: number
+  cronRowsPerDay: number
+  paused: boolean
+}
 type Stored = { id: number; rule_id: number | null; rule_category: number | null; rule_transfer: number | null }
 
 const start = (who: Who = 'admin') => call('/api/rules/rerun', { who, method: 'POST', body: {} })
+const stop = (who: Who = 'admin') => call('/api/rules/rerun/stop', { who, method: 'POST', body: {} })
 const step = (who: Who = 'admin') => call('/api/rules/rerun/step', { who, method: 'POST', body: {} })
 const latest = async (who: Who = 'member') => ((await (await call('/api/rules/rerun', { who })).json()) as { job: Job | null }).job
 
@@ -126,7 +142,7 @@ async function resetEverything() {
  * A D1 binding that counts what the code under test asks of it: queries (each statement of a batch is one, as the free plan counts
  * them), and the rows D1 says it read and wrote.
  */
-function metered(db: D1Database = env.DB) {
+function metered(db: D1Database = env.DB, hooks: { beforeBatch?: () => Promise<void> } = {}) {
   const usage = { queries: 0, rowsRead: 0, rowsWritten: 0 }
   const tally = (meta: D1Result['meta']) => {
     usage.rowsRead += meta.rows_read
@@ -162,6 +178,8 @@ function metered(db: D1Database = env.DB) {
   const binding = {
     prepare: (sql: string) => wrap(db.prepare(sql)),
     batch: async (statements: D1PreparedStatement[]) => {
+      // Another request gets in between this one's reads and its batch.
+      await hooks.beforeBatch?.()
       const results = await db.batch(statements.map((s) => unwrapped.get(s)!))
       usage.queries += statements.length
       for (const result of results) tally(result.meta)
@@ -305,12 +323,12 @@ describe('a big history', () => {
 
     const entries = (await changeLog()).slice(before)
     expect(entries).toMatchObject([
-      { summary: 'Started applying the Rules to all 20,000 Transactions', type: 'rule', actor: 'admin@example.com', before: null },
-      { summary: expect.stringMatching(/^Finished applying the Rules to all Transactions: 20,000 looked at, [\d,]+ changed$/), type: 'rule', actor: 'admin@example.com', before: null },
+      { summary: 'Started applying the Rules to up to 20,000 Transactions', type: 'rule', actor: 'admin@example.com', before: null },
+      { summary: expect.stringMatching(/^Finished applying the Rules to all Transactions: 20,000 looked at, [\d,]+ updated$/), type: 'rule', actor: 'admin@example.com', before: null },
     ])
-    expect(JSON.parse(entries[0]!.after as string)).toEqual({ transactionsToCheck: BIG })
+    expect(JSON.parse(entries[0]!.after as string)).toEqual({ transactionsUpTo: BIG })
     const finished = JSON.parse(entries[1]!.after as string)
-    expect(finished).toEqual({ transactionsChecked: BIG, transactionsChanged: (await latest())!.changedRows })
+    expect(finished).toEqual({ transactionsLookedAt: BIG, transactionsUpdated: (await latest())!.changedRows })
   })
 
   describe('costs, per step, what the free plan allows (ADR 0004: 10 ms CPU, 50 queries, 100k rows written and 5 million read a day)', () => {
@@ -326,8 +344,8 @@ describe('a big history', () => {
       }
       expect((await latest())!.status).toBe('done')
 
-      // Every step: the 50 queries an invocation may make are far off.
-      expect(Math.max(...steps.map((s) => s.queries))).toBeLessThanOrEqual(10)
+      // Every step: the 50 queries an invocation may make are far off. (Finding the job, the end of the chunk, the batch of 2, the day's tally, and when it ends 3 more.)
+      expect(Math.max(...steps.map((s) => s.queries))).toBeLessThanOrEqual(1 + QUERIES_PER_CHUNK + QUERIES_TO_FINISH)
       // The chunk is read twice (the walk and the row it updates) and each row is checked against the Rules it has to get past.
       expect(Math.max(...steps.map((s) => s.rowsRead))).toBeLessThanOrEqual(RERUN_CHUNK * (RULES + 10))
       // At most a table row and an index entry for each Transaction changed, plus the progress row and the Change Log entry. (Measured
@@ -354,18 +372,23 @@ describe('a big history', () => {
     // The most there can be, none of which matches until the last: every Transaction walks past all of them (the Rules are read in
     // priority order and the walk stops at the first match). This is the dear case: a step reads about 106,000 rows, and a
     // 100,000-Transaction history 10 million, which is two days' reads, so the job would pause at the daily limit and carry on.
-    it.each([5, MAX_RULES])('reads about a row per Rule for each Transaction, with %i Rules and no early match', LONG, async (rules) => {
+    // With the most Rules the chunk is smaller (chunkFor), so a step stays about STEP_READS whatever the Rules.
+    it.each([5, 30, MAX_RULES])('reads about a row per Rule for each Transaction, with %i Rules and no early match, in a chunk sized to them', LONG, async (rules) => {
       const groceries = await categoryId('Groceries')
       await env.DB.batch(Array.from({ length: rules }, (_, i) => env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(i + 1, i === rules - 1 ? 'EXAMPLE' : `NO SUCH SHOP ${i}`, groceries)))
-      await startOk()
+      const size = chunkFor(rules)
+      expect(await startOk()).toMatchObject({ stepRows: size })
       const { db, usage } = metered()
 
-      await stepRerun(db)
+      const job = await stepRerun(db)
 
-      expect(usage.queries).toBeLessThanOrEqual(10)
-      expect(usage.rowsRead).toBeLessThanOrEqual(RERUN_CHUNK * (rules + 10))
-      expect(usage.rowsRead).toBeGreaterThan(RERUN_CHUNK * rules) // so a bound this tight is about the Rules, not slack
-      expect(usage.rowsWritten).toBeLessThanOrEqual(RERUN_CHUNK * 2 + 10) // all 1,000 matched the last Rule: a table row and an index entry each, and the job's place
+      expect(job!.doneRows).toBe(size)
+      expect(size).toBe(rules === 5 ? RERUN_CHUNK : rules === 30 ? 625 : 227)
+      expect(usage.queries).toBeLessThanOrEqual(1 + QUERIES_PER_CHUNK + QUERIES_TO_FINISH)
+      expect(usage.rowsRead).toBeLessThanOrEqual(size * (rules + READS_PER_ROW) + 400) // 400: the count of Rules, read with the job each time
+      expect(usage.rowsRead).toBeGreaterThan(size * rules) // so a bound this tight is about the Rules, not slack
+      expect(usage.rowsRead).toBeLessThanOrEqual(STEP_READS + 1_000) // the same step whatever the Rules (5 Rules: 15,000, as the chunk is capped)
+      expect(usage.rowsWritten).toBeLessThanOrEqual(size * 2 + 10) // all matched the last Rule: a table row and an index entry each, and the job's place
     })
 
     it('costs one query when there is nothing to carry on, on a cron run', async () => {
@@ -382,7 +405,71 @@ describe('a big history', () => {
       await continueRerun(db)
 
       expect((await latest())!.doneRows).toBe(CRON_CHUNKS * RERUN_CHUNK)
-      expect(usage.queries).toBeLessThanOrEqual(CRON_CHUNKS * 4 + 2) // the free plan allows 50, and the backup and Sync share the cron
+      expect(usage.queries).toBeLessThanOrEqual(cronQueries(CRON_CHUNKS)) // 16 of the 50 the plan allows; the backup (20) and Sync share the cron
+      expect(cronQueries(CRON_CHUNKS) + 20).toBeLessThan(50)
+    })
+
+    // A cron run that is also carrying a backup on has the invocation's encoding and hashing to do as well, so it does one chunk.
+    it('does one chunk when a backup is being carried on in the same run', LONG, async () => {
+      await saveRules()
+      await startOk()
+      try {
+        await worker.scheduled(createScheduledController({ cron: BACKUP_CRON, scheduledTime: new Date('2026-10-11T15:00:00Z') }), env) // starts a backup of 20,000 Transactions, which is more than one run writes
+        expect((await latest())!.doneRows).toBe(0) // the weekly cron leaves the re-run alone
+        const { db, usage } = metered()
+
+        await cron({ ...env, DB: db } as Env)
+
+        expect((await latest())!.doneRows).toBe(BACKUP_CHUNKS * RERUN_CHUNK)
+        // The backup's continuation makes D1 queries too (up to 20 operations with R2's), so the invocation's share is both.
+        expect(usage.queries).toBeLessThanOrEqual(cronQueries(BACKUP_CHUNKS) + 20)
+        expect(cronQueries(BACKUP_CHUNKS) + 20).toBeLessThan(50)
+      } finally {
+        for (const object of (await env.BACKUPS.list()).objects) await env.BACKUPS.delete(object.key)
+      }
+    })
+
+    it('starts and restarts without counting the Transactions: the highest ID is the one read', LONG, async () => {
+      await saveRules()
+      const started = metered()
+      await startRerun(started.db, { email: 'admin@example.com', role: 'admin' })
+      expect(started.usage.rowsRead).toBeLessThanOrEqual(30) // the highest ID and the job, not 20,000 Transactions
+
+      await stepOk()
+      const restarted = metered()
+      await restartRerun(restarted.db).run()
+      expect(restarted.usage.rowsRead).toBeLessThanOrEqual(30)
+      expect(await latest()).toMatchObject({ doneRows: 0, restarts: 1, totalRows: BIG })
+    })
+
+    it('a step that lost its place to another does no work: it reads next to nothing and changes nothing', LONG, async () => {
+      await saveRules()
+      await startOk()
+      const before = await stored()
+      // The other request moves the job on (as a winning step would have) after this one has read where it is and before its batch.
+      const other = () => env.DB.prepare("UPDATE data_migration_progress SET cursor = 1000, done_rows = 1000 WHERE status = 'running'").run().then(() => undefined)
+      const { db, usage } = metered(env.DB, { beforeBatch: other })
+
+      const job = await stepRerun(db)
+
+      expect(job).toMatchObject({ status: 'running', doneRows: 1000 }) // the other's, not this one's
+      expect(await stored()).toEqual(before) // neither moved a Transaction (the other only moved the place)
+      // The end of the chunk was read (1,000 rows) and the walk and the move found nothing to do. Walking the chunk would add about 9,000.
+      expect(usage.rowsRead).toBeLessThanOrEqual(RERUN_CHUNK + 100)
+      expect(usage.rowsWritten).toBe(0)
+    })
+
+    it('a step that was stopped meanwhile does no work either', LONG, async () => {
+      await saveRules()
+      await startOk()
+      const before = await stored()
+      const { db, usage } = metered(env.DB, { beforeBatch: async () => void (await stop()) })
+
+      const job = await stepRerun(db)
+
+      expect(job).toMatchObject({ status: 'stopped', doneRows: 0 })
+      expect(await stored()).toEqual(before)
+      expect(usage.rowsRead).toBeLessThanOrEqual(RERUN_CHUNK + 100)
     })
   })
 })
@@ -507,11 +594,12 @@ describe('a small history', () => {
       await saveRules()
       await env.DB.prepare('DELETE FROM transactions WHERE id % 3 = 0 OR (id BETWEEN 1000 AND 1800)').run()
       const left = await countWhere('1 = 1')
-      expect(await startOk()).toMatchObject({ totalRows: left })
+      // The count would read every Transaction, so the job says the most there can be: the highest ID.
+      expect(await startOk()).toMatchObject({ totalRows: N })
 
       const done = (await stepToEnd()).at(-1)!
 
-      expect(done).toMatchObject({ status: 'done', doneRows: left })
+      expect(done).toMatchObject({ status: 'done', totalRows: N, doneRows: left, percent: 100 })
       await expectSameAsFromScratch()
     })
 
@@ -653,6 +741,315 @@ describe('a small history', () => {
     })
   })
 
+  describe("the job's own share of the day's rows", () => {
+    // D1 Free's allowance is for the whole app, and when it is gone every request fails until 00:00 UTC. The job counts what D1 says each
+    // step read and wrote and pauses before a chunk that would take it past its share (2.5 million reads, 40,000 writes), until the day changes.
+    const today = () => utcDay(new Date())
+    const setTally = (day: string | null, reads: number, writes: number) =>
+      env.DB.prepare("UPDATE data_migration_progress SET usage_day = ?, day_rows_read = ?, day_rows_written = ? WHERE status = 'running'").bind(day, reads, writes).run()
+    const tally = async () => (await env.DB.prepare('SELECT usage_day, day_rows_read, day_rows_written FROM data_migration_progress ORDER BY id DESC LIMIT 1').first<{ usage_day: string | null; day_rows_read: number; day_rows_written: number }>())!
+
+    it('counts what each step reads and writes against today', async () => {
+      await saveRules()
+      await startOk()
+      expect(await tally()).toEqual({ usage_day: null, day_rows_read: 0, day_rows_written: 0 })
+      const { db, usage } = metered()
+
+      await stepRerun(db)
+
+      const counted = await tally()
+      expect(counted.usage_day).toBe(today())
+      // What D1 reported for the walk, the move and the end of the chunk: nearly all of what the step read (not the job's own few lookups).
+      expect(counted.day_rows_read).toBeGreaterThan(usage.rowsRead * 0.9)
+      expect(counted.day_rows_read).toBeLessThanOrEqual(usage.rowsRead)
+      expect(counted.day_rows_written).toBeGreaterThan(0)
+      expect(counted.day_rows_written).toBeLessThanOrEqual(usage.rowsWritten)
+
+      await stepOk()
+      expect((await tally()).day_rows_read).toBeGreaterThan(counted.day_rows_read) // added to, not started again
+    })
+
+    it.each([
+      ['reads', DAILY_READ_BUDGET - 1, 0],
+      ['writes', 0, DAILY_WRITE_BUDGET - 1],
+    ])('pauses when the next chunk would pass its share of the day\'s %s, and does nothing while it is', async (_which, reads, writes) => {
+      await saveRules()
+      await startOk()
+      await setTally(today(), reads, writes)
+      const before = { transactions: await stored(), job: await reruns() }
+      const { db, usage } = metered()
+
+      const job = await stepRerun(db)
+
+      expect(job).toMatchObject({ status: 'running', paused: true, doneRows: 0 })
+      expect(usage).toEqual({ queries: 1, rowsRead: expect.any(Number), rowsWritten: 0 }) // it only looked at the job
+      expect(usage.rowsRead).toBeLessThanOrEqual(10)
+      expect(await stored()).toEqual(before.transactions)
+      expect(await reruns()).toEqual(before.job)
+      // The answer to the page is the same, and a Member reading it sees the job is waiting.
+      const res = await step()
+      expect(res.status).toBe(200)
+      expect(((await res.json()) as { job: Job }).job).toMatchObject({ paused: true, doneRows: 0 })
+      expect(await latest()).toMatchObject({ paused: true })
+    })
+
+    it('leaves a paused job alone on a cron run, for the one query it takes to look', async () => {
+      await saveRules()
+      await startOk()
+      await setTally(today(), DAILY_READ_BUDGET - 1, 0)
+      const { db, usage } = metered()
+
+      await continueRerun(db)
+
+      expect(usage).toMatchObject({ queries: 1, rowsWritten: 0 })
+      expect((await latest())!.doneRows).toBe(0)
+    })
+
+    it('carries on when the day has changed, from the next step or cron run, and starts counting again', async () => {
+      await saveRules()
+      await startOk()
+      await setTally('2020-01-01', DAILY_READ_BUDGET, DAILY_WRITE_BUDGET) // all of another day's share, which is no concern of today's
+      expect(await latest()).toMatchObject({ paused: false })
+
+      const job = await stepOk()
+
+      expect(job).toMatchObject({ paused: false, doneRows: RERUN_CHUNK })
+      const counted = await tally()
+      expect(counted.usage_day).toBe(today())
+      expect(counted.day_rows_read).toBeLessThan(DAILY_READ_BUDGET / 10) // only this step's
+
+      await setTally('2020-01-01', DAILY_READ_BUDGET, DAILY_WRITE_BUDGET)
+      await cron()
+      expect((await latest())!.doneRows).toBeGreaterThan(RERUN_CHUNK)
+    })
+
+    it('pauses part way through the day when what is left is less than a chunk, and finishes with the right result the next day', async () => {
+      await saveRules()
+      await startOk()
+      await setTally(today(), DAILY_READ_BUDGET - ESTIMATED_STEP_READS - 2_000, 0) // room for one step (estimated at 30,000 reads) and not for a second after it has read what it reads
+
+      const first = await stepOk()
+      const second = await stepOk()
+
+      expect(first).toMatchObject({ doneRows: RERUN_CHUNK, paused: true })
+      expect(second).toMatchObject({ doneRows: RERUN_CHUNK, paused: true, status: 'running' }) // nothing more happened
+      expect((await tally()).day_rows_read).toBeLessThan(DAILY_READ_BUDGET) // so it never took the day's allowance past its share
+
+      await setTally('2020-01-01', DAILY_READ_BUDGET, DAILY_WRITE_BUDGET) // the next day
+      const done = (await stepToEnd()).at(-1)!
+
+      expect(done).toMatchObject({ status: 'done', doneRows: N, percent: 100 })
+      await expectSameAsFromScratch()
+    })
+
+    it.each([0, 1, 14, 15, 16, 30, 60, MAX_RULES])('is sized the same in SQL (where the step works it out) and in the page\'s numbers, with %i Rules', async (rules) => {
+      const groceries = await categoryId('Groceries')
+      if (rules > 0) await env.DB.batch(Array.from({ length: rules }, (_, i) => env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(i + 1, `NO SUCH SHOP ${i}`, groceries)))
+      const started = await startOk()
+      expect(started.stepRows).toBe(chunkFor(rules))
+
+      const job = await stepOk()
+
+      expect(job.doneRows).toBe(Math.min(chunkFor(rules), N)) // what the step looked at, as SQL sized it
+      expect(chunkFor(rules)).toBeGreaterThanOrEqual(MIN_CHUNK)
+      expect(chunkFor(rules)).toBeLessThanOrEqual(RERUN_CHUNK)
+    })
+
+    it('is sized to the Rules: fewer Transactions in a step when there are many, so a step is about the same reads', async () => {
+      const groceries = await categoryId('Groceries')
+      await env.DB.batch(Array.from({ length: MAX_RULES }, (_, i) => env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(i + 1, `NO SUCH SHOP ${i}`, groceries)))
+      const started = await startOk()
+      expect(started.stepRows).toBe(chunkFor(MAX_RULES))
+      expect(started.cronRowsPerDay).toBe(2 * CRON_CHUNKS * started.stepRows)
+
+      const job = await stepOk()
+
+      expect(job.doneRows).toBe(chunkFor(MAX_RULES))
+      expect(job.doneRows).toBeLessThan(RERUN_CHUNK)
+    })
+  })
+
+  describe('ending the job', () => {
+    // Whichever request ends a job writes its entry, and only that one: not a second request that found the same job at its end, and not a
+    // request that read the job at its end before the Rules changed under it or it was stopped.
+    async function atItsEnd() {
+      await saveRules()
+      await startOk()
+      await env.DB.prepare("UPDATE data_migration_progress SET cursor = end_id, done_rows = total_rows WHERE status = 'running'").run()
+    }
+    const finishes = async () => (await changeLog()).filter((e) => String(e.summary).startsWith('Finished applying'))
+
+    it('is recorded once, however many requests find it at its end together', async () => {
+      await atItsEnd()
+
+      const answers = await Promise.all([step(), step(), step(), step()])
+
+      expect(answers.map((a) => a.status)).toEqual([200, 200, 200, 200])
+      expect(await latest()).toMatchObject({ status: 'done' })
+      expect(await finishes()).toHaveLength(1)
+    })
+
+    it('is recorded once from the cron and a request together', async () => {
+      await atItsEnd()
+
+      await Promise.all([step(), cron(), step()])
+
+      expect(await finishes()).toHaveLength(1)
+    })
+
+    it('is not recorded, and the job is not ended, when the Rules changed after the request read it', async () => {
+      await atItsEnd()
+      const { db } = metered(env.DB, { beforeBatch: async () => void (await restartRerun(env.DB).run()) }) // what a change to a Rule does, in the same batch as the change
+
+      const job = await stepRerun(db)
+
+      expect(job).toMatchObject({ status: 'running', doneRows: 0, restarts: 1 })
+      expect(await finishes()).toEqual([])
+      // It is not lost: the job goes on from the start, and ends once when it gets to the end.
+      await stepToEnd()
+      expect(await finishes()).toHaveLength(1)
+    })
+
+    it('is not recorded when the Admin stopped the job after the request read it, and the stop is recorded once', async () => {
+      await atItsEnd()
+      const { db } = metered(env.DB, { beforeBatch: async () => void (await stop()) })
+
+      const job = await stepRerun(db)
+
+      expect(job).toMatchObject({ status: 'stopped' })
+      expect(await finishes()).toEqual([])
+      expect((await changeLog()).filter((e) => String(e.summary).startsWith('Stopped applying'))).toHaveLength(1)
+    })
+  })
+
+  describe('stopping', () => {
+    it('ends the job, writes one entry with the counts, and leaves the results it had given', async () => {
+      await saveRules()
+      await startOk()
+      const first = await stepOk()
+      const before = (await changeLog()).length
+
+      const res = await stop()
+
+      expect(res.status).toBe(200)
+      const { job } = (await res.json()) as { job: Job }
+      expect(job).toMatchObject({ status: 'stopped', doneRows: RERUN_CHUNK, changedRows: first.changedRows, percent: expect.any(Number) })
+      expect(job.finishedAt).not.toBeNull()
+      expect((await changeLog()).slice(before)).toMatchObject([
+        { summary: `Stopped applying the Rules to all Transactions: 1,000 looked at, ${first.changedRows.toLocaleString('en-NZ')} updated`, type: 'rule', actor: 'admin@example.com' },
+      ])
+      expect(await countWhere(`id <= ${RERUN_CHUNK} AND rule_id IS NOT NULL`)).toBeGreaterThan(0)
+      expect(await countWhere(`id > ${RERUN_CHUNK} AND rule_id IS NOT NULL`)).toBe(0)
+    })
+
+    it('is followed by steps and cron runs that do nothing, and a change to the Rules that does not bring it back', async () => {
+      const rules = await saveRules()
+      await startOk()
+      await stepOk()
+      await stop()
+      const before = await stored()
+
+      expect(await stepOk()).toMatchObject({ status: 'stopped', doneRows: RERUN_CHUNK })
+      await cron()
+      await call(`/api/rules/${rules.fuel}`, { method: 'DELETE', body: {} })
+
+      expect(await latest()).toMatchObject({ status: 'stopped', doneRows: RERUN_CHUNK, restarts: 0 })
+      expect(await stored()).toEqual(before)
+    })
+
+    it('can be followed by a new run, which starts from the first Transaction', async () => {
+      await saveRules()
+      await startOk()
+      await stepOk()
+      await stop()
+
+      const next = await startOk()
+
+      expect(next).toMatchObject({ status: 'running', doneRows: 0 })
+      expect((await stepToEnd()).at(-1)).toMatchObject({ status: 'done', doneRows: N })
+      await expectSameAsFromScratch()
+    })
+
+    it('writes no entry when the job ended between the request reading it and stopping it', async () => {
+      await saveRules()
+      await startOk()
+      const entries = (await changeLog()).length
+      const { db } = metered(env.DB, { beforeBatch: async () => void (await env.DB.prepare("UPDATE data_migration_progress SET status = 'done', finished_at = '2026-10-11T00:00:00.000Z' WHERE status = 'running'").run()) })
+
+      expect(await stopRerun(db, { email: 'admin@example.com', role: 'admin' })).toBeNull()
+
+      expect(await changeLog()).toHaveLength(entries) // not "Stopped" for a job that had already ended
+      expect(await latest()).toMatchObject({ status: 'done' })
+    })
+
+    it('is refused when no job is running, writing nothing', async () => {
+      const entries = (await changeLog()).length
+      let res = await stop()
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'No re-run is in progress' })
+
+      await startOk()
+      await stepToEnd() // ended: a stop that arrives now has nothing to stop
+      const afterwards = (await changeLog()).length
+      res = await stop()
+      expect(res.status).toBe(409)
+      expect(await changeLog()).toHaveLength(afterwards)
+      expect(afterwards).toBeGreaterThan(entries)
+    })
+  })
+
+  describe('what a changed Transaction costs in writes', () => {
+    // D1 bills every table row and index entry written. A Transaction's result is on its row, and its Category is in the rule_category
+    // index too (migration 1402), so the writes for one Transaction are: a Transfer mark 1 (the row), a Category it did not have 2 (the row
+    // and an index entry), and a Category that changes to another 2 in the local database (the row, and its index entry changed). D1 may
+    // bill that entry as a delete and an insert, which would be 3, so the day's budget counts 3 for every changed Transaction
+    // (ESTIMATED_WRITES_PER_ROW). The README says the same.
+    it('is 1 for a Transfer mark, 2 for a Category, and 2 (counted as 3 against the day) for a change from one Category to another', async () => {
+      const writesOfTheFirstStep = async () => {
+        const { db, usage } = metered()
+        await stepRerun(db)
+        const written = usage.rowsWritten
+        await stop() // so the next run can start; the stop does not count
+        return written
+      }
+      const inFirstChunk = (where: string) => countWhere(`id <= ${RERUN_CHUNK} AND ${where}`)
+      // The job's own bookkeeping (its place, its tally) is a few writes in each step.
+      const perRow = (written: number, rows: number) => Math.round((written - 4) / rows)
+
+      await addRule({ textContains: 'ROUND UP', transfer: true })
+      await startOk()
+      const transfers = await writesOfTheFirstStep()
+      const transferRows = await inFirstChunk('rule_transfer = 1')
+      expect(transferRows).toBeGreaterThan(100)
+      expect(perRow(transfers, transferRows)).toBe(1)
+
+      const misc = await addRule({ textContains: 'MISC', categoryId: await categoryId('Groceries') })
+      await startOk()
+      const gained = await writesOfTheFirstStep()
+      const gainedRows = await inFirstChunk('rule_category IS NOT NULL')
+      expect(gainedRows).toBeGreaterThan(100)
+      expect(perRow(gained, gainedRows)).toBe(2)
+
+      await call(`/api/rules/${misc}`, { method: 'PUT', body: { textContains: 'MISC', categoryId: await categoryId('Fuel') } })
+      await startOk()
+      const moved = await writesOfTheFirstStep()
+      expect(perRow(moved, gainedRows)).toBe(2)
+      expect(ESTIMATED_WRITES_PER_ROW).toBe(3)
+    })
+
+    it('is counted as 3 for every Transaction in a chunk when the job decides whether the chunk fits in the day', async () => {
+      await saveRules()
+      await startOk()
+      const chunk = RERUN_CHUNK * ESTIMATED_WRITES_PER_ROW
+
+      await env.DB.prepare("UPDATE data_migration_progress SET usage_day = ?, day_rows_written = ? WHERE status = 'running'").bind(utcDay(new Date()), DAILY_WRITE_BUDGET - chunk + 1).run()
+      expect(await latest()).toMatchObject({ paused: true })
+
+      await env.DB.prepare("UPDATE data_migration_progress SET day_rows_written = ? WHERE status = 'running'").bind(DAILY_WRITE_BUDGET - chunk).run()
+      expect(await latest()).toMatchObject({ paused: false })
+    })
+  })
+
   describe('on a cron run', () => {
     it('carries on a running job by a few chunks, and does nothing when there is none', async () => {
       await cron()
@@ -710,6 +1107,7 @@ describe('a small history', () => {
     it.each([
       ['start a re-run', false, '/api/rules/rerun'],
       ['do a step of one', true, '/api/rules/rerun/step'],
+      ['stop one', true, '/api/rules/rerun/stop'],
     ])('cannot %s', async (_what, running, path) => {
       await saveRules()
       if (running) await startOk()
