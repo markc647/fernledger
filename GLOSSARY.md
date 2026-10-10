@@ -145,7 +145,7 @@ The page every Member lands on, except the Admin, who lands on the Dashboard: th
 _Avoid_: Home page
 
 **Dashboard**:
-The page the Admin lands on: shortcuts to the work only the Admin does (Import, Uncategorised, Rules, Categories, Budgets, Settings), then every part of the Summary, then the Charts. Where the Summary is for a Member, the Dashboard is for the Admin; the address is the same and the Admin's navigation calls it the Dashboard.
+The page the Admin lands on: shortcuts to the work only the Admin does (Import, Uncategorised, Rules, Categories, Budgets, Settings), then every part of the Summary, then the Charts, of which spending by Category is drawn at once and net worth waits for the Admin to ask for it (it reads every Transaction). Where the Summary is for a Member, the Dashboard is for the Admin; the address is the same and the Admin's navigation calls it the Dashboard.
 _Avoid_: Home page, admin panel
 
 **Charts**:

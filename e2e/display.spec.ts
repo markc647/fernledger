@@ -458,6 +458,8 @@ test.describe('zoom', () => {
           await sizeButton(page, size).click()
           const netWorth = page.getByRole('region', { name: 'Net worth over time' })
           const spending = page.getByRole('region', { name: 'Spending by Category' })
+          // The Dashboard draws net worth when it is asked to; the Charts page draws it at once.
+          if (path === '/') await netWorth.getByRole('button', { name: 'Show net worth' }).click()
           await expect(netWorth.getByRole('img', { name: /^Line chart of net worth by month/ }).locator('svg.recharts-surface')).toBeVisible()
           await expect(spending.getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
           await expect(netWorth).toContainText('These Accounts are not in the total:')
@@ -481,6 +483,37 @@ test.describe('zoom', () => {
           }
         })
       }
+    }
+  }
+
+  // The Dashboard as the Admin lands on it, net worth not yet asked for: its explanation, its button (a touch target that may wrap) and its link to the Charts page, beside
+  // spending drawn from long data. The charts' data is stubbed, so this needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/ with the Show net worth button at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await stubCharts(page)
+        await page.setViewportSize({ width, height })
+        await page.goto('/')
+        await sizeButton(page, size).click()
+        const netWorth = page.getByRole('region', { name: 'Net worth over time' })
+        const button = netWorth.getByRole('button', { name: 'Show net worth' })
+        await expect(button).toBeVisible()
+        await expect(netWorth).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
+        await expect(netWorth.getByRole('link', { name: 'Open the Charts page for longer ranges' })).toBeVisible()
+        await expect(page.getByRole('region', { name: 'Spending by Category' }).getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        const box = await button.boundingBox()
+        expect(box!.width).toBeLessThanOrEqual(clientWidth)
+        expect(box!.height).toBeGreaterThanOrEqual(44)
+      })
     }
   }
 

@@ -129,9 +129,13 @@ const balancesNow = async (context: BrowserContext) => {
 
 test.describe.configure({ mode: 'serial' })
 
-test('the Admin lands on the Dashboard: their tools, every part of the Summary, then the charts', async ({ page, context, baseURL }, testInfo) => {
+test('the Admin lands on the Dashboard: their tools, every part of the Summary, then the charts, with net worth waiting to be asked for', async ({ page, context, baseURL }, testInfo) => {
   await seed(context, baseURL!, testInfo.project.name)
-  await stubNetWorth(page)
+  const netWorthRequests: string[] = []
+  await page.route(/\/api\/charts\/net-worth/, (route) => {
+    netWorthRequests.push(route.request().url()) // a spy: it counts what the page asks for, and answers it
+    return route.fulfill({ json: NET_WORTH })
+  })
   await stubSpending(page, SPENT, 16_050)
   await page.setViewportSize({ width: 1024, height: 900 })
   await page.goto('/')
@@ -150,16 +154,20 @@ test('the Admin lands on the Dashboard: their tools, every part of the Summary, 
     await expect(tools.getByRole('link', { name: new RegExp(`^${name}`) })).toHaveAttribute('href', href!)
   }
 
-  // And the charts, drawn from the data, with their bars.
-  await drawn(netWorth(page), LINE)
+  // Spending is drawn from the data, with its bars. Net worth is not: it reads every Transaction, so the Dashboard says so and offers a button.
   await expect(spending(page).getByRole('combobox', { name: 'Period' })).toHaveValue('this-month')
   await drawn(spending(page), /^Bar chart of the 3 Categories that spent the most in October 2026/)
   await expect(spending(page).locator('.recharts-bar-rectangle')).toHaveCount(3)
-  await expect(netWorth(page).getByRole('combobox')).toHaveCount(0) // the Dashboard draws the last 24 months; the Charts page has the choice
-  await expect(netWorth(page).getByRole('link', { name: 'Longer ranges are on the Charts page.' })).toHaveAttribute('href', '/charts')
+  const region = netWorth(page)
+  const show = region.getByRole('button', { name: 'Show net worth' })
+  await expect(show).toBeVisible()
+  await expect(region).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
+  await expect(region.getByRole('link', { name: 'Open the Charts page for longer ranges' })).toHaveAttribute('href', '/charts')
+  await expect(region.locator('svg.recharts-surface')).toHaveCount(0)
+  expect(netWorthRequests, 'net worth is asked for only when the button is pressed').toEqual([])
 
   // The Summary's parts come first, in the Summary's order, and the charts after them.
-  expect(await page.getByRole('main').getByRole('heading', { level: 2 }).allInnerTexts()).toEqual([
+  const headings = [
     'Your tools',
     'Balance checks',
     'Balances',
@@ -167,8 +175,51 @@ test('the Admin lands on the Dashboard: their tools, every part of the Summary, 
     'Recent transactions',
     'Net worth over time',
     'Spending by Category',
-  ])
-  await noAxeViolations(page)
+  ]
+  expect(await page.getByRole('main').getByRole('heading', { level: 2 }).allInnerTexts()).toEqual(headings)
+  await noAxeViolations(page) // the page with the button
+
+  // Pressing it asks once, tells the reader what is happening, and draws the last 24 months, with no choice of range (the Charts page has it).
+  await show.click()
+  await expect(region.getByRole('heading', { level: 2, name: 'Net worth over time' })).toBeFocused() // focus stays where the button was
+  await drawn(region, LINE)
+  await expect(region.getByRole('status').filter({ hasText: 'Net worth has loaded.' })).toHaveCount(1)
+  await expect(region.getByRole('button', { name: 'Show net worth' })).toHaveCount(0)
+  await expect(region.getByRole('combobox')).toHaveCount(0)
+  await expect(region.getByRole('link', { name: 'Longer ranges are on the Charts page.' })).toHaveAttribute('href', '/charts')
+  expect(netWorthRequests).toHaveLength(1)
+  expect(new URL(netWorthRequests[0]!).searchParams.get('range')).toBe('24-months')
+  expect(await page.getByRole('main').getByRole('heading', { level: 2 }).allInnerTexts()).toEqual(headings)
+  await noAxeViolations(page) // and with the chart
+  expect(netWorthRequests).toHaveLength(1) // nothing asked again
+})
+
+test('the button that shows net worth is a touch target with a clear name, works from the keyboard, and shows a busy cue while it loads', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  let answered = 0
+  await page.route(/\/api\/charts\/net-worth/, async (route) => {
+    answered += 1
+    await new Promise((resolve) => setTimeout(resolve, 700)) // slow enough to see the cue
+    await route.fulfill({ json: NET_WORTH })
+  })
+  await stubSpending(page, SPENT, 16_050)
+  await page.goto('/')
+  const region = netWorth(page)
+  const show = region.getByRole('button', { name: 'Show net worth', exact: true })
+  await expect(show).toBeVisible()
+  expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+  await sizeButton(page, 'A++').click()
+  await expect(sizeButton(page, 'A++')).toHaveAttribute('aria-pressed', 'true')
+
+  await show.focus()
+  await page.keyboard.press('Enter')
+
+  await expect(region).toHaveAttribute('aria-busy', 'true')
+  await expect(region.getByRole('status').filter({ hasText: 'Loading net worth. It reads every Transaction, so it can take a moment.' })).toBeVisible()
+  await expect(region.getByRole('heading', { level: 2 })).toBeFocused() // not lost to the page when the button goes
+  await drawn(region, LINE)
+  await expect(region).toHaveAttribute('aria-busy', 'false')
+  expect(answered).toBe(1)
 })
 
 test('a Member lands on the Summary, which leads to the Charts, and sees none of the Admin\'s tools', async ({ page, context }) => {

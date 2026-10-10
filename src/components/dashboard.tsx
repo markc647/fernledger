@@ -18,7 +18,8 @@ const TOOLS = [
 
 /**
  * Where the Admin lands: the shortcuts to the work only the Admin does, then everything the Summary shows every Member (it is the same widgets, so the
- * two cannot disagree), then the charts. A Member lands on the Summary, which has the charts one click away.
+ * two cannot disagree), then the charts: spending by Category is drawn at once, and net worth waits for a button, because working it out reads every Transaction
+ * (ADR 0004). A Member lands on the Summary, which has the charts one click away.
  */
 export function Dashboard({ me }: { me: { email: string; role: Role } }) {
   return (

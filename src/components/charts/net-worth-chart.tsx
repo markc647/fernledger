@@ -1,10 +1,11 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 import { Amount } from '@/components/amount'
 import { ResponsiveTable } from '@/components/responsive-table'
 import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
+import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import {
   DASHBOARD_NET_WORTH_RANGE,
@@ -31,21 +32,46 @@ const linkStyle = 'underline underline-offset-4 focus-visible:outline-2 focus-vi
 
 /**
  * Net worth over time: the money in the Accounts added up at the end of each month (worker/net-worth.ts). The line is a picture of the figures under "Show the
- * figures", which a screen reader and a printout use. The figures come from the Worker as they are shown. The Dashboard draws the last 24 months; the Charts page
- * (`choosable`) lets the reader choose a longer range.
+ * figures", which a screen reader and a printout use. The figures come from the Worker as they are shown. The Charts page (`choosable`) draws it at once and lets the
+ * reader choose a range. The Dashboard (`onRequest`) does not ask the Worker until the reader presses "Show net worth", because working it out reads every Transaction,
+ * and then draws the last 24 months.
  */
-export function NetWorthChart({ choosable = false }: { choosable?: boolean }) {
+export function NetWorthChart({ choosable = false, onRequest = false }: { choosable?: boolean; onRequest?: boolean }) {
   const id = useId()
   const [chosen, setChosen] = useState<NetWorthRange>(DASHBOARD_NET_WORTH_RANGE)
+  const [requested, setRequested] = useState(!onRequest)
   const range = choosable ? chosen : DASHBOARD_NET_WORTH_RANGE
-  const { data, error, isPlaceholderData } = useQuery({ ...netWorthQuery(range), placeholderData: keepPreviousData })
+  const { data, error, isPlaceholderData } = useQuery({ ...netWorthQuery(range), enabled: requested, placeholderData: keepPreviousData })
   const figures = useOpenForPrint()
+  const heading = useRef<HTMLHeadingElement>(null)
   const early = data ? stoppedEarly(data.counted, data.points) : []
+  // Pressing the button removes it, so focus goes to the heading it sits under, which is where the reader is told what is happening and then where the chart is.
+  const request = () => {
+    setRequested(true)
+    heading.current?.focus()
+  }
+  const [announce, setAnnounce] = useState(false)
+  useEffect(() => {
+    if (onRequest && requested && data) setAnnounce(true)
+  }, [onRequest, requested, data])
   return (
-    <section aria-labelledby="net-worth-heading" aria-busy={isPlaceholderData}>
-      <h2 id="net-worth-heading" className="mb-3 text-xl font-semibold">
+    <section aria-labelledby="net-worth-heading" aria-busy={requested && (isPlaceholderData || (!data && !error))}>
+      <h2 id="net-worth-heading" ref={heading} tabIndex={-1} className="mb-3 text-xl font-semibold outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         Net worth over time
       </h2>
+      {!requested && (
+        <>
+          <p className="mb-3">Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.</p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <Button type="button" size="touch" onClick={request}>
+              Show net worth
+            </Button>
+            <Link to="/charts" className={`inline-flex min-h-11 items-center ${linkStyle}`}>
+              Open the Charts page for longer ranges
+            </Link>
+          </div>
+        </>
+      )}
       {choosable && (
         <div className="mb-3 max-w-xs">
           <label htmlFor={`${id}-range`} className="block font-medium">
@@ -60,10 +86,10 @@ export function NetWorthChart({ choosable = false }: { choosable?: boolean }) {
           </Select>
         </div>
       )}
-      {error ? (
+      {!requested ? null : error ? (
         <p role="alert">Fernledger couldn't load net worth. Reload the page to try again.</p>
       ) : !data ? (
-        <p role="status">Loading…</p>
+        <p role="status">Loading net worth. It reads every Transaction, so it can take a moment.</p>
       ) : data.tooManyAccounts ? (
         <p>{tooManyAccountsMessage(data.tooManyAccounts.count, data.tooManyAccounts.limit)}</p>
       ) : data.points.length === 0 ? (
@@ -142,6 +168,11 @@ export function NetWorthChart({ choosable = false }: { choosable?: boolean }) {
           )}
           <NotCounted accounts={data.notCounted} />
         </>
+      )}
+      {announce && (
+        <p role="status" className="sr-only">
+          Net worth has loaded.
+        </p>
       )}
     </section>
   )
