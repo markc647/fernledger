@@ -22,6 +22,7 @@ import { formatDate } from '@/lib/format'
 import { meQuery } from '@/lib/me'
 import { PAGE_SIZE, transactionCountQuery, transactionsQuery } from '@/lib/queries'
 import { SORT_KEYS, sortOf, tidy, type DetailOrigin, type SortKey, type TransactionSearch } from '@/lib/transaction-search'
+import { transferLabel } from '@/lib/transfers'
 
 type Row = InferResponseType<typeof api.transactions.$get, 200>['transactions'][number]
 
@@ -40,8 +41,19 @@ const SORT_WORDS: Record<SortKey, { ascending: string; descending: string }> = {
 }
 const isSortKey = (id: string): id is SortKey => (SORT_KEYS as readonly string[]).includes(id)
 
-/** The Category column: the effective Category, marked when the Admin set it by hand (Override) or a Rule gave it. */
+/**
+ * The Category column: the effective Category, marked when the Admin set it by hand (Override) or a Rule gave it. A Transfer has
+ * no Category to show, because it is not spending: it says where the money went or came from instead.
+ */
 function CategoryCell({ row }: { row: Row }) {
+  const transfer = transferLabel(row)
+  if (transfer !== null)
+    return (
+      <>
+        {transfer}
+        <span className="block text-muted-foreground">{row.transfer === 'rule' ? 'Marked by a Rule, not spending' : 'Not spending'}</span>
+      </>
+    )
   if (row.categoryName === null) return <span className="text-muted-foreground">Uncategorised</span>
   return (
     <>

@@ -31,7 +31,7 @@ A Transaction the bank has reported but not yet settled; it may still change or 
 _Avoid_: Unsettled, provisional
 
 **Transfer**:
-A Transaction moving money between two tracked Accounts; it is not spending and is excluded from Budgets.
+A Transaction moving money between two tracked Accounts, found as one of a pair in different Accounts or marked by a Rule; it is not spending and is excluded from Budgets. How pairs are found is in README [How it works](README.md#how-it-works).
 _Avoid_: Internal payment, sweep
 
 ## Sources
@@ -73,7 +73,7 @@ A label grouping Transactions by purpose, such as Groceries or Care Fees.
 _Avoid_: Tag, type, bucket
 
 **Uncategorised**:
-What a Transaction is when no Override, Rule or Akahu suggestion gives it a Category in use, so a removed Category counts as none; the Admin has a list of them. Removing a Category takes away its Overrides, and those Transactions fall back to their Rule or Akahu category, or are Uncategorised if neither applies.
+What a Transaction is when no Override, Rule or Akahu suggestion gives it a Category in use, so a removed Category counts as none; the Admin has a list of them. A Transfer is not Uncategorised and is left off that list. Removing a Category takes away its Overrides, and those Transactions fall back to their Rule or Akahu category, or are Uncategorised if neither applies.
 _Avoid_: Unassigned, unknown
 
 **Rule**:
