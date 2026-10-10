@@ -447,8 +447,9 @@ test('hovering a bar or a point says what it is, in the same words as the figure
   await expect(tip).toContainText('$45.50')
 
   await drawn(netWorth(page), LINE)
-  const plot = await netWorth(page).locator('svg.recharts-surface').boundingBox()
-  await page.mouse.move(plot!.x + plot!.width - 40, plot!.y + plot!.height / 2)
+  const picture = netWorth(page).locator('svg.recharts-surface')
+  const size = await picture.boundingBox()
+  await picture.hover({ position: { x: size!.width - 40, y: size!.height / 2 } }) // scrolls to it first: hovering the bar scrolled the page
   await expect(netWorth(page).locator('.recharts-tooltip-wrapper')).toContainText('Wed 7 Oct 2026')
 })
 
