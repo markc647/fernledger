@@ -95,7 +95,8 @@ const reset = async (db: D1Database) => {
     (await db.prepare(`SELECT name FROM pragma_table_list WHERE schema = 'main' AND ${where}`).all<{ name: string }>()).results.map((t) => t.name)
   for (const name of await named("type = 'virtual'")) await db.prepare(`DROP TABLE "${name}"`).run() // takes its shadow tables with it
   for (const name of await named("type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name <> 'd1_migrations'")) {
-    if (name === 'settings' || name === 'change_log') await db.prepare(`DELETE FROM "${name}"`).run()
+    // Kept, empty: the daily crons look in data_migration_progress for a Rules re-run to carry on (worker/rule-rerun.ts).
+    if (['settings', 'change_log', 'data_migration_progress'].includes(name)) await db.prepare(`DELETE FROM "${name}"`).run()
     else await db.prepare(`DROP TABLE "${name}"`).run()
   }
   await db.prepare('DELETE FROM sqlite_sequence').run()
@@ -221,23 +222,27 @@ describe('free-plan limits', () => {
     await seedChangeLog(1)
   }
 
-  it('uses exactly the operation budget it is given: 37 on the weekly cron, 16 on a continuation', async () => {
+  it('uses exactly the operation budget it is given: 38 on the weekly cron, 16 on a continuation', async () => {
     await seedManyTinyTables()
 
     const weekly = counted()
     await runCron(BACKUP_CRON, sunday, weekly.bindings)
     // R2: read the saved run, check for a finished backup, then per table a part and a cursor save.
     // D1: the schema and the applied migrations, then one read per table. A short page needs no empty read after it.
-    expect(weekly.ops).toMatchObject({ d1: 2 + 11, r2: 2 + 11 * 2 })
+    // (The table of Rules re-run progress is one of them, and empty: it costs a read and no part.)
+    expect(weekly.ops).toMatchObject({ d1: 2 + 12, r2: 2 + 11 * 2 })
     expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).toBeNull()
 
     const next = counted()
     await runCron(daily, new Date('2026-10-12T18:00:00Z'), next.bindings)
-    expect(next.ops).toMatchObject({ d1: 5, r2: 1 + 5 * 2 })
+    // D1: 5 for the backup and 1 more, which the Rules re-run spends to look for a job to carry on (the weekly cron does not).
+    expect(next.ops).toMatchObject({ d1: 5 + 1, r2: 1 + 5 * 2 })
 
-    // The 50-query and 50-subrequest limits leave room: Sync shares the daily crons.
+    // The 50-query and 50-subrequest limits leave room: Sync shares the daily crons. (A running re-run adds at most 16 queries on those,
+    // or 8 in a run that is also carrying a backup on, as worker/rule-rerun.ts says and rule-rerun.test.ts pins: the backup's 20 and the
+    // re-run's 8 are well inside 50.)
     expect(weekly.ops.d1 + weekly.ops.r2).toBeLessThanOrEqual(40)
-    expect(next.ops.d1 + next.ops.r2).toBeLessThanOrEqual(20)
+    expect(next.ops.d1 + next.ops.r2).toBeLessThanOrEqual(20 + 1) // the backup's 20, and the re-run's look
   })
 
   it('stops at about 1 MB of NDJSON per invocation, so the CPU spent on encoding and hashing stays small', async () => {

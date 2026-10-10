@@ -4,10 +4,13 @@ import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { criteriaBody, describeRule, MAX_RULES, ruleBody, ruleRecord, toCriteria, type Criteria } from './rule-criteria'
 import { previewStatements, type PreviewSample } from './rule-preview'
+import { latestRerun, restartRerun, startRerun, stepRerun, stopRerun } from './rule-rerun'
 import { validate } from './validate'
 
 // Rules are applied to Transactions an Import adds (rule-apply.ts); saving, changing or removing a Rule here never
-// touches a Transaction that is already stored. Every change is one Change Log entry of type `rule`.
+// touches a Transaction that is already stored. The Admin applies the Rules to all of those with a re-run (rule-rerun.ts),
+// which is started and stepped from the routes at the end. A change to the Rules while a re-run is running sends it back
+// to the start, so each change here carries `restartRerun` in its batch. Every change is one Change Log entry of type `rule`.
 
 const orderBody = z.object({ ids: z.array(z.int().check(z.positive())).check(z.maxLength(MAX_RULES)) })
 const nothing = z.object({})
@@ -69,12 +72,15 @@ export const rules = new Hono<AppEnv>()
     const target = { category: category?.name ?? null, transfer: body.transfer === true }
     const [added] = await recordChange(
       db,
-      db
-        .prepare(
-          `INSERT INTO rules (position, text_contains, bank_type, direction, min_cents, max_cents, category_id, is_transfer)
-           VALUES ((SELECT COALESCE(MAX(position), 0) + 1 FROM rules WHERE removed_at IS NULL), ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(criteria.textContains, criteria.bankType, criteria.direction, criteria.minCents, criteria.maxCents, category?.id ?? null, target.transfer ? 1 : 0),
+      [
+        db
+          .prepare(
+            `INSERT INTO rules (position, text_contains, bank_type, direction, min_cents, max_cents, category_id, is_transfer)
+             VALUES ((SELECT COALESCE(MAX(position), 0) + 1 FROM rules WHERE removed_at IS NULL), ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(criteria.textContains, criteria.bankType, criteria.direction, criteria.minCents, criteria.maxCents, category?.id ?? null, target.transfer ? 1 : 0),
+        restartRerun(db),
+      ],
       { actor: c.var.member, type: 'rule', summary: `Added a Rule: ${describeRule(criteria, target)}`, after: ruleRecord(criteria, target) },
     )
     return c.json({ id: added!.meta.last_row_id }, 201)
@@ -90,7 +96,7 @@ export const rules = new Hono<AppEnv>()
     if (ids.every((id, i) => id === current[i]!.id)) return c.json({ ids })
 
     const byId = new Map(current.map((rule) => [rule.id, rule]))
-    await recordChange(db, db.prepare('UPDATE rules SET position = (SELECT j.key + 1 FROM json_each(?1) j WHERE j.value = rules.id) WHERE removed_at IS NULL').bind(JSON.stringify(ids)), {
+    await recordChange(db, [db.prepare('UPDATE rules SET position = (SELECT j.key + 1 FROM json_each(?1) j WHERE j.value = rules.id) WHERE removed_at IS NULL').bind(JSON.stringify(ids)), restartRerun(db)], {
       actor: c.var.member,
       type: 'rule',
       summary: 'Changed the order of Rules',
@@ -114,9 +120,12 @@ export const rules = new Hono<AppEnv>()
 
     await recordChange(
       db,
-      db
-        .prepare('UPDATE rules SET text_contains = ?, bank_type = ?, direction = ?, min_cents = ?, max_cents = ?, category_id = ?, is_transfer = ? WHERE id = ? AND removed_at IS NULL')
-        .bind(criteria.textContains, criteria.bankType, criteria.direction, criteria.minCents, criteria.maxCents, next.categoryId, next.transfer ? 1 : 0, id),
+      [
+        db
+          .prepare('UPDATE rules SET text_contains = ?, bank_type = ?, direction = ?, min_cents = ?, max_cents = ?, category_id = ?, is_transfer = ? WHERE id = ? AND removed_at IS NULL')
+          .bind(criteria.textContains, criteria.bankType, criteria.direction, criteria.minCents, criteria.maxCents, next.categoryId, next.transfer ? 1 : 0, id),
+        restartRerun(db),
+      ],
       { actor: c.var.member, type: 'rule', summary: `Changed a Rule: ${describe(next)}`, before: record(rule), after: record(next) },
     )
     return c.json({ id })
@@ -128,11 +137,24 @@ export const rules = new Hono<AppEnv>()
     const rule = await findRule(db, id)
     if (!rule) return c.json({ error: 'Not found' }, 404)
 
-    await recordChange(db, db.prepare("UPDATE rules SET removed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND removed_at IS NULL").bind(id), {
+    await recordChange(db, [db.prepare("UPDATE rules SET removed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND removed_at IS NULL").bind(id), restartRerun(db)], {
       actor: c.var.member,
       type: 'rule',
       summary: `Removed a Rule: ${describe(rule)}`,
       before: record(rule),
     })
     return c.json({ id })
+  })
+  // Applying the Rules to the Transactions already on file (rule-rerun.ts): start a run, then step it, one chunk a request, until
+  // it says it is done (or paused until D1's day changes), or stop it. The Rules page does all of it. The latest run, running or
+  // ended, is readable by every Member like the Rules.
+  .get('/rerun', async (c) => c.json({ job: await latestRerun(c.env.DB) }))
+  .post('/rerun', validate('json', nothing), async (c) => {
+    const job = await startRerun(c.env.DB, c.var.member)
+    return job ? c.json({ job }, 201) : c.json({ error: 'A re-run is already in progress' }, 409)
+  })
+  .post('/rerun/step', validate('json', nothing), async (c) => c.json({ job: await stepRerun(c.env.DB) }))
+  .post('/rerun/stop', validate('json', nothing), async (c) => {
+    const job = await stopRerun(c.env.DB, c.var.member)
+    return job ? c.json({ job }) : c.json({ error: 'No re-run is in progress' }, 409)
   })

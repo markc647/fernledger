@@ -53,7 +53,7 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
 
   await page.goto('/rules')
   await expect(page.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible()
-  await expect(page.getByText('does not change the Transactions you already have')).toBeVisible()
+  await expect(page.getByText('The Transactions you already have change only when you choose Apply the Rules to all Transactions')).toBeVisible()
   await page.getByRole('button', { name: 'Add a Rule' }).click()
   await expect(page.getByLabel('Text contains')).toBeFocused()
 
@@ -81,7 +81,7 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
 
   const saved = page.getByRole('status').filter({ hasText: 'Added the Rule.' })
   await expect(saved).toContainText('used for new Transactions as they are imported')
-  await expect(saved).toContainText('applying Rules to those will come in a later update')
+  await expect(saved).toContainText('To use the change on the Transactions you already have, choose Apply the Rules to all Transactions')
   await expect(page.getByRole('button', { name: 'Add a Rule' })).toBeFocused()
   const row = rowFor(page, shop.toLowerCase())
   await expect(row).toContainText(`Text contains “${shop.toLowerCase()}”`)
@@ -202,6 +202,269 @@ test('the Admin is told what is wrong with a box, and taken to it', async ({ pag
   await expect(page.getByRole('alert').filter({ hasText: 'must not be less than the amount it starts from' })).toBeVisible()
   await expect(page.getByLabel('Amount up to ($)')).toBeFocused()
   await noAxeViolations(page)
+})
+
+const rerunButton = (page: Page) => page.getByRole('button', { name: 'Apply the Rules to all Transactions' })
+
+test('the Admin applies a Rule to the Transactions already on file, and one set by hand is left alone', async ({ page, context, baseURL }, testInfo) => {
+  await signInAs(context, 'admin')
+  const stamp = `${testInfo.project.name}${Date.now()}`
+  const shop = `EXAMPLE APPLYSHOP ${stamp}`
+  // Two Transactions on file before there is a Rule. The Admin sets the Category of one by hand.
+  await importTransaction(context, baseURL!, testInfo.project.name, `${shop} PLAIN`, `AP${stamp}`)
+  await importTransaction(context, baseURL!, testInfo.project.name, `${shop} HAND`, `AH${stamp}`)
+  const list = async (text: string) =>
+    ((await (await context.request.get(`/api/transactions?text=${encodeURIComponent(text)}&count=false`)).json()) as { transactions: { id: number; description: string; categoryName: string | null; categorySource: string | null }[] }).transactions
+  const found = () => list(shop)
+  const handId = (await list(`${shop} HAND`))[0]!.id
+  expect((await context.request.put(`/api/transactions/${handId}/override`, { headers: { Origin: baseURL! }, data: { categoryId: await categoryId(context, 'Travel') } })).ok()).toBe(true)
+  const rule = await addRule(context, baseURL!, { textContains: shop.toLowerCase(), categoryId: await categoryId(context, 'Groceries') })
+
+  try {
+    await page.goto('/rules')
+    await expect(page.getByRole('heading', { level: 2, name: 'Apply the Rules to all Transactions' })).toBeVisible()
+    await expect(rerunButton(page)).toBeEnabled()
+    await noAxeViolations(page)
+    // Nothing has changed yet: a Rule is for new Transactions until it is applied.
+    expect((await found()).map((t) => t.categoryName).sort()).toEqual(['Travel', null])
+
+    // (The light and dark runs share a database, so the page may already show the other's finished run; the Transactions are what tell.)
+    await rerunButton(page).click()
+    await expect.poll(async () => (await found()).find((t) => t.description.endsWith('PLAIN'))?.categoryName).toBe('Groceries')
+    await expect(page.getByRole('status').filter({ hasText: /Finished\. Looked at/ })).toContainText('and updated')
+    await expect(page.getByText(/^Finished (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d/)).toBeVisible()
+    await expect(rerunButton(page)).toBeEnabled()
+    await expect(page.getByRole('progressbar')).toHaveCount(0)
+    await noAxeViolations(page)
+
+    // The Transaction on file from before has the Rule's Category now. The one the Admin set by hand has the Category it was given.
+    const applied = await found()
+    expect(applied.find((t) => t.description.endsWith('PLAIN'))).toMatchObject({ categoryName: 'Groceries', categorySource: 'rule' })
+    expect(applied.find((t) => t.description.endsWith('HAND'))).toMatchObject({ categoryName: 'Travel', categorySource: 'override' })
+
+    await page.goto('/change-log')
+    await expect(page.getByRole('listitem').filter({ hasText: 'Started applying the Rules to up to' }).first()).toContainText('Rule change by admin@example.com')
+    await expect(page.getByRole('listitem').filter({ hasText: 'Finished applying the Rules to all Transactions' }).first()).toContainText('Rule change by admin@example.com')
+  } finally {
+    await removeRule(context, baseURL!, rule)
+  }
+
+  // With the Rule gone, applying the Rules again takes the Category it gave away. The Override stays.
+  await page.goto('/rules')
+  await rerunButton(page).click()
+  await expect.poll(async () => (await found()).find((t) => t.description.endsWith('PLAIN'))?.categoryName).toBeNull()
+  await expect(page.getByRole('status').filter({ hasText: /Finished\. Looked at/ })).toBeVisible()
+  const cleared = await found()
+  expect(cleared.find((t) => t.description.endsWith('PLAIN'))).toMatchObject({ categoryName: null, categorySource: null })
+  expect(cleared.find((t) => t.description.endsWith('HAND'))).toMatchObject({ categoryName: 'Travel', categorySource: 'override' })
+})
+
+const runningJob = (over: Record<string, unknown> = {}) => ({
+  id: 7,
+  status: 'running',
+  startedAt: '2026-10-11T02:00:00.000Z',
+  updatedAt: '2026-10-11T02:00:30.000Z',
+  finishedAt: null,
+  totalRows: 20_000,
+  doneRows: 4_000,
+  changedRows: 12,
+  percent: 20,
+  restarts: 0,
+  stepRows: 1_000,
+  cronRowsPerDay: 6_000,
+  paused: false,
+  ...over,
+})
+
+test.describe('while the Rules are being applied', () => {
+  // The 429 below is the free plan's daily allowance being used up, which the page has to explain; Chrome logs it as an error.
+  test.use({ expectedStatuses: [429] })
+
+  test('the page shows how far it has got, announces a few times, says a used-up day ends at midday NZ time, and carries on by itself then', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    // The page asks again when the day changes (00:00 UTC), so the clock is the test's to move.
+    await page.clock.install({ time: new Date('2026-10-11T02:00:00Z') })
+    let current = runningJob()
+    const answers: (() => { status: number; json: unknown })[] = [
+      () => ({ status: 200, json: { job: (current = runningJob({ doneRows: 10_000, changedRows: 400, percent: 50, updatedAt: '2026-10-11T02:01:00.000Z' })) } }),
+      () => ({ status: 429, json: { error: 'Daily limit reached' } }),
+      () => ({ status: 200, json: { job: (current = runningJob({ status: 'done', doneRows: 20_000, changedRows: 1_234, percent: 100, updatedAt: '2026-10-12T00:05:00.000Z', finishedAt: '2026-10-12T00:05:00.000Z' })) } }),
+    ]
+    // Each step waits to be let go, so the page can be looked at between them.
+    const gates = answers.map(() => {
+      let open = () => {}
+      const opened = new Promise<void>((resolve) => (open = resolve))
+      return { opened, open }
+    })
+    let steps = 0
+    await page.route('**/api/rules/rerun/step', async (route) => {
+      const n = steps++
+      await gates[n]!.opened
+      await route.fulfill(answers[n]!())
+    })
+    await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: current } }) : route.fallback()))
+
+    await page.goto('/rules')
+    // A run that was going when the page was opened is carried on, and shown.
+    await expect(page.getByText('Looked at 4,000 of up to 20,000 Transactions (20%).')).toBeVisible()
+    const bar = page.getByRole('progressbar', { name: 'Apply the Rules to all Transactions' })
+    await expect(bar).toHaveAttribute('value', '20')
+    await expect(page.getByRole('status').filter({ hasText: 'Started. Going through up to 20,000 Transactions.' })).toBeVisible()
+    await expect(page.getByText('Last updated Sun 11 Oct 2026, 3:00 pm.')).toBeVisible()
+    await expect(page.getByText('About 16 more steps if you keep this page open, or about 3 days if you close it. Keep this page open to finish sooner.')).toBeVisible()
+    await expect(rerunButton(page)).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
+    await noAxeViolations(page)
+
+    gates[0]!.open()
+    await expect(page.getByText('Looked at 10,000 of up to 20,000 Transactions (50%).')).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: '50% done.' })).toBeVisible()
+    await expect(bar).toHaveAttribute('value', '50')
+
+    gates[1]!.open()
+    const alert = page.getByRole('alert').filter({ hasText: 'used up the database allowance' })
+    await expect(alert).toContainText('It carries on by itself after the daily allowance resets, around midday NZ time. Open this page then to finish sooner.')
+    await expect(alert.getByRole('button')).toHaveCount(0) // trying again now would only be refused again
+    await expect(page.getByText('Looked at 10,000 of up to 20,000 Transactions (50%).')).toBeVisible() // where it got to is still shown
+    await noAxeViolations(page)
+
+    // The day changes: the page asks again, with nobody pressing anything.
+    gates[2]!.open()
+    await page.clock.fastForward('23:00:00')
+    await expect(page.getByRole('status').filter({ hasText: 'Finished. Looked at all 20,000 Transactions and updated 1,234 of them.' })).toBeVisible()
+    await expect(page.getByText('Finished Mon 12 Oct 2026, 1:05 pm.')).toBeVisible()
+    await expect(alert).toHaveCount(0)
+    await expect(bar).toHaveCount(0)
+    await expect(rerunButton(page)).toBeEnabled()
+    await noAxeViolations(page)
+  })
+
+  test('a run that has used its share of the day is shown as paused, and the page does not ask for steps', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    let steps = 0
+    await page.route('**/api/rules/rerun/step', (route) => {
+      steps++
+      return route.fulfill({ json: { job: runningJob({ paused: true }) } })
+    })
+    await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob({ paused: true }) } }) : route.fallback()))
+    await page.goto('/rules')
+
+    await expect(page.getByText(/^Paused: it has used the share of today's free database allowance that it keeps for itself\./)).toContainText('Open this page then to finish sooner.')
+    await expect(page.getByRole('status').filter({ hasText: 'Paused until the daily allowance resets, around midday NZ time.' })).toBeVisible()
+    await expect(rerunButton(page)).toBeDisabled()
+    await noAxeViolations(page)
+    expect(steps).toBe(0)
+  })
+
+  test('a page whose clock is ahead of the Worker\'s asks again in a few minutes and not a day later', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    // By this page's clock it is ten minutes to midnight UTC. The Worker's day has not changed when the page first asks, and changes later.
+    await page.clock.install({ time: new Date('2026-10-11T23:50:00Z') })
+    let workersDayHasChanged = false
+    let asked = 0
+    let steps = 0
+    let finished = false
+    const current = () =>
+      finished
+        ? runningJob({ status: 'done', doneRows: 20_000, percent: 100, finishedAt: '2026-10-12T00:20:00.000Z', updatedAt: '2026-10-12T00:20:00.000Z' })
+        : runningJob({ paused: !workersDayHasChanged })
+    await page.route('**/api/rules/rerun/step', (route) => {
+      steps++
+      finished = true
+      return route.fulfill({ json: { job: current() } })
+    })
+    await page.route('**/api/rules/rerun', (route) => {
+      if (route.request().method() !== 'GET') return route.fallback()
+      asked++
+      return route.fulfill({ json: { job: current() } })
+    })
+    await page.goto('/rules')
+    await expect(page.getByText(/^Paused: it has used the share/)).toBeVisible()
+    expect(asked).toBe(1)
+
+    await page.clock.fastForward('00:10:10') // the page's midnight: it asks, and is told to wait
+    await expect.poll(() => asked).toBe(2)
+    await expect(page.getByText(/^Paused: it has used the share/)).toBeVisible()
+    expect(steps).toBe(0)
+
+    workersDayHasChanged = true // the Worker's midnight comes a little later
+    await page.clock.fastForward('00:05:10') // the page asks again five minutes after, and not a day after
+    await expect(page.getByRole('status').filter({ hasText: 'Finished. Looked at all 20,000 Transactions' })).toBeVisible()
+    expect(asked).toBe(3)
+    expect(steps).toBe(1)
+  })
+
+  test('says the Rules changed while it ran, and that it started again', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.route('**/api/rules/rerun/step', () => new Promise(() => {})) // never answered: the page stays as the job was when it opened
+    await page.route('**/api/rules/rerun', (route) =>
+      route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob({ totalRows: 3_000, doneRows: 0, percent: 0, restarts: 2 }) } }) : route.fallback(),
+    )
+    await page.goto('/rules')
+
+    await expect(page.getByText('The Rules changed 2 times while this was running, so it started again from the first Transaction each time.')).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: 'The Rules changed again, so it started again (2 times). Going through up to 3,000 Transactions.' })).toBeVisible()
+  })
+
+  test('does not announce a run that finished before the page was opened', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.route('**/api/rules/rerun', (route) =>
+      route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob({ status: 'done', doneRows: 20_000, percent: 100, finishedAt: '2026-10-11T02:05:00.000Z' }) } }) : route.fallback(),
+    )
+    await page.goto('/rules')
+
+    await expect(page.getByText('Finished. Looked at all 20,000 Transactions and updated 12 of them.')).toBeVisible() // shown...
+    await expect(page.getByRole('status').filter({ hasText: 'Finished.' })).toHaveCount(0) // ...but not said again to a screen reader
+  })
+
+  test('the Admin stops a run, and is told what that leaves', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.route('**/api/rules/rerun/step', () => new Promise(() => {}))
+    await page.route('**/api/rules/rerun/stop', (route) =>
+      route.fulfill({ json: { job: runningJob({ status: 'stopped', doneRows: 7_000, changedRows: 300, percent: 35, finishedAt: '2026-10-11T02:07:00.000Z' }) } }),
+    )
+    await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
+    await page.goto('/rules')
+
+    await page.getByRole('button', { name: 'Stop applying the Rules' }).click()
+
+    await expect(page.getByRole('status').filter({ hasText: 'Stopped. Looked at 7,000 Transactions and updated 300 of them. Those keep the result they were given and the rest are as they were.' })).toBeFocused()
+    await expect(page.getByText('Stopped Sun 11 Oct 2026, 3:07 pm.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Stop applying the Rules' })).toHaveCount(0)
+    await expect(rerunButton(page)).toBeEnabled()
+    await noAxeViolations(page)
+  })
+
+  test('while a Rule is being changed the run waits, and the form, the Save message and the removal say that saving starts it again', async ({ page, context, baseURL }, testInfo) => {
+    await signInAs(context, 'admin')
+    const stamp = `${testInfo.project.name}${Date.now()}`
+    const rule = await addRule(context, baseURL!, { textContains: `EXAMPLE RUNGOING ${stamp}`, categoryId: await categoryId(context, 'Fuel') })
+    let steps = 0
+    try {
+      await page.route('**/api/rules/rerun/step', (route) => {
+        steps++
+        return route.fulfill({ json: { job: runningJob() } })
+      })
+      await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
+      await page.goto('/rules')
+      await expect.poll(() => steps).toBeGreaterThan(2) // asking for step after step...
+
+      await page.getByRole('button', { name: 'Add a Rule' }).click()
+      await expect(page.getByText('A run is going. Saving starts it again from the first Transaction.')).toBeVisible()
+      await expect(page.getByText('Waiting while you change a Rule.')).toBeVisible()
+      await noAxeViolations(page)
+      const whenOpened = steps
+      await page.waitForTimeout(600)
+      expect(steps - whenOpened).toBeLessThanOrEqual(1) // ...until the form is open: at most the one already out
+      await page.getByRole('button', { name: 'Cancel' }).click()
+      await expect.poll(() => steps).toBeGreaterThan(whenOpened + 2) // and then on again
+
+      await page.getByRole('button', { name: new RegExp(`^Remove Rule \\d+$`) }).last().click()
+      await expect(page.getByRole('group', { name: /^Remove Rule/ })).toContainText('A run is going. Removing the Rule starts it again from the first Transaction.')
+    } finally {
+      await removeRule(context, baseURL!, rule)
+    }
+  })
 })
 
 test('a Member does not see the Rules page, and the API refuses their changes', async ({ page, context, baseURL }) => {
