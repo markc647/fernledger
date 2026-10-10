@@ -3,6 +3,7 @@ import type { PreviewRow } from '@/generated/api/import-rows'
 import { api } from './api'
 import type { CarryPreview } from './import-carry'
 import { HttpError } from './me'
+import { loadBalances } from './report-balances'
 import { loadListing } from './report-transactions'
 import { apiQuery, filterQuery, filtersOf, type TransactionSearch } from './transaction-search'
 
@@ -93,6 +94,28 @@ export const reportListingQuery = (accounts: { id: number; name: string; account
         to,
         fetchPage: async ({ accountId, after, limit, ...range }) => {
           const res = await api.reports.transactions.$get({ query: { accountId: String(accountId), ...range, limit: String(limit), ...(after === undefined ? {} : { after }) } })
+          if (!res.ok) throw new HttpError(res.status)
+          return res.json()
+        },
+      }),
+  })
+
+/**
+ * The balances-over-time Report's data: each Account's balance history at the end of each month in the range, one request for each
+ * Account (loadBalances). Read once and kept, as the Transaction listing is: a Report is a snapshot.
+ */
+export const reportBalancesQuery = (accounts: { id: number; name: string; accountNumber: string; cutoverDate: string | null }[], from: string, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'balances', accounts.map((a) => a.id), from, to],
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: () =>
+      loadBalances({
+        accounts,
+        from,
+        to,
+        fetchReport: async ({ accountId, ...range }) => {
+          const res = await api.reports.balances.$get({ query: { accountId: String(accountId), ...range } })
           if (!res.ok) throw new HttpError(res.status)
           return res.json()
         },

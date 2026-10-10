@@ -281,13 +281,15 @@
     padding: 0;
   }
 }
-/* Black on white. The colours that carry meaning on screen (money in and out, muted words) are black on paper, because the
-   sign and the words "Money in" and "Money out" carry it, and a black-and-white printer would turn a colour into a grey. */
+/* Black on white. The colours that carry meaning on screen (money in and out, warnings, muted words) are black on paper, because the
+   sign, the words "Money in" and "Money out", and a warning's icon and box carry it, and a black-and-white printer would turn a colour
+   into a grey. */
 @media print {
   .report-frame {
     --foreground: oklch(0 0 0);
     --muted-foreground: oklch(0 0 0);
     --success: oklch(0 0 0);
+    --warning: oklch(0 0 0);
     --danger: oklch(0 0 0);
     --border: oklch(0.45 0 0);
     color: oklch(0 0 0);
