@@ -1,9 +1,10 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { APPLY_HELD, HOLD_REMOVED } from './carry-over'
+import { APPLY_HELD, HOLD_REMOVED, MARK_APPLIED } from './carry-over'
 import worker from './index'
-import { PAIR_ONE, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, pairTransfersStatement } from './transfers'
+import { WRITES_PER_CARRIED, WRITES_PER_MARK_REMOVED } from './import-rows'
+import { PAIR_ONE, clearHeldNotTransferStatement, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, pairTransfersStatement } from './transfers'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only). All the data is made up (bank 99).
@@ -49,22 +50,24 @@ let serial = 0
 /** A made-up row; each gets a bank unique ID of its own, so rows that look identical are still different rows. */
 const row = (date: string, amountCents: number, payee = 'EXAMPLE TRANSFER', uniqueId = `U${++serial}`) => ({ date, uniqueId, tranType: 'TFR', chequeNumber: null, payee, bankMemo: '', amountCents })
 
-const sendChunk = (account: Account, rows: unknown[], extra: { replace?: boolean } = {}) =>
+const sendChunk = (account: Account, rows: unknown[], extra: { replace?: boolean; index?: number; count?: number } = {}) =>
   call('/api/imports/chunks', {
     method: 'POST',
     body: {
       account,
-      chunk: { index: 0, count: 1 },
+      chunk: { index: extra.index ?? 0, count: extra.count ?? 1 },
       file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: '2026-10-01', to: '2026-10-31', ledgerBalance: { cents: 0, date: '2026-10-31' } },
       rows,
       ...(extra.replace ? { replace: true } : {}),
     },
   })
-async function importInto(account: Account, rows: unknown[], extra: { replace?: boolean } = {}) {
+async function importInto(account: Account, rows: unknown[], extra: { replace?: boolean; index?: number; count?: number } = {}) {
   const res = await sendChunk(account, rows, extra)
   expect(res.status, JSON.stringify(await res.clone().json())).toBe(200)
-  return (await res.json()) as { lostTransactions: { description: string; notTransfer: boolean }[]; paired: number }
+  return (await res.json()) as { lostTransactions: { description: string; notTransfer: boolean }[]; paired: number; carried: number; stillWaiting: number | null }
 }
+/** How many marks the Accounts are holding for a replace that has not finished. */
+const heldMarks = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM carry_over WHERE not_transfer_with IS NOT NULL').first<{ n: number }>())!.n
 
 type Listed = {
   id: number
@@ -535,8 +538,9 @@ describe('treating a marked pairing as a Transfer again', () => {
 
     const res = await treatAsTransferAgain('OUT')
 
+    // It was a Transfer all along, and says so.
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ id: await idOf('OUT'), notTransfer: false, paired: false })
+    expect(await res.json()).toEqual({ id: await idOf('OUT'), notTransfer: false, paired: true })
     expect(await pairs()).toEqual([['OUT', 'IN']])
     expect(await transferLog()).toEqual([])
   })
@@ -548,11 +552,23 @@ describe('treating a marked pairing as a Transfer again', () => {
     // A second window treats it as a Transfer again in the instant between this request reading the marks and writing.
     const res = await callWhileInterrupted(`/api/transactions/${await idOf('OUT')}/not-transfer`, 'DELETE', () => treatAsTransferAgain('IN'))
 
+    // The other window paired them, so that is what this one reports.
     expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ id: await idOf('OUT'), notTransfer: false, paired: true })
     expect(await pairs()).toEqual([['OUT', 'IN']])
     expect(await marker('OUT')).toBeNull()
     // The mark, and the one undo that did something.
     expect(await transferLog()).toHaveLength(2)
+  })
+
+  it('says it is not paired when the other window found nothing to pair it with', async () => {
+    await transferRule('ROUND UP')
+    await importInto(EVERYDAY, [row(DAY, -50, 'ROUND UP TO SAVINGS', 'ROUND')])
+    await notTransfer('ROUND')
+
+    const res = await callWhileInterrupted(`/api/transactions/${await idOf('ROUND')}/not-transfer`, 'DELETE', () => treatAsTransferAgain('ROUND'))
+
+    expect(await res.json()).toEqual({ id: await idOf('ROUND'), notTransfer: false, paired: false })
   })
 
   it('takes its own mark off when its matching Transaction was replaced by one the file does not hold, and pairs with what matches now', async () => {
@@ -688,6 +704,69 @@ describe('replacing imported history keeps the Admin\'s Not a Transfer, as it do
 
     expect(imported.paired).toBe(0)
     expect(await pairs()).toEqual([])
+  })
+
+  /** A replace of Savings that stops after its first part: the marked $50.00 in is removed and its mark held, and nothing of the file that holds it again is saved yet. */
+  async function replaceStoppedAfterFirstPart() {
+    const first = await sendChunk(SAVINGS, [row('2026-10-06', 1, 'EXAMPLE OTHER', 'ELSEWHERE')], { replace: true, index: 0, count: 2 })
+    expect(first.status, JSON.stringify(await first.clone().json())).toBe(200)
+    expect(await heldMarks()).toBe(1)
+  }
+
+  it('takes the mark off the half that is held too when the Admin treats the other half as a Transfer again, so the half that comes back is not marked', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    await replaceStoppedAfterFirstPart()
+
+    await treatAsTransferAgain('OUT')
+
+    expect(await heldMarks()).toBe(0)
+    // The rest of the file is imported: the $50.00 in comes back as it was before the Admin said anything, and pairs with the $50.00 out again.
+    await importInto(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN')])
+    expect(await marker('IN')).toBeNull()
+    expect(await marker('OUT')).toBeNull()
+    expect(await pairs()).toEqual([['OUT', 'IN']])
+  })
+
+  it('does not give a mark made later the number of a half that is still held', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    await replaceStoppedAfterFirstPart()
+    await treatAsTransferAgain('OUT')
+    // The $50.00 out finds another match in Bills, and the Admin says that one is wrong too. A new mark takes the lower ID of its two, here the $50.00 out's:
+    // the number the held half was marked with.
+    await importInto(BILLS, [row(DAY, 5000, 'EXAMPLE DEPOSIT', 'DEPOSIT')])
+    expect(await pairs()).toEqual([['OUT', 'DEPOSIT']])
+    await notTransfer('OUT')
+
+    await importInto(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN')])
+
+    expect(await marker('IN')).toBeNull()
+    expect(await marker('OUT')).not.toBeNull()
+    expect(await marker('OUT')).toBe(await marker('DEPOSIT'))
+    expect(await pairs()).toEqual([])
+  })
+
+  it('does not count a held mark as given to a Transaction that is paired already, and leaves it waiting', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    await replaceStoppedAfterFirstPart()
+    // A Savings Transaction with the bank number of the held one turns up paired with another $50.00 out (made by hand: an Import would have given it the mark).
+    const everyday = await accountIdOf('Everyday')
+    const savings = await accountIdOf('Savings')
+    const insert = env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source, bank_unique_id) VALUES (?, ?, ?, 'EXAMPLE', 'import', ?) RETURNING id")
+    const out2 = (await insert.bind(everyday, DAY, -5000, 'OUT2').first<{ id: number }>())!.id
+    const in2 = (await insert.bind(savings, DAY, 5000, 'IN').first<{ id: number }>())!.id
+    await env.DB.batch([env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(in2, out2), env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(out2, in2)])
+
+    const imported = await importInto(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN')])
+
+    expect(imported).toMatchObject({ carried: 0, stillWaiting: 1 })
+    expect(await marker('IN')).toBeNull()
+    expect(await pairs()).toEqual([['OUT2', 'IN']])
+    expect((await lastImport()).summary).toContain('Overrides, Notes and Not a Transfer marks carried over for 0 Transactions, 1 still waiting')
+    expect(await heldMarks()).toBe(1)
+    expect(await (await call(`/api/imports/imported/${savings}`)).json()).toMatchObject({ carryOverWaiting: 1 })
   })
 
   it('says in the Change Log that the mark was carried over, with the Overrides and Notes', async () => {
@@ -827,6 +906,47 @@ describe('what marking, undoing and carrying read and write (ADR 0004: free plan
     for (const read of reads) expect(read).toMatch(/USING (INTEGER PRIMARY KEY|INDEX transactions_date)/)
     const clear = (await plan('UPDATE transactions SET not_transfer_with = NULL WHERE not_transfer_with = ?1', 1)).join('\n')
     expect(clear).toMatch(/USING (COVERING )?INDEX transactions_not_transfer_with/)
+  })
+
+  it('costs WRITES_PER_CARRIED writes at most to carry an Override, a Note and a mark: 8 to hold, give, mark given and clear, and 1 to remove the marked row', async () => {
+    await wrongPair()
+    const savings = await accountIdOf('Savings')
+    const id = (
+      await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source, bank_unique_id) VALUES (?, '2026-09-01', -100, 'EXAMPLE', 'import', 'ALL') RETURNING id").bind(savings).first<{ id: number }>()
+    )!.id
+    await env.DB.prepare('UPDATE transactions SET override_category = ?, note = ?, not_transfer_with = id WHERE id = ?').bind(await categoryId('Groceries'), 'n', id).run()
+    const rows = JSON.stringify([{ uniqueId: 'ALL' }])
+
+    const hold = (await env.DB.prepare(HOLD_REMOVED).bind(savings, 5000).run()).meta
+    await env.DB.prepare('DELETE FROM transactions WHERE id = ?').bind(id).run()
+    await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source, bank_unique_id) VALUES (?, '2026-09-01', -100, 'EXAMPLE', 'import', 'ALL')").bind(savings).run()
+    const give = (await env.DB.prepare(APPLY_HELD).bind(savings, rows).run()).meta
+    const marked = (await env.DB.prepare(MARK_APPLIED).bind(savings, rows).run()).meta
+
+    // Holding writes the row and its key; giving writes the row, an entry in the Override's index and one in the mark's; marking it given writes the row.
+    expect([hold.rows_written, give.rows_written, marked.rows_written]).toEqual([2, 3, 1])
+    // Clearing deletes the row and its key, which D1 bills as 2 (the local runtime reports a deleted row as 1). Removing the marked row takes out its entry in the mark index.
+    const clearing = 2
+    expect(hold.rows_written + give.rows_written + marked.rows_written + clearing + WRITES_PER_MARK_REMOVED).toBe(WRITES_PER_CARRIED)
+    const indexes = (await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'transactions_not_transfer_with'").first<{ sql: string }>())!.sql
+    expect(indexes).toMatch(/WHERE not_transfer_with IS NOT NULL/)
+  })
+
+  it('takes the mark off what is held by reading the held rows, which are none except while a replace is unfinished', async () => {
+    const none = (await clearHeldNotTransferStatement(env.DB, { token: 123 }).run()).meta
+    const account = (await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-77', 'Held') RETURNING id").first<{ id: number }>())!.id
+    await env.DB.prepare(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 300)
+       INSERT INTO carry_over (account_id, bank_unique_id, note, not_transfer_with, date, amount_cents, description) SELECT ?, 'HELD' || i, 'n', i, '2026-09-01', -100, 'EXAMPLE' FROM n`,
+    )
+      .bind(account)
+      .run()
+    const held = (await clearHeldNotTransferStatement(env.DB, { token: 123 }).run()).meta
+
+    expect(none.rows_read).toBeLessThanOrEqual(1)
+    expect(held.rows_read).toBeLessThanOrEqual(310)
+    expect(held.changes).toBe(1)
+    expect(await heldMarks()).toBe(299)
   })
 
   it('costs a replace nothing more to hold a mark than to hold a Note, and nothing more to give it', async () => {

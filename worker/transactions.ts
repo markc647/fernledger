@@ -5,7 +5,7 @@ import { recordChange } from './changelog'
 import { effectiveCategory, type CategorySource, type TransferSource } from './effective-category'
 import { exportQuery, exportResponse } from './transaction-export'
 import { buildSearch, categoryProbe, isFewInCategory, needsCategoryProbe, searchQuery, toFilters, toSearch, type Statement } from './transaction-search'
-import { clearNotTransferStatement, markNotTransferStatement, pairOneStatement, PARTNER_JOIN } from './transfers'
+import { clearHeldNotTransferStatement, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, PARTNER_JOIN } from './transfers'
 import { nothing, validate } from './validate'
 
 /** The Admin's Override: a Category in use, or null to take it off. */
@@ -274,16 +274,19 @@ export const transactions = new Hono<AppEnv>()
     const transaction = await findTransferState(db, id)
     if (!transaction) return c.json({ error: 'Not found' }, 404)
     const token = transaction.mark
-    if (token === null) return c.json({ id, notTransfer: false, paired: false })
+    if (token === null) return c.json({ id, notTransfer: false, paired: transaction.transferOf !== null })
 
-    // Each half is paired with what matches now, the Transaction it was marked with first, and then the marks come off: last, so that a second request that
-    // finds them off changes nothing and writes no entry.
+    // Each half is paired with what matches now, the Transaction it was marked with first. The mark comes off what a replace that has not finished is holding
+    // (or the half that comes back would be marked again), and then off the Transactions: last, so that a second request that finds them off changes
+    // nothing and writes no entry.
     const { matching } = transaction
+    const pairing = matching ? 2 : 1
     const results = await recordChange(
       db,
       [
         pairOneStatement(db, { id, prefer: matching?.id ?? null, token }),
         ...(matching ? [pairOneStatement(db, { id: matching.id, prefer: id, token })] : []),
+        clearHeldNotTransferStatement(db, { token }),
         clearNotTransferStatement(db, { token }),
       ],
       {
@@ -295,5 +298,9 @@ export const transactions = new Hono<AppEnv>()
         onlyIfChanged: true,
       },
     )
-    return c.json({ id, notTransfer: false, paired: results.slice(0, -1).some((result) => result.meta.changes > 0) })
+    const paired = results.slice(0, pairing).some((result) => result.meta.changes > 0)
+    if (paired || results.at(-1)!.meta.changes > 0) return c.json({ id, notTransfer: false, paired })
+    // Another request took the marks off first, so this one changed nothing: say how it left this Transaction.
+    const now = await db.prepare('SELECT transfer_of IS NOT NULL AS paired FROM transactions WHERE id = ?').bind(id).first<{ paired: number }>()
+    return c.json({ id, notTransfer: false, paired: now?.paired === 1 })
   })

@@ -22,17 +22,22 @@ export const DAILY_ROW_WRITES = 100_000
  * A Rule adds to that (rule-apply.ts stores the result on the imported row): 1 for a Transfer mark, 2 for a Category, because
  * the Category also has an entry in the rule_category index; removing a row with a Category takes that entry out, 1 more. So a
  * row removed and its replacement imported cost 6 in all, 9 when a Rule gave them a Category. A Transfer (WRITES_PER_PAIRED_IMPORTED
- * and _REMOVED) and an Override or Note carried over (WRITES_PER_CARRIED) cost more again. The estimates built on this number are
+ * and _REMOVED) and an Override, Note or Not a Transfer mark carried over (WRITES_PER_CARRIED) cost more again. The estimates built on this number are
  * for the plain 6 and leave the rest out, and the day's limit is still handled when it is reached.
  */
 export const WRITES_PER_ROW = 3
 
 /**
- * What carrying one Transaction's Override, Note or Not a Transfer mark over costs, at most: holding it (the row and its key, 2), giving it to
- * the new row (the row, and its Category index or the mark index, 2), marking it given (1) and clearing it (2). A mark also costs the removed row 1 more, for its entry in that index. A replace of rows that
- * mostly have neither adds little to the 6 per pair above; one where every row has one adds 7 for each pair.
+ * What carrying one Transaction's Override, Note or Not a Transfer mark over costs, at most: 9. Holding it writes the row and its key (2). Giving it to
+ * the new row writes the row, an entry in the index of the Override's Category and one in the mark's index (3 with both). Marking it given writes the row
+ * (1), and clearing it deletes the row and its key (2). That is 8 for a row with all three, and removing the row it came from takes its entry out of the
+ * mark index, 1 more (WRITES_PER_MARK_REMOVED). An Override or a Note alone costs 7. Pinned in not-a-transfer.test.ts. A replace of rows that mostly
+ * have none adds little to the 6 per pair above; one where every row has all three adds 9 for each pair.
  */
-export const WRITES_PER_CARRIED = 7
+export const WRITES_PER_CARRIED = 9
+
+/** Removing a row that has a Not a Transfer mark takes its entry out of the index the mark has (migrations/3702_not_a_transfer_carry_over.sql). */
+export const WRITES_PER_MARK_REMOVED = 1
 
 /**
  * What a Transfer costs on top of the 3 per row. Pairing writes the matching Transaction's ID on both halves, each a row and an
@@ -53,10 +58,10 @@ export const MAX_CHUNKS = 20
  * (`/api/imports/clear-history`). A slice costs 15,000 writes to remove, up to about 20,000 when a Rule gave every row a
  * Category (4 each, with the rule_category index entry), and 5,000 x 3 = 15,000 more if every row was paired (it lets go of its matching
  * Transaction too: WRITES_PER_PAIRED_REMOVED). A replace writes 6 for each row removed and imported, 9 with a Rule's Category,
- * 16 with an Override or Note carried over as well (WRITES_PER_CARRIED), and 7 more for a row that is paired (13 for a paired row
- * replaced where an unpaired one costs 6: WRITES_PER_PAIRED_REMOVED and _IMPORTED). So the day's allowance covers about 16,000 rows
- * replaced at best, about 6,000 when every row has a Rule's Category and something to carry over, and about 4,000 if every row is
- * a Transfer as well, which a household's rows are not. An Account with more imported rows than that cannot be
+ * 18 with an Override, Note and Not a Transfer mark carried over as well (WRITES_PER_CARRIED; 16 with an Override or Note alone), and 7 more for a row
+ * that is paired, which is never marked (13 for a paired row replaced where an unpaired one costs 6: WRITES_PER_PAIRED_REMOVED and _IMPORTED). So the
+ * day's allowance covers about 16,000 rows replaced at best, about 5,500 when every row has a Rule's Category and all three to carry over, and about
+ * 4,000 if every row is a Transfer with an Override and Note as well, which a household's rows are not. An Account with more imported rows than that cannot be
  * replaced in one day: the Import stops at the limit ("Daily limit reached") and the Admin carries on the next day.
  */
 export const REPLACE_SLICE = 5000

@@ -82,10 +82,12 @@ export function NotATransfer({ id, transfer, extra, onDone }: { id: number; tran
 
 /**
  * "Undo: treat as a Transfer again", for the Admin, on a Transaction marked Not a Transfer. It takes the mark off both halves and pairs each with
- * what matches now, and `onDone` is told whether anything was paired. No question first: it is the undo.
+ * what matches now, and `onDone` is told whether anything was paired. No question first: it is the undo. `warning` is said beside the button, for
+ * something the Admin should know before pressing it.
  */
-export function TreatAsTransferAgain({ id, onDone }: { id: number; onDone: (paired: boolean) => void }) {
+export function TreatAsTransferAgain({ id, warning, onDone }: { id: number; warning?: string; onDone: (paired: boolean) => void }) {
   const queryClient = useQueryClient()
+  const warningId = useId()
   const undo = useMutation({
     mutationFn: async () => {
       const res = await api.transactions[':id']['not-transfer'].$delete({ param: { id: String(id) }, json: {} })
@@ -100,7 +102,12 @@ export function TreatAsTransferAgain({ id, onDone }: { id: number; onDone: (pair
 
   return (
     <>
-      <Button type="button" size="touch" variant="outline" className="mt-2" disabled={undo.isPending} onClick={() => undo.mutate()}>
+      {warning && (
+        <p id={warningId} className="mt-2">
+          {warning}
+        </p>
+      )}
+      <Button type="button" size="touch" variant="outline" className="mt-2" aria-describedby={warning ? warningId : undefined} disabled={undo.isPending} onClick={() => undo.mutate()}>
         Undo: treat as a Transfer again
       </Button>
       {undo.isError && <span role="alert" className="mt-2 block font-medium text-destructive">{failure(undo.error)}</span>}

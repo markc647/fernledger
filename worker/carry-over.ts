@@ -28,6 +28,16 @@ const IN_USE = 'SELECT id FROM categories WHERE removed_at IS NULL'
  */
 export const annotated = (alias: string) => `(${alias}.note IS NOT NULL OR ${alias}.override_category IN (${IN_USE}) OR ${alias}.not_transfer_with IS NOT NULL)`
 
+/**
+ * SQL for "the mark held in `h` can go to `target`" (a `transactions` alias): that Transaction is not paired, and not marked with another number. A mark is
+ * never put on a paired Transaction, because its matching Transaction would be left pointing at it; a Transaction that has the mark already (given a
+ * moment ago, by the statement that gives it) counts too, so the two statements below agree.
+ */
+const takesMark = (h: string, target: string) => `(${target}.not_transfer_with IS ${h}.not_transfer_with OR (${target}.transfer_of IS NULL AND ${target}.not_transfer_with IS NULL))`
+
+/** SQL for "`h` has something to give to `target`": a Note, an Override to a Category in use, or a mark the Transaction takes. NULL, like `annotated`, for none. */
+const giveable = (h: string, target: string) => `(${h}.note IS NOT NULL OR ${h}.override_category IN (${IN_USE}) OR (${h}.not_transfer_with IS NOT NULL AND ${takesMark(h, target)}))`
+
 /** The Override to keep: the Category, but only while it is in use. */
 const liveOverride = (alias: string) => `CASE WHEN ${alias}.override_category IN (${IN_USE}) THEN ${alias}.override_category END`
 
@@ -51,7 +61,7 @@ export const COUNT_REMOVED_ANNOTATED = `
   WHERE t.id IN (${IMPORTED_SLICE})
     AND t.bank_unique_id IS NOT NULL AND ${annotated('t')}`
 
-// A replace that starts again from the beginning holds the Overrides and Notes of the rows it removes, including the ones
+// A replace that starts again from the beginning holds the Overrides, Notes and Not a Transfer marks of the rows it removes, including the ones
 // an earlier attempt already gave back, so the rows marked as given by that attempt are dropped first or they would be
 // counted twice. Rows still waiting are kept: their Transactions are gone and this is all that is left of them.
 export const FORGET_APPLIED = 'DELETE FROM carry_over WHERE account_id = ? AND applied = 1'
@@ -61,13 +71,14 @@ export const FORGET_APPLIED = 'DELETE FROM carry_over WHERE account_id = ? AND a
 // how much is held. A held Category that has been removed since is dropped here, which is why it is not revived. A row
 // already given out (`applied`) is never given again, so a Note the Admin has edited since is not written over.
 // The mark is copied as it is: both halves of a marked pair hold the same number, so neither needs pointing at the other's new row. It runs before the
-// chunk's rows are paired (imports.ts), so a Transaction that comes back marked is never paired, and a row that is paired already is not marked.
+// chunk's rows are paired (imports.ts), so a Transaction that comes back marked is never paired. One that is paired already is not marked (`takesMark`),
+// so a held row with only a mark is then given nothing, and stays waiting.
 export const APPLY_HELD = `
   UPDATE transactions
   SET override_category = ${liveOverride('h')}, note = h.note,
-      not_transfer_with = CASE WHEN transactions.transfer_of IS NULL THEN COALESCE(transactions.not_transfer_with, h.not_transfer_with) ELSE transactions.not_transfer_with END
+      not_transfer_with = CASE WHEN ${takesMark('h', 'transactions')} THEN COALESCE(transactions.not_transfer_with, h.not_transfer_with) ELSE transactions.not_transfer_with END
   FROM carry_over h
-  WHERE h.account_id = ?1 AND h.applied = 0 AND ${annotated('h')}
+  WHERE h.account_id = ?1 AND h.applied = 0 AND ${giveable('h', 'transactions')}
     AND h.bank_unique_id IN (SELECT json_extract(value, '$.uniqueId') FROM json_each(?2))
     AND transactions.account_id = ?1 AND transactions.source = 'import' AND transactions.bank_unique_id = h.bank_unique_id`
 
@@ -78,9 +89,9 @@ export const MARK_APPLIED = `
   SET applied = 1,
       differs = (SELECT t.amount_cents IS NOT carry_over.amount_cents FROM transactions t
                  WHERE t.account_id = ?1 AND t.source = 'import' AND t.bank_unique_id = carry_over.bank_unique_id)
-  WHERE account_id = ?1 AND applied = 0 AND ${annotated('carry_over')}
+  WHERE account_id = ?1 AND applied = 0
     AND bank_unique_id IN (SELECT json_extract(value, '$.uniqueId') FROM json_each(?2))
-    AND EXISTS (SELECT 1 FROM transactions t WHERE t.account_id = ?1 AND t.source = 'import' AND t.bank_unique_id = carry_over.bank_unique_id)`
+    AND EXISTS (SELECT 1 FROM transactions t WHERE t.account_id = ?1 AND t.source = 'import' AND t.bank_unique_id = carry_over.bank_unique_id AND ${giveable('carry_over', 't')})`
 
 /** The last chunk of a completed replace empties the Account's held rows: what it has not given to a Transaction is lost, and was counted. */
 export const CLEAR_HELD = 'DELETE FROM carry_over WHERE account_id = ?'
@@ -93,7 +104,7 @@ export const TIDY_HELD = `DELETE FROM carry_over WHERE account_id = ?1 AND (appl
 /** Up to this many Transactions are listed in a Change Log entry and on the finished screen's report of what was lost. */
 export const LISTED_LOST = 20
 
-// How many Overrides and Notes the Account has waiting from a replace that did not finish, and the first LISTED_LOST of
+// How many Overrides, Notes and Not a Transfer marks the Account has waiting from a replace that did not finish, and the first LISTED_LOST of
 // the Transactions they were on (as JSON, oldest first), for the Admin to see before discarding them. ?1 = the Account.
 export const WAITING_LIST = `
   SELECT COUNT(*) AS n,
@@ -127,8 +138,13 @@ export const PENDING_CTE = `
     WHERE h.account_id = ?4 AND h.applied = 0 AND ${annotated('h')}
       AND NOT EXISTS (SELECT 1 FROM transactions x WHERE x.account_id = ?5 AND x.source = 'import' AND x.bank_unique_id = h.bank_unique_id))`
 
-// A Sync row that already holds an ID is not given the Override or Note held for it.
+// A Sync row that already holds an ID is not given the Override, Note or mark held for it.
 const heldBySync = (id: string) => `EXISTS (SELECT 1 FROM transactions s WHERE s.account_id = ?4 AND s.source <> 'import' AND s.bank_unique_id = ${id})`
+
+// A held row with only a mark is not claimed by a Transaction that is paired or marked already (`takesMark`). Only an Import that is not a replace can meet one
+// (?5 is null): in a replace the Transactions it would meet are the ones it removes.
+const blockedMark = (pending: string, id: string) =>
+  `(${pending}.marked AND ${pending}.note IS NULL AND ${pending}.category IS NULL AND ?5 IS NULL AND EXISTS (SELECT 1 FROM transactions x WHERE x.account_id = ?4 AND x.source = 'import' AND x.bank_unique_id = ${id} AND (x.transfer_of IS NOT NULL OR x.not_transfer_with IS NOT NULL)))`
 
 /**
  * Columns for the row count. `carried`: how many pending IDs the rows will claim, and `differing` how many of those have
@@ -138,15 +154,15 @@ const heldBySync = (id: string) => `EXISTS (SELECT 1 FROM transactions s WHERE s
  * pending rows this chunk will not claim, as JSON, oldest first.
  */
 export const COUNT_COLUMNS = `
-  (SELECT COUNT(*) FROM incoming JOIN pending ON pending.id = incoming.id WHERE NOT ${heldBySync('incoming.id')}) AS carried,
-  (SELECT COUNT(*) FROM incoming JOIN pending ON pending.id = incoming.id WHERE NOT ${heldBySync('incoming.id')} AND pending.cents IS NOT incoming.cents) AS differing,
+  (SELECT COUNT(*) FROM incoming JOIN pending ON pending.id = incoming.id WHERE NOT ${heldBySync('incoming.id')} AND NOT ${blockedMark('pending', 'incoming.id')}) AS carried,
+  (SELECT COUNT(*) FROM incoming JOIN pending ON pending.id = incoming.id WHERE NOT ${heldBySync('incoming.id')} AND NOT ${blockedMark('pending', 'incoming.id')} AND pending.cents IS NOT incoming.cents) AS differing,
   (SELECT COUNT(*) FROM pending) AS waiting,
   (SELECT COUNT(*) FROM carry_over WHERE account_id = ?4) AS heldRows,
   (SELECT COUNT(*) FROM carry_over WHERE account_id = ?4 AND applied = 1 AND ?5 IS NULL) AS applied,
   (SELECT COUNT(*) FROM carry_over WHERE account_id = ?4 AND applied = 1 AND differs = 1 AND ?5 IS NULL) AS appliedDiffering,
   (SELECT json_group_array(json_object('date', date, 'amountCents', cents, 'description', description, 'category', category, 'note', note, 'notTransfer', json(CASE WHEN marked THEN 'true' ELSE 'false' END)))
    FROM (SELECT p.date, p.cents, p.description, p.category, p.note, p.marked FROM pending p
-         WHERE ?6 = 1 AND NOT (p.id IN (SELECT id FROM incoming) AND NOT ${heldBySync('p.id')})
+         WHERE ?6 = 1 AND NOT (p.id IN (SELECT id FROM incoming) AND NOT ${heldBySync('p.id')} AND NOT ${blockedMark('p', 'p.id')})
          ORDER BY p.date, p.id LIMIT ${LISTED_LOST})) AS lostRows`
 
 /**
@@ -167,7 +183,7 @@ export const parseLostRows = (json: string): LostRow[] => JSON.parse(json) as Lo
 
 /** What a chunk does about carrying over. */
 export type CarryPlan = {
-  /** Hold the Overrides and Notes of the rows this chunk removes (the first chunk of a replace). */
+  /** Hold the Overrides, Notes and Not a Transfer marks of the rows this chunk removes (the first chunk of a replace). */
   holds: boolean
   /** Give the rows this chunk saves what is held. */
   applies: boolean
@@ -195,17 +211,17 @@ export function planCarryOver(chunk: { replacing: boolean; lastChunk: boolean; f
 
 /** What a chunk carried, and (on the last chunk of an Import that took part) the totals. */
 export type CarryOutcome = {
-  /** Transactions this chunk gave an Override or Note to. */
+  /** Transactions this chunk gave an Override, Note or Not a Transfer mark to. */
   carried: number
   /** Last chunk only: Transactions given one in all, across every chunk of the Import. */
   carriedTotal: number | null
   /** Last chunk only: of those, how many went to a Transaction whose amount is not the removed one's. */
   differing: number | null
-  /** Last chunk of a replace only: held Overrides and Notes no Transaction claimed, which are gone. */
+  /** Last chunk of a replace only: held Overrides, Notes and Not a Transfer marks no Transaction claimed, which are gone. */
   lost: number | null
   /** The Transactions they were on, up to LISTED_LOST. */
   lostRows: LostRow[]
-  /** Last chunk of any other Import only: held Overrides and Notes still waiting for their Transactions. */
+  /** Last chunk of any other Import only: held Overrides, Notes and Not a Transfer marks still waiting for their Transactions. */
   stillWaiting: number | null
 }
 

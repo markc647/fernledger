@@ -67,7 +67,7 @@ export type ChunkPlan = {
 
 /**
  * The statements of a chunk, built from `prepare` (one per kind, in this order): create the Account, set its Cutover
- * Date, remove the old balances, forget what an earlier attempt gave out and hold the Overrides and Notes of the rows
+ * Date, remove the old balances, forget what an earlier attempt gave out and hold the Overrides, Notes and Not a Transfer marks of the rows
  * about to go (carry-over.ts), let go of the matching Transactions of those rows (transfers.ts), remove the old imported rows,
  * insert the rows. The insert is always last, and the removal of rows, when there is one, is just before it, which is how the
  * handler finds their results.

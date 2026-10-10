@@ -252,6 +252,10 @@ test('the Admin can say Not a Transfer from the edit panel, and is told what an 
   await outRow.getByRole('button', { name: /^Edit Category and Note/ }).click()
   await expect(page.getByText('The Admin marked this Not a Transfer, so it counts as spending')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Not a Transfer', exact: true })).toHaveCount(0)
+  await expect(page.getByText("Changes in this panel that you haven't saved will be lost.")).toHaveCount(0)
+  // Undo closes the panel too, so it says what an unsaved change costs, as the question for Not a Transfer does.
+  await page.locator('#edit-note').fill('Typed but not saved either')
+  await expect(page.getByRole('button', { name: 'Undo: treat as a Transfer again' })).toHaveAccessibleDescription("Changes in this panel that you haven't saved will be lost.")
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Undo: treat as a Transfer again' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Treated as a Transfer again. It is paired with its matching Transaction.' })).toBeVisible()

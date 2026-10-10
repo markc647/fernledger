@@ -45,6 +45,8 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
   const param = { id: String(row.id) }
   const transferHint = transferEditHint(row)
   const unsaved = categoryId !== startCategory || note.trim() !== (row.note ?? '')
+  /** Saying Not a Transfer, or taking it off, saves at once and closes the panel, so what has been typed in it and not saved goes. */
+  const unsavedWarning = unsaved ? "Changes in this panel that you haven't saved will be lost." : undefined
 
   const save = useMutation({
     mutationFn: async () => {
@@ -130,12 +132,12 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
                 : 'Fernledger pairs a Transaction with one in another Account on the same date for the same amount. If that is wrong, choose Not a Transfer.'}
           </p>
           {row.notTransfer ? (
-            <TreatAsTransferAgain id={row.id} onDone={(paired) => onSaved(treatAsTransferAgainSaved(paired))} />
+            <TreatAsTransferAgain id={row.id} warning={unsavedWarning} onDone={(paired) => onSaved(treatAsTransferAgainSaved(paired))} />
           ) : (
             <NotATransfer
               id={row.id}
               transfer={row}
-              extra={unsaved ? "Changes in this panel that you haven't saved will be lost." : undefined}
+              extra={unsavedWarning}
               onDone={() => onSaved(notTransferSaved())}
             />
           )}

@@ -109,6 +109,13 @@ export const MARK_NOT_TRANSFER = `
 export const CLEAR_NOT_TRANSFER = 'UPDATE transactions SET not_transfer_with = NULL WHERE not_transfer_with = ?1'
 
 /**
+ * Takes the mark (?1) off the rows a replace that has not finished is holding for the Transactions it removed. Without it the half that comes back when the
+ * replace is finished would be marked again, though the Admin has taken the mark off the half that stayed, and a mark made later could take the same number.
+ * Reads the held rows, which are none except while a replace is unfinished.
+ */
+export const CLEAR_HELD_NOT_TRANSFER = 'UPDATE carry_over SET not_transfer_with = NULL WHERE not_transfer_with = ?1'
+
+/**
  * Pairs one Transaction (?1) with a match there is now: the same NZ date, the equal and opposite amount, another Account, neither paired nor marked, as `PAIR`
  * requires, and ?2 first if it still qualifies. A Transaction marked with ?3 counts as unmarked: this runs before the mark comes off, in the same batch, so
  * that the batch's last statement is the one that changes the mark and the Change Log entry can wait on it (`onlyIfChanged`). Run it for the Transaction and
@@ -131,6 +138,9 @@ export const PAIR_ONE = `
 
 /** Marks the Transaction, and `matchingId` (the Transaction it is paired with, or null), Not a Transfer. */
 export const markNotTransferStatement = (db: D1Database, scope: { id: number; matchingId: number | null }) => db.prepare(MARK_NOT_TRANSFER).bind(scope.id, scope.matchingId)
+
+/** Takes the mark `token` off what a replace that has not finished is holding. */
+export const clearHeldNotTransferStatement = (db: D1Database, scope: { token: number }) => db.prepare(CLEAR_HELD_NOT_TRANSFER).bind(scope.token)
 
 /** Takes the mark `token` off the Transaction and the one it was marked with. */
 export const clearNotTransferStatement = (db: D1Database, scope: { token: number }) => db.prepare(CLEAR_NOT_TRANSFER).bind(scope.token)

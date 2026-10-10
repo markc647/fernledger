@@ -41,14 +41,14 @@ import { validate } from './validate'
 // - A bound string may be 2 MB. Row fields are length-capped (import-rows.ts); 500 worst-case rows measured 335 KB.
 // - 10 ms of CPU: reading, checking and re-serialising 500 typical rows (86 KB) measured about 1-2 ms in Node.
 // - A chunk request costs at most 20 D1 queries (find the Account, count the Import-sourced rows to replace, count the
-//   rows it already holds and the Overrides and Notes it will carry over, find the highest Transaction ID, then one batch
+//   rows it already holds and the Overrides, Notes and Not a Transfer marks it will carry over, find the highest Transaction ID, then one batch
 //   of at most 14 statements: set the Cutover Date (or create the Account), remove the old balances, forget what an
 //   earlier attempt gave out, hold the Overrides, Notes and Not a Transfer marks of the rows that go, let go of the matching Transactions of the rows
 //   that go, remove the old rows, insert the rows, apply the Rules to the rows just added, give the new
 //   rows what is held, mark what was given, pair their Transfers, clear what is left (or, in an Import that is not a replace, tidy what is
 //   finished with), record the file's ledger balance (last chunk only), write the Change Log entry; then the last chunk's
 //   Balance Check reads and saves in 2 more), well under 50. A statement in a batch counts as one query; balances.test.ts
-//   pins the worst case. Only a replace, or an Import of an Account a replace left holding Overrides and Notes, has the
+//   pins the worst case. Only a replace, or an Import of an Account a replace left holding Overrides, Notes and Not a Transfer marks, has the
 //   carry-over statements (carry-over.ts); an ordinary chunk is exactly as it was, plus the one that pairs its Transfers.
 //   The list of Transactions that lost theirs rides in the row count's one query. The Replace question's forecast
 //   (`/carry-preview`, 500 rows a request) costs 2 queries, discarding what a stopped replace holds (`/discard-held`) 3.
@@ -82,7 +82,7 @@ const chunkRequest = z.object({
   cutoverDate: z.optional(isoDate),
   /** Remove the Account's Import-sourced Transactions in the same batch as this chunk (first chunk only). */
   replace: z.optional(z.boolean()),
-  /** This is the last chunk of a replace: what no Transaction claimed is lost, and the Account's held Overrides and Notes are cleared (last chunk only). */
+  /** This is the last chunk of a replace: what no Transaction claimed is lost, and the Account's held Overrides, Notes and Not a Transfer marks are cleared (last chunk only). */
   completes: z.optional(z.boolean()),
 })
   // Whole-Import options ride on the first chunk, where they apply once and atomically with its rows.
@@ -137,7 +137,7 @@ const COUNT_IMPORTED_AND_ANNOTATED = `SELECT COUNT(*) AS imported,
 // Only ever Import-sourced rows: Sync-sourced Transactions are never removed here. At most ?2 (REPLACE_SLICE) rows go
 // in one statement, so rows added between the count and the delete can't push one replace past the write budget in
 // ADR 0004: a removed row costs 3 D1 writes (the row and its two indexes), so a slice is 15,000 of the day's 100,000, and
-// each of its rows that has an Override or Note costs 2 more to hold (the row and its key): at worst 10,000 more. A removed
+// each of its rows that has an Override, Note or Not a Transfer mark costs 2 more to hold (the row and its key): at worst 10,000 more. A removed
 // row that was paired costs up to 3 more, for its own Transfer index entry and to let go of its matching Transaction (transfers.ts): at worst
 // 15,000 more again.
 const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (${IMPORTED_SLICE})`
@@ -166,7 +166,7 @@ export const imports = new Hono<AppEnv>()
 
     const effectiveCutover = cutoverDate ?? existing?.cutover_date ?? null
     const rowsJson = serialiseRows(rows)
-    // When replacing, the rows being removed don't count as already held. The Account's held Overrides and Notes count as
+    // When replacing, the rows being removed don't count as already held. The Account's held Overrides, Notes and Not a Transfer marks count as
     // waiting, and so do those of the rows about to be removed.
     const replacing = replace === true && existing != null
     const lastChunk = chunk.index === chunk.count - 1
@@ -185,7 +185,7 @@ export const imports = new Hono<AppEnv>()
     }
     const name = existing?.name ?? account.name ?? number
     const setsCutover = cutoverDate !== undefined
-    // What this chunk does about the Overrides and Notes of the history it replaces, and what it will have carried.
+    // What this chunk does about the Overrides, Notes and Not a Transfer marks of the history it replaces, and what it will have carried.
     const carryPlan = planCarryOver({ replacing, lastChunk, finishesReplace }, counts)
     const carry = carryOutcome(carryPlan, counts, lastChunk)
 
@@ -259,9 +259,9 @@ export const imports = new Hono<AppEnv>()
       // Pairs of Transactions this chunk matched as Transfers with another Account's, counting both halves once. The Change Log entry
       // was written with the rows, before there was a count to put in it.
       paired: results[pairAt]!.meta.changes / 2,
-      // Transactions this chunk gave an Override or Note from the replaced history. On the last chunk of an Import that took
+      // Transactions this chunk gave an Override, Note or Not a Transfer mark from the replaced history. On the last chunk of an Import that took
       // part (carry-over.ts), also the total over all its chunks and how many went to a Transaction with another amount,
-      // and how many Overrides and Notes found no Transaction (lost, with the Transactions they were on, when a replace
+      // and how many Overrides, Notes and Not a Transfer marks found no Transaction (lost, with the Transactions they were on, when a replace
       // finishes; still waiting after any other Import).
       carried: done?.carried ?? 0,
       carriedTotal: done?.carriedTotal ?? null,
@@ -275,7 +275,7 @@ export const imports = new Hono<AppEnv>()
   // How many Import-sourced rows an Account holds, and how many of those carry the Admin's own work (an Override to a
   // Category in use, or a Note), so the Admin is told what a replace will carry over before confirming. A removed
   // Category's Override doesn't count: the Admin was told when they removed it that the Transactions lose it. Also how many
-  // Overrides and Notes an earlier replace that stopped part way is still holding for the Account, and how many of the rows are
+  // Overrides, Notes and Not a Transfer marks an earlier replace that stopped part way is still holding for the Account, and how many of the rows are
   // half of a Transfer, which cost more writes to remove and to import again (import-rows.ts: WRITES_PER_PAIRED_REMOVED).
   .get('/imported/:accountId', async (c) => {
     const accountId = Number(c.req.param('accountId'))
@@ -297,7 +297,7 @@ export const imports = new Hono<AppEnv>()
     const total = (await db.prepare(COUNT_IMPORTED).bind(accountId).first<{ n: number }>())?.n ?? 0
     if (total <= REPLACE_SLICE) return c.json({ error: 'The imported history is small enough to replace in one go', remaining: total }, 409)
     const remaining = total - REPLACE_SLICE
-    // The Overrides and Notes of the rows this step removes are held for the Import that follows (carry-over.ts).
+    // The Overrides, Notes and Not a Transfer marks of the rows this step removes are held for the Import that follows (carry-over.ts).
     const held = (await db.prepare(COUNT_REMOVED_ANNOTATED).bind(accountId, REPLACE_SLICE).first<{ n: number }>())?.n ?? 0
     const kept = held > 0 ? `, keeping the ${CARRIED} of ${held} ${held === 1 ? 'Transaction' : 'Transactions'} to carry over` : ''
     // The balances of the history being replaced go with its first step: they describe Transactions that are going.
@@ -318,7 +318,7 @@ export const imports = new Hono<AppEnv>()
     )
     return c.json({ removed: REPLACE_SLICE, remaining })
   })
-  // What a replace with this file would do with the Account's Overrides and Notes, for the Replace question to say before
+  // What a replace with this file would do with the Account's Overrides, Notes and Not a Transfer marks, for the Replace question to say before
   // the Admin confirms: nothing is changed. The browser sends the file's IDs and amounts (already without the rows on or
   // after the Cutover Date) at most 500 at a time, as an Import does; `carries` and `differing` add up over the requests,
   // `waiting` is the Account's own and is the same in each. A POST with a body because the rows do not fit a URL; the
@@ -333,7 +333,7 @@ export const imports = new Hono<AppEnv>()
     const counts = (await db.prepare(CARRY_PREVIEW).bind(null, serialisePreviewRows(rows), null, accountId, accountId, 0).first<CarryCounts>())!
     return c.json({ waiting: counts.waiting, carries: counts.carried, differing: counts.differing })
   })
-  // Throws away the Overrides and Notes a replace that stopped part way is still holding for the Account (they stay until
+  // Throws away the Overrides, Notes and Not a Transfer marks a replace that stopped part way is still holding for the Account (they stay until
   // a replace completes or the Admin does this), and says in the Change Log which Transactions they were on.
   .post('/discard-held', validate('json', clearRequest), async (c) => {
     const { accountId } = c.req.valid('json')
