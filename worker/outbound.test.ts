@@ -47,7 +47,7 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
 type Opts = { method?: string; body?: unknown }
 type Exercise = { route: string; path: (accountId: number) => string; opts?: Opts | ((accountId: number) => Opts) }
 // IDs made by earlier exercises, for the later ones that need them (the Category and Transaction are read lazily, after they exist).
-const made = { categoryId: 0, transactionId: 0 }
+const made = { categoryId: 0, transactionId: 0, ruleId: 0 }
 const EXERCISES: Exercise[] = [
   // First: it creates the Account that the PATCH below renames.
   { route: 'POST /api/imports/chunks', path: () => '/api/imports/chunks', opts: { method: 'POST', body: {
@@ -66,6 +66,13 @@ const EXERCISES: Exercise[] = [
   { route: 'PATCH /api/categories/:id', path: () => `/api/categories/${made.categoryId}`, opts: () => ({ method: 'PATCH', body: { name: 'Example renamed' } }) },
   { route: 'PUT /api/transactions/:id/override', path: () => `/api/transactions/${made.transactionId}/override`, opts: () => ({ method: 'PUT', body: { categoryId: made.categoryId } }) },
   { route: 'PUT /api/transactions/:id/note', path: () => `/api/transactions/${made.transactionId}/note`, opts: () => ({ method: 'PUT', body: { note: 'Example note' } }) },
+  // The Rules, on that Category: add one, then everything that reads or changes it, and last remove it.
+  { route: 'POST /api/rules', path: () => '/api/rules', opts: () => ({ method: 'POST', body: { textContains: 'EXAMPLE', categoryId: made.categoryId } }) },
+  { route: 'GET /api/rules', path: () => '/api/rules' },
+  { route: 'POST /api/rules/preview', path: () => '/api/rules/preview', opts: { method: 'POST', body: { textContains: 'EXAMPLE' } } },
+  { route: 'PUT /api/rules/:id', path: () => `/api/rules/${made.ruleId}`, opts: { method: 'PUT', body: { textContains: 'EXAMPLE SHOP', transfer: true } } },
+  { route: 'PUT /api/rules/order', path: () => '/api/rules/order', opts: () => ({ method: 'PUT', body: { ids: [made.ruleId] } }) },
+  { route: 'DELETE /api/rules/:id', path: () => `/api/rules/${made.ruleId}`, opts: { method: 'DELETE', body: {} } },
   { route: 'DELETE /api/categories/:id', path: () => `/api/categories/${made.categoryId}`, opts: { method: 'DELETE', body: {} } },
   { route: 'GET /api/imports/imported/:accountId', path: (id) => `/api/imports/imported/${id}` },
   { route: 'PUT /api/accounts/:id/cutover-date', path: (id) => `/api/accounts/${id}/cutover-date`, opts: { method: 'PUT', body: { cutoverDate: '2026-11-01' } } },
@@ -108,6 +115,10 @@ describe('outbound calls', () => {
       if (route === 'POST /api/categories') {
         expect(res.status).toBe(201)
         made.categoryId = ((await res.json()) as { id: number }).id
+      }
+      if (route === 'POST /api/rules') {
+        expect(res.status).toBe(201)
+        made.ruleId = ((await res.json()) as { id: number }).id
       }
       // Each exercise must reach its handler's success path, or it proves nothing about that route. (Clear-history refuses a small history.)
       if (route !== 'POST /api/imports/clear-history') expect(res.status, route).toBeLessThan(400)

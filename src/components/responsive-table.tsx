@@ -11,6 +11,8 @@ export type Column<Row> = {
   cell: (row: Row) => ReactNode
   /** Right-align (money and numbers). */
   align?: 'start' | 'end'
+  /** Keep the heading on one line, for a narrow column (such as a number) that the other columns would otherwise squeeze until its heading breaks. */
+  nowrap?: boolean
   /**
    * Lets the reader sort by this column. In the table its heading is a button; on cards, where there are no headings, a
    * "Sort by" menu lists it. The table only shows the order it is given: `set` is where the page re-sorts (here, on the server).
@@ -140,7 +142,7 @@ export function ResponsiveTable<Row>({
               <dl className="grid gap-2">
                 {columns.map((column) => (
                   <div key={column.key} className="flex items-start justify-between gap-4">
-                    <dt className="text-muted-foreground">{column.header}</dt>
+                    <dt className="shrink-0 text-muted-foreground">{column.header}</dt>
                     <dd className="min-w-0 text-end break-words">{column.cell(row)}</dd>
                   </div>
                 ))}
@@ -161,7 +163,7 @@ export function ResponsiveTable<Row>({
               key={column.key}
               scope="col"
               aria-sort={column.sort ? (column.sort.direction ?? 'none') : undefined}
-              className={cn(column.sort ? 'px-1 py-0' : 'px-3 py-2', 'font-semibold', align(column))}
+              className={cn(column.sort ? 'px-1 py-0' : 'px-3 py-2', 'font-semibold', column.nowrap && 'whitespace-nowrap', align(column))}
             >
               {column.sort ? <SortHeading column={{ ...column, sort: column.sort }} /> : column.header}
             </th>
