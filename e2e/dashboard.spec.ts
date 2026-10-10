@@ -8,18 +8,19 @@ const noAxeViolations = async (page: Page) => {
 }
 
 // The Dashboard (where the Admin lands), the Summary (where a Member does) and the Charts, against the real Worker. The light and dark projects share one local
-// database, so each has two Accounts of its own, and its own months of Transactions (2034, which no other spec uses: June for light and September for dark,
+// database, so each has two Accounts of its own, and its own months of Transactions (2004, which no other spec uses: June for light and September for dark,
 // with the month before each for a second point on the net worth line), so the amounts below are the only ones in the dates a test asks about and nothing from
-// another spec can pair with them as a Transfer. Payees avoid "EXAMPLE", which other specs' Rules look for.
+// another spec can pair with them as a Transfer. They are older than every other spec's Transactions on purpose: the Summary's newest five and the first
+// page of the Transactions list belong to the specs that look for theirs there. Payees avoid "EXAMPLE", which other specs' Rules look for.
 const dataFor = (project: string) => {
   const dark = project === 'dark'
-  const month = dark ? '2034-09' : '2034-06'
+  const month = dark ? '2004-09' : '2004-06'
   return {
     month,
-    earlier: dark ? '2034-08' : '2034-05',
+    earlier: dark ? '2004-08' : '2004-05',
     everyday: { number: `99-9999-9999999-${dark ? '66' : '64'}`, name: `Dashboard everyday ${project}` },
     savings: { number: `99-9999-9999999-${dark ? '67' : '65'}`, name: `Dashboard savings ${project}` },
-    words: dark ? 'September 2034' : 'June 2034',
+    words: dark ? 'September 2004' : 'June 2004',
     from: `${month}-01`,
     to: `${month}-30`,
   }
@@ -88,9 +89,9 @@ const drawn = async (region: ReturnType<typeof netWorth>, name: RegExp) => {
 
 /** Shows spending between two dates, as the person who chooses dates does. */
 async function chooseDates(page: Page, from: string, to: string) {
-  await spending(page).getByLabel('Period').selectOption('custom')
-  await spending(page).getByLabel('From').fill(from)
-  await spending(page).getByLabel('To').fill(to)
+  await spending(page).getByLabel('Period', { exact: true }).selectOption('custom')
+  await spending(page).getByLabel('From', { exact: true }).fill(from)
+  await spending(page).getByLabel('To', { exact: true }).fill(to)
 }
 
 // The same API as the pages, so the tests can say what the pages should show.
@@ -230,7 +231,7 @@ test('a period the Worker names is asked for by name, and a mistake in the dates
   await expect(region.getByRole('combobox', { name: 'Period' })).toHaveValue('this-month')
 
   const asked = page.waitForRequest((request) => request.url().includes('/api/charts/spending?period=last-month'))
-  await region.getByLabel('Period').selectOption('last-month')
+  await region.getByLabel('Period', { exact: true }).selectOption('last-month')
   await asked
   const lastMonth = new Date(new Date().toLocaleString('en-US', { timeZone: 'Pacific/Auckland' }))
   lastMonth.setDate(1)
@@ -238,17 +239,17 @@ test('a period the Worker names is asked for by name, and a mistake in the dates
   await expect(region).toContainText(lastMonth.toLocaleString('en-NZ', { month: 'long', year: 'numeric' }))
 
   // Dates the wrong way round: the To date is marked and explained, and nothing more is asked of the Worker.
-  await region.getByLabel('Period').selectOption('custom')
+  await region.getByLabel('Period', { exact: true }).selectOption('custom')
   const requests: string[] = []
   page.on('request', (request) => request.url().includes('/api/charts/spending') && requests.push(request.url()))
-  await region.getByLabel('From').fill('2034-06-30')
-  await region.getByLabel('To').fill('2034-06-01')
+  await region.getByLabel('From', { exact: true }).fill('2034-06-30')
+  await region.getByLabel('To', { exact: true }).fill('2034-06-01')
   await expect(region.getByRole('alert')).toHaveText('The “To” date is before the “From” date. Change one of them to see the chart.')
-  await expect(region.getByLabel('To')).toHaveAttribute('aria-invalid', 'true')
+  await expect(region.getByLabel('To', { exact: true })).toHaveAttribute('aria-invalid', 'true')
   expect(requests).toEqual([])
 
   // Putting them right asks, and the explanation goes.
-  await region.getByLabel('To').fill('2034-06-30')
+  await region.getByLabel('To', { exact: true }).fill('2034-06-30')
   await expect(region.getByRole('alert')).toHaveCount(0)
   await expect.poll(() => requests.some((url) => url.includes('from=2034-06-30') && url.includes('to=2034-06-30'))).toBe(true)
 })

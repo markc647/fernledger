@@ -426,7 +426,7 @@ test.describe('zoom', () => {
         json: {
           counted: [{ accountId: 1, accountName: longChartName }],
           notCounted: [{ accountId: 2, accountName: `${longChartName} credit card` }, { accountId: 3, accountName: 'Example savings' }],
-          points: Array.from({ length: 120 }, (_, i) => ({ date: new Date(Date.UTC(2017, i + 1, 0)).toISOString().slice(0, 10), cents: 123_456_789_012 - i * 2_000_000_000 })),
+          points: Array.from({ length: 120 }, (_, i) => ({ date: new Date(Date.UTC(2017, i + 1, 0)).toISOString().slice(0, 10), cents: 123_456_789 - i * 2_000_000 })),
           tooManyAccounts: null,
         },
       }),
