@@ -224,7 +224,7 @@ test('a Transaction opens to show its details, and Back returns to the same sear
   await page.goto(`/transactions?q=${stamp}`)
   await page.getByRole('link', { name: names.cafeOne }).click()
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Transaction' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Transaction', exact: true })).toBeVisible()
   const summary = page.getByRole('region', { name: 'Summary' })
   await expect(summary).toContainText('Mon 8 Oct 2012')
   await expect(summary).toContainText(names.cafeOne)
@@ -307,7 +307,7 @@ test('Back from a Transaction opened on the Uncategorised page returns to the Un
 
   await page.goto('/uncategorised?sort=amount')
   await page.getByRole('link', { name: 'EXAMPLE CAFE TOWN' }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Transaction' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Transaction', exact: true })).toBeVisible()
   await page.getByRole('link', { name: 'Back to Uncategorised' }).click()
 
   await expect(page).toHaveURL(/\/uncategorised\?sort=amount$/)
@@ -381,7 +381,7 @@ test('the Admin edits a Transaction from its details and sees the change there',
   const { stamp, names } = await seedFour(context, baseURL!, testInfo.project.name)
   await page.goto(`/transactions?q=${stamp}`)
   await page.getByRole('link', { name: names.hardware }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Transaction' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Transaction', exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Edit Category and Note' }).click()
   await expect(page.getByLabel('Category', { exact: true })).toBeFocused()

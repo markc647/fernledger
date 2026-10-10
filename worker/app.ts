@@ -13,6 +13,7 @@ import { FEATURES, featureStatuses } from './features'
 import { imports } from './imports'
 import { logEvent } from './log'
 import { isJson, isWrite } from './request-format'
+import { rules } from './rules'
 import { SECURITY_HEADERS } from './security-headers'
 import { readSettings, rejectedFields, settingsPatch, updateSettings } from './settings'
 import { transactions } from './transactions'
@@ -60,6 +61,7 @@ export const app = new Hono<AppEnv>()
   .route('/api/categories', categories)
   .route('/api/change-log', changeLogList)
   .route('/api/imports', imports)
+  .route('/api/rules', rules)
   .route('/api/transactions', transactions)
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404))

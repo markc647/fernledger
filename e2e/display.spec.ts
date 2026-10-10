@@ -89,7 +89,7 @@ test.describe('zoom', () => {
     { name: '200% zoom', width: 640, height: 360 },
     { name: '400% zoom (320px wide)', width: 320, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in']
+  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -162,6 +162,41 @@ test.describe('zoom', () => {
         await page.getByRole('button', { name: 'Replace imported history…' }).click()
         await expect(page.getByRole('alertdialog')).toContainText('removed in steps of 5,000')
         await expect(page.getByRole('alertdialog')).toContainText("43 Transactions have an Override (your own Category) or a Note. 38 of them carry over to this file; 5 won't.")
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The Rules page with a long Rule listed, the form open and a check result with a long example: the longest text it shows.
+  // The Rules and the check are stubbed, so this needs no data in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/rules with the form open and a check result at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        const description = 'EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN'
+        await page.route('**/api/rules', (route) =>
+          route.request().method() === 'GET'
+            ? route.fulfill({
+                json: [{ id: 1, textContains: description, bankType: 'EFTPOS', direction: 'out', minCents: 1000, maxCents: 123456789, categoryId: 7, categoryName: 'Health and medical', categoryRemoved: true, transfer: false }],
+              })
+            : route.fallback(),
+        )
+        await page.route('**/api/rules/preview', (route) => route.fulfill({ json: { matches: 1234, samples: [{ id: 1, date: '2026-09-10', description, bankType: 'EFTPOS', amountCents: -123456789 }] } }))
+        await page.setViewportSize({ width, height })
+        await page.goto('/rules')
+        await sizeButton(page, size).click()
+        await page.getByRole('button', { name: 'Add a Rule' }).click()
+        await page.getByLabel('Text contains').fill('example')
+        await page.getByRole('button', { name: 'Check how many match' }).click()
+        await expect(page.getByText('1,234 Transactions you already have match.')).toBeVisible()
+        await expect(page.getByText(/Category: Health and medical \(removed/)).toBeVisible()
+        // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({

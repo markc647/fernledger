@@ -17,7 +17,11 @@ export const MAX_ROWS_PER_CHUNK = 500
 /** D1 Free allows this many rows written a day (ADR 0004). Once it is used up, every write fails until the next day. */
 export const DAILY_ROW_WRITES = 100_000
 
-/** A row costs 3 writes: the row itself, its date index and its unique-ID index. Removing a row costs the same. */
+/**
+ * A row costs 3 writes: the row itself, its date index and its unique-ID index. Removing a row costs the same.
+ * An imported row that a Rule matches costs one more (rule-apply.ts stores the result on its row); the estimates built
+ * on this number leave that out, and the day's limit is still handled when it is reached.
+ */
 export const WRITES_PER_ROW = 3
 
 /**
