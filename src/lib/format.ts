@@ -58,11 +58,21 @@ export function formatInstantDate(instant: Date | number) {
 
 const nzClock = new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', hour: 'numeric', minute: '2-digit', hour12: true })
 
+const timeOfDay = (moment: Date) => {
+  const part = Object.fromEntries(nzClock.formatToParts(moment).map(({ type, value }) => [type, value]))
+  return `${part.hour}:${part.minute} ${part.dayPeriod.toLowerCase()}`
+}
+
 /** A moment (ISO 8601, UTC) as NZ day and time: "Thu 8 Oct 2026, 3:42 pm". Always Pacific/Auckland, whatever the device's time zone. */
 export function formatDateTime(instant: string) {
   const moment = new Date(instant)
-  const part = Object.fromEntries(nzClock.formatToParts(moment).map(({ type, value }) => [type, value]))
-  return `${formatInstantDate(moment)}, ${part.hour}:${part.minute} ${part.dayPeriod.toLowerCase()}`
+  return `${formatInstantDate(moment)}, ${timeOfDay(moment)}`
+}
+
+/** A moment as a sentence's NZ day and time: "Thu 8 Oct 2026 at 3:42 pm" (for "Generated … by …" on a Report). Always Pacific/Auckland. */
+export function formatDateAtTime(instant: Date | number) {
+  const moment = new Date(instant)
+  return `${formatInstantDate(moment)} at ${timeOfDay(moment)}`
 }
 
 /** The plain-language direction of an amount; null for zero. Never "debit" or "credit". */
