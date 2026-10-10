@@ -1,6 +1,9 @@
 import { expect, test as base, type BrowserContext } from '@playwright/test'
 import type { Role } from '../src/generated/api/auth'
 
+// A spec that creates Accounts uses numbers of its own (99-9999-9999999-NN), one set for each project, because the light and dark projects and every spec share one
+// local database. Take unused NN from account-numbers.json and add them there: `npm run test:scripts` fails when two specs use the same one.
+
 /** Signs in as the localhost dev identity for `role`. A cookie on `localhost` is shared by every port, so no port is needed here. */
 export const signInAs = (context: BrowserContext, role: Role) =>
   context.addCookies([{ name: 'fernledger_dev_as', value: role, domain: 'localhost', path: '/' }])

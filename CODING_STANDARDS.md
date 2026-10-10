@@ -48,6 +48,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 ## Tests
 - Test behaviour at three seams: the Worker boundary, the bank CSV adapters, and the browser (Playwright, kept small). Worker tests go through the real request path (`exports.default.fetch`). Call `worker.fetch` directly only when the test must change the Worker's env.
 - Fixtures are made up and follow the hard rule in `AGENTS.md`. See `docs/bank-formats/` for each layout.
+- A browser spec that creates Accounts takes numbers no other spec uses (the specs and both themes share one database), from the registry in `e2e/account-numbers.json`; `npm run test:scripts` fails on a clash.
 - A test proves something only if it would fail when the code it protects is removed. Reviewers check this for security tests.
 
 ## Dependencies
