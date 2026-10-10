@@ -3,7 +3,7 @@ import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { effectiveCategory, type CategorySource } from './effective-category'
-import { buildSearch, searchQuery, toSearch, type Statement } from './transaction-search'
+import { buildSearch, categoryProbe, isFewInCategory, needsCategoryProbe, searchQuery, toSearch, type Statement } from './transaction-search'
 import { validate } from './validate'
 
 /** The Admin's Override: a Category in use, or null to take it off. */
@@ -78,9 +78,16 @@ export const transactions = new Hono<AppEnv>()
     // The count reads every Transaction the filters keep, so it runs only when asked for or on the first page (`want`); the
     // page reads little more than itself when its order is the date index's (ADR 0004: D1 bills rows read). A date range is
     // served by the (date, id) index. An Account filter wants (account_id, date, id):
-    // the balances ticket's migration 1002 adds it and this ticket adds none. A text filter, a Category filter, or a sort on
-    // any column but date, reads every Transaction the other filters keep (transaction-search.ts says why for a Category).
-    const search = toSearch(c.req.valid('query'))
+    // the balances ticket's migration 1002 adds it and this ticket adds none. A text filter, or a sort on any column but date,
+    // reads every Transaction the other filters keep. A Category filter reads the Transactions its Override and Rule indexes
+    // list, or for a page sorted by date of a Category with many, the date index as far as the page needs; one small probe
+    // tells which (transaction-search.ts says why).
+    let search = toSearch(c.req.valid('query'))
+    if (needsCategoryProbe(search)) {
+      const probe = categoryProbe(search.categoryId!)
+      const found = await db.prepare(probe.sql).bind(...probe.binds).first<{ candidates: number }>()
+      search = { ...search, fewInCategory: isFewInCategory(found?.candidates ?? 0) }
+    }
     const { count, page } = buildSearch(search)
     const run = ({ sql, binds }: Statement) => db.prepare(sql).bind(...binds)
     const counting = search.want !== 'page'

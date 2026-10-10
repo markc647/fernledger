@@ -1,8 +1,9 @@
 import { env } from 'cloudflare:workers'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as z from 'zod/mini'
 import { MAX_TEXT as PAGE_MAX_TEXT, SORT_KEYS as PAGE_SORT_KEYS } from '../src/lib/transaction-search'
-import { buildSearch, MAX_LIMIT, MAX_TEXT, searchQuery, SORT_KEYS, toSearch, type Search } from './transaction-search'
+import { effectiveCategory } from './effective-category'
+import { buildSearch, CANDIDATE_LIMIT, categoryProbe, isFewInCategory, MAX_LIMIT, MAX_TEXT, needsCategoryProbe, searchQuery, SORT_KEYS, toSearch, type Search } from './transaction-search'
 
 const search = (over: Partial<Search> = {}): Search => ({ uncategorised: false, sort: 'date', dir: 'desc', limit: 50, offset: 0, want: 'both', ...over })
 const parse = (query: Record<string, string | string[]>) => toSearch(z.parse(searchQuery, query))
@@ -70,11 +71,25 @@ describe('what a request reads from D1', () => {
       .bind(ids[0], ids[1])
       .run()
   })
-
+  /** What the Worker does for a request: the Category probe when the search needs one, then the count and the page. */
+  const planned = async (over: Partial<Search>) => {
+    let s = search(over)
+    if (needsCategoryProbe(s)) {
+      const probe = categoryProbe(s.categoryId!)
+      const { candidates } = (await env.DB.prepare(probe.sql).bind(...probe.binds).first<{ candidates: number }>())!
+      s = { ...s, fewInCategory: isFewInCategory(candidates) }
+    }
+    return s
+  }
   const reads = async (over: Partial<Search>) => {
-    const { count, page } = buildSearch(search(over))
+    const { count, page } = buildSearch(await planned(over))
     const [c, p] = await env.DB.batch([env.DB.prepare(count.sql).bind(...count.binds), env.DB.prepare(page.sql).bind(...page.binds)])
-    return { total: (c!.results[0] as { total: number }).total, count: (c!.meta as { rows_read: number }).rows_read, page: (p!.meta as { rows_read: number }).rows_read }
+    return {
+      total: (c!.results[0] as { total: number }).total,
+      count: (c!.meta as { rows_read: number }).rows_read,
+      page: (p!.meta as { rows_read: number }).rows_read,
+      ids: (p!.results as { id: number }[]).map((r) => r.id),
+    }
   }
 
   it('reads one page off the date index for the default list', async () => {
@@ -96,13 +111,93 @@ describe('what a request reads from D1', () => {
     }
   })
 
-  // A Rule can supply the Category as well as an Override, so the effective Category is worked out per Transaction and the
-  // Overrides' index no longer serves this filter (transaction-search.ts). None here is in Category 1, so the page walks the whole
-  // date index, which reads each row and its Account.
-  it('reads every Transaction to count one Category, and to find a page of it when few are in it', async () => {
-    const r = await reads({ categoryId: 1 })
-    expect(r.count).toBeLessThanOrEqual(TRANSACTIONS + 10)
-    expect(r.page).toBeLessThanOrEqual(TRANSACTIONS * 2 + 10)
+  // A Transaction's Category is its Override or else its Rule's, so a Category filter checks the effective Category of each Transaction
+  // it considers. Which it considers is the question (transaction-search.ts): the Transactions the Category's two indexes list, or all
+  // of them. Whichever it reads, it must find exactly the Transactions whose effective Category it is.
+  describe('a Category', () => {
+    // Category 1 has few Transactions, found by its Rule and by an Override. Category 2 has a fifth of them. Category 3 is what an
+    // Override outranking the Rule gives two of Category 1's, and a removed Category's Override counts for nothing. Put back after,
+    // so the other tests still see Transactions with no Category.
+    beforeAll(async () => {
+      const gone = (await env.DB.prepare("INSERT INTO categories (name, removed_at) VALUES ('Search test removed', '2026-10-01T00:00:00.000Z') RETURNING id").first<{ id: number }>())!.id
+      await env.DB.batch([
+        env.DB.prepare('UPDATE transactions SET rule_category = 1 WHERE id % 600 = 0'),
+        env.DB.prepare('UPDATE transactions SET override_category = 1 WHERE id % 1500 = 0'),
+        env.DB.prepare('UPDATE transactions SET rule_category = 2 WHERE id % 5 = 0 AND rule_category IS NULL'),
+        env.DB.prepare('UPDATE transactions SET override_category = 3 WHERE id IN (600, 1200)'),
+        env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = 1800').bind(gone),
+      ])
+    })
+    afterAll(async () => {
+      await env.DB.prepare('UPDATE transactions SET rule_category = NULL, override_category = NULL').run()
+    })
+
+    const effective = async (categoryId: number) => {
+      const category = effectiveCategory()
+      const { results } = await env.DB.prepare(`SELECT t.id FROM transactions t ${category.joins} WHERE ${category.id} = ? ORDER BY t.date DESC, t.id DESC`).bind(categoryId).all<{ id: number }>()
+      return results.map((r) => r.id)
+    }
+    const byId = (ids: number[]) => ids.slice().sort((a, b) => a - b)
+
+    it("is found by its Override or by its Rule, unless an Override to another Category outranks the Rule, and a removed Category's Override counts for nothing", async () => {
+      const expected = await effective(1)
+      // The Rule's: 600 to 6000 by 600, but not 600 and 1200 (Overridden to Category 3); 1800 stays (its Override is of a removed Category).
+      // The Override's: 1500 to 6000 by 1500. 3000 and 6000 are both.
+      expect(byId(expected)).toEqual([1500, 1800, 2400, 3000, 3600, 4200, 4500, 4800, 5400, 6000])
+
+      for (const over of [{ categoryId: 1 }, { categoryId: 1, sort: 'amount' as const, dir: 'asc' as const }]) {
+        const r = await reads({ ...over, limit: 200 })
+        expect(r.total, JSON.stringify(over)).toBe(expected.length)
+        expect(byId(r.ids), JSON.stringify(over)).toEqual(byId(expected))
+      }
+      // A Category with many is the same page whichever way it is found.
+      const many = await effective(2)
+      for (const fewInCategory of [true, false]) {
+        const { page } = buildSearch(search({ categoryId: 2, limit: 200, fewInCategory }))
+        const ids = ((await env.DB.prepare(page.sql).bind(...page.binds).all()).results as { id: number }[]).map((r) => r.id)
+        expect(ids, `fewInCategory ${fewInCategory}`).toEqual(many.slice(0, 200))
+      }
+    })
+
+    it('with few Transactions is found through its indexes: a page reads about what is in it, not what there is', async () => {
+      const r = await reads({ categoryId: 1 })
+      expect(r.total).toBe(10)
+      expect(r.count).toBeLessThanOrEqual(100)
+      expect(r.page).toBeLessThanOrEqual(150) // the 10 in it, each with its Account and Categories, and the sort of them
+      expect((await reads({ categoryId: 1, sort: 'amount' })).page).toBeLessThanOrEqual(150) // any other sort too
+    })
+
+    it("with many is counted through its indexes and paged off the date index, which stops at the page's 50th", async () => {
+      const r = await reads({ categoryId: 2 })
+      expect(r.total).toBe((await effective(2)).length)
+      expect(r.total).toBeGreaterThan(CANDIDATE_LIMIT)
+      expect(r.count).toBeLessThanOrEqual(r.total * 5 + 20) // an index entry, the Transaction and its two Category lookups
+      expect(r.page).toBeLessThanOrEqual(1000) // every fifth is in it: about 250 are read to find 50
+    })
+
+    it('is told apart as few or many by a probe that reads no further than CANDIDATE_LIMIT in each index', async () => {
+      const probed = async (categoryId: number) => {
+        const probe = categoryProbe(categoryId)
+        const result = await env.DB.prepare(probe.sql).bind(...probe.binds).all<{ candidates: number }>()
+        return { candidates: result.results[0]!.candidates, rowsRead: (result.meta as { rows_read: number }).rows_read }
+      }
+      const few = await probed(1)
+      const many = await probed(2)
+
+      expect(few.candidates).toBeLessThanOrEqual(CANDIDATE_LIMIT)
+      expect(isFewInCategory(few.candidates)).toBe(true)
+      expect(few.rowsRead).toBeLessThanOrEqual(few.candidates + 10)
+      expect(many.candidates).toBeGreaterThan(CANDIDATE_LIMIT) // 1,200 are in it: the probe stops counting at the limit, so it never reads a big Category through
+      expect(isFewInCategory(many.candidates)).toBe(false)
+      expect(many.rowsRead).toBeLessThanOrEqual(2 * (CANDIDATE_LIMIT + 1) + 10)
+    })
+
+    it('needs the probe only for a page sorted by date', () => {
+      expect(needsCategoryProbe(search({ categoryId: 1 }))).toBe(true)
+      expect(needsCategoryProbe(search({ categoryId: 1, sort: 'amount' }))).toBe(false) // it reads every Transaction it keeps, so the fewest is best
+      expect(needsCategoryProbe(search({ categoryId: 1, want: 'count' }))).toBe(false)
+      expect(needsCategoryProbe(search({}))).toBe(false)
+    })
   })
 
   it('reads each Transaction once to count the Uncategorised ones, and a page of them off the date index', async () => {

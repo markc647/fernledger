@@ -759,8 +759,8 @@ describe('what applying Rules and previewing read (ADR 0004: the free plan allow
     // A walk through the Account's history on its index would add the 3,000 older rows to every chunk.
     expect(old.rows_read).toBeLessThanOrEqual(fresh.rows_read + 50)
     expect(fresh.rows_read).toBeLessThanOrEqual(CHUNK * (RULES + 12))
-    // Only the rows a Rule matched are written.
-    expect(old.rows_written).toBe(CHUNK)
+    // Only the rows a Rule matched are written: each is a table row and an entry in the rule_category index (migrations/1402).
+    expect(old.rows_written).toBe(CHUNK * 2)
   })
 
   it('stops at the first Rule that matches, so the Rules below it cost nothing', async () => {
