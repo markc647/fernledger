@@ -3,6 +3,7 @@ import type { PreviewRow } from '@/generated/api/import-rows'
 import { api } from './api'
 import type { CarryPreview } from './import-carry'
 import { HttpError } from './me'
+import { apiQuery, filterQuery, filtersOf, type TransactionSearch } from './transaction-search'
 
 export const PAGE_SIZE = 50
 
@@ -32,14 +33,43 @@ export const changeLogQuery = (filters: ChangeLogFilters, page: number) =>
     },
   })
 
-/** One page of Transactions, newest first; with `uncategorised`, only those with no Category. `page` is 0-based. */
-export const transactionsQuery = (page: number, uncategorised = false) =>
+/**
+ * One page of Transactions for a search (filters, sort and page), as the API returns it, without a count: counting reads
+ * every Transaction the filters keep (ADR 0004), so it is `transactionCountQuery`'s, asked once per search and not per page.
+ * Every key starts with 'transactions', so saving an Override or Note refreshes them all.
+ */
+export const transactionsQuery = (search: TransactionSearch) =>
   queryOptions({
-    queryKey: ['transactions', { uncategorised }, page],
+    queryKey: ['transactions', 'list', search],
     queryFn: async () => {
-      const query: Record<string, string> = { limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) }
-      if (uncategorised) query.uncategorised = 'true'
-      const res = await api.transactions.$get({ query })
+      const res = await api.transactions.$get({ query: { ...apiQuery(search, PAGE_SIZE), count: 'false' } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
+/** How many Transactions a search matches. Only its filters count, so paging and sorting reuse the answer instead of asking again. */
+export const transactionCountQuery = (search: TransactionSearch) => {
+  const filters = filtersOf(search)
+  return queryOptions({
+    queryKey: ['transactions', 'count', filters],
+    queryFn: async () => {
+      const res = await api.transactions.$get({ query: { ...filterQuery(filters), count: 'only' } })
+      if (!res.ok) throw new HttpError(res.status)
+      const { total } = await res.json()
+      if (total === null) throw new Error('The API did not count') // count=only always does; this narrows the type
+      return total
+    },
+  })
+}
+
+/** One Transaction in full. A 404 means there is no such Transaction. */
+export const transactionQuery = (id: string) =>
+  queryOptions({
+    queryKey: ['transactions', 'detail', id],
+    retry: (count, error) => !(error instanceof HttpError && error.status === 404) && count < 3,
+    queryFn: async () => {
+      const res = await api.transactions[':id'].$get({ param: { id } })
       if (!res.ok) throw new HttpError(res.status)
       return res.json()
     },
@@ -117,7 +147,8 @@ export const RECENT_TRANSACTIONS = 5
 export const recentTransactionsQuery = queryOptions({
   queryKey: ['transactions', 'recent'],
   queryFn: async () => {
-    const res = await api.transactions.$get({ query: { limit: String(RECENT_TRANSACTIONS) } })
+    // No count: the Summary shows no total, and counting would read every Transaction on every visit (ADR 0004).
+    const res = await api.transactions.$get({ query: { limit: String(RECENT_TRANSACTIONS), count: 'false' } })
     if (!res.ok) throw new HttpError(res.status)
     return res.json()
   },

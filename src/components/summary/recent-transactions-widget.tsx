@@ -31,10 +31,10 @@ export function RecentTransactionsWidget() {
               { key: 'amount', header: 'Amount', align: 'end', cell: (row) => <Amount cents={row.amountCents} showLabel /> },
             ]}
           />
-          {data.total > 0 && (
+          {data.transactions.length > 0 && (
             <p className="mt-3">
               <Link to="/transactions" className="inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                See all {data.total.toLocaleString('en-NZ')} transactions
+                See all transactions
               </Link>
             </p>
           )}

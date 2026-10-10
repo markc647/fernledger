@@ -33,12 +33,13 @@ function Layout() {
     <>
       <a
         href="#main"
-        className={`sr-only focus:not-sr-only focus:absolute focus:start-2 focus:top-2 focus:z-10 focus:rounded-lg focus:bg-background focus:px-3 focus:py-2 ${focusStyle}`}
+        className={`sr-only print:hidden focus:not-sr-only focus:absolute focus:start-2 focus:top-2 focus:z-10 focus:rounded-lg focus:bg-background focus:px-3 focus:py-2 ${focusStyle}`}
       >
         Skip to main content
       </a>
       {import.meta.env.DEV && <DevIdentitySwitcher />}
-      <header className="border-b">
+      {/* Navigation and the text-size and theme controls mean nothing on paper. A page that wants the title in its printout writes it itself. */}
+      <header className="border-b print:hidden">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <span className="min-h-7 min-w-0 text-lg font-semibold">{appTitle}</span>
           <nav aria-label="Main">

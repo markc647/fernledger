@@ -55,4 +55,5 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 - Use the shared building blocks rather than formatting by hand: `formatAmount`, `formatBalance`, `formatDate` and `formatInstantDate` (`src/lib/format.ts`), `Amount`, `Status`, and `ResponsiveTable`. `/styleguide` shows them, and the browser tests scan it.
 - Size text in `rem` so the A / A+ / A++ control scales it, and use `size="touch"` for interactive targets.
 - Add a new page to the zoom test in `e2e/display.spec.ts`.
+- A printout leaves out the app header (`print:hidden` in `src/routes/__root.tsx`), and with it the app title, so a printable page writes its own title, as How to sign in does.
 - Show state with a border or outline as well as a box-shadow or fill: Windows high contrast removes the latter.

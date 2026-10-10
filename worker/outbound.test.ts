@@ -86,7 +86,8 @@ const EXERCISES: Exercise[] = [
   { route: 'GET /api/features', path: () => '/api/features' },
   { route: 'GET /api/accounts', path: () => '/api/accounts' },
   { route: 'GET /api/change-log', path: () => '/api/change-log' },
-  { route: 'GET /api/transactions', path: () => '/api/transactions' },
+  { route: 'GET /api/transactions', path: () => '/api/transactions?text=example&from=2026-01-01&sort=amount&dir=asc' },
+  { route: 'GET /api/transactions/:id', path: () => `/api/transactions/${made.transactionId}` },
   { route: 'PATCH /api/settings', path: () => '/api/settings', opts: { method: 'PATCH', body: { app_title: 'Example family' } } },
   { route: 'PATCH /api/accounts/:id', path: (id) => `/api/accounts/${id}`, opts: { method: 'PATCH', body: { name: 'Example savings' } } },
 ]
