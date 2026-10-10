@@ -1,10 +1,5 @@
-import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import worker from './index'
-import * as transactionsChanged from './transactions-changed'
-
-const afterTransactionsChanged = vi.spyOn(transactionsChanged, 'afterTransactionsChanged')
+import { beforeEach, describe, expect, it } from 'vitest'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -52,7 +47,6 @@ const changeLog = async () => (await env.DB.prepare('SELECT summary, actor, type
 
 beforeEach(async () => {
   await env.DB.batch(['transactions', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
-  afterTransactionsChanged.mockClear()
 })
 
 describe('POST /api/imports/chunks', () => {
@@ -200,34 +194,6 @@ describe('chunked Imports', () => {
     expect(res.status).toBe(409)
     expect(await accounts()).toEqual([])
     expect(await changeLog()).toEqual([])
-  })
-
-  it('calls the after-Transactions-changed hook after every chunk', async () => {
-    // Through the Worker's handler imported here: the spy above sees the calls the Worker makes.
-    const viaHandler = async (rows: unknown[], index: number) => {
-      const ctx = createExecutionContext()
-      const request = new Request(`${origin}/api/imports/chunks`, {
-        method: 'POST',
-        headers: { Cookie: 'fernledger_dev_as=admin', Origin: origin, 'Content-Type': 'application/json' },
-        body: JSON.stringify(chunkBody(rows, { index, count: 3 })),
-      })
-      const res = await worker.fetch!(request as never, env, ctx)
-      await waitOnExecutionContext(ctx)
-      return (await res.json()) as { accountId: number }
-    }
-    const { accountId } = await viaHandler(rowsFrom(1, 2), 0)
-    expect(afterTransactionsChanged).toHaveBeenCalledTimes(1)
-
-    // The hook is told the highest Transaction ID from before the chunk, so it can tell which rows the chunk added.
-    expect(afterTransactionsChanged).toHaveBeenLastCalledWith(env.DB, { accountId, afterId: 0 })
-
-    await viaHandler(rowsFrom(3, 4), 1)
-    const lastId = (await env.DB.prepare('SELECT MAX(id) AS id FROM transactions').first<{ id: number }>())!.id
-    expect(lastId).toBeGreaterThan(0)
-    await viaHandler(rowsFrom(3, 4), 2) // adds nothing, but the chunk still committed
-
-    expect(afterTransactionsChanged).toHaveBeenCalledTimes(3)
-    expect(afterTransactionsChanged).toHaveBeenLastCalledWith(env.DB, { accountId, afterId: lastId })
   })
 
   it('stores the fields of a row, using the memo when the payee is empty', async () => {

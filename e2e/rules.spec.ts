@@ -8,8 +8,9 @@ const noAxeViolations = async (page: Page) => {
 }
 
 // The light and dark projects share one local database, so each test uses text and an Account of its own, no earlier run used
-// and no other spec uses (the Summary spec has 86 and 87, Categories 88 and 89, the Change Log 90 and 91).
-const accountFor = (projectName: string) => (projectName === 'dark' ? '99-9999-9999999-92' : '99-9999-9999999-93')
+// and no other spec uses: the Summary spec has 86 and 87, Categories 88 and 89, the Change Log 90 and 91, Cutover 92 and 93
+// (a Cutover Date drops rows dated after it), Import 94 to 97.
+const accountFor = (projectName: string) => (projectName === 'dark' ? '99-9999-9999999-84' : '99-9999-9999999-85')
 
 async function importTransaction(context: BrowserContext, baseURL: string, projectName: string, description: string, uniqueId: string) {
   const res = await context.request.post('/api/imports/chunks', {

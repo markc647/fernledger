@@ -11,6 +11,9 @@
 // statement only ever sets them.
 import { ruleMatches } from './rule-criteria'
 
+/** The highest Transaction ID, or 0 when there are none. Read it before the batch that adds Transactions, to pass as `afterId`. */
+export const lastTransactionId = async (db: D1Database) => (await db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM transactions').first<{ id: number }>())!.id
+
 /** A Rule counts while it is in use and has somewhere to send a Transaction: the Transfer flag, or a Category still in use. `c` is the Rule's Category, if it has one. */
 const IS_ACTIVE = `r.removed_at IS NULL AND (r.is_transfer = 1 OR (c.id IS NOT NULL AND c.removed_at IS NULL))`
 

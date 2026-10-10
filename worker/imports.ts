@@ -7,8 +7,7 @@ import { statusOnRecord } from './balance-rules'
 import { recordChange } from './changelog'
 import { chunkDetail, chunkStatements, chunkSummary, replaceWouldLeaveNothing } from './import-chunk'
 import { badRowField, MAX_CHUNKS, REPLACE_SLICE, serialiseRows, type ImportRow } from './import-rows'
-import { applyRulesStatement } from './rule-apply'
-import { afterTransactionsChanged, lastTransactionId } from './transactions-changed'
+import { applyRulesStatement, lastTransactionId } from './rule-apply'
 import { validate } from './validate'
 
 // The browser parses the file (ADR 0004) and sends rows in chunks of about 500. Limits measured and chosen
@@ -145,7 +144,9 @@ export const imports = new Hono<AppEnv>()
         insertRows: () => db.prepare(INSERT_ROWS).bind(number, rowsJson, effectiveCutover),
       },
     )
-    // Read before the rows are written: every Transaction above it afterwards is one this chunk added, which is all the Rules apply to.
+    // The Rules apply to this Account's Transactions above this ID. It is read here, outside the batch, so those are the rows
+    // this chunk adds and also any other write to the Account that lands between the read and the batch; a Rule's result
+    // depends only on its own row, so giving those the Rules too is harmless.
     const afterId = await lastTransactionId(db)
     // The Rules are applied in the same batch as the rows, so a chunk and its Rule results commit together or not at all.
     // Applied after the commit, a failure would leave rows no retry gives Rules to: the retry reads the new highest ID.
@@ -168,7 +169,6 @@ export const imports = new Hono<AppEnv>()
       after: chunkDetail(outcome, { file, rowsInChunk: rows.length, cutoverDate: effectiveCutover, newAccount: !existing }),
     })
     const accountId = existing?.id ?? results[0]!.meta.last_row_id
-    await afterTransactionsChanged(db, { accountId, afterId })
     const inserted = results[insertAt]!.meta.changes
     // After the last chunk, every balance of the Account is checked again: this file's, and the neighbours it changes.
     const balanceCheck = lastChunk ? await checkAfterRecording(db, accountId, ledger.date) : null
@@ -211,6 +211,5 @@ export const imports = new Hono<AppEnv>()
       summary: `Removed ${REPLACE_SLICE} imported rows from ${account.name} to replace its imported history (${remaining} left)`,
       after: { removed: REPLACE_SLICE, remaining },
     })
-    await afterTransactionsChanged(db, { accountId })
     return c.json({ removed: REPLACE_SLICE, remaining })
   })
