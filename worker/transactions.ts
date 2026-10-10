@@ -78,10 +78,9 @@ export const transactions = new Hono<AppEnv>()
     const db = c.env.DB
     // The count reads every Transaction the filters keep, so it runs only when asked for or on the first page (`want`); the
     // page reads little more than itself when its order is the date index's (ADR 0004: D1 bills rows read). A date range is
-    // served by the (date, id) index, and an Override Category by its own index. An Account filter wants (account_id, date, id):
-    // the balances ticket's migration 1002 adds it and this ticket adds none. A text filter, or a sort on any column but date,
-    // reads every Transaction the other filters keep. When Rules arrive the effective Category is worked out per Transaction,
-    // so a Category filter should be revisited then.
+    // served by the (date, id) index. An Account filter wants (account_id, date, id):
+    // the balances ticket's migration 1002 adds it and this ticket adds none. A text filter, a Category filter, or a sort on
+    // any column but date, reads every Transaction the other filters keep (transaction-search.ts says why for a Category).
     const search = toSearch(c.req.valid('query'))
     const { count, page } = buildSearch(search)
     const run = ({ sql, binds }: Statement) => db.prepare(sql).bind(...binds)

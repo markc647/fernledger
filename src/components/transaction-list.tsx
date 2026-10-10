@@ -40,13 +40,14 @@ const SORT_WORDS: Record<SortKey, { ascending: string; descending: string }> = {
 }
 const isSortKey = (id: string): id is SortKey => (SORT_KEYS as readonly string[]).includes(id)
 
-/** The Category column: the effective Category, marked when the Admin set it by hand. */
+/** The Category column: the effective Category, marked when the Admin set it by hand (Override) or a Rule gave it. */
 function CategoryCell({ row }: { row: Row }) {
   if (row.categoryName === null) return <span className="text-muted-foreground">Uncategorised</span>
   return (
     <>
       {row.categoryName}
       {row.categorySource === 'override' && <span className="block text-muted-foreground">Override</span>}
+      {row.categorySource === 'rule' && <span className="block text-muted-foreground">Rule</span>}
     </>
   )
 }

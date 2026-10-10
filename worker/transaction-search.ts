@@ -136,6 +136,11 @@ export type Statement = { sql: string; binds: (string | number)[] }
  * The one definition of what a filter means: the list, its count and the CSV export all build from it. Only the filters asked
  * for are in the SQL, so an index on the column can serve each one. A Transaction's Category is its effective Category
  * (effective-category.ts), the same one the list shows, so a query that filters by Category needs `category.joins`.
+ * That is worked out per Transaction, through one join for each source that has a column (the Override, the Rule, and Akahu's
+ * once Sync lands), and an Override's index cannot serve it once a Rule can also supply the Category. So a Category filter
+ * or sort reads every Transaction the other filters keep, and each join costs a row read on top (ADR 0004: D1 bills rows
+ * read). The list, its count and the CSV export all pay that cost. A cached count, or a column kept up to date, is a later
+ * ticket's call.
  */
 export function buildFilter(filters: Filters, category: EffectiveCategory = effectiveCategory()): { conditions: string[]; binds: (string | number)[] } {
   const conditions: string[] = []
