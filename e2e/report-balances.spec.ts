@@ -27,9 +27,9 @@ const dataFor = (project: string) => {
   return {
     start,
     end: start + YEARS - 1,
-    savings: { number: light ? '99-9999-9999999-41' : '99-9999-9999999-44', name: `Balances savings ${project}` },
-    cheque: { number: light ? '99-9999-9999999-42' : '99-9999-9999999-45', name: `Balances cheque ${project}` },
-    nothing: { number: light ? '99-9999-9999999-43' : '99-9999-9999999-46', name: `Balances empty ${project}` },
+    savings: { number: light ? '99-9999-9999999-51' : '99-9999-9999999-54', name: `Balances savings ${project}` },
+    cheque: { number: light ? '99-9999-9999999-52' : '99-9999-9999999-55', name: `Balances cheque ${project}` },
+    nothing: { number: light ? '99-9999-9999999-53' : '99-9999-9999999-56', name: `Balances empty ${project}` },
   }
 }
 
@@ -196,7 +196,7 @@ test.describe('on screen', () => {
     await context.clock.setFixedTime(NOW) // keeps running; only the date is fixed
   })
 
-  test('has the title block, what the balances are worked out from, the opening and closing balance, and a line for each month', async ({ page, context, request, baseURL }, testInfo) => {
+  test('has the title block, what the balances are worked out from, the opening and closing balance, and a row for each month', async ({ page, context, request, baseURL }, testInfo) => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, "Mum's finances")
@@ -213,18 +213,19 @@ test.describe('on screen', () => {
 
     // Said before the figures: one balance a month, and that they are calculated.
     const about = report.getByRole('region', { name: 'About these balances' })
-    await expect(about).toContainText('a balance for the end of every month')
+    await expect(about).toContainText('a row for every month in these dates')
     await expect(about).toContainText('calculated figures, not balances the bank gave for each month-end')
+    await expect(about).toContainText('A date is held when Fernledger has a Transaction or a bank balance for the Account on it')
 
     const account = report.getByRole('region', { name: `${savings.name} (${savings.number})` })
     await expect(account).toContainText(`Worked out from the bank's balance of ${money(balanceAfter(MONTHS_HELD - 1))} on ${dateText(`${end}-12-31`)}.`)
     const summary = account.locator('dl')
-    await expect(summary).toContainText(`Before the first Transaction held, ${dateText(transactionDate(start, 0))}`)
+    await expect(summary).toContainText(`Before the first date held, ${dateText(transactionDate(start, 0))}`)
     await expect(summary).toContainText(money(OPENING))
     await expect(summary).toContainText(`At the end of ${dateText(`${end}-12-31`)}`)
     await expect(summary).toContainText(money(balanceAfter(MONTHS_HELD - 1)))
     await expect(summary).toContainText(money(balanceAfter(MONTHS_HELD - 1) - OPENING))
-    await expect(account).toContainText(`No Transactions are held before ${dateText(transactionDate(start, 0))}.`) // the dates begin on 1 January
+    await expect(account).toContainText(`The first date held for this Account is ${dateText(transactionDate(start, 0))}, so there are no balances before it.`) // the dates begin on 1 January
 
     const table = account.getByRole('table', { name: `Balances in ${savings.name}` })
     await expect(table.getByRole('columnheader')).toHaveText(['Date', 'Balance', 'Change', 'Source'])
@@ -237,10 +238,10 @@ test.describe('on screen', () => {
     await expect(first).toContainText(money(balanceAfter(0)))
     await expect(first).toContainText(money(-spend(0))) // a month of money out is a negative change
     await expect(first).toContainText('Calculated from the Transactions')
-    const lastLine = table.locator('tbody tr').last()
-    await expect(lastLine).toContainText(dateText(`${end}-12-31`))
-    await expect(lastLine).toContainText(money(balanceAfter(MONTHS_HELD - 1)))
-    await expect(lastLine).toContainText('Bank balance') // the bank gave this one
+    const lastRow = table.locator('tbody tr').last()
+    await expect(lastRow).toContainText(dateText(`${end}-12-31`))
+    await expect(lastRow).toContainText(money(balanceAfter(MONTHS_HELD - 1)))
+    await expect(lastRow).toContainText('Bank balance') // the bank gave this one
     await expect(table.getByText('Bank balance')).toHaveCount(1)
 
     // Every month's balance, in order, is what the history says it is.
@@ -262,6 +263,8 @@ test.describe('on screen', () => {
     await expect(account).toContainText(`Balance differs from bank by $3.00 since ${dateText(`${start}-01-31`)}`)
     await expect(account).toContainText(`Found in the bank balance of ${dateText(`${start}-02-28`)}.`)
     await expect(account).toContainText("The bank's balance is lower than the Transactions add up to.")
+    // What it means for the rows above: every balance is worked back from the latest bank balance, so January's carries it (see its Source).
+    await expect(account).toContainText(`Balances before ${dateText(`${start}-02-28`)} are worked back from the latest bank balance, so they carry this difference.`)
     await expect(account).not.toContainText('agrees with the bank')
 
     // The balances are the history's, worked back from the latest bank balance, so January is $3.00 out of line with what the bank said that day.
@@ -269,10 +272,10 @@ test.describe('on screen', () => {
     await expect(table.locator('tbody tr')).toHaveCount(2)
     await expect(table.locator('tbody tr').nth(0)).toContainText(`${dateText(`${start}-01-31`)}`)
     await expect(table.locator('tbody tr').nth(0)).toContainText(money(98_200))
-    await expect(table.locator('tbody tr').nth(0)).toContainText(`Calculated from the Transactions. The bank gave ${money(98_500)}.`)
+    await expect(table.locator('tbody tr').nth(0)).toContainText(`Calculated from the Transactions, $3.00 less than the bank's ${money(98_500)}.`)
     await expect(table.locator('tbody tr').nth(1)).toContainText(money(95_700))
     await expect(table.locator('tbody tr').nth(1)).toContainText('Bank balance')
-    await expect(account).toContainText(`No Transactions are held after ${dateText(`${start}-02-28`)}, so the Report stops there.`)
+    await expect(account).toContainText(`The last date held for this Account is ${dateText(`${start}-02-28`)}, so the Report stops there.`)
   })
 
   test('starts a Report that begins part way through the history from the balance the day before, and ends it on the last date asked for', async ({ page, context, baseURL }, testInfo) => {
@@ -294,7 +297,7 @@ test.describe('on screen', () => {
     await expect(rows.first()).toContainText(dateText(monthEnd(start, 29))) // June's balance, after June's Transaction
     await expect(rows.first()).toContainText(money(balanceAfter(29)))
     await expect(rows.last()).toContainText(dateText(to)) // not the end of the month
-    await expect(account).not.toContainText('No Transactions are held')
+    await expect(account).not.toContainText('date held for this Account')
   })
 
   test('stops at the last date held, however far the dates run, and says so', async ({ page, context, baseURL }, testInfo) => {
@@ -305,7 +308,7 @@ test.describe('on screen', () => {
 
     const account = article(page).getByRole('region', { name: `${savings.name} (${savings.number})` })
     await expect(account.getByRole('table').locator('tbody tr')).toHaveCount(MONTHS_HELD) // no rows for the months after
-    await expect(account).toContainText(`No Transactions are held after ${dateText(`${end}-12-31`)}, so the Report stops there.`)
+    await expect(account).toContainText(`The last date held for this Account is ${dateText(`${end}-12-31`)}, so the Report stops there.`)
     await expect(account.locator('dl')).toContainText(`At the end of ${dateText(`${end}-12-31`)}`)
   })
 
@@ -316,11 +319,11 @@ test.describe('on screen', () => {
 
     await page.goto(address(savingsId, `${end + 1}-01-01`, `${end + 1}-12-31`))
     const account = article(page).getByRole('region', { name: `${savings.name} (${savings.number})` })
-    await expect(account).toContainText(`The Transactions held for this Account end on ${dateText(`${end}-12-31`)}.`)
+    await expect(account).toContainText(`The last date held for this Account is ${dateText(`${end}-12-31`)}.`)
     await expect(account.getByRole('table')).toHaveCount(0)
 
     await page.goto(address(savingsId, `${start - 3}-01-01`, `${start - 1}-12-31`))
-    await expect(article(page).getByRole('region', { name: `${savings.name} (${savings.number})` })).toContainText(`The Transactions held for this Account start on ${dateText(transactionDate(start, 0))}.`)
+    await expect(article(page).getByRole('region', { name: `${savings.name} (${savings.number})` })).toContainText(`The first date held for this Account is ${dateText(transactionDate(start, 0))}.`)
   })
 
   test('says why an Account with no bank balance it can count has no balances, and never gives it figures', async ({ page, context, baseURL }, testInfo) => {
@@ -330,7 +333,7 @@ test.describe('on screen', () => {
     await page.goto(address(nothingId, `${start}-01-01`, `${start}-12-31`))
 
     const account = article(page).getByRole('region', { name: `${nothing.name} (${nothing.number})` })
-    await expect(account).toContainText('No balances can be worked out for this Account yet. The file ended before its bank balance date.')
+    await expect(account).toContainText('No balances can be worked out for this Account. The file ended before its bank balance date.')
     await expect(account.getByRole('table')).toHaveCount(0)
     await expect(account.locator('dl')).toHaveCount(0)
   })

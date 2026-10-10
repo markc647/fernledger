@@ -50,11 +50,12 @@ async function importFile(rows: unknown[], options: ImportOptions) {
 
 const accountId = async (number = savings) => (await env.DB.prepare('SELECT id FROM accounts WHERE account_number = ?').bind(number).first<{ id: number }>())!.id
 const query = (id: number, from: string, to: string) => `accountId=${id}&from=${from}&to=${to}`
-const report = async (from: string, to: string, number = savings, who: Who = 'member'): Promise<BalancesReport> => {
-  const res = await call(`/api/reports/balances?${query(await accountId(number), from, to)}`, { who })
+const reportFor = async (id: number, from: string, to: string, who: Who = 'member'): Promise<BalancesReport> => {
+  const res = await call(`/api/reports/balances?${query(id, from, to)}`, { who })
   expect(res.status, `${from} to ${to}`).toBe(200)
   return res.json()
 }
+const report = async (from: string, to: string, number = savings, who: Who = 'member') => reportFor(await accountId(number), from, to, who)
 type Point = { date: string; balanceCents: number }
 const history = async (number = savings): Promise<{ anchor: { asOfDate: string; balanceCents: number } | null; points: Point[] }> => (await call(`/api/balances/${await accountId(number)}/history`)).json()
 
@@ -70,7 +71,7 @@ beforeEach(async () => {
   await env.DB.batch(['balance_checks', 'transactions', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
 })
 
-const summary = (r: BalancesReport) => ({ opening: r.opening, rows: r.rows.map((row) => [row.date, row.balanceCents, row.changeCents]), closing: r.closing })
+const summary = (r: BalancesReport) => ({ opening: r.opening, rows: r.rows.map((row) => [row.date, row.balanceCents, row.changeCents]), closing: r.closing, change: r.changeCents })
 
 describe('the balances Report', () => {
   it('gives the opening balance, the balance at the end of each month and the closing balance', async () => {
@@ -87,6 +88,7 @@ describe('the balances Report', () => {
         ['2026-10-07', 12_300, 300], // the last date held, not the end of the month
       ],
       closing: { date: '2026-10-07', balanceCents: 12_300 },
+      change: 2300, // the closing balance less the opening one
     })
     expect(r.held).toEqual({ from: '2026-07-10', to: '2026-10-07' })
     expect(r.anchor).toEqual({ asOfDate: '2026-10-07', balanceCents: 12_300 })
@@ -107,6 +109,7 @@ describe('the balances Report', () => {
         ['2026-10-07', 12_300, 300],
       ],
       closing: { date: '2026-10-07', balanceCents: 12_300 },
+      change: 300,
     })
   })
 
@@ -122,7 +125,7 @@ describe('the balances Report', () => {
 
     const r = await report('2026-10-01', '2026-10-05')
 
-    expect(summary(r)).toEqual({ opening: { balanceCents: 12_000, beforeFirst: false }, rows: [['2026-10-05', 11_900, -100]], closing: { date: '2026-10-05', balanceCents: 11_900 } })
+    expect(summary(r)).toEqual({ opening: { balanceCents: 12_000, beforeFirst: false }, rows: [['2026-10-05', 11_900, -100]], closing: { date: '2026-10-05', balanceCents: 11_900 }, change: -100 })
   })
 
   it('is a single row for one day', async () => {
@@ -130,7 +133,7 @@ describe('the balances Report', () => {
 
     const r = await report('2026-10-06', '2026-10-06')
 
-    expect(summary(r)).toEqual({ opening: { balanceCents: 11_900, beforeFirst: false }, rows: [['2026-10-06', 12_300, 400]], closing: { date: '2026-10-06', balanceCents: 12_300 } })
+    expect(summary(r)).toEqual({ opening: { balanceCents: 11_900, beforeFirst: false }, rows: [['2026-10-06', 12_300, 400]], closing: { date: '2026-10-06', balanceCents: 12_300 }, change: 400 })
   })
 
   it('gives no balances before the first date held or after the last, and says what is held', async () => {
@@ -141,7 +144,7 @@ describe('the balances Report', () => {
       ['2026-10-08', '2026-12-31'],
     ] as const) {
       const r = await report(from, to)
-      expect(summary(r), `${from} to ${to}`).toEqual({ opening: null, rows: [], closing: null })
+      expect(summary(r), `${from} to ${to}`).toEqual({ opening: null, rows: [], closing: null, change: null })
       expect(r.held).toEqual({ from: '2026-07-10', to: '2026-10-07' })
     }
   })
@@ -154,6 +157,7 @@ describe('the balances Report', () => {
     expect(r.rows.map((row) => row.date)).toEqual(['2026-07-31', '2026-08-31', '2026-09-30', '2026-10-07'])
     expect(r.opening).toEqual({ balanceCents: OPENING, beforeFirst: true })
     expect(r.closing).toEqual({ date: '2026-10-07', balanceCents: 12_300 })
+    expect(r.changeCents).toBe(2300)
   })
 
   it('has no balances for an Account with no bank balance to work from, and says why', async () => {
@@ -162,7 +166,7 @@ describe('the balances Report', () => {
 
     const r = await report('2026-07-01', '2026-08-31')
 
-    expect(r).toMatchObject({ anchor: null, held: null, opening: null, rows: [], closing: null, latestStatus: 'file-ends-early', differences: [], checked: 0 })
+    expect(r).toMatchObject({ anchor: null, held: null, opening: null, rows: [], closing: null, latestStatus: 'file-ends-early', differences: [], changeCents: null, checks: { count: 0, coversFrom: null, coversTo: null } })
   })
 
   it('has none for an Account whose only bank balance is on or after its Cutover Date', async () => {
@@ -179,8 +183,34 @@ describe('the balances Report', () => {
       opening: { balanceCents: 5777, beforeFirst: true },
       rows: [['2026-08-31', 5000, -777]],
       closing: { date: '2026-08-31', balanceCents: 5000 },
+      change: -777,
     })
     expect((await report('2026-08-01', '2026-08-31')).rows).toMatchObject([{ balanceCents: 12_000 }])
+  })
+
+  it('counts each leg of a Transfer in its Account’s balance: money moved between Accounts is not spending, but it is in the bank’s balance', async () => {
+    // $50.00 moves from savings ($100.00 before) to cheque ($20.00 before) on 10 August. Each file's balance is after it.
+    await importFile([tx('T1', '2026-08-10', -5000)], { ledger: ['2026-08-31', 5000], from: '2026-08-01' })
+    await importFile([tx('T2', '2026-08-10', 5000)], { number: cheque, ledger: ['2026-08-31', 7000], from: '2026-08-01' })
+    // The two are paired as a Transfer (worker/transfers.ts), so the test would not mean much if they were not.
+    const paired = await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE transfer_of IS NOT NULL').first<{ n: number }>()
+    expect(paired!.n).toBe(2)
+
+    expect(summary(await report('2026-08-01', '2026-08-31'))).toEqual({
+      opening: { balanceCents: OPENING, beforeFirst: true },
+      rows: [['2026-08-31', 5000, -5000]],
+      closing: { date: '2026-08-31', balanceCents: 5000 },
+      change: -5000,
+    })
+    expect(summary(await report('2026-08-01', '2026-08-31', cheque))).toEqual({
+      opening: { balanceCents: 2000, beforeFirst: true },
+      rows: [['2026-08-31', 7000, 5000]],
+      closing: { date: '2026-08-31', balanceCents: 7000 },
+      change: 5000,
+    })
+    // And it is the history's: the balance on the day of the Transfer already has it.
+    expect((await history()).points).toContainEqual({ date: '2026-08-10', balanceCents: 5000 })
+    expect((await history(cheque)).points).toContainEqual({ date: '2026-08-10', balanceCents: 7000 })
   })
 })
 
@@ -206,30 +236,37 @@ describe('the balances Report matches balance history', () => {
       if (day >= end) break
     }
     const before = points.filter((p) => p.date < from).at(-1)
-    return { rows, opening: start > end ? null : before ? before.balanceCents : openingCents, closing: start > end ? null : at(end) }
+    const opening = start > end ? null : before ? before.balanceCents : openingCents
+    const closing = start > end ? null : at(end)
+    return { rows, opening, closing, change: opening === null || closing === null ? null : closing - opening }
   }
 
+  // About 190 requests each (every pair of DATES), which a busy machine can take longer than the 5 s default over.
+  const SWEEP = { timeout: 30_000 }
+
+  /** Looks the Account up once, then asks the Report about every pair of dates and holds each answer to the history. */
   const sweep = async (number: string, openingCents: number) => {
+    const id = await accountId(number)
     const { points } = await history(number)
     expect(points.length).toBeGreaterThan(2)
     let compared = 0
     for (const from of DATES)
       for (const to of DATES) {
         if (from > to) continue
-        const r = await report(from, to, number)
+        const r = await reportFor(id, from, to)
         const expected = fromHistory(points, from, to, openingCents)
-        expect({ rows: r.rows.map((row) => [row.date, row.balanceCents]), opening: r.opening?.balanceCents ?? null, closing: r.closing?.balanceCents ?? null }, `${from} to ${to}`).toEqual(expected)
+        expect({ rows: r.rows.map((row) => [row.date, row.balanceCents]), opening: r.opening?.balanceCents ?? null, closing: r.closing?.balanceCents ?? null, change: r.changeCents }, `${from} to ${to}`).toEqual(expected)
         compared += 1
       }
     expect(compared).toBeGreaterThan(100)
   }
 
-  it('gives the history’s balance on every date it reports, for ranges that begin before, in and after the history', async () => {
+  it('gives the history’s balance on every date it reports, for ranges that begin before, in and after the history', SWEEP, async () => {
     await importAllSavings()
     await sweep(savings, OPENING)
   })
 
-  it('matches for an Account with a Cutover Date, where a later bank balance does not count and Transactions stop at the Cutover Date', async () => {
+  it('matches for an Account with a Cutover Date, where a later bank balance does not count and Transactions stop at the Cutover Date', SWEEP, async () => {
     await importFile([...july, ...august], { ledger: ['2026-08-31', OPENING + 5000 - 1000 - 2000], cutoverDate: '2026-10-01' })
     // The October file's balance is dated after the Cutover Date, so history does not use it, and its Transactions are dropped.
     await importFile(october, { ledger: ['2026-10-07', 99_999], cutoverDate: '2026-10-01', from: '2026-09-01' })
@@ -244,7 +281,7 @@ describe('the balances Report matches balance history', () => {
     expect(r.held).toEqual({ from: '2026-07-10', to: '2026-08-31' })
   })
 
-  it('matches for the second of two Accounts, with an older file imported after a newer one', async () => {
+  it('matches for the second of two Accounts, with an older file imported after a newer one', SWEEP, async () => {
     await importAllSavings()
     await importFile([tx('C2', '2026-09-20', -300)], { number: cheque, ledger: ['2026-09-30', 4700], from: '2026-09-01' })
     await importFile([tx('C1', '2026-08-02', -1000)], { number: cheque, ledger: ['2026-08-31', 5000], from: '2026-08-01' })
@@ -318,11 +355,11 @@ describe('the balances Report lists the Balance Check differences in its dates',
 
     const before = await report('2026-07-01', '2026-08-31') // ends on the day the span starts after
     expect(before.differences).toEqual([])
-    expect(before.checked).toBe(0) // nothing was compared in those dates
+    expect(before.checks).toEqual({ count: 0, coversFrom: null, coversTo: null }) // nothing was compared in those dates
 
     const after = await report('2026-10-08', '2026-12-31')
     expect(after.differences).toEqual([])
-    expect(after.checked).toBe(0)
+    expect(after.checks.count).toBe(0)
   })
 
   it('says when a check was made and found no difference', async () => {
@@ -332,7 +369,18 @@ describe('the balances Report lists the Balance Check differences in its dates',
     const r = await report('2026-09-01', '2026-10-31')
 
     expect(r.differences).toEqual([])
-    expect(r.checked).toBe(1)
+    expect(r.checks).toEqual({ count: 1, coversFrom: '2026-08-31', coversTo: '2026-10-07' })
+  })
+
+  it('gives the dates the checks span, which can be more than the dates of the Report, so it never says more than was compared', async () => {
+    await importFile([...july, ...august], { ledger: ['2026-08-31', 12_000] })
+    await importFile([tx('S1', '2026-09-10', -50)], { ledger: ['2026-09-30', 11_950], from: '2026-09-01' })
+    await importFile(october, { ledger: ['2026-10-07', 12_250], from: '2026-10-01' })
+
+    // Two checks: 31 August to 30 September, and 30 September to 7 October. A Report of 10 to 20 September is inside the first.
+    expect((await report('2026-09-10', '2026-09-20')).checks).toEqual({ count: 1, coversFrom: '2026-08-31', coversTo: '2026-09-30' })
+    // One of 25 September to 3 October is partly in each, so it counts both, and they span more than its dates.
+    expect((await report('2026-09-25', '2026-10-03')).checks).toEqual({ count: 2, coversFrom: '2026-08-31', coversTo: '2026-10-07' })
   })
 
   it('does not list another Account’s difference', async () => {
@@ -382,7 +430,7 @@ describe('the balances Report’s request', () => {
 })
 
 describe('the balances Report’s months', () => {
-  const none = { anchor: null, latestStatus: null, bank: [], checked: 0, differences: [] }
+  const none = { anchor: null, latestStatus: null, bank: [], checks: { count: 0, coversFrom: null, coversTo: null }, differences: [] }
   const request = { accountId: 1, from: '2023-01-01', to: '2024-12-31' }
   // The history query's rows for an Account held from 15 November 2023 to 10 March 2024: the month-end rows are the last date in each month with Transactions.
   const history: HistoryRow[] = [
@@ -404,6 +452,8 @@ describe('the balances Report’s months', () => {
       ['2024-03-10', 1500, 100],
     ])
     expect(r.opening).toEqual({ balanceCents: 1000, beforeFirst: true })
+    expect(r.changeCents).toBe(500) // the closing balance less the opening one, which is also the sum of the rows
+    expect(r.rows.reduce((sum, row) => sum + row.changeCents, 0)).toBe(500)
   })
 
   it('has nothing to say without a first and last date: no balance can be worked out', () => {

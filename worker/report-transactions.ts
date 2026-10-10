@@ -1,6 +1,7 @@
 import * as z from 'zod/mini'
-import { isQueryDate, isRealDate } from './dates'
+import { isRealDate } from './dates'
 import { effectiveCategory, type TransferSource } from './effective-category'
+import { datesInOrder, reportRange } from './report-query'
 import type { Statement } from './transaction-search'
 
 // The data of the Transaction listing Report (GET /api/reports/transactions), as pure functions. One Account at a time, oldest
@@ -20,13 +21,11 @@ const CURSOR = /^(\d{4}-\d{2}-\d{2}):([1-9]\d{0,14})$/
 /** The query string of a Report page, validated before anything runs. A refusal names the field. */
 export const reportQuery = z
   .object({
-    accountId: z.string().check(z.regex(/^[1-9]\d{0,8}$/)),
-    from: z.string().check(z.refine(isQueryDate)),
-    to: z.string().check(z.refine(isQueryDate)),
+    ...reportRange,
     after: z.optional(z.string().check(z.regex(CURSOR), z.refine((cursor) => isRealDate(cursor.slice(0, 10))))),
     limit: z.optional(digits),
   })
-  .check(z.refine((q) => q.from <= q.to, { path: ['to'] }))
+  .check(datesInOrder)
 
 export type ReportQueryParams = z.output<typeof reportQuery>
 

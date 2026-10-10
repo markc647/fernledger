@@ -7,31 +7,31 @@ import { accountLabel } from '@/lib/report-frame'
 import {
   closingLabel,
   describeDifference,
+  differencesNote,
   differencesSummary,
   heldNotes,
   openingLabel,
   outlook,
   sourceOf,
   type AccountBalances,
-  type BalanceLine,
+  type MonthBalance,
 } from '@/lib/report-balances'
 
 /** Tighter cells on paper, where a page is 680px wide and a Report is many pages long. */
 const PAPER = 'print:px-2 print:py-2'
 
-// One line for each month. The date and the two amounts keep their words whole; the Source, which can be a sentence, is the column
+// One row for each month. The date and the two amounts keep their words whole; the Source, which can be a sentence, is the column
 // that gives way.
-const columns: Column<BalanceLine>[] = [
-  { key: 'date', header: 'Date', className: `${PAPER} whitespace-nowrap [overflow-wrap:normal]`, cell: (line) => formatDate(line.date) },
-  { key: 'balance', header: 'Balance', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (line) => <Amount cents={line.balanceCents} balance /> },
-  { key: 'change', header: 'Change', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (line) => <Amount cents={line.changeCents} /> },
+const columns: Column<MonthBalance>[] = [
+  { key: 'date', header: 'Date', className: `${PAPER} whitespace-nowrap [overflow-wrap:normal]`, cell: (row) => formatDate(row.date) },
+  { key: 'balance', header: 'Balance', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.balanceCents} balance /> },
+  { key: 'change', header: 'Change', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.changeCents} /> },
   { key: 'source', header: 'Source', className: PAPER, cell: sourceOf },
 ]
 
-/** The balance when the dates begin and when they end, and what changed. They come before the table, so they never end up alone on a last page. */
-function Summary({ section }: { section: AccountBalances }) {
+/** The balance when the dates begin and when they end, and what changed (the API's, not worked out here). They come before the table, so they never end up alone on a last page. */
+function OpeningAndClosing({ section }: { section: AccountBalances }) {
   const { report } = section
-  const change = report.closing!.balanceCents - report.opening!.balanceCents
   return (
     <dl className="mt-3 grid max-w-xl grid-cols-[1fr_auto] items-baseline gap-x-6 gap-y-1 break-inside-avoid">
       <dt>{openingLabel(report)}</dt>
@@ -44,7 +44,7 @@ function Summary({ section }: { section: AccountBalances }) {
       </dd>
       <dt className="border-t pt-1 font-semibold">Change</dt>
       <dd className="border-t pt-1 text-end">
-        <Amount cents={change} />
+        <Amount cents={report.changeCents!} />
       </dd>
     </dl>
   )
@@ -54,6 +54,7 @@ function Summary({ section }: { section: AccountBalances }) {
 function Differences({ section }: { section: AccountBalances }) {
   const { report } = section
   const summary = differencesSummary(report)
+  const note = differencesNote(report)
   return (
     // Not a section with a name of its own: every Account has one, and landmarks with the same name are hard to tell apart.
     <div className="mt-6 print:mt-4">
@@ -61,26 +62,29 @@ function Differences({ section }: { section: AccountBalances }) {
       {summary !== null ? (
         <p className="mt-1">{summary}</p>
       ) : (
-        <ul className="mt-2 grid gap-3">
-          {report.differences.map((difference) => {
-            const words = describeDifference(difference)
-            return (
-              <li key={difference.asOfDate} className="break-inside-avoid rounded-xl border-2 p-3">
-                <p>
-                  <Status tone="warning">{words.headline}</Status>
-                </p>
-                <p className="mt-1">{words.found}</p>
-                <p className="mt-1">{words.direction}</p>
-              </li>
-            )
-          })}
-        </ul>
+        <>
+          <ul className="mt-2 grid gap-3">
+            {report.differences.map((difference) => {
+              const words = describeDifference(difference)
+              return (
+                <li key={difference.asOfDate} className="break-inside-avoid rounded-xl border-2 p-3">
+                  <p>
+                    <Status tone="warning">{words.headline}</Status>
+                  </p>
+                  <p className="mt-1">{words.found}</p>
+                  <p className="mt-1">{words.direction}</p>
+                </li>
+              )
+            })}
+          </ul>
+          <p className="mt-3">{note}</p>
+        </>
       )}
     </div>
   )
 }
 
-/** An Account: its name and bank number, what its figures are worked out from, the opening and closing balance, a line for each month, and the Balance Check differences. */
+/** An Account: its name and bank number, what its figures are worked out from, the opening and closing balance, a row for each month, and the Balance Check differences. */
 function AccountSection({ section }: { section: AccountBalances }) {
   const { report } = section
   const headingId = `account-${section.accountId}`
@@ -94,21 +98,21 @@ function AccountSection({ section }: { section: AccountBalances }) {
       </h2>
       {what.kind === 'no-balance' && (
         <p className="mt-2 font-semibold">
-          No balances can be worked out for this Account yet. {what.reason}.
+          No balances can be worked out for this Account. {what.reason}.
         </p>
       )}
       {what.kind === 'before-held' && (
-        <p className="mt-2 font-semibold">No balances for these dates. The Transactions held for this Account start on {formatDate(what.heldFrom)}.</p>
+        <p className="mt-2 font-semibold">No balances for these dates. The first date held for this Account is {formatDate(what.heldFrom)}.</p>
       )}
       {what.kind === 'after-held' && (
-        <p className="mt-2 font-semibold">No balances for these dates. The Transactions held for this Account end on {formatDate(what.heldTo)}.</p>
+        <p className="mt-2 font-semibold">No balances for these dates. The last date held for this Account is {formatDate(what.heldTo)}.</p>
       )}
       {what.kind === 'balances' && (
         <>
           <p className="mt-1">
             Worked out from the bank's balance of {formatBalance(report.anchor!.balanceCents)} on {formatDate(report.anchor!.asOfDate)}.
           </p>
-          <Summary section={section} />
+          <OpeningAndClosing section={section} />
           {heldNotes(report, section.cutoverDate).map((note) => (
             <p key={note} className="mt-2">
               {note}
@@ -119,7 +123,7 @@ function AccountSection({ section }: { section: AccountBalances }) {
               caption={`Balances in ${section.accountName}`}
               columns={columns}
               rows={report.rows}
-              getRowKey={(line) => line.date}
+              getRowKey={(row) => row.date}
               className="print:text-[12pt]"
               printHeading={printHeading}
             />
@@ -131,20 +135,21 @@ function AccountSection({ section }: { section: AccountBalances }) {
   )
 }
 
-/** What a reader needs before the figures: how often, and where a balance comes from. */
-export function AboutBalances() {
+/** What a reader needs before the figures: how often, where a balance comes from, and what "held" means. */
+function AboutBalances() {
   return (
     <section aria-labelledby="about-balances" className="mt-6 print:mt-4">
       <h2 id="about-balances" className="text-lg font-semibold print:text-[13pt]">
         About these balances
       </h2>
       <p className="mt-1">
-        Each Account has a balance for the end of every month in these dates. The first is the balance when the dates begin, and the last is the balance when they end.
+        Each Account has a row for every month in these dates, with its balance at the end of the month. Above the rows are its balance when the dates begin and when they end.
       </p>
       <p className="mt-1">
         Fernledger works each balance out from the Transactions it holds, starting from the bank's own balance for the Account. They are calculated figures, not balances the bank gave for each
-        month-end. A line says “Bank balance” where the bank did give one for that day.
+        month-end. A row says “Bank balance” where the bank did give one for that day.
       </p>
+      <p className="mt-1">A date is held when Fernledger has a Transaction or a bank balance for the Account on it. There are no balances before the first date held or after the last.</p>
     </section>
   )
 }

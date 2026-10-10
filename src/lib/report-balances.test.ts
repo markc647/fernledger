@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BalancesReport } from '@/generated/api/report-balances'
-import { closingLabel, describeDifference, differencesSummary, heldNotes, loadBalances, openingLabel, outlook, sourceOf } from './report-balances'
+import { closingLabel, describeDifference, differencesNote, differencesSummary, heldNotes, loadBalances, openingLabel, outlook, sourceOf } from './report-balances'
 
 // What the balances Report says, as pure functions (src/lib/report-balances.ts); worker/report-balances.test.ts holds its numbers
 // to the Account's balance history, and e2e/report-balances.spec.ts checks how it prints.
@@ -15,7 +15,8 @@ const report = (over: Partial<BalancesReport> = {}): BalancesReport => ({
   opening: { balanceCents: 10_000, beforeFirst: true },
   rows: [{ date: '2026-10-07', balanceCents: 12_300, changeCents: 2300, bankCents: 12_300 }],
   closing: { date: '2026-10-07', balanceCents: 12_300 },
-  checked: 0,
+  changeCents: 2300,
+  checks: { count: 0, coversFrom: null, coversTo: null },
   differences: [],
   ...over,
 })
@@ -26,24 +27,24 @@ describe('outlook', () => {
   })
 
   it('says why there are none when no bank balance can be counted, in the words the Summary uses', () => {
-    expect(outlook(report({ held: null, anchor: null, latestStatus: 'after-cutover', rows: [], opening: null, closing: null }))).toEqual({
+    expect(outlook(report({ held: null, anchor: null, latestStatus: 'after-cutover', rows: [], opening: null, closing: null, changeCents: null }))).toEqual({
       kind: 'no-balance',
       reason: 'The bank balance we have is after the Cutover Date',
     })
-    expect(outlook(report({ held: null, anchor: null, latestStatus: 'file-ends-early', rows: [], opening: null, closing: null }))).toMatchObject({ reason: 'The file ended before its bank balance date' })
-    expect(outlook(report({ held: null, anchor: null, latestStatus: null, rows: [], opening: null, closing: null }))).toMatchObject({ reason: 'No bank balance yet' })
+    expect(outlook(report({ held: null, anchor: null, latestStatus: 'file-ends-early', rows: [], opening: null, closing: null, changeCents: null }))).toMatchObject({ reason: 'The file ended before its bank balance date' })
+    expect(outlook(report({ held: null, anchor: null, latestStatus: null, rows: [], opening: null, closing: null, changeCents: null }))).toMatchObject({ reason: 'No bank balance yet' })
   })
 
   it('says what is held when the dates end before it begins or begin after it ends', () => {
-    expect(outlook(report({ to: '2026-07-09', rows: [], opening: null, closing: null }))).toEqual({ kind: 'before-held', heldFrom: '2026-07-10' })
-    expect(outlook(report({ from: '2026-10-08', rows: [], opening: null, closing: null }))).toEqual({ kind: 'after-held', heldTo: '2026-10-07' })
+    expect(outlook(report({ to: '2026-07-09', rows: [], opening: null, closing: null, changeCents: null }))).toEqual({ kind: 'before-held', heldFrom: '2026-07-10' })
+    expect(outlook(report({ from: '2026-10-08', rows: [], opening: null, closing: null, changeCents: null }))).toEqual({ kind: 'after-held', heldTo: '2026-10-07' })
   })
 })
 
 describe('openingLabel and closingLabel', () => {
-  it('says the opening balance is from before the first Transaction held when the dates begin on or before it', () => {
-    expect(openingLabel(report())).toBe('Before the first Transaction held, Fri 10 Jul 2026')
-    expect(openingLabel(report({ from: '2026-07-10' }))).toBe('Before the first Transaction held, Fri 10 Jul 2026')
+  it('says the opening balance is from before the first date held when the dates begin on or before it', () => {
+    expect(openingLabel(report())).toBe('Before the first date held, Fri 10 Jul 2026')
+    expect(openingLabel(report({ from: '2026-07-10' }))).toBe('Before the first date held, Fri 10 Jul 2026')
   })
 
   it('says it is the balance when the dates begin when they begin part way through', () => {
@@ -60,14 +61,17 @@ describe('heldNotes', () => {
     expect(heldNotes(report({ from: '2026-08-01', to: '2026-09-30' }), null)).toEqual([])
   })
 
-  it('says where the Transactions held begin and end when the dates run past them', () => {
-    expect(heldNotes(report(), null)).toEqual(['No Transactions are held before Fri 10 Jul 2026.', 'No Transactions are held after Wed 7 Oct 2026, so the Report stops there.'])
+  it('says the first and last date held when the dates run past them, for a date may be a bank balance’s and not a Transaction’s', () => {
+    expect(heldNotes(report(), null)).toEqual([
+      'The first date held for this Account is Fri 10 Jul 2026, so there are no balances before it.',
+      'The last date held for this Account is Wed 7 Oct 2026, so the Report stops there.',
+    ])
   })
 
   it('adds where the rest of an Account with a Cutover Date will come from', () => {
     expect(heldNotes(report({ held: { from: '2026-07-10', to: '2026-08-31' } }), '2026-10-01')).toEqual([
-      'No Transactions are held before Fri 10 Jul 2026.',
-      'No Transactions are held after Mon 31 Aug 2026, so the Report stops there.',
+      'The first date held for this Account is Fri 10 Jul 2026, so there are no balances before it.',
+      'The last date held for this Account is Mon 31 Aug 2026, so the Report stops there.',
       "From its Cutover Date, Thu 1 Oct 2026, this Account's Transactions will come from the bank link once syncing starts.",
     ])
   })
@@ -82,19 +86,20 @@ describe('heldNotes', () => {
 })
 
 describe('sourceOf', () => {
-  const line = { date: '2026-08-31', balanceCents: 12_000, changeCents: 0 }
+  const row = { date: '2026-08-31', balanceCents: 12_000, changeCents: 0 }
 
   it('says a balance is calculated unless the bank gave one for that day', () => {
-    expect(sourceOf({ ...line, bankCents: null })).toBe('Calculated from the Transactions')
+    expect(sourceOf({ ...row, bankCents: null })).toBe('Calculated from the Transactions')
   })
 
   it('says so when the bank gave the same balance', () => {
-    expect(sourceOf({ ...line, bankCents: 12_000 })).toBe('Bank balance')
+    expect(sourceOf({ ...row, bankCents: 12_000 })).toBe('Bank balance')
   })
 
-  it('gives the bank’s own figure when it differs, without replacing the calculated one', () => {
-    expect(sourceOf({ ...line, bankCents: 12_500 })).toBe('Calculated from the Transactions. The bank gave $125.00.')
-    expect(sourceOf({ ...line, bankCents: -500 })).toBe('Calculated from the Transactions. The bank gave −$5.00.')
+  it('gives the bank’s own figure and the difference when they differ, without replacing the calculated one', () => {
+    expect(sourceOf({ ...row, bankCents: 12_500 })).toBe("Calculated from the Transactions, $5.00 less than the bank's $125.00.")
+    expect(sourceOf({ ...row, bankCents: 11_700 })).toBe("Calculated from the Transactions, $3.00 more than the bank's $117.00.")
+    expect(sourceOf({ ...row, bankCents: -500 })).toBe("Calculated from the Transactions, $125.00 more than the bank's −$5.00.")
   })
 })
 
@@ -112,17 +117,42 @@ describe('describeDifference', () => {
   })
 })
 
+describe('differencesNote', () => {
+  const difference = { asOfDate: '2026-10-07', since: '2026-08-31', differenceCents: 400 }
+
+  it('says the balances before a difference carry it, because every balance is worked back from the latest bank balance', () => {
+    expect(differencesNote(report({ differences: [difference] }))).toBe('Balances before Wed 7 Oct 2026 are worked back from the latest bank balance, so they carry this difference.')
+  })
+
+  it('says it of each date when there are several', () => {
+    expect(differencesNote(report({ differences: [difference, { ...difference, asOfDate: '2026-09-30', since: '2026-08-31' }] }))).toBe(
+      'Balances before each of these dates are worked back from the latest bank balance, so they carry the difference found there.',
+    )
+  })
+
+  it('has nothing to say when there are no differences', () => {
+    expect(differencesNote(report())).toBeNull()
+  })
+})
+
 describe('differencesSummary', () => {
-  it('says there are none to list when a Balance Check covers the dates and found nothing', () => {
-    expect(differencesSummary(report({ checked: 2 }))).toBe('No difference was found. Every Balance Check that covers these dates agrees with the bank.')
+  it('says how many Balance Checks covered the dates and what dates they span, which can be more than the Report’s, when they found nothing', () => {
+    expect(differencesSummary(report({ checks: { count: 1, coversFrom: '2026-08-31', coversTo: '2026-10-07' } }))).toBe(
+      'No difference was found. The one Balance Check that covers part or all of these dates agrees with the bank. It checks Mon 31 Aug 2026 to Wed 7 Oct 2026.',
+    )
+    expect(differencesSummary(report({ checks: { count: 2, coversFrom: '2026-08-31', coversTo: '2026-10-07' } }))).toBe(
+      'No difference was found. The 2 Balance Checks that cover part or all of these dates agree with the bank. Together they check Mon 31 Aug 2026 to Wed 7 Oct 2026.',
+    )
   })
 
   it('does not say the bank agrees when no Balance Check covers the dates', () => {
-    expect(differencesSummary(report({ checked: 0 }))).toBe('No Balance Check covers these dates, so none could find a difference.')
+    expect(differencesSummary(report({ checks: { count: 0, coversFrom: null, coversTo: null } }))).toBe('No Balance Check covers these dates, so none could find a difference.')
   })
 
   it('has nothing to add when there are differences to list', () => {
-    expect(differencesSummary(report({ checked: 1, differences: [{ asOfDate: '2026-10-07', since: '2026-08-31', differenceCents: 400 }] }))).toBeNull()
+    expect(
+      differencesSummary(report({ checks: { count: 1, coversFrom: '2026-08-31', coversTo: '2026-10-07' }, differences: [{ asOfDate: '2026-10-07', since: '2026-08-31', differenceCents: 400 }] })),
+    ).toBeNull()
   })
 })
 
