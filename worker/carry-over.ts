@@ -97,7 +97,7 @@ export const MARK_APPLIED = `
 export const CLEAR_HELD = 'DELETE FROM carry_over WHERE account_id = ?'
 
 // The last chunk of any other Import drops only what is finished with: rows already given out, and rows with nothing left
-// to give (the Admin removed the Category and there is no Note). What still waits stays, for a replace to finish or the
+// to give (the Admin removed the Category and there is no Note or mark). What still waits stays, for a replace to finish or the
 // Admin to discard.
 export const TIDY_HELD = `DELETE FROM carry_over WHERE account_id = ?1 AND (applied = 1 OR NOT COALESCE(${annotated('carry_over')}, 0))`
 

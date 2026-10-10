@@ -61,7 +61,7 @@ export class ImportStopped extends Error {
 
 /**
  * Steps of clearing a very large history before the first chunk (5,000 rows each, so more than any Account will hold).
- * Each step is final, and uses 15,000 of the free plan's 100,000 D1 writes a day (a removed row costs 3), so a big
+ * Each step is final, and uses 20,000 of the free plan's 100,000 D1 writes a day (a removed row costs 4), so a big
  * history can hit the daily limit part way; the Worker then answers 429 and the Import stops with a daily-limit message.
  */
 const MAX_CLEAR_STEPS = 40

@@ -18,21 +18,23 @@ export const MAX_ROWS_PER_CHUNK = 500
 export const DAILY_ROW_WRITES = 100_000
 
 /**
- * A row costs 3 writes: the row itself, its date index and its unique-ID index. Removing a row costs the same.
+ * A row costs 4 writes: the row itself and its three indexes (its date, its Account and date, and its unique ID: migrations 0802 and 1002), and an insert
+ * statement writes 1 more for the table's row counter, once however many rows it inserts. Pinned in imports.test.ts. Removing a row is taken to cost the same 4,
+ * because every index entry goes too; the local database reports a deleted row as 1, so that half is the model and not a measurement.
  * A Rule adds to that (rule-apply.ts stores the result on the imported row): 1 for a Transfer mark, 2 for a Category, because
  * the Category also has an entry in the rule_category index; removing a row with a Category takes that entry out, 1 more. So a
- * row removed and its replacement imported cost 6 in all, 9 when a Rule gave them a Category. A Transfer (WRITES_PER_PAIRED_IMPORTED
+ * row removed and its replacement imported cost 8 in all, 11 when a Rule gave them a Category. A Transfer (WRITES_PER_PAIRED_IMPORTED
  * and _REMOVED) and an Override, Note or Not a Transfer mark carried over (WRITES_PER_CARRIED) cost more again. The estimates built on this number are
- * for the plain 6 and leave the rest out, and the day's limit is still handled when it is reached.
+ * for the plain 8 and leave the rest out, and the day's limit is still handled when it is reached.
  */
-export const WRITES_PER_ROW = 3
+export const WRITES_PER_ROW = 4
 
 /**
  * What carrying one Transaction's Override, Note or Not a Transfer mark over costs, at most: 10. Holding it writes the row and its key (2). Giving it to
- * the new row writes the row, an entry in the index of the Override's Category and one in the mark's index (3 with both). Marking it given writes the row
- * (1), and clearing it deletes the row and its key (2). That is 8 for a row with all three. Removing the row it came from takes its entry out of the
- * Override index and out of the mark index, 1 more each (WRITES_PER_OVERRIDE_REMOVED, WRITES_PER_MARK_REMOVED). So an Override alone costs 8 (7 and its
- * entry in the index), a mark alone 8, a Note alone 7. Pinned in not-a-transfer.test.ts. A replace of rows that mostly have none adds little to the 6 per pair
+ * the new row writes the row, and an entry in the index of the Override's Category and one in the mark's index (3 with both; a Note is in no index). Marking it
+ * given writes the row (1), and clearing it deletes the row and its key (2). That is 8 for a row with all three. Removing the row it came from takes its entry out
+ * of the Override index and out of the mark index, 1 more each (WRITES_PER_OVERRIDE_REMOVED, WRITES_PER_MARK_REMOVED). So an Override alone costs 8 (7 and its
+ * entry in the index), a mark alone 8, a Note alone 6. Pinned in not-a-transfer.test.ts. A replace of rows that mostly have none adds little to the 8 per pair
  * above; one where every row has all three adds 10 for each pair.
  */
 export const WRITES_PER_CARRIED = 10
@@ -44,28 +46,28 @@ export const WRITES_PER_OVERRIDE_REMOVED = 1
 export const WRITES_PER_MARK_REMOVED = 1
 
 /**
- * What a Transfer costs on top of the 3 per row. Pairing writes the matching Transaction's ID on both halves, each a row and an
+ * What a Transfer costs on top of the 4 per row. Pairing writes the matching Transaction's ID on both halves, each a row and an
  * entry in the Transfer index (transfers.ts), and both halves are written by the Import that adds the second one, so an imported
- * row that is paired costs 4 more: 7 in all. Removing a paired row deletes its own entry in the Transfer index (1) and lets go of its
- * matching Transaction, a row and an index entry (2), so a removed row that was paired costs 3 more: 6 in all. A replace that gives
- * back rows its history had paired removes at 6 and imports at 7: 13 for a row replaced, where an unpaired one costs 6.
+ * row that is paired costs 4 more: 8 in all. Removing a paired row deletes its own entry in the Transfer index (1) and lets go of its
+ * matching Transaction, a row and an index entry (2), so a removed row that was paired costs 3 more: 7 in all. A replace that gives
+ * back rows its history had paired removes at 7 and imports at 8: 15 for a row replaced, where an unpaired one costs 8.
  */
 export const WRITES_PER_PAIRED_IMPORTED = 4
 export const WRITES_PER_PAIRED_REMOVED = 3
 
-/** Chunks in one Import, so 10,000 rows: at most 30,000 of the day's writes. */
+/** Chunks in one Import, so 10,000 rows: at most 40,000 of the day's writes, and 20 more for the chunks' insert statements. */
 export const MAX_CHUNKS = 20
 
 /**
- * Most Import-sourced rows removed in one go when replacing imported history: 15,000 writes, leaving room in the day
- * for the new file (at most 10,000 rows, 30,000 writes). Larger histories are removed in steps of this size first
- * (`/api/imports/clear-history`). A slice costs 15,000 writes to remove, up to about 20,000 when a Rule gave every row a
- * Category (4 each, with the rule_category index entry; 1 more for a row with an Override or a mark), and 5,000 x 3 = 15,000 more if every row was paired (it lets go of its matching
- * Transaction too: WRITES_PER_PAIRED_REMOVED). A replace writes 6 for each row removed and imported, 9 with a Rule's Category,
- * 19 with an Override, Note and Not a Transfer mark carried over as well (WRITES_PER_CARRIED; 17 with an Override alone), and 7 more for a row
- * that is paired, which is never marked (13 for a paired row replaced where an unpaired one costs 6: WRITES_PER_PAIRED_REMOVED and _IMPORTED). So the
- * day's allowance covers about 16,000 rows replaced at best, about 5,000 when every row has a Rule's Category and all three to carry over, and about
- * 4,000 if every row is a Transfer with an Override and Note as well, which a household's rows are not. An Account with more imported rows than that cannot be
+ * Most Import-sourced rows removed in one go when replacing imported history: 20,000 writes, leaving room in the day
+ * for the new file (at most 10,000 rows, 40,000 writes). Larger histories are removed in steps of this size first
+ * (`/api/imports/clear-history`). A slice costs 20,000 writes to remove, up to about 25,000 when a Rule gave every row a
+ * Category (5 each, with the rule_category index entry; 1 more for a row with an Override or a mark), and 5,000 x 3 = 15,000 more if every row was paired (it lets go of its matching
+ * Transaction too: WRITES_PER_PAIRED_REMOVED). A replace writes 8 for each row removed and imported, 11 with a Rule's Category,
+ * 21 with an Override, Note and Not a Transfer mark carried over as well (WRITES_PER_CARRIED; 19 with an Override alone), and 7 more for a row
+ * that is paired, which is never marked (15 for a paired row replaced where an unpaired one costs 8: WRITES_PER_PAIRED_REMOVED and _IMPORTED). So the
+ * day's allowance covers about 12,000 rows replaced at best, about 4,700 when every row has a Rule's Category and all three to carry over, and about
+ * 3,800 if every row is a Transfer with an Override and Note as well, which a household's rows are not. An Account with more imported rows than that cannot be
  * replaced in one day: the Import stops at the limit ("Daily limit reached") and the Admin carries on the next day.
  */
 export const REPLACE_SLICE = 5000

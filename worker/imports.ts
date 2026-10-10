@@ -98,7 +98,7 @@ const previewRequest = z.object({ accountId: z.int().check(z.minimum(1)), rows: 
 // `ON CONFLICT … DO NOTHING` ignores only a repeat of the bank's unique ID, unlike `OR IGNORE`, which would also
 // swallow a bad row. A repeat is a duplicate: it adds no row, so duplicates = rows kept - rows added.
 // ?3 is the Cutover Date (or null): rows dated on or after it are not inserted. ISO dates compare correctly as text.
-const INSERT_ROWS = `
+export const INSERT_ROWS = `
   INSERT INTO transactions (account_id, date, amount_cents, description, bank_memo, bank_type, bank_reference, source, bank_unique_id)
   SELECT (SELECT id FROM accounts WHERE account_number = ?1),
          json_extract(value, '$.date'),
@@ -136,7 +136,7 @@ const COUNT_IMPORTED_AND_ANNOTATED = `SELECT COUNT(*) AS imported,
 
 // Only ever Import-sourced rows: Sync-sourced Transactions are never removed here. At most ?2 (REPLACE_SLICE) rows go
 // in one statement, so rows added between the count and the delete can't push one replace past the write budget in
-// ADR 0004: a removed row costs 3 D1 writes (the row and its two indexes), so a slice is 15,000 of the day's 100,000, and
+// ADR 0004: a removed row costs 4 D1 writes (the row and its three indexes), so a slice is 20,000 of the day's 100,000, and
 // each of its rows that has an Override, Note or Not a Transfer mark costs 2 more to hold (the row and its key): at worst 10,000 more. A removed
 // row that was paired costs up to 3 more, for its own Transfer index entry and to let go of its matching Transaction (transfers.ts): at worst
 // 15,000 more again.

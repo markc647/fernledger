@@ -924,30 +924,42 @@ describe('what marking, undoing and carrying read and write (ADR 0004: free plan
     expect(clear).toMatch(/USING (COVERING )?INDEX transactions_not_transfer_with/)
   })
 
-  it('costs WRITES_PER_CARRIED writes at most to carry an Override, a Note and a mark: 8 to hold, give, mark given and clear, and 1 each to take the removed row out of the Override index and the mark index', async () => {
+  // Holding writes the row and its key; giving writes the row and an entry in each index the Override and the mark are in; marking it given writes the row.
+  // Clearing deletes the row and its key, which D1 bills as 2 (the local runtime reports a deleted row as 1). Removing the row it came from takes its entries out
+  // of the Override index and the mark index, which the local runtime does not report either: they are there, and partial, so only a row that has one pays.
+  const CLEARING = 2
+  it.each([
+    ['a Note alone', { override: false, note: true, mark: false }, 6],
+    ['an Override alone', { override: true, note: false, mark: false }, 8],
+    ['a mark alone', { override: false, note: false, mark: true }, 8],
+    ['an Override, a Note and a mark: WRITES_PER_CARRIED', { override: true, note: true, mark: true }, WRITES_PER_CARRIED],
+  ])('carrying %s costs the writes the figures say', async (_name, has, expected) => {
     await wrongPair()
     const savings = await accountIdOf('Savings')
     const id = (
-      await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source, bank_unique_id) VALUES (?, '2026-09-01', -100, 'EXAMPLE', 'import', 'ALL') RETURNING id").bind(savings).first<{ id: number }>()
+      await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source, bank_unique_id) VALUES (?, '2026-09-01', -100, 'EXAMPLE', 'import', 'X') RETURNING id").bind(savings).first<{ id: number }>()
     )!.id
-    await env.DB.prepare('UPDATE transactions SET override_category = ?, note = ?, not_transfer_with = id WHERE id = ?').bind(await categoryId('Groceries'), 'n', id).run()
-    const rows = JSON.stringify([{ uniqueId: 'ALL' }])
+    await env.DB.prepare('UPDATE transactions SET override_category = ?, note = ?, not_transfer_with = ? WHERE id = ?')
+      .bind(has.override ? await categoryId('Groceries') : null, has.note ? 'n' : null, has.mark ? id : null, id)
+      .run()
+    const rows = JSON.stringify([{ uniqueId: 'X' }])
 
     const hold = (await env.DB.prepare(HOLD_REMOVED).bind(savings, 5000).run()).meta
     await env.DB.prepare('DELETE FROM transactions WHERE id = ?').bind(id).run()
-    await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source, bank_unique_id) VALUES (?, '2026-09-01', -100, 'EXAMPLE', 'import', 'ALL')").bind(savings).run()
+    await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source, bank_unique_id) VALUES (?, '2026-09-01', -100, 'EXAMPLE', 'import', 'X')").bind(savings).run()
     const give = (await env.DB.prepare(APPLY_HELD).bind(savings, rows).run()).meta
     const marked = (await env.DB.prepare(MARK_APPLIED).bind(savings, rows).run()).meta
 
-    // Holding writes the row and its key; giving writes the row, an entry in the Override's index and one in the mark's; marking it given writes the row.
-    expect([hold.rows_written, give.rows_written, marked.rows_written]).toEqual([2, 3, 1])
-    // Clearing deletes the row and its key, which D1 bills as 2 (the local runtime reports a deleted row as 1). Removing the row it came from takes its entries out of
-    // the two indexes it is in because of what it carries, which the local runtime does not report either: they are there, and partial, so only such rows pay.
-    const clearing = 2
-    expect(hold.rows_written + give.rows_written + marked.rows_written + clearing + WRITES_PER_OVERRIDE_REMOVED + WRITES_PER_MARK_REMOVED).toBe(WRITES_PER_CARRIED)
+    const removal = (has.override ? WRITES_PER_OVERRIDE_REMOVED : 0) + (has.mark ? WRITES_PER_MARK_REMOVED : 0)
+    expect(hold.rows_written + give.rows_written + marked.rows_written + CLEARING + removal).toBe(expected)
+  })
+
+  it('has the two indexes a removed Override and a removed mark are taken out of, and no others a Note is in', async () => {
     const index = async (name: string) => (await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?").bind(name).first<{ sql: string }>())!.sql
     expect(await index('transactions_override_category')).toMatch(/WHERE override_category IS NOT NULL/)
     expect(await index('transactions_not_transfer_with')).toMatch(/WHERE not_transfer_with IS NOT NULL/)
+    const onNote = (await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'index' AND tbl_name = 'transactions' AND sql LIKE '%note%'").first<{ n: number }>())!.n
+    expect(onNote).toBe(0)
   })
 
   it('takes the mark off what is held by reading the held rows, which are none except while a replace is unfinished', async () => {
