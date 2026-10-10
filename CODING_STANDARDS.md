@@ -28,7 +28,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 
 ## Migrations
 - Files in `migrations/` are named `<ticket number × 100 + n>_<name>.sql`, n from 01 to 99, lower-case name. Ticket 8 owns `0801_…` to `0899_…`; ticket 2 owns `0201_…` to `0299_…`. Parallel tickets can't collide, and wrangler applies files in numeric order.
-- Add a new file rather than editing one that has merged. Migrations are add-only (ADR 0009): new tables, nullable columns, indexes. `DROP` and `RENAME` wait for a later release.
+- Add a new file rather than editing one that has merged. Migrations are add-only (ADR 0009): new tables, nullable columns (or NOT NULL with a constant default, ADR 0009), indexes. `DROP` and `RENAME` wait for a later release.
 - `npm run migrations:check`, part of `npm run check`, fails on a duplicate prefix, a badly named file, or any `DROP` or `RENAME`.
 - `npm run check` also upgrades every sample database in `test/sample-dbs/` and fails if data is lost or a merged migration was edited ([docs/releasing.md](docs/releasing.md#sample-databases)). A migration that rewrites existing values needs its expected change written into that test.
 

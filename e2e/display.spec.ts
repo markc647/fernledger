@@ -443,6 +443,7 @@ test.describe('zoom', () => {
               categoryId: 3,
               categoryName: 'Eating out',
               categorySource: 'override',
+              categoryKind: 'loans', // the longest kind note, so it is measured too
               note: `${long} note that goes on and on`,
               bankTime: '2026-10-07T20:15:00.000Z',
               firstSeenAt: '2026-10-08T06:30:00.000Z',

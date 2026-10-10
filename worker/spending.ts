@@ -35,8 +35,8 @@ export function buildSpending(range: SpendingRange): { sql: string; binds: (stri
 }
 
 /**
- * SQL that is true for a Transaction in a Loans Category, and not for a Transfer: the one definition of "a loan", for the Loans Report to list
- * from (`WHERE ${isLoan()}`, with `category.joins` in the query). The Loans Report reads the Transactions themselves, so it needs this and
+ * SQL that is true for a Transaction in a Loans Category, and not for a Transfer: the one definition of "a loan", for a Report that lists loans
+ * to use (`WHERE ${isLoan()}`, with `category.joins` in the query). Listing loans needs the Transactions themselves, so it uses this and
  * not the totals `buildSpending` gives. Pass the `effectiveCategory()` the query already uses.
  */
 export const isLoan = (category: EffectiveCategory = effectiveCategory()) => `(${category.shown.kind} = '${LOANS}')`

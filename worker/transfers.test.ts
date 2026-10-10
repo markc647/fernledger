@@ -425,7 +425,7 @@ describe('what is left out of spending', () => {
 })
 
 describe('an Override', () => {
-  it('outranks a pairing on its own Transaction, which then counts as spending in its Category, while the matching Transaction stays a Transfer', async () => {
+  it('outranks a pairing on its own Transaction, which then counts under the kind of its Category (here Spending), while the matching Transaction stays a Transfer', async () => {
     await importInto(EVERYDAY, [row(DAY, -5000, 'TFR TO SAVINGS', 'OUT')])
     await importInto(SAVINGS, [row(DAY, 5000, 'TFR FROM EVERYDAY', 'IN')])
     await override('OUT', await categoryId('Gifts and donations'))
@@ -506,7 +506,7 @@ describe("a Transaction's details", () => {
     expect(t).toMatchObject({ transfer: null, transferAccountName: null, transferTransactionId: null })
   })
 
-  it('say the matching Transaction counts as spending when it has an Override, and that both do when each has one', async () => {
+  it('say the matching Transaction counts under the kind of its Category when it has an Override, and that both do when each has one', async () => {
     await importInto(EVERYDAY, [row(DAY, -5000, 'OUT', 'OUT')])
     await importInto(SAVINGS, [row(DAY, 5000, 'IN', 'IN')])
     const detail = async (uniqueId: string) => (await (await call(`/api/transactions/${await idOf(uniqueId)}`)).json()) as Record<string, unknown>
