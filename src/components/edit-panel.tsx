@@ -21,7 +21,7 @@ export type EditableTransaction = {
   categorySource: string | null
   /** Set while the Transaction is a Transfer, which an Override takes out of the Transfers. */
   transfer: TransferSource | null
-  /** The Account of its matching Transaction, if it is paired, whether or not an Override makes this one spending. */
+  /** The Account of its matching Transaction, if it is paired, whether or not an Override or Not a Transfer means this one is no longer a Transfer. */
   transferAccountName: string | null
   /** What the Worker says the Admin can do about its Transfer: say Not a Transfer, or take it off if they have. */
   canMarkNotTransfer: boolean
