@@ -81,6 +81,17 @@ const EXERCISES: Exercise[] = [
   { route: 'GET /api/imports/imported/:accountId', path: (id) => `/api/imports/imported/${id}` },
   { route: 'PUT /api/accounts/:id/cutover-date', path: (id) => `/api/accounts/${id}/cutover-date`, opts: { method: 'PUT', body: { cutoverDate: '2026-11-01' } } },
   { route: 'POST /api/imports/clear-history', path: () => '/api/imports/clear-history', opts: (id) => ({ method: 'POST', body: { accountId: id } }) },
+  // A replace that stops after its first part holds the Overrides and Notes of the removed Transaction (it has a Note by now),
+  // which the next two routes forecast and discard.
+  { route: 'POST /api/imports/chunks', path: () => '/api/imports/chunks', opts: { method: 'POST', body: {
+      account: { number: '99-9999-9999999-99' },
+      chunk: { index: 0, count: 2 },
+      file: { adapterId: 'asb', rowCount: 2, skipped: 0, from: '2026-10-01', to: '2026-10-31', ledgerBalance: { cents: 0, date: '2026-10-31' } },
+      rows: [{ date: '2026-10-02', uniqueId: 'ID2', tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SHOP', bankMemo: 'EFTPOS', amountCents: -1000 }],
+      replace: true,
+    } } },
+  { route: 'POST /api/imports/carry-preview', path: () => '/api/imports/carry-preview', opts: (id) => ({ method: 'POST', body: { accountId: id, rows: [{ uniqueId: 'ID1', amountCents: -1000 }] } }) },
+  { route: 'POST /api/imports/discard-held', path: () => '/api/imports/discard-held', opts: (id) => ({ method: 'POST', body: { accountId: id } }) },
   { route: 'GET /api/me', path: () => '/api/me' },
   { route: 'GET /api/settings', path: () => '/api/settings' },
   { route: 'GET /api/features', path: () => '/api/features' },
