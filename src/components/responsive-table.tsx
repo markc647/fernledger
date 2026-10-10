@@ -146,7 +146,7 @@ export function ResponsiveTable<Row>({
               <dl className="grid grid-cols-1 gap-2">
                 {columns.map((column) => (
                   <div key={column.key} className="flex items-start justify-between gap-4">
-                    <dt className="text-muted-foreground">{column.header}</dt>
+                    <dt className="shrink-0 text-muted-foreground">{column.header}</dt>
                     <dd className="min-w-0 text-end break-words">{column.cell(row)}</dd>
                   </div>
                 ))}

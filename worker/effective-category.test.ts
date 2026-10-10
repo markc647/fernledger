@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { CATEGORY_SLOTS, effectiveCategory, type CategorySlot } from './effective-category'
 
-// Rule and Akahu Sync have no column yet, so the order is proven on a stand-in row that does have all three.
+// Akahu Sync has no column yet, so the full order is proven on a stand-in row that does have all three.
 const allThree: CategorySlot[] = [
   { source: 'override', column: 't.o' },
   { source: 'rule', column: 't.r' },
@@ -22,6 +22,16 @@ const resolve = async (o: string | null, r: string | null, a: string | null, slo
   const id = (name: string | null) => (name === null ? null : ids[name]!)
   return env.DB.prepare(`SELECT ${effective.id} AS id, ${effective.name} AS name, ${effective.source} AS source FROM (SELECT ? AS o, ? AS r, ? AS a) t ${effective.joins}`)
     .bind(id(o), id(r), id(a))
+    .first<{ id: number | null; name: string | null; source: string | null }>()
+}
+
+// The real slots, on a stand-in row with the real column names of the `transactions` table.
+const resolveStored = async (override: number | null, rule: number | null) => {
+  const effective = effectiveCategory()
+  return env.DB.prepare(
+    `SELECT ${effective.id} AS id, ${effective.name} AS name, ${effective.source} AS source FROM (SELECT ? AS override_category, ? AS rule_category) t ${effective.joins}`,
+  )
+    .bind(override, rule)
     .first<{ id: number | null; name: string | null; source: string | null }>()
 }
 
@@ -52,9 +62,17 @@ describe('the effective Category', () => {
     }
   })
 
-  it('has no Rule or Akahu source yet, so only an Override can supply a Category', () => {
-    expect(CATEGORY_SLOTS.filter((slot) => slot.column !== null).map((slot) => slot.source)).toEqual(['override'])
+  it('has no Akahu source yet, so only an Override or a Rule can supply a Category', () => {
+    expect(CATEGORY_SLOTS.filter((slot) => slot.column !== null).map((slot) => slot.source)).toEqual(['override', 'rule'])
     expect(CATEGORY_SLOTS.map((slot) => slot.source)).toEqual(['override', 'rule', 'akahu']) // the order of precedence
+  })
+
+  it('reads the Rule slot from the Transaction\'s stored Rule result, below its Override', async () => {
+    const stored = (override: string | null, rule: string | null) =>
+      resolveStored(override === null ? null : ids[override]!, rule === null ? null : ids[rule]!)
+    expect(await stored('Precedence Override', 'Precedence Rule')).toEqual({ id: ids['Precedence Override'], name: 'Precedence Override', source: 'override' })
+    expect(await stored(null, 'Precedence Rule')).toEqual({ id: ids['Precedence Rule'], name: 'Precedence Rule', source: 'rule' })
+    expect(await stored(null, null)).toEqual({ id: null, name: null, source: null })
   })
 
   it('is always Uncategorised when no slot has a column', async () => {

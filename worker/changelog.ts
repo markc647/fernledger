@@ -1,7 +1,7 @@
 import type { Member } from './auth'
 
 /** What kind of thing changed, and how the Change Log names it. A ticket that adds a kind of Admin change adds its type here. */
-export const CHANGE_TYPES = { settings: 'Settings', account: 'Account', import: 'Import', category: 'Category', transaction: 'Transaction' } as const
+export const CHANGE_TYPES = { settings: 'Settings', account: 'Account', import: 'Import', category: 'Category', rule: 'Rule', transaction: 'Transaction' } as const
 export type ChangeType = keyof typeof CHANGE_TYPES
 export const CHANGE_TYPE_IDS = Object.keys(CHANGE_TYPES) as [ChangeType, ...ChangeType[]]
 
