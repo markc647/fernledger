@@ -10,6 +10,7 @@ Fernledger's maintainers collect no one's data. Each deployment is run by whoeve
 - **Account balances.**
 - **Email addresses:** Members' in Cloudflare Access, and the Admin's in every Change Log entry.
 - **Notes** the Admin writes.
+- **Copies of Notes and descriptions** from replacing imported history: a holding table keeps them until the replace finishes or is discarded, and some Change Log entries keep them until teardown ([How it works](../README.md#how-it-works)).
 
 The counterparty account number and payment references are kept on purpose. An attorney may need to show exactly where money went.
 
