@@ -272,10 +272,27 @@ test.describe('on screen', () => {
     await expect(table.locator('tbody tr')).toHaveCount(2)
     await expect(table.locator('tbody tr').nth(0)).toContainText(`${dateText(`${start}-01-31`)}`)
     await expect(table.locator('tbody tr').nth(0)).toContainText(money(98_200))
-    await expect(table.locator('tbody tr').nth(0)).toContainText(`Calculated from the Transactions, $3.00 less than the bank's ${money(98_500)}.`)
+    await expect(table.locator('tbody tr').nth(0)).toContainText(`Calculated from the Transactions, $3.00 less than the bank's ${money(98_500)}`)
     await expect(table.locator('tbody tr').nth(1)).toContainText(money(95_700))
     await expect(table.locator('tbody tr').nth(1)).toContainText('Bank balance')
     await expect(account).toContainText(`The last date held for this Account is ${dateText(`${start}-02-28`)}, so the Report stops there.`)
+  })
+
+  test('explains a balance that is off the bank’s figure by a difference found after the dates, and never says the bank agrees', async ({ page, context, baseURL }, testInfo) => {
+    const { start, cheque } = dataFor(testInfo.project.name)
+    const { chequeId } = await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    // The Balance Check that found the $3.00 begins on 31 January, the last of these dates, so it is not listed: the Transaction missing from it is dated after.
+    await page.goto(address(chequeId, `${start}-01-01`, `${start}-01-31`))
+
+    const account = article(page).getByRole('region', { name: `${cheque.name} (${cheque.number})` })
+    const row = account.getByRole('table').locator('tbody tr')
+    await expect(row).toHaveCount(1)
+    await expect(row).toContainText(`Calculated from the Transactions, $3.00 less than the bank's ${money(98_500)}`)
+    await expect(account).toContainText('No Balance Check covers these dates, so none could find a difference.')
+    await expect(account).toContainText("Where a balance above differs from the bank's own figure, it is because every balance is worked back from the latest bank balance")
+    await expect(account).not.toContainText('Balance differs from bank by') // no difference is listed
+    await expect(account).not.toContainText('agree')
   })
 
   test('starts a Report that begins part way through the history from the balance the day before, and ends it on the last date asked for', async ({ page, context, baseURL }, testInfo) => {

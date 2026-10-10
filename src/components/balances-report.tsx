@@ -59,27 +59,24 @@ function Differences({ section }: { section: AccountBalances }) {
     // Not a section with a name of its own: every Account has one, and landmarks with the same name are hard to tell apart.
     <div className="mt-6 print:mt-4">
       <h3 className="text-lg font-semibold print:text-[13pt]">Balance Check differences</h3>
-      {summary !== null ? (
-        <p className="mt-1">{summary}</p>
-      ) : (
-        <>
-          <ul className="mt-2 grid gap-3">
-            {report.differences.map((difference) => {
-              const words = describeDifference(difference)
-              return (
-                <li key={difference.asOfDate} className="break-inside-avoid rounded-xl border-2 p-3">
-                  <p>
-                    <Status tone="warning">{words.headline}</Status>
-                  </p>
-                  <p className="mt-1">{words.found}</p>
-                  <p className="mt-1">{words.direction}</p>
-                </li>
-              )
-            })}
-          </ul>
-          <p className="mt-3">{note}</p>
-        </>
+      {summary !== null && <p className="mt-1">{summary}</p>}
+      {report.differences.length > 0 && (
+        <ul className="mt-2 grid gap-3">
+          {report.differences.map((difference) => {
+            const words = describeDifference(difference)
+            return (
+              <li key={difference.asOfDate} className="break-inside-avoid rounded-xl border-2 p-3">
+                <p>
+                  <Status tone="warning">{words.headline}</Status>
+                </p>
+                <p className="mt-1">{words.found}</p>
+                <p className="mt-1">{words.direction}</p>
+              </li>
+            )
+          })}
+        </ul>
       )}
+      {note !== null && <p className="mt-3">{note}</p>}
     </div>
   )
 }

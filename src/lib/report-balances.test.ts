@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BalancesReport } from '@/generated/api/report-balances'
-import { closingLabel, describeDifference, differencesNote, differencesSummary, heldNotes, loadBalances, openingLabel, outlook, sourceOf } from './report-balances'
+import { closingLabel, describeDifference, differencesNote, differencesSummary, heldNotes, loadBalances, openingLabel, outlook, rowsDiffer, sourceOf } from './report-balances'
 
 // What the balances Report says, as pure functions (src/lib/report-balances.ts); worker/report-balances.test.ts holds its numbers
 // to the Account's balance history, and e2e/report-balances.spec.ts checks how it prints.
@@ -97,9 +97,9 @@ describe('sourceOf', () => {
   })
 
   it('gives the bank’s own figure and the difference when they differ, without replacing the calculated one', () => {
-    expect(sourceOf({ ...row, bankCents: 12_500 })).toBe("Calculated from the Transactions, $5.00 less than the bank's $125.00.")
-    expect(sourceOf({ ...row, bankCents: 11_700 })).toBe("Calculated from the Transactions, $3.00 more than the bank's $117.00.")
-    expect(sourceOf({ ...row, bankCents: -500 })).toBe("Calculated from the Transactions, $125.00 more than the bank's −$5.00.")
+    expect(sourceOf({ ...row, bankCents: 12_500 })).toBe("Calculated from the Transactions, $5.00 less than the bank's $125.00")
+    expect(sourceOf({ ...row, bankCents: 11_700 })).toBe("Calculated from the Transactions, $3.00 more than the bank's $117.00")
+    expect(sourceOf({ ...row, bankCents: -500 })).toBe("Calculated from the Transactions, $125.00 more than the bank's −$5.00")
   })
 })
 
@@ -130,8 +130,29 @@ describe('differencesNote', () => {
     )
   })
 
-  it('has nothing to say when there are no differences', () => {
+  it('has nothing to say when there are no differences and every bank figure matches', () => {
     expect(differencesNote(report())).toBeNull()
+  })
+
+  it('explains a row that differs from the bank’s figure even when the difference is outside the dates, so none is listed', () => {
+    // A difference found by a Balance Check that begins on or after the last of the dates is not listed, but the balances are still worked back from it.
+    const differs = { rows: [{ date: '2026-08-31', balanceCents: 12_400, changeCents: 0, bankCents: 12_000 }] }
+    expect(differencesNote(report(differs))).toBe(
+      "Where a balance above differs from the bank's own figure, it is because every balance is worked back from the latest bank balance, and so carries any difference found after these dates, or a Transaction added after the bank gave its figure.",
+    )
+  })
+})
+
+describe('rowsDiffer', () => {
+  const row = { date: '2026-08-31', balanceCents: 12_000, changeCents: 0 }
+
+  it('is true when a figure the bank gave for a row’s day is not the row’s balance', () => {
+    expect(rowsDiffer(report({ rows: [{ ...row, bankCents: 12_400 }] }))).toBe(true)
+  })
+
+  it('is false when the bank gave the same figure, or none', () => {
+    expect(rowsDiffer(report({ rows: [{ ...row, bankCents: 12_000 }, { ...row, date: '2026-09-30', bankCents: null }] }))).toBe(false)
+    expect(rowsDiffer(report({ rows: [] }))).toBe(false)
   })
 })
 
@@ -143,6 +164,16 @@ describe('differencesSummary', () => {
     expect(differencesSummary(report({ checks: { count: 2, coversFrom: '2026-08-31', coversTo: '2026-10-07' } }))).toBe(
       'No difference was found. The 2 Balance Checks that cover part or all of these dates agree with the bank. Together they check Mon 31 Aug 2026 to Wed 7 Oct 2026.',
     )
+  })
+
+  it('does not say the bank agrees while a row differs from the bank’s figure, though the checks inside the dates found nothing', () => {
+    // 1 July to 31 August, in worker/report-balances.test.ts: 31 August's row is $4.00 off the bank's, but the check that found it begins that day.
+    const rows = [{ date: '2026-08-31', balanceCents: 12_400, changeCents: 0, bankCents: 12_000 }]
+    const one = differencesSummary(report({ rows, checks: { count: 1, coversFrom: '2026-07-31', coversTo: '2026-08-31' } }))
+    expect(one).toBe('No difference was found in the one Balance Check that covers part or all of these dates, which checks Fri 31 Jul 2026 to Mon 31 Aug 2026.')
+    const several = differencesSummary(report({ rows, checks: { count: 2, coversFrom: '2026-06-30', coversTo: '2026-08-31' } }))
+    expect(several).toBe('No difference was found in the 2 Balance Checks that cover part or all of these dates, which together check Tue 30 Jun 2026 to Mon 31 Aug 2026.')
+    expect(`${one} ${several}`).not.toContain('agree')
   })
 
   it('does not say the bank agrees when no Balance Check covers the dates', () => {

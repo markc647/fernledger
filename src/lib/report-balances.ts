@@ -88,8 +88,15 @@ export function sourceOf(row: MonthBalance) {
   if (row.bankCents === null) return 'Calculated from the Transactions'
   if (row.bankCents === row.balanceCents) return 'Bank balance'
   const gap = row.balanceCents - row.bankCents
-  return `Calculated from the Transactions, ${formatBalance(Math.abs(gap))} ${gap < 0 ? 'less' : 'more'} than the bank's ${formatBalance(row.bankCents)}.`
+  return `Calculated from the Transactions, ${formatBalance(Math.abs(gap))} ${gap < 0 ? 'less' : 'more'} than the bank's ${formatBalance(row.bankCents)}`
 }
+
+/**
+ * Whether any row's balance differs from a figure the bank gave for that day. It can be because of a difference that is outside the
+ * dates of the Report (a Balance Check that begins on or after the last of them is not listed, but the balances are worked back
+ * from the latest bank balance), so the Report must not say the bank agrees while one does.
+ */
+export const rowsDiffer = (report: BalancesReport) => report.rows.some((row) => row.bankCents !== null && row.bankCents !== row.balanceCents)
 
 /** A Balance Check difference in the Balance Check's own words (src/lib/balance-check.ts, which the Summary shows too), and the bank balance that found it. */
 export function describeDifference(difference: BalanceDifference) {
@@ -102,24 +109,32 @@ export function describeDifference(difference: BalanceDifference) {
 
 /**
  * What the differences mean for the balances above them, which a reader would otherwise have to work out. Every balance is worked back
- * from the latest bank balance, so the ones before a difference's date carry it. Null when there are no differences.
+ * from the latest bank balance, so the ones before a difference's date carry it. When a difference is listed it names its date. When
+ * none is listed but a row still differs from the bank's figure (the difference was found after these dates, or a Transaction was added
+ * after the bank gave its figure), it says that instead. Null when there is nothing to explain.
  */
 export function differencesNote(report: BalancesReport) {
-  if (report.differences.length === 0) return null
-  return report.differences.length === 1
-    ? `Balances before ${formatDate(report.differences[0]!.asOfDate)} are worked back from the latest bank balance, so they carry this difference.`
-    : 'Balances before each of these dates are worked back from the latest bank balance, so they carry the difference found there.'
+  if (report.differences.length === 1) return `Balances before ${formatDate(report.differences[0]!.asOfDate)} are worked back from the latest bank balance, so they carry this difference.`
+  if (report.differences.length > 1) return 'Balances before each of these dates are worked back from the latest bank balance, so they carry the difference found there.'
+  if (rowsDiffer(report))
+    return "Where a balance above differs from the bank's own figure, it is because every balance is worked back from the latest bank balance, and so carries any difference found after these dates, or a Transaction added after the bank gave its figure."
+  return null
 }
 
 /**
  * The sentence for when there are no differences to list. It never says more than was compared: a Balance Check that covers part of the
- * dates covers all of its own, so it says how many there are and the dates they span, which can be more than the Report's. Null when there are differences.
+ * dates covers all of its own, so it says how many there are and the dates they span, which can be more than the Report's. It does not
+ * say the bank agrees while a row differs from a figure the bank gave (`rowsDiffer`). Null when there are differences.
  */
 export function differencesSummary(report: BalancesReport) {
   if (report.differences.length > 0) return null
   const { count, coversFrom, coversTo } = report.checks
   if (count === 0 || coversFrom === null || coversTo === null) return 'No Balance Check covers these dates, so none could find a difference.'
   const span = `${formatDate(coversFrom)} to ${formatDate(coversTo)}`
+  if (rowsDiffer(report))
+    return count === 1
+      ? `No difference was found in the one Balance Check that covers part or all of these dates, which checks ${span}.`
+      : `No difference was found in the ${count} Balance Checks that cover part or all of these dates, which together check ${span}.`
   return count === 1
     ? `No difference was found. The one Balance Check that covers part or all of these dates agrees with the bank. It checks ${span}.`
     : `No difference was found. The ${count} Balance Checks that cover part or all of these dates agree with the bank. Together they check ${span}.`

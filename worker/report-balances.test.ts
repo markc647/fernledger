@@ -57,7 +57,8 @@ const reportFor = async (id: number, from: string, to: string, who: Who = 'membe
 }
 const report = async (from: string, to: string, number = savings, who: Who = 'member') => reportFor(await accountId(number), from, to, who)
 type Point = { date: string; balanceCents: number }
-const history = async (number = savings): Promise<{ anchor: { asOfDate: string; balanceCents: number } | null; points: Point[] }> => (await call(`/api/balances/${await accountId(number)}/history`)).json()
+const historyOf = async (id: number): Promise<{ anchor: { asOfDate: string; balanceCents: number } | null; points: Point[] }> => (await call(`/api/balances/${id}/history`)).json()
+const history = async (number = savings) => historyOf(await accountId(number))
 
 // Savings: $100.00 before its first Transaction. July leaves $140.00 on the 31st, August $120.00, September (no Transactions) the same,
 // and October's two leave $123.00 on 7 October, the date of the bank's last balance.
@@ -247,7 +248,7 @@ describe('the balances Report matches balance history', () => {
   /** Looks the Account up once, then asks the Report about every pair of dates and holds each answer to the history. */
   const sweep = async (number: string, openingCents: number) => {
     const id = await accountId(number)
-    const { points } = await history(number)
+    const { points } = await historyOf(id)
     expect(points.length).toBeGreaterThan(2)
     let compared = 0
     for (const from of DATES)
@@ -356,6 +357,9 @@ describe('the balances Report lists the Balance Check differences in its dates',
     const before = await report('2026-07-01', '2026-08-31') // ends on the day the span starts after
     expect(before.differences).toEqual([])
     expect(before.checks).toEqual({ count: 0, coversFrom: null, coversTo: null }) // nothing was compared in those dates
+    // But the balances are worked back from the latest bank balance, so the row for the day the bank gave a figure is $4.00 off it. The page says so
+    // (differencesNote in src/lib/report-balances.ts) rather than that nothing differs.
+    expect(before.rows.at(-1)).toMatchObject({ date: '2026-08-31', balanceCents: 12_400, bankCents: 12_000 })
 
     const after = await report('2026-10-08', '2026-12-31')
     expect(after.differences).toEqual([])
