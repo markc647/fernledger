@@ -96,10 +96,13 @@ describe('what a request reads from D1', () => {
     }
   })
 
-  it('reads next to nothing to count and list one Category (its Overrides have an index)', async () => {
+  // A Rule can supply the Category as well as an Override, so the effective Category is worked out per Transaction and the
+  // Overrides' index no longer serves this filter (transaction-search.ts). None here is in Category 1, so the page walks the whole
+  // date index, which reads each row and its Account.
+  it('reads every Transaction to count one Category, and to find a page of it when few are in it', async () => {
     const r = await reads({ categoryId: 1 })
-    expect(r.count).toBeLessThanOrEqual(10)
-    expect(r.page).toBeLessThanOrEqual(10)
+    expect(r.count).toBeLessThanOrEqual(TRANSACTIONS + 10)
+    expect(r.page).toBeLessThanOrEqual(TRANSACTIONS * 2 + 10)
   })
 
   it('reads each Transaction once to count the Uncategorised ones, and a page of them off the date index', async () => {
