@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as z from 'zod/mini'
 import { MAX_TEXT as PAGE_MAX_TEXT, SORT_KEYS as PAGE_SORT_KEYS } from '../src/lib/transaction-search'
-import { effectiveCategory } from './effective-category'
+import { CATEGORY_SLOTS, categoryColumns, effectiveCategory } from './effective-category'
 import { buildSearch, CANDIDATE_LIMIT, categoryProbe, isFewInCategory, MAX_LIMIT, MAX_TEXT, needsCategoryProbe, searchQuery, SORT_KEYS, toSearch, type Search } from './transaction-search'
 
 const search = (over: Partial<Search> = {}): Search => ({ uncategorised: false, sort: 'date', dir: 'desc', limit: 50, offset: 0, want: 'both', ...over })
@@ -192,11 +192,97 @@ describe('what a request reads from D1', () => {
       expect(many.rowsRead).toBeLessThanOrEqual(2 * (CANDIDATE_LIMIT + 1) + 10)
     })
 
-    it('needs the probe only for a page sorted by date', () => {
+    it('needs the probe only when there is a choice: a page sorted by date, or a count with a date range, and no text to find', () => {
       expect(needsCategoryProbe(search({ categoryId: 1 }))).toBe(true)
-      expect(needsCategoryProbe(search({ categoryId: 1, sort: 'amount' }))).toBe(false) // it reads every Transaction it keeps, so the fewest is best
-      expect(needsCategoryProbe(search({ categoryId: 1, want: 'count' }))).toBe(false)
+      expect(needsCategoryProbe(search({ categoryId: 1, want: 'page', from: '2021-01-01' }))).toBe(true)
+      expect(needsCategoryProbe(search({ categoryId: 1, want: 'count', from: '2021-01-01' }))).toBe(true)
+      expect(needsCategoryProbe(search({ categoryId: 1, want: 'count', to: '2021-01-31' }))).toBe(true)
+      expect(needsCategoryProbe(search({ categoryId: 1, want: 'count' }))).toBe(false) // the candidates, always
+      expect(needsCategoryProbe(search({ categoryId: 1, want: 'both', sort: 'amount' }))).toBe(false) // the page reads every Transaction it keeps, so the fewest is best
+      expect(needsCategoryProbe(search({ categoryId: 1, want: 'page', sort: 'amount', from: '2021-01-01' }))).toBe(false)
+      expect(needsCategoryProbe(search({ categoryId: 1, text: 'example' }))).toBe(false) // nor does a text search, which reads every Transaction it keeps
+      expect(needsCategoryProbe(search({ categoryId: 1, text: 'example', from: '2021-01-01' }))).toBe(false)
       expect(needsCategoryProbe(search({}))).toBe(false)
+    })
+
+    // Category 2 has many, so its page walks the date index. Each filter it is combined with must keep that cheap, or bring the
+    // candidates in where they are cheaper. (The fixture has 4 Transactions a day over 1,500 days, every 10th with 'CAFE' in it.)
+    describe('with many, and another filter', () => {
+      const inMonth = { from: '2021-03-01', to: '2021-03-31' }
+
+      it('and a date range, reads the range for both the page and the count, never the whole Category', async () => {
+        const r = await reads({ categoryId: 2, ...inMonth })
+        const inRange = (await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE date BETWEEN ? AND ?').bind(inMonth.from, inMonth.to).first<{ n: number }>())!.n
+        const inCategory = (await effective(2)).length
+        expect(r.total).toBeGreaterThan(0)
+        expect(r.total).toBeLessThan(inRange)
+        expect(r.total).toBeLessThan(inCategory)
+        expect(r.page).toBeLessThanOrEqual(inRange * 4 + 20) // each Transaction in the range, its Account and its Categories
+        expect(r.count).toBeLessThanOrEqual(inRange * 4 + 20) // not the 1,188 in the Category, which would be about 3,600
+      })
+
+      it('and a date range, with few in the Category, still goes through its indexes', async () => {
+        const r = await reads({ categoryId: 1, from: '2020-01-01', to: '2030-01-01' }) // every Transaction is in the range
+        expect(r.total).toBe(10)
+        expect(r.count).toBeLessThanOrEqual(100)
+        expect(r.page).toBeLessThanOrEqual(150)
+      })
+
+      it('and an Account, counts through the candidates and pages off the date index', async () => {
+        const r = await reads({ categoryId: 2, accountId })
+        expect(r.total).toBe((await effective(2)).filter((id) => id % 2 === 0).length) // the first Account has the even IDs
+        expect(r.page).toBeLessThanOrEqual(1000)
+        expect(r.count).toBeLessThanOrEqual((await effective(2)).length * 5 + 20) // the Category's, each five reads
+      })
+
+      it('and text to find, goes through the candidates for both, so a text found in few does not read every Transaction', async () => {
+        // The text search reads every Transaction it keeps whichever way it goes in, so it goes in through the Category's candidates, which
+        // are fewer unless the Category holds a fifth or more of all the Transactions (about 4.5 reads each against about 1 for a scan).
+        const through = 't.id IN (SELECT id FROM transactions WHERE override_category = ?'
+        const withText = buildSearch(search({ categoryId: 2, text: 'cafe' }))
+        expect(withText.count.sql).toContain(through)
+        expect(withText.page.sql).toContain(through)
+        expect(buildSearch(search({ categoryId: 2 })).page.sql).not.toContain(through) // without text, a Category with many walks the date index
+
+        // Text found in one Transaction: the date index would be walked to the end without finding a page's worth.
+        const rare = await reads({ categoryId: 2, text: 'cafe 5990' })
+        const inCategory = (await effective(2)).length
+        expect(rare.ids).toEqual([5990])
+        expect(rare.total).toBe(1)
+        expect(rare.page).toBeLessThanOrEqual(inCategory * 6 + 20) // about six reads for each candidate
+        expect(rare.count).toBeLessThanOrEqual(inCategory * 6 + 20)
+
+        // Text found in a tenth of them (every 10th Transaction has 'CAFE' in it) still gives the right answer.
+        const common = await reads({ categoryId: 2, text: 'cafe', limit: 200 })
+        expect(common.total).toBe((await effective(2)).filter((id) => id % 10 === 0).length)
+        expect(common.total).toBeGreaterThan(0)
+        expect(common.page).toBeLessThanOrEqual(inCategory * 6 + 20)
+      })
+    })
+
+    describe('and the sources that can supply it', () => {
+      it('is found through an index on each column that can hold a Category (a source that gains a column needs one too)', async () => {
+        const columns = categoryColumns()
+        expect(columns).toEqual(['override_category', 'rule_category']) // Akahu\'s joins them when Sync lands, and this list with it
+        for (const column of columns) {
+          const { results } = await env.DB.prepare(
+            "SELECT il.name FROM pragma_index_list('transactions') il JOIN pragma_index_info(il.name) ii WHERE ii.seqno = 0 AND ii.name = ?",
+          )
+            .bind(column)
+            .all()
+          expect(results.length, `an index starting with ${column}`).toBeGreaterThan(0)
+        }
+      })
+
+      it('has candidates from every source that has a column, whichever they are', () => {
+        const slots = [...CATEGORY_SLOTS.slice(0, 2), { source: 'akahu' as const, column: 't.akahu_category' }]
+        const { count, page } = buildSearch(search({ categoryId: 7, sort: 'amount' }), slots)
+        const probe = categoryProbe(7, slots)
+
+        for (const statement of [count, page, probe]) expect(statement.sql, 'the new source').toContain('akahu_category = ?')
+        expect(count.binds).toEqual([7, 7, 7, 7]) // three candidate columns, then the exact Category check
+        expect(probe.binds).toEqual([7, 7, 7])
+      })
     })
   })
 

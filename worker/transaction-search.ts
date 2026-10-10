@@ -1,6 +1,6 @@
 import * as z from 'zod/mini'
 import { isQueryDate } from './dates'
-import { effectiveCategory } from './effective-category'
+import { CATEGORY_SLOTS, categoryColumns, effectiveCategory, type CategorySlot } from './effective-category'
 
 // Searching, filtering, sorting and paging the Transactions (the query for GET /api/transactions), as pure functions.
 // The SQL is built here from constants chosen by validated input; a value from the request only ever reaches SQLite as a
@@ -117,27 +117,40 @@ const TEXT_COLUMNS = [
 export type Statement = { sql: string; binds: (string | number)[] }
 
 /**
- * The most Transactions a Category's two indexes (an Override's and a Rule's) may list for a page of it to be found through them.
- * Reading a candidate costs about six reads (the index entry, the Transaction, its Account and its two Category lookups, and the
- * sort), so 1,000 is at most about 6,000. Past it the date index finds a page sooner: it stops at the 50th match, which for a Category
- * holding 2% of 100,000 Transactions is about 2,500 rows, where the indexes would read 12,000 to list them all.
+ * The most Transactions a Category's indexes (one for each source that can supply a Category: an Override, a Rule, Akahu's) may list
+ * for a page of it to be found through them. Reading a candidate costs about six reads (the index entry, the Transaction, its Account and
+ * its Category lookups, and the sort), so 1,000 is at most about 6,000. Past it the date index finds a page sooner: it stops at the 50th
+ * match, which for a Category holding 2% of 100,000 Transactions is about 2,500 rows, where the indexes would read 12,000 to list them all.
  */
 export const CANDIDATE_LIMIT = 1000
 
 /**
  * How many Transactions the indexes list for a Category, counted no further than CANDIDATE_LIMIT in each (so the probe reads at
- * most twice that, however big the Category is). Compare with `isFewInCategory`. A Transaction in both indexes counts twice.
+ * most that many times the number of sources, however big the Category is). Compare with `isFewInCategory`. A Transaction in more
+ * than one index counts for each.
  */
-export const categoryProbe = (categoryId: number): Statement => ({
-  sql: `SELECT (SELECT COUNT(*) FROM (SELECT 1 FROM transactions WHERE override_category = ?1 LIMIT ${CANDIDATE_LIMIT + 1}))
-             + (SELECT COUNT(*) FROM (SELECT 1 FROM transactions WHERE rule_category = ?1 LIMIT ${CANDIDATE_LIMIT + 1})) AS candidates`,
-  binds: [categoryId],
-})
+export const categoryProbe = (categoryId: number, slots: readonly CategorySlot[] = CATEGORY_SLOTS): Statement => {
+  const columns = categoryColumns(slots)
+  return {
+    sql: `SELECT ${columns.map((column) => `(SELECT COUNT(*) FROM (SELECT 1 FROM transactions WHERE ${column} = ? LIMIT ${CANDIDATE_LIMIT + 1}))`).join(' + ')} AS candidates`,
+    binds: columns.map(() => categoryId),
+  }
+}
 
 export const isFewInCategory = (candidates: number) => candidates <= CANDIDATE_LIMIT
 
-/** Whether to run the probe before building the statements: only a page sorted by date can be found either way. Any other page reads every Transaction it keeps, so it always uses the indexes. */
-export const needsCategoryProbe = (search: Search) => search.categoryId !== undefined && search.want !== 'count' && search.sort === 'date'
+/** A date range is the one filter that makes the date index cheaper than the candidates for a Category with many: it reads the range and no more. (An Account's index is not selective: an Account holds a large share.) */
+const narrowedByDate = (search: Search) => search.from !== undefined || search.to !== undefined
+
+/**
+ * Whether the way in is still to be chosen, so the probe should run before the statements are built. It is not when text is to be
+ * found: a text search reads every Transaction it keeps, so it always goes in through the candidates, which are fewer (about 4.5 reads
+ * each against about 1 for each Transaction scanned, so they are fewer while the Category holds under a fifth of them all). It is, when either
+ * statement has a choice: a page sorted by date, which can walk the date index, or a count with a date range, which can read the
+ * range. Any other page reads every Transaction it keeps whichever way it goes in, so it goes through the candidates.
+ */
+export const needsCategoryProbe = (search: Search) =>
+  search.categoryId !== undefined && search.text === undefined && ((search.want !== 'count' && search.sort === 'date') || (search.want !== 'page' && narrowedByDate(search)))
 
 /**
  * The two statements a list needs: how many Transactions match (`count`), and one page of them (`page`).
@@ -148,15 +161,18 @@ export const needsCategoryProbe = (search: Search) => search.categoryId !== unde
  * the Transactions the indexes on `override_category` and `rule_category` list for it (every Transaction in the Category is
  * one, whichever of the two supplies it), and the effective Category is then checked on those alone. That check stays, because a
  * candidate may be outranked (a Rule's Category under an Override to another one, or an Override of a removed Category).
- * - The count always goes through the candidates: it reads about five rows for each one rather than all the Transactions.
- * - A page does when the Category has few (`fewInCategory`, from the probe) or is sorted by anything but date, which reads every
- *   Transaction it keeps anyway. A page sorted by date of a Category with many walks the date index and stops at the 50th match,
- *   which is a few hundred reads where listing a big Category's candidates would be tens of thousands.
+ * - The count goes through the candidates: it reads about five rows for each one rather than all the Transactions. Unless the search
+ *   has a date range and the Category has many (`fewInCategory` false): then it reads the range, which is fewer.
+ * - A page does when the Category has few (`fewInCategory`, from the probe) or is sorted by anything but date, or has text to find,
+ *   which read every Transaction they keep anyway. A page sorted by date of a Category with many walks the date index and stops at
+ *   the 50th match, which is a few hundred reads where listing a big Category's candidates would be tens of thousands.
  * A Category filter that names an Account, dates or text keeps them too; the planner starts from the candidates.
+ * The candidates come from `categoryColumns`, so a source that can supply a Category (Akahu's, when Sync lands) is among them as soon
+ * as it has a slot with a column; each such column needs an index (the test says so).
  * A cached count, or a column kept up to date, is a later ticket's call.
  */
-export function buildSearch(search: Search): { count: Statement; page: Statement } {
-  const category = effectiveCategory()
+export function buildSearch(search: Search, slots: readonly CategorySlot[] = CATEGORY_SLOTS): { count: Statement; page: Statement } {
+  const category = effectiveCategory(slots)
   const where: Statement[] = []
   const add = (sql: string, ...binds: (string | number)[]) => where.push({ sql, binds })
   if (search.accountId !== undefined) add('t.account_id = ?', search.accountId)
@@ -170,13 +186,15 @@ export function buildSearch(search: Search): { count: Statement; page: Statement
     add(`(${TEXT_COLUMNS.map((column) => `instr(lower(${column}), lower(?)) > 0`).join(' OR ')})`, ...TEXT_COLUMNS.map(() => search.text!))
   }
   // The Category's candidates: the Transactions its two indexes list. The exact check above stays with them.
+  const columns = categoryColumns(slots)
   const candidates: Statement[] =
     search.categoryId === undefined
       ? []
-      : [{ sql: 't.id IN (SELECT id FROM transactions WHERE override_category = ? UNION SELECT id FROM transactions WHERE rule_category = ?)', binds: [search.categoryId, search.categoryId] }]
+      : [{ sql: `t.id IN (${columns.map((column) => `SELECT id FROM transactions WHERE ${column} = ?`).join(' UNION ')})`, binds: columns.map(() => search.categoryId!) }]
   const filterOf = (conditions: Statement[]) => ({ sql: conditions.length ? `WHERE ${conditions.map((c) => c.sql).join(' AND ')}` : '', binds: conditions.flatMap((c) => c.binds) })
-  const counting = filterOf([...candidates, ...where])
-  const paging = filterOf(search.fewInCategory === true || search.sort !== 'date' ? [...candidates, ...where] : where)
+  const readsEverything = search.text !== undefined
+  const counting = filterOf(readsEverything || search.fewInCategory === true || !narrowedByDate(search) ? [...candidates, ...where] : where)
+  const paging = filterOf(readsEverything || search.fewInCategory === true || search.sort !== 'date' ? [...candidates, ...where] : where)
   // The count joins only what its filters read: the Category's tables, and only when filtering by Category.
   const filterJoins = search.categoryId !== undefined || search.uncategorised ? category.joins : ''
 
