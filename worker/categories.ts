@@ -4,7 +4,7 @@ import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { validate } from './validate'
 
-type CategoryRow = { id: number; name: string }
+export type CategoryRow = { id: number; name: string }
 
 /** A Category's name as the Admin types it (trimmed, 1 to 40 characters). */
 export const categoryName = z.string().check(z.trim(), z.minLength(1), z.maxLength(40))
@@ -16,7 +16,7 @@ const isDuplicateName = (error: unknown) => error instanceof Error && error.mess
 const alreadyThere = { error: 'A Category with that name already exists' }
 
 /** A Category that is in use. A removed one is gone as far as the API is concerned (see migrations/1101_categories.sql). */
-const findCategory = (db: D1Database, id: number) =>
+export const findCategory = (db: D1Database, id: number) =>
   Number.isSafeInteger(id) ? db.prepare('SELECT id, name FROM categories WHERE id = ? AND removed_at IS NULL').bind(id).first<CategoryRow>() : null
 
 export const categories = new Hono<AppEnv>()

@@ -66,6 +66,10 @@ const EXERCISES: Exercise[] = [
   { route: 'PATCH /api/categories/:id', path: () => `/api/categories/${made.categoryId}`, opts: () => ({ method: 'PATCH', body: { name: 'Example renamed' } }) },
   { route: 'PUT /api/transactions/:id/override', path: () => `/api/transactions/${made.transactionId}/override`, opts: () => ({ method: 'PUT', body: { categoryId: made.categoryId } }) },
   { route: 'PUT /api/transactions/:id/note', path: () => `/api/transactions/${made.transactionId}/note`, opts: () => ({ method: 'PUT', body: { note: 'Example note' } }) },
+  // A Budget for that Category, and the two ways of reading Budgets (vs-actual reads what that chunk imported).
+  { route: 'PUT /api/budgets/:categoryId', path: () => `/api/budgets/${made.categoryId}`, opts: { method: 'PUT', body: { effectiveFrom: '2026-10', amountCents: 50_000 } } },
+  { route: 'GET /api/budgets', path: () => '/api/budgets?month=2026-10' },
+  { route: 'GET /api/budgets/vs-actual', path: () => '/api/budgets/vs-actual?month=2026-10' },
   // The Rules, on that Category: add one, then everything that reads or changes it, and last remove it.
   { route: 'POST /api/rules', path: () => '/api/rules', opts: () => ({ method: 'POST', body: { textContains: 'EXAMPLE', categoryId: made.categoryId } }) },
   { route: 'GET /api/rules', path: () => '/api/rules' },
