@@ -24,6 +24,7 @@ test.describe('text size', () => {
     expect(medium).toBeGreaterThan(16)
 
     await sizeButton(page, 'A++').click()
+    await expect(sizeButton(page, 'A++')).toHaveAttribute('aria-pressed', 'true')
     expect(await fontSize(page, 'body')).toBeGreaterThan(medium)
   })
 
