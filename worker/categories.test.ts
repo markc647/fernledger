@@ -19,7 +19,7 @@ type Row = { id: number; categoryId: number | null; categoryName: string | null;
 const categories = async (who: Who = 'member'): Promise<Category[]> => (await call('/api/categories', { who })).json()
 const idOf = async (name: string) => (await categories()).find((c) => c.name === name)!.id
 const add = async (name: string) => ((await (await call('/api/categories', { method: 'POST', body: { name } })).json()) as Category).id
-const list = async (query = ''): Promise<{ total: number; transactions: Row[] }> => (await call(`/api/transactions${query}`)).json()
+const list = async (query = ''): Promise<{ total: number | null; transactions: Row[] }> => (await call(`/api/transactions${query}`)).json()
 const changeLog = async () => (await env.DB.prepare('SELECT summary, actor, type, before, after FROM change_log ORDER BY id').all()).results
 
 let accountId = 0
@@ -392,7 +392,7 @@ describe('the Uncategorised list', () => {
 
   it('pages like the full list', async () => {
     for (const n of [1, 2, 3]) await transaction(n)
-    const page = await list('?uncategorised=true&limit=2&offset=2')
+    const page = await list('?uncategorised=true&limit=2&offset=2&count=true')
     expect(page.total).toBe(3)
     expect(page.transactions).toHaveLength(1)
   })

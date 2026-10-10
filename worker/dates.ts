@@ -12,3 +12,11 @@ export const isRealDate = (value: unknown) => {
   const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
   return day <= (month === 2 && !leap ? 28 : DAYS_IN_MONTH[month - 1]!)
 }
+
+// The years a search by date accepts. Bounded so nzDayStart and nextDay never see a year they can't handle (a date input
+// emits partial years such as 0002 while one is typed). The browser's date inputs use the same bounds (src/lib/date-range.ts).
+export const MIN_QUERY_DATE = '2000-01-01'
+export const MAX_QUERY_DATE = '2100-12-31'
+
+/** Whether `value` is a real NZ date within the years a search accepts. Shared by the Change Log and the Transactions list. */
+export const isQueryDate = (value: unknown): value is string => isRealDate(value) && (value as string) >= MIN_QUERY_DATE && (value as string) <= MAX_QUERY_DATE

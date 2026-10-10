@@ -44,6 +44,10 @@ _Avoid_: Upload, migration
 The time of day of a Transaction, shown only when the bank actually supplied one; most Transactions have a date only.
 _Avoid_: Timestamp, posted time
 
+**First-seen time**:
+When Akahu first reported a Transaction to Sync, shown in its details as "First seen by Akahu". Only Transactions that come through Sync have one: an Import's details say Akahu hasn't reported it. Not Bank Time, which is the time of day the bank supplied, and not the Transaction's date.
+_Avoid_: Created time, import time
+
 **Sync**:
 The daily pull of new Transactions and Pending Transactions from Akahu.
 _Avoid_: Refresh, update, fetch

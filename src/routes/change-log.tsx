@@ -5,6 +5,7 @@ import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { changeFields, type ChangeRow } from '@/lib/change-log'
+import { MAX_DATE, MIN_DATE, outOfRange } from '@/lib/date-range'
 import { formatDateTime } from '@/lib/format'
 import { CHANGE_LOG_PAGE_SIZE, changeLogQuery, type ChangeLogFilters } from '@/lib/queries'
 
@@ -14,11 +15,6 @@ export const Route = createFileRoute('/change-log')({
 })
 
 const NO_FILTERS: ChangeLogFilters = { type: '', from: '', to: '' }
-
-// The range the API accepts. A date input emits partial years (0002, then 0020...) while one is typed; those aren't searched.
-const MIN_DATE = '2000-01-01'
-const MAX_DATE = '2100-12-31'
-const outOfRange = (date: string) => date !== '' && (date < MIN_DATE || date > MAX_DATE)
 
 /** Field, then Before and After where the entry recorded them (an Import has no Before). */
 const columnsFor = ({ showBefore, showAfter }: { showBefore: boolean; showAfter: boolean }): Column<ChangeRow>[] => [
