@@ -302,50 +302,55 @@ function WaitingNotice({ accountId }: { accountId: number }) {
       <p role="status">
         <Status tone="neutral">{message}</Status>
       </p>
-      {confirming ? (
-        <section
-          role="alertdialog"
-          aria-labelledby="discard-heading"
-          className="space-y-3 rounded-lg border-2 border-foreground p-4"
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              setConfirming(false)
-              discardButton.current?.focus()
-            }
+      <Button ref={discardButton} size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" onClick={() => setConfirming(true)}>
+        Discard them…
+      </Button>
+      {confirming && (
+        <DiscardDialog
+          failed={failed}
+          onDiscard={() => void discard()}
+          onCancel={() => {
+            setConfirming(false)
+            // The dialog's own button is about to unmount; put focus back on the button that opened it.
+            discardButton.current?.focus()
           }}
-        >
-          <h3 id="discard-heading" className="text-lg font-semibold">
-            Discard what is waiting?
-          </h3>
-          <p>The Overrides and Notes will be gone for good. The Change Log records which Transactions they were on.</p>
-          {failed && (
-            <p role="alert" className="font-medium text-destructive">
-              Fernledger could not discard them. Try again.
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="touch"
-              className="max-w-full py-2 whitespace-normal"
-              ref={(button) => button?.focus()}
-              onClick={() => {
-                setConfirming(false)
-                discardButton.current?.focus()
-              }}
-            >
-              No, keep them
-            </Button>
-            <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" onClick={() => void discard()}>
-              Yes, discard them
-            </Button>
-          </div>
-        </section>
-      ) : (
-        <Button ref={discardButton} size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" onClick={() => setConfirming(true)}>
-          Discard them…
-        </Button>
+        />
       )}
     </div>
+  )
+}
+
+/** Asks before discarding, as the Replace question does: the safe answer has focus, and Escape says no. */
+function DiscardDialog(props: { failed: boolean; onDiscard: () => void; onCancel: () => void }) {
+  const keepButton = useRef<HTMLButtonElement>(null)
+  useEffect(() => keepButton.current?.focus(), [])
+  return (
+    <section
+      role="alertdialog"
+      aria-labelledby="discard-heading"
+      className="space-y-3 rounded-lg border-2 border-foreground p-4"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') props.onCancel()
+      }}
+    >
+      <h3 id="discard-heading" className="text-lg font-semibold">
+        Discard what is waiting?
+      </h3>
+      <p>The Overrides and Notes will be gone for good. The Change Log records which Transactions they were on.</p>
+      {props.failed && (
+        <p role="alert" className="font-medium text-destructive">
+          Fernledger could not discard them. Try again.
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button ref={keepButton} size="touch" className="max-w-full py-2 whitespace-normal" onClick={props.onCancel}>
+          No, keep them
+        </Button>
+        <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" onClick={props.onDiscard}>
+          Yes, discard them
+        </Button>
+      </div>
+    </section>
   )
 }
 
