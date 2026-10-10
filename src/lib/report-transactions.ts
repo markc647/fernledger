@@ -1,7 +1,8 @@
 import { isSearchDate } from './date-range'
 
 // The Transaction listing Report's data, put together in the browser from the API's pages (worker/report-transactions.ts).
-// A page is read at a time (ADR 0004: many small requests, not one big one); a Report is at most 50 requests.
+// A page is read at a time (ADR 0004: many small requests, not one big one): about 50 pages for the cap, plus about one request
+// per Account for its last part-page or the probe past the cap.
 
 /** The most Transactions the API gives in a page, the largest page of the Transactions list. The Worker keeps its own copy (worker/report-transactions.ts pins the two together in its test). */
 export const REPORT_PAGE_SIZE = 200
@@ -37,7 +38,7 @@ export function detailsOf(row: ReportRow): string[] {
   const parts: [string, string | null][] = [
     [row.source === 'import' ? 'Cheque number' : 'Reference', row.bankReference],
     ['Counterparty account', row.bankCounterpartyAccount],
-    ['Card', row.bankCardSuffix?.trim() ? `ending ${row.bankCardSuffix.trim()}` : null],
+    ['Card', row.bankCardSuffix?.trim() ? `Ending ${row.bankCardSuffix.trim()}` : null],
     ['Particulars', row.bankParticulars],
     ['Code', row.bankPaymentCode],
   ]
@@ -129,6 +130,8 @@ export async function loadListing({
   }
   for (const [index, section] of sections.entries()) {
     section.netCents = section.moneyInCents + section.moneyOutCents
+    // A cut-off Account with no rows listed is 'not-listed', not 'partial' (intended): the cap fell at the end of the Account
+    // before it, so none of this one was read, and the Report says so rather than "No Transactions in these dates".
     if (stoppedAt >= 0 && index >= stoppedAt) section.status = index === stoppedAt && section.rows.length > 0 ? 'partial' : 'not-listed'
   }
   return { sections, rowCount, capped: stoppedAt >= 0 }

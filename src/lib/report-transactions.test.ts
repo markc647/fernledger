@@ -130,7 +130,7 @@ describe('detailsOf (what the bank said about the payment)', () => {
   it('lists the reference, the counterparty account, the card, the particulars and the code, in that order', () => {
     expect(
       detailsOf(row({ source: 'sync', bankPaymentCode: 'Oct', bankParticulars: 'Rent', bankCardSuffix: '1234', bankCounterpartyAccount: '99-9999-9999999-97', bankReference: 'Ref 77' })),
-    ).toEqual(['Reference: Ref 77', 'Counterparty account: 99-9999-9999999-97', 'Card: ending 1234', 'Particulars: Rent', 'Code: Oct'])
+    ).toEqual(['Reference: Ref 77', 'Counterparty account: 99-9999-9999999-97', 'Card: Ending 1234', 'Particulars: Rent', 'Code: Oct'])
   })
 
   it('leaves out what is missing or blank', () => {

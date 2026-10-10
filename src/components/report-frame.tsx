@@ -103,8 +103,8 @@ export function ReportFrame({
           Print or save as PDF
         </Button>
         <p className="min-w-0 flex-1 basis-64">
-          In the print window, choose “Save as PDF” to keep a copy. Chrome and Edge number the pages (“Page 2 of 5”) themselves. In Firefox and Safari, turn on the print
-          window's header and footer option to get page numbers.
+          In the print window, choose “Save as PDF” to keep a copy. Chrome and Edge (version 131 or later) number the pages (“Page 2 of 5”) themselves. Firefox and
+          Safari may need you to turn on the browser's headers and footers in the print dialog.
         </p>
       </div>
       <article aria-labelledby="report-title" className="report-frame">

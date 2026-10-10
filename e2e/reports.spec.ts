@@ -569,7 +569,7 @@ test.describe('around a Report', () => {
     )
     await page.goto(reportAddress(savingsId, year))
     const rows = article(page).locator('tbody tr td:nth-child(2)')
-    await expect(rows.nth(0)).toHaveText('EXAMPLE FULLReference: Ref 77 · Counterparty account: 99-9999-9999999-97 · Card: ending 1234 · Particulars: Rent · Code: Oct')
+    await expect(rows.nth(0)).toHaveText('EXAMPLE FULLReference: Ref 77 · Counterparty account: 99-9999-9999999-97 · Card: Ending 1234 · Particulars: Rent · Code: Oct')
     await expect(rows.nth(1)).toHaveText('EXAMPLE PARTLYCounterparty account: 99-9999-9999999-97')
     await expect(rows.nth(2)).toHaveText('EXAMPLE NONE')
   })
