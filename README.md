@@ -49,7 +49,13 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **A Summary for every Member:** the balance of each account, the newest transactions and any balance warnings, on the page Members land on.
 - **Dashboard:** balances, net worth over time, spending by category, budget vs actual.
 - **Printable reports:** spending by category, budget vs actual, income vs spending, balances over time, full transaction listing with notes. Print them or save as PDF from your browser.
-- **CSV export** for any date range.
+- **CSV export** for any date range: the Transactions page's **Download CSV** button saves the Transactions that match the filters you last searched with (text, account, category, dates), oldest first, to open in a spreadsheet.
+  - **Columns:** date, account, description, category, note, amount, and the bank's type and reference. An amount is dollars as a plain number, with a minus sign for money out, so a spreadsheet can add it up.
+  - **Totals:** Money in, Money out, Net and the number of Transactions come after a blank line, in the second column and not the Amount column, so adding up the Amount column gives the Net.
+  - **Safe to open:** a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return would run as a formula in a spreadsheet, so it gets an apostrophe in front. Amounts are numbers we write ourselves and are never changed.
+  - **Opens correctly in Excel:** the file starts with a UTF-8 byte order mark, so macrons (Whāngārei) show properly. A program that reads the file as plain UTF-8 will see an invisible character before the first heading; Python's `utf-8-sig` drops it.
+  - **At most 10,000 Transactions a file**, because the free plan gives a request 10 ms of CPU ([ADR 0004](docs/adr/0004-runs-on-workers-free-plan.md)). A longer history is exported a date range at a time; the file says so when more matched.
+  - **Once saved, a file is outside Fernledger's protection:** no sign-in, no read-only Members, no Change Log. See [docs/privacy.md](docs/privacy.md#what-a-deployment-holds).
 - **Change Log** of every edit the Admin makes, visible to everyone: who changed what and when, with the values before and after, newest first. Filter it by type of change and by date.
 - **Light and dark themes.**
 - **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and reports will.
@@ -324,7 +330,8 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Transaction search and details | Done |
 | Rules, transfers, budgets | Planned |
 | Dashboard | Planned |
-| Reports and export | Planned |
+| CSV export | Done |
+| Reports | Planned |
 | Backups and teardown | Done |
 | Release process, update pull requests, upgrade tests | Done |
 | Security audit, Deploy button, v1.0 | Planned |

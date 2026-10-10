@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { MAX_DATE, MIN_DATE, isSearchDate } from '@/lib/date-range'
 import { accountsQuery, categoriesQuery } from '@/lib/queries'
-import { MAX_TEXT, tidy, type TransactionSearch } from '@/lib/transaction-search'
+import { EXPORT_MAX_ROWS, exportPath, MAX_TEXT, tidy, type TransactionSearch } from '@/lib/transaction-search'
 
 /** What is typed in the form: text for every field, so a half-typed filter is never lost. */
 type Draft = { account: string; category: string; from: string; to: string; q: string }
@@ -64,6 +64,8 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
   const filtered = Object.values(draftOf(search)).some((value) => value !== '')
   // Filters are applied when Search is pressed, not as they are typed, so say so while what is shown is not what is asked for.
   const unapplied = JSON.stringify({ ...draft, q: draft.q.trim() }) !== applied
+  // The file holds what the list shows, which is the applied search, so it waits for Search; and a range that runs backwards holds nothing.
+  const canDownload = !unapplied && !(search.from && search.to && search.from > search.to)
 
   return (
     <form
@@ -174,11 +176,24 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
             Clear filters
           </Button>
         )}
+        {canDownload ? (
+          <a href={exportPath(search)} download className={buttonVariants({ variant: 'outline', size: 'touch' })} aria-describedby="filter-download-hint">
+            Download CSV
+          </a>
+        ) : (
+          <Button type="button" size="touch" variant="outline" disabled aria-describedby="filter-download-hint">
+            Download CSV
+          </Button>
+        )}
       </div>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <div role="status" className="mt-2">
         {unapplied && <p className="text-muted-foreground">Press Search to apply these filters.</p>}
       </div>
+      <p id="filter-download-hint" className="mt-2 text-muted-foreground">
+        Download CSV saves the Transactions that match the filters you last searched with, oldest first, to open in a spreadsheet. A file holds up to{' '}
+        {EXPORT_MAX_ROWS.toLocaleString('en-NZ')} Transactions and says so if more match. Once saved, it is no longer protected by Fernledger's sign-in.
+      </p>
     </form>
   )
 }

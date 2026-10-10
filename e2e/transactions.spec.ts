@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { AxeBuilder } from '@axe-core/playwright'
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
@@ -293,6 +294,53 @@ test('typed filters say they are not applied until Search is pressed', async ({ 
   await expect(page.getByText(hint)).toBeVisible()
   await page.getByLabel('From', { exact: true }).fill('')
   await expect(page.getByText(hint)).toHaveCount(0)
+})
+
+test('a Member downloads the Transactions they searched for as a CSV file, with formulas defused, once Search has been pressed', async ({ page, context, baseURL }, testInfo) => {
+  const { savings } = accountsFor(testInfo.project.name)
+  const stamp = `csv${testInfo.project.name}${Date.now()}`
+  await seed(context, baseURL!, [
+    {
+      account: savings,
+      rows: [
+        { date: '2012-06-02', description: `=EXAMPLE ${stamp} FORMULA`, amountCents: -1234 },
+        { date: '2012-06-01', description: `EXAMPLE ${stamp} PLAIN`, amountCents: 5000 },
+        { date: '2012-07-01', description: `EXAMPLE ${stamp} OUTSIDE`, amountCents: -100 },
+      ],
+    },
+  ])
+  await signInAs(context, 'member')
+  await page.goto(`/transactions?q=${stamp}&from=2012-06-01&to=2012-06-30`)
+  await expect(dataRows(page)).toHaveCount(2)
+  const link = page.getByRole('link', { name: 'Download CSV' })
+  await expect(link).toBeVisible()
+  await noAxeViolations(page)
+
+  // The file holds what is shown, so it waits while the filters typed are not the ones applied.
+  await searchBox(page).fill('something else')
+  await expect(page.getByRole('button', { name: 'Download CSV' })).toBeDisabled()
+  await expect(link).toHaveCount(0)
+  await searchBox(page).fill(stamp)
+  await expect(link).toBeVisible()
+
+  const [file] = await Promise.all([page.waitForEvent('download'), link.click()])
+  expect(file.suggestedFilename()).toBe('fernledger-transactions-2012-06-01-to-2012-06-30.csv')
+  const text = readFileSync(await file.path(), 'utf8')
+  const byteOrderMark = String.fromCharCode(0xfeff) // so Excel reads the file as UTF-8
+  expect(text).toBe(
+    [
+      `${byteOrderMark}Date,Account,Description,Category,Note,Amount,Bank type,Bank reference`,
+      `2012-06-01,${savings.name},EXAMPLE ${stamp} PLAIN,Uncategorised,,50.00,EFTPOS,`,
+      `2012-06-02,${savings.name},'=EXAMPLE ${stamp} FORMULA,Uncategorised,,-12.34,EFTPOS,`,
+      '',
+      'Totals',
+      'Money in,50.00',
+      'Money out,-12.34',
+      'Net,37.66',
+      'Transactions,2',
+      '',
+    ].join('\r\n'),
+  )
 })
 
 test('Back from a Transaction opened on the Uncategorised page returns to the Uncategorised page, in the same order', async ({ page, context }) => {
