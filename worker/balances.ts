@@ -24,10 +24,12 @@ export const CURRENT = `
   FROM accounts a LEFT JOIN balance_checks b ON b.id = (${ANCHOR_ID})
   ORDER BY a.name COLLATE NOCASE, a.id`
 
-// Balance at the end of each day with Transactions (and the anchor's day): the opening balance the anchor implies,
-// plus the running total of the days. Working backwards from the bank's balance is the same sum.
-export const HISTORY = `
-  WITH anchor AS (
+// Balance at the end of each day with Transactions (and the anchor's day): the opening balance the anchor implies, plus the
+// running total of the days. Working backwards from the bank's balance is the same sum. `net` is the day's own total, so a
+// balance less its `net` is the balance before that day. The Report of balances over time (report-balances.ts) picks month-ends
+// out of these same CTEs, so it can't drift from this history.
+export const HISTORY_CTES = `
+  anchor AS (
     SELECT as_of_date, bank_cents, through_transaction_id FROM balance_checks
     WHERE account_id = ?1 AND status NOT IN (${UNCOUNTED_SQL}) ORDER BY as_of_date DESC LIMIT 1),
   days AS (
@@ -39,12 +41,15 @@ export const HISTORY = `
     SELECT COALESCE(SUM(t.amount_cents), 0) AS total FROM transactions t, anchor
     WHERE t.account_id = ?1 AND (t.date < anchor.as_of_date OR (t.date = anchor.as_of_date AND t.id <= anchor.through_transaction_id))),
   history AS (
-    SELECT date, (SELECT bank_cents FROM anchor) - (SELECT total FROM counted) + SUM(net) OVER (ORDER BY date) AS balanceCents FROM days)
+    SELECT date, net, (SELECT bank_cents FROM anchor) - (SELECT total FROM counted) + SUM(net) OVER (ORDER BY date) AS balanceCents FROM days)`
+
+export const HISTORY = `
+  WITH ${HISTORY_CTES}
   SELECT date, balanceCents FROM history
   WHERE balanceCents IS NOT NULL AND (?2 IS NULL OR date >= ?2) AND (?3 IS NULL OR date <= ?3)
   ORDER BY date`
 
-const ANCHOR = `SELECT as_of_date AS asOfDate, bank_cents AS balanceCents FROM balance_checks WHERE account_id = ? AND status NOT IN (${UNCOUNTED_SQL}) ORDER BY as_of_date DESC LIMIT 1`
+export const ANCHOR = `SELECT as_of_date AS asOfDate, bank_cents AS balanceCents FROM balance_checks WHERE account_id = ? AND status NOT IN (${UNCOUNTED_SQL}) ORDER BY as_of_date DESC LIMIT 1`
 
 const rangeQuery = z.object({ from: z.optional(isoDate), to: z.optional(isoDate) })
 

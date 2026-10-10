@@ -3,6 +3,13 @@ import { formatBalance, formatDate } from './format'
 
 export type BalanceCheckOutcome = ImportOutcome
 
+/** Why an Account has no balance: a bank balance may exist that the Transactions held don't reach. Written for the Summary and the balances Report. */
+export function noBalanceReason(latestStatus: string | null) {
+  if (latestStatus === 'after-cutover') return 'The bank balance we have is after the Cutover Date'
+  if (latestStatus === 'file-ends-early') return 'The file ended before its bank balance date'
+  return 'No bank balance yet'
+}
+
 /** "Balance differs from bank by $12.34 since Thu 8 Oct 2026": the size of the difference (no sign) and the date of the previous bank balance it was compared with. */
 export const balanceDiffersMessage = (differenceCents: number, since: string) =>
   `Balance differs from bank by ${formatBalance(Math.abs(differenceCents))} since ${formatDate(since)}`
