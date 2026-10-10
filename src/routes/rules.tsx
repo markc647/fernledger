@@ -9,6 +9,7 @@ import { api } from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
+import { announcement, percentDone, progressSentence, restartNote, updatedSentence, type RerunJob } from '@/lib/rerun'
 import { dollarsForInput, readDollars, ruleConditions, ruleResult, type RuleView } from '@/lib/rules'
 
 export const Route = createFileRoute('/rules')({
@@ -26,8 +27,23 @@ const rulesQuery = queryOptions({
   },
 })
 
-const NEW_ONLY =
-  'A Rule is used for new Transactions as they are imported. It does not change the Transactions you already have; applying Rules to those will come in a later update.'
+/** The latest time the Rules were applied to every Transaction (worker/rule-rerun.ts), running or finished; null if never. */
+const rerunQuery = queryOptions({
+  queryKey: ['rerun'],
+  queryFn: async (): Promise<RerunJob | null> => {
+    const res = await api.rules.rerun.$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return (await res.json()).job
+  },
+  // The page itself keeps this up to date while a run is going; a refetch in the middle of that would only show an older step.
+  staleTime: Infinity,
+  refetchOnWindowFocus: false,
+})
+
+const INTRO =
+  'A Rule is used for new Transactions as they are imported. The Transactions you already have change only when you choose Apply the Rules to all Transactions, below.'
+/** Said after any change to the Rules. */
+const THEN_APPLY = 'To use the change on the Transactions you already have, choose Apply the Rules to all Transactions, below.'
 
 const count = new Intl.NumberFormat('en-NZ')
 
@@ -85,7 +101,7 @@ function AdminRules() {
     },
     onSuccess: async (_data, change) => {
       moveFocus.current = change.focus
-      await queryClient.invalidateQueries({ queryKey: ['rules'] })
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
       setNotice(change.message)
     },
     onError: (failure) =>
@@ -110,7 +126,7 @@ function AdminRules() {
     setProblem('')
     move.mutate({
       ids,
-      message: `Moved Rule ${item.number} ${by < 0 ? 'up' : 'down'}. It is now Rule ${now} of ${items.length}. A change in order is used for new Transactions only.`,
+      message: `Moved Rule ${item.number} ${by < 0 ? 'up' : 'down'}. It is now Rule ${now} of ${items.length}. ${THEN_APPLY}`,
       focus: by < 0 ? [`rule-${item.rule.id}-up`, `rule-${item.rule.id}-down`] : [`rule-${item.rule.id}-down`, `rule-${item.rule.id}-up`],
     })
   }
@@ -150,7 +166,7 @@ function AdminRules() {
         A Rule puts the Transactions that match it into a Category, or marks them as Transfers. Rules are checked from the top of the list, and the first one that matches is used. A Category you set by hand
         on a Transaction (an Override) always beats a Rule, and a Rule beats the category Akahu suggests, if you use Akahu Sync.
       </p>
-      <p className="mt-2">{NEW_ONLY}</p>
+      <p className="mt-2">{INTRO}</p>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {notice}
@@ -168,6 +184,7 @@ function AdminRules() {
           onCancel={() => closed('', editing.kind === 'edit' ? `rule-${editing.rule.id}-edit` : 'add-rule-button')}
         />
       )}
+      <ApplyToHistory />
       <div className="mt-6">
         {error ? (
           <p role="alert">Fernledger couldn't load the Rules. Reload the page to try again.</p>
@@ -178,6 +195,111 @@ function AdminRules() {
         )}
       </div>
     </>
+  )
+}
+
+/**
+ * Applying the Rules to every Transaction on file. The Worker does it a chunk at a time, one chunk for each request (worker/rule-rerun.ts), so
+ * this page asks for the next chunk for as long as a run is going and it is open, and shows how far it has got. A run is not lost when the page
+ * is closed: it keeps its place and the Worker carries on by itself, slowly, and the page carries on again where it was when it is opened.
+ */
+function ApplyToHistory() {
+  const queryClient = useQueryClient()
+  const { data: job, error } = useQuery(rerunQuery)
+  // 'limit' is the free plan's allowance for the day being used up; the run keeps its place either way.
+  const [problem, setProblem] = useState<'' | 'limit' | 'failed'>('')
+  const [attempt, setAttempt] = useState(0)
+  const status = useRef<HTMLParagraphElement>(null)
+
+  const start = useMutation({
+    mutationFn: async () => {
+      const res = await api.rules.rerun.$post({ json: {} })
+      if (res.status === 409) return null // one is already going (another page, or a second click): carry on with that one
+      if (!res.ok) throw new HttpError(res.status)
+      return (await res.json()).job
+    },
+    onSuccess: async (started) => {
+      setProblem('')
+      if (started) queryClient.setQueryData(rerunQuery.queryKey, started)
+      else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
+      // The button is off while it runs, so keyboard focus moves to the progress rather than being lost.
+      status.current?.focus()
+    },
+  })
+
+  // The loop: one step at a time, never two at once, until the job is done, something goes wrong, or the page goes. It depends on whether a
+  // run is going and not on how far it has got, so a step's answer does not restart it.
+  const running = job?.status === 'running'
+  useEffect(() => {
+    if (!running || problem) return
+    let stopped = false
+    ;(async () => {
+      while (!stopped) {
+        const res = await api.rules.rerun.step.$post({ json: {} })
+        if (stopped) return
+        if (!res.ok) return setProblem(res.status === 429 ? 'limit' : 'failed')
+        const { job: next } = await res.json()
+        if (stopped) return
+        queryClient.setQueryData(rerunQuery.queryKey, next)
+        if (next?.status !== 'running') {
+          // Every Category shown in a list may have changed.
+          await queryClient.invalidateQueries({ queryKey: ['transactions'] })
+          return
+        }
+      }
+    })().catch(() => {
+      if (!stopped) setProblem('failed')
+    })
+    return () => {
+      stopped = true
+    }
+  }, [running, problem, attempt, queryClient])
+
+  const note = job ? restartNote(job) : null
+  return (
+    <section aria-labelledby="rerun-heading" className="mt-6 max-w-xl rounded-xl border-2 p-4">
+      <h2 id="rerun-heading" className="text-lg font-semibold">
+        Apply the Rules to all Transactions
+      </h2>
+      <p className="mt-1">
+        Fernledger goes through every Transaction you have, a few at a time, and gives each the Category of the first Rule that matches it. A Transaction that no Rule matches any more loses the
+        Category a Rule gave it. A Category you set by hand (an Override) is never changed.
+      </p>
+      <p className="mt-1">Change the Rules first, then apply them once. If you change a Rule while this is going, it starts again from the first Transaction so that it uses the change.</p>
+      <Button id="rerun-button" className="mt-3 max-w-full py-2 whitespace-normal" size="touch" disabled={running || start.isPending || job === undefined} onClick={() => start.mutate()}>
+        Apply the Rules to all Transactions
+      </Button>
+      {/* Always in the page, so a screen reader announces the words when they change. They change a few times in a run, not at every step. */}
+      <p role="status" ref={status} tabIndex={-1} className="mt-3 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+        {job ? announcement(job) : ''}
+      </p>
+      {job && (
+        <div className="mt-2">
+          {running && <progress aria-labelledby="rerun-heading" className="block h-4 w-full accent-primary" value={percentDone(job)} max={100} />}
+          <p className="mt-1">{progressSentence(job)}</p>
+          <p className="mt-1 text-muted-foreground">{updatedSentence(job)}</p>
+          {note && <p className="mt-1">{note}</p>}
+          {running && !problem && <p className="mt-1">You can leave this page. Fernledger carries on by itself, but slowly, and speeds up again when you open this page.</p>}
+        </div>
+      )}
+      {problem && (
+        <div role="alert" className="mt-2 space-y-2 font-medium text-destructive">
+          <p>
+            {problem === 'limit'
+              ? 'Fernledger has used up the database allowance the free plan gives for today. It has kept its place and will carry on tomorrow, or you can try again now.'
+              : 'That did not work. Fernledger has kept its place, so you can try again.'}
+          </p>
+          <Button size="touch" variant="outline" onClick={() => { setProblem(''); setAttempt(attempt + 1) }}>
+            Try again
+          </Button>
+        </div>
+      )}
+      {(error || start.isError) && (
+        <p role="alert" className="mt-2 font-medium text-destructive">
+          {error ? "Fernledger couldn't find out whether the Rules are being applied. Reload the page to try again." : 'The Rules could not be applied. Try again.'}
+        </p>
+      )}
+    </section>
   )
 }
 
@@ -192,14 +314,14 @@ function RemoveConfirm({ item, onDone, onCancel }: { item: Item; onDone: (messag
       if (!res.ok) throw new HttpError(res.status)
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['rules'] })
-      onDone(`Removed Rule ${item.number}. It is no longer used for new Transactions; Transactions it already put in a Category keep that Category.`)
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
+      onDone(`Removed Rule ${item.number}. It is no longer used for new Transactions. Transactions it already put in a Category keep that Category until you apply the Rules to all Transactions.`)
     },
   })
 
   return (
     <div role="group" aria-label={`Remove Rule ${item.number}`} className="space-y-2 text-start">
-      <p>Remove Rule {item.number}? It will no longer be used for new Transactions. Transactions it already put in a Category keep that Category.</p>
+      <p>Remove Rule {item.number}? It will no longer be used for new Transactions. Transactions it already put in a Category keep that Category until you apply the Rules to all Transactions.</p>
       <div className="flex flex-wrap gap-2">
         <Button size="touch" aria-label={`Yes, remove Rule ${item.number}`} disabled={remove.isPending} onClick={() => remove.mutate()}>
           Yes, remove
@@ -304,8 +426,8 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
       if (!res.ok) throw new HttpError(res.status)
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['rules'] })
-      onDone(`${rule ? 'Saved the changes to the Rule.' : 'Added the Rule.'} ${NEW_ONLY}`)
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
+      onDone(`${rule ? 'Saved the changes to the Rule.' : 'Added the Rule.'} It is used for new Transactions as they are imported. ${THEN_APPLY}`)
     },
   })
 
@@ -436,7 +558,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
           {error('target') && <p id="rule-target-error" role="alert" className="mt-1 font-medium text-destructive">{error('target')}</p>}
           {values.target === 'transfer' && (
             <p id="rule-transfer-note" className="mt-1 text-muted-foreground">
-              The mark is stored on new Transactions now. It takes effect when Transfer pairing ships; until then they have no Category.
+              The mark is stored on each Transaction the Rule matches. It takes effect when Transfer pairing ships; until then they have no Category.
             </p>
           )}
           {categoriesFailed && <p role="alert" className="mt-1 font-medium text-destructive">The Categories could not be loaded. Reload the page to try again.</p>}
@@ -456,7 +578,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: RuleView; onDone: (messag
                     ? 'No Transactions you already have match.'
                     : `${count.format(shown.matches)} ${shown.matches === 1 ? 'Transaction' : 'Transactions'} you already have ${shown.matches === 1 ? 'matches' : 'match'}.`}
                 </p>
-                <p className="mt-1">Saving the Rule won't change {shown.matches === 1 ? 'it' : 'them'}. It is used for new Transactions as they are imported.</p>
+                <p className="mt-1">Saving the Rule won't change {shown.matches === 1 ? 'it' : 'them'}. {shown.matches === 1 ? 'It changes' : 'They change'} when you apply the Rules to all Transactions.</p>
                 {shown.samples.length > 0 && (
                   <>
                     <p className="mt-2">The newest {shown.samples.length === 1 ? 'one' : shown.samples.length}:</p>

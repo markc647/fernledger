@@ -8,7 +8,7 @@ Fernledger's maintainers collect no one's data. Each deployment is run by whoeve
 
 - **Transactions** for the tracked Accounts: date (time only where the bank supplies one, which is rare), amount, description, merchant, category, type, **the counterparty's account number**, card suffix, and payment particulars, code and reference. These often include other people's names.
 - **Account balances.**
-- **Email addresses:** Members' in Cloudflare Access, and the Admin's in every Change Log entry.
+- **Email addresses:** Members' in Cloudflare Access, and the Admin's in every Change Log entry and in the record of each time the Rules are applied to all Transactions.
 - **Notes** the Admin writes.
 
 The counterparty account number and payment references are kept on purpose. An attorney may need to show exactly where money went.
