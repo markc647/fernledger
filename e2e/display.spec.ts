@@ -88,6 +88,9 @@ test.describe('zoom', () => {
   const zoomLevels = [
     { name: '200% zoom', width: 640, height: 360 },
     { name: '400% zoom (320px wide)', width: 320, height: 256 },
+    // Text can measure a pixel or two wider on another machine: a form that overflowed 320px by 1px on CI's Linux fitted
+    // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
+    { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
   const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules']
 
