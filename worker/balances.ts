@@ -4,7 +4,7 @@ import { isoDate } from './account-fields'
 import type { AppEnv } from './app-env'
 import { UNCOUNTED_SQL } from './balance-check'
 import type { BalanceStatus } from './balance-rules'
-import { validate } from './validate'
+import { pathId, validate } from './validate'
 
 // Read-only, so every Member can use these; the guard in app.ts already refuses a change from anyone but the Admin.
 // A balance is the latest bank balance whose date the saved Transactions reach (balance-rules.ts), plus the
@@ -74,10 +74,11 @@ export const balances = new Hono<AppEnv>()
   // One Account's balance at the end of each day it had Transactions, oldest first, worked backwards from its latest
   // bank balance. `from` and `to` (inclusive) limit the points returned, not the sum.
   .get('/:accountId/history', validate('query', rangeQuery), async (c) => {
-    const accountId = Number(c.req.param('accountId'))
+    const accountId = pathId(c.req.param('accountId'))
+    if (accountId === null) return c.json({ error: 'Not found' }, 404)
     const { from, to } = c.req.valid('query')
     const db = c.env.DB
-    const account = Number.isSafeInteger(accountId) ? await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first() : null
+    const account = await db.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first()
     if (!account) return c.json({ error: 'Not found' }, 404)
 
     const [anchor, points] = await db.batch([db.prepare(ANCHOR).bind(accountId), db.prepare(HISTORY).bind(accountId, from ?? null, to ?? null)])

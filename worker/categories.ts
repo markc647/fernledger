@@ -4,7 +4,7 @@ import type { AppEnv } from './app-env'
 import { CATEGORY_KINDS, KIND_LABELS, type CategoryKind } from './category-kinds'
 import { recordChange } from './changelog'
 import { restartRerun } from './rule-rerun'
-import { nothing, validate } from './validate'
+import { nothing, pathId, validate } from './validate'
 
 type CategoryRow = { id: number; name: string; kind: CategoryKind }
 
@@ -47,7 +47,8 @@ export const categories = new Hono<AppEnv>()
     }
   })
   .patch('/:id', validate('json', body), async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const { name } = c.req.valid('json')
     const db = c.env.DB
     const category = await findCategory(db, id)
@@ -70,7 +71,8 @@ export const categories = new Hono<AppEnv>()
   })
   // What the Category is for (ADR 0012). Changing it changes how its Transactions are totalled from now on, in every month: nothing is stored per Transaction.
   .put('/:id/kind', validate('json', kindBody), async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const { kind } = c.req.valid('json')
     const db = c.env.DB
     const category = await findCategory(db, id)
@@ -89,7 +91,8 @@ export const categories = new Hono<AppEnv>()
   // Removing keeps the row (see migrations/1101_categories.sql), so it is one write however many Transactions use the Category.
   // Those Transactions lose that Override: each falls back to its Rule or Akahu category, or is Uncategorised if neither applies.
   .delete('/:id', validate('json', nothing), async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const db = c.env.DB
     const category = await findCategory(db, id)
     if (!category) return c.json({ error: 'Not found' }, 404)

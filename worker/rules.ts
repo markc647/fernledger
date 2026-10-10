@@ -5,7 +5,7 @@ import { recordChange } from './changelog'
 import { criteriaBody, describeRule, MAX_RULES, ruleBody, ruleRecord, toCriteria, type Criteria } from './rule-criteria'
 import { previewStatements, type PreviewSample } from './rule-preview'
 import { latestRerun, restartRerun, startRerun, stepRerun, stopRerun } from './rule-rerun'
-import { nothing, validate } from './validate'
+import { nothing, pathId, validate } from './validate'
 
 // Rules are applied to Transactions an Import adds (rule-apply.ts); saving, changing or removing a Rule here never
 // touches a Transaction that is already stored. The Admin applies the Rules to all of those with a re-run (rule-rerun.ts),
@@ -105,7 +105,8 @@ export const rules = new Hono<AppEnv>()
     return c.json({ ids })
   })
   .put('/:id', validate('json', ruleBody), async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const body = c.req.valid('json')
     const db = c.env.DB
     const rule = await findRule(db, id)
@@ -131,7 +132,8 @@ export const rules = new Hono<AppEnv>()
   })
   // Removing keeps the row (see migrations/1301_rules.sql): Transactions it categorised point at it, and the Change Log keeps its details.
   .delete('/:id', validate('json', nothing), async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
     const db = c.env.DB
     const rule = await findRule(db, id)
     if (!rule) return c.json({ error: 'Not found' }, 404)
