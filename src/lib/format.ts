@@ -49,6 +49,15 @@ export function formatDate(isoDate: string) {
   return readDay(asCalendarDate, date!)
 }
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+/** An NZ calendar month as stored ("2026-10"), such as the one a Budget is effective from: "October 2026". Written in full, so "Sept" and "Sep" can't disagree. */
+export function formatMonth(month: string) {
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month)
+  if (!match) throw new RangeError('Months are YYYY-MM')
+  return `${MONTH_NAMES[Number(match[2]) - 1]} ${match[1]}`
+}
+
 /** A moment in time (such as when a Sync last ran) shown as its New Zealand day: "Thu 8 Oct 2026". */
 export function formatInstantDate(instant: Date | number) {
   const date = new Date(instant)

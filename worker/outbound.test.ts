@@ -77,6 +77,12 @@ const EXERCISES: Exercise[] = [
   // That Transaction is half of a pairing: say it is not a Transfer, then treat it as one again (which pairs it with the other half).
   { route: 'POST /api/transactions/:id/not-transfer', path: () => `/api/transactions/${made.transactionId}/not-transfer`, opts: { method: 'POST', body: {} } },
   { route: 'DELETE /api/transactions/:id/not-transfer', path: () => `/api/transactions/${made.transactionId}/not-transfer`, opts: { method: 'DELETE', body: {} } },
+  // A Budget for that Category, and the two ways of reading Budgets (vs-actual reads what that chunk imported).
+  { route: 'PUT /api/budgets/:categoryId', path: () => `/api/budgets/${made.categoryId}`, opts: { method: 'PUT', body: { effectiveFrom: '2026-10', amountCents: 50_000 } } },
+  { route: 'GET /api/budgets', path: () => '/api/budgets?month=2026-10' },
+  { route: 'GET /api/budgets/vs-actual', path: () => '/api/budgets/vs-actual?month=2026-10' },
+  // Last, because once it is Income the Category can have no Budget.
+  { route: 'PUT /api/categories/:id/kind', path: () => `/api/categories/${made.categoryId}/kind`, opts: { method: 'PUT', body: { kind: 'income' } } },
   // The Rules, on that Category: add one, then everything that reads or changes it, and last remove it.
   { route: 'POST /api/rules', path: () => '/api/rules', opts: () => ({ method: 'POST', body: { textContains: 'EXAMPLE', categoryId: made.categoryId } }) },
   { route: 'GET /api/rules', path: () => '/api/rules' },

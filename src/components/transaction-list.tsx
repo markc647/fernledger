@@ -18,6 +18,7 @@ import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
+import { KIND_NOTES } from '@/lib/category-kinds'
 import { formatDate } from '@/lib/format'
 import { meQuery } from '@/lib/me'
 import { PAGE_SIZE, transactionCountQuery, transactionsQuery } from '@/lib/queries'
@@ -58,6 +59,7 @@ function CategoryCell({ row }: { row: Row }) {
   return (
     <>
       {row.categoryName}
+      {row.categoryKind !== null && KIND_NOTES[row.categoryKind] !== null && <span className="block text-muted-foreground">{KIND_NOTES[row.categoryKind]}</span>}
       {row.categorySource === 'override' && <span className="block text-muted-foreground">Override</span>}
       {row.categorySource === 'rule' && <span className="block text-muted-foreground">Rule</span>}
     </>

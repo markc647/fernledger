@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { BalanceWarningsWidget } from '@/components/summary/balance-warnings-widget'
 import { BalancesWidget } from '@/components/summary/balances-widget'
+import { BudgetVsActualWidget } from '@/components/summary/budget-vs-actual-widget'
 import { RecentTransactionsWidget } from '@/components/summary/recent-transactions-widget'
 import { meQuery } from '@/lib/me'
 import { roleLabel } from '@/lib/role'
@@ -25,6 +26,7 @@ function Summary() {
       <div className="mt-6 grid gap-8">
         <BalanceWarningsWidget />
         <BalancesWidget />
+        <BudgetVsActualWidget />
         <RecentTransactionsWidget />
       </div>
     </>

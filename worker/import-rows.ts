@@ -61,13 +61,14 @@ export const MAX_CHUNKS = 20
 /**
  * Most Import-sourced rows removed in one go when replacing imported history: 20,000 writes, leaving room in the day
  * for the new file (at most 10,000 rows, 40,000 writes). Larger histories are removed in steps of this size first
- * (`/api/imports/clear-history`). A slice costs 20,000 writes to remove, up to about 25,000 when a Rule gave every row a
- * Category (5 each, with the rule_category index entry; 1 more for a row with an Override or a mark), and 5,000 x 3 = 15,000 more if every row was paired (it lets go of its matching
- * Transaction too: WRITES_PER_PAIRED_REMOVED). A replace writes 8 for each row removed and imported, 11 with a Rule's Category,
- * 21 with an Override, Note and Not a Transfer mark carried over as well (WRITES_PER_CARRIED; 19 with an Override alone), and 7 more for a row
- * that is paired, which is never marked (15 for a paired row replaced where an unpaired one costs 8: WRITES_PER_PAIRED_REMOVED and _IMPORTED). So the
- * day's allowance covers about 12,000 rows replaced at best, about 4,700 when every row has a Rule's Category and all three to carry over, and about
- * 3,800 if every row is a Transfer with an Override and Note as well, which a household's rows are not. An Account with more imported rows than that cannot be
+ * (`/api/imports/clear-history`). A slice costs 20,000 writes to remove, up to about 25,000 when a Rule gave every row a Category (5 each, with the
+ * rule_category index entry), 1 more for each row with an Override and 1 more for each with a mark (2 for a row with both), and 5,000 x 3 = 15,000 more if
+ * every row was paired (it lets go of its matching Transaction too: WRITES_PER_PAIRED_REMOVED). A replace writes 8 for each row removed and imported, and
+ * 11 when a Rule gave the row a Category. With an Override, a Note and a Not a Transfer mark carried over as well (WRITES_PER_CARRIED, 10) that is 21 for a
+ * row with a Rule's Category (11 + 10), and 19 with an Override alone (11 + 8). A row that is paired costs 7 more and is never marked (15 for a paired row
+ * replaced where an unpaired one costs 8: WRITES_PER_PAIRED_REMOVED and _IMPORTED). So the day's allowance covers about 12,000 rows replaced at best, about
+ * 4,700 when every row has a Rule's Category and all three to carry over (21 each), and about 3,800 if every row is a Transfer with a Rule's Category and an
+ * Override and Note as well (11 + 8 + 7 = 26 each), which a household's rows are not. An Account with more imported rows than that cannot be
  * replaced in one day: the Import stops at the limit ("Daily limit reached") and the Admin carries on the next day.
  */
 export const REPLACE_SLICE = 5000

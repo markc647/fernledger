@@ -473,6 +473,7 @@ describe('GET /api/transactions/:id', () => {
       categoryId: category('Eating out'),
       categoryName: 'Eating out',
       categorySource: 'override',
+      categoryKind: 'spending',
       note: 'Lunch with Sam',
       transfer: null,
       transferAccountName: null,

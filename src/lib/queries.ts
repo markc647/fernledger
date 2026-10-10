@@ -132,6 +132,29 @@ export const categoriesQuery = queryOptions({
   },
 })
 
+/**
+ * Every Category in use with the Budget it has this NZ month (the Worker decides which month that is) and all of its Budget changes.
+ * Every key starts with 'budgets', so saving a Budget refreshes both.
+ */
+export const budgetsQuery = queryOptions({
+  queryKey: ['budgets', 'list'],
+  queryFn: async () => {
+    const res = await api.budgets.$get({ query: {} })
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+/** This NZ month's Budget vs actual: each Category that has a Budget, with what it has spent. */
+export const budgetVsActualQuery = queryOptions({
+  queryKey: ['budgets', 'vs-actual'],
+  queryFn: async () => {
+    const res = await api.budgets['vs-actual'].$get({ query: {} })
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
 /** How many Import-sourced Transactions an Account holds, and how many of them have an Override or a Note, so a replace can say what it will remove. Read fresh each time it's asked. */
 export const importedRowsQuery = (accountId: number) =>
   queryOptions({

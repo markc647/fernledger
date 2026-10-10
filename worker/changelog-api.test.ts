@@ -55,6 +55,7 @@ describe('GET /api/change-log', () => {
       { id: 'import', label: 'Import' },
       { id: 'category', label: 'Category' },
       { id: 'rule', label: 'Rule' },
+      { id: 'budget', label: 'Budget' },
       { id: 'transaction', label: 'Transaction' },
       { id: 'transfer', label: 'Transfer' },
     ])

@@ -5,6 +5,7 @@ import { Amount } from '@/components/amount'
 import { EditPanel } from '@/components/edit-panel'
 import { NotATransfer, TreatAsTransferAgain } from '@/components/not-a-transfer'
 import { Button } from '@/components/ui/button'
+import { KIND_NOTES } from '@/lib/category-kinds'
 import { formatDate, formatDateTime } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { transactionQuery } from '@/lib/queries'
@@ -154,6 +155,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
           <Fact label="Account">{t.accountName}</Fact>
           <Fact label="Category">
             {t.categoryName ?? <span className="text-muted-foreground">{t.transfer === null ? 'Uncategorised' : 'None, as this is a Transfer'}</span>}
+            {t.categoryKind !== null && KIND_NOTES[t.categoryKind] !== null && <span className="block text-muted-foreground">{KIND_NOTES[t.categoryKind]}</span>}
             {t.categorySource === 'override' && <span className="block text-muted-foreground">Override: set by the Admin</span>}
           </Fact>
           {transferNote !== null && (

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { APPLY_HELD, HOLD_REMOVED, MARK_APPLIED } from './carry-over'
 import worker from './index'
 import { WRITES_PER_CARRIED, WRITES_PER_MARK_REMOVED, WRITES_PER_OVERRIDE_REMOVED } from './import-rows'
+import { buildSpending, rollUp, type SpendingRow } from './spending'
 import { PAIR_ONE, clearHeldNotTransferStatement, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, pairTransfersStatement } from './transfers'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
@@ -75,6 +76,7 @@ type Listed = {
   description: string
   amountCents: number
   categoryName: string | null
+  categoryKind: string | null
   categorySource: string | null
   transfer: 'pair' | 'rule' | null
   transferAccountName: string | null
@@ -105,6 +107,7 @@ type Detail = {
   transferAccountName: string | null
   transferTransactionId: number | null
   categoryName: string | null
+  categoryKind: string | null
 }
 const detail = async (uniqueId: string, who: Who = 'admin') => (await (await call(`/api/transactions/${await idOf(uniqueId)}`, { who })).json()) as Detail
 
@@ -340,6 +343,43 @@ describe('marking a pairing as Not a Transfer', () => {
     expect(await pairs()).toEqual([])
     expect(await byDescription('EXAMPLE REFUND')).toMatchObject({ transfer: null })
     expect(await marker('IN')).toBe(await marker('OUT'))
+  })
+})
+
+describe('spending, income and loans once the Admin has said Not a Transfer (ADR 0012)', () => {
+  const spent = async () => {
+    const query = buildSpending({ from: '2026-10-01', to: '2026-10-31' })
+    return (await env.DB.prepare(query.sql).bind(...query.binds).all<SpendingRow>()).results
+  }
+
+  it("leaves a pair out, counts both halves under their Category's kind once marked, and leaves them out again when the mark is taken off", async () => {
+    await wrongPair()
+    expect(await spent()).toEqual([])
+
+    await notTransfer('OUT')
+
+    // Uncategorised counts as Spending.
+    expect(await spent()).toEqual([{ month: '2026-10', categoryId: null, kind: 'spending', outCents: 5000, inCents: 5000 }])
+    await treatAsTransferAgain('OUT')
+    expect(await spent()).toEqual([])
+  })
+
+  it('counts a marked half in a Loans Category as a loan, which the totals leave out, and the details and the list say so together', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    const loans = await categoryId('Loans')
+    await override('OUT', loans)
+    await override('IN', loans)
+
+    const rows = await spent()
+
+    expect(rows).toEqual([{ month: '2026-10', categoryId: loans, kind: 'loans', outCents: 5000, inCents: 5000 }])
+    expect(rollUp(rows).months).toEqual([])
+    // The Transactions API sends the kind of the Category and the Not a Transfer state side by side, and a marked half is not a Transfer.
+    expect(await detail('OUT')).toMatchObject({ categoryName: 'Loans', categoryKind: 'loans', transfer: null, notTransfer: true, canMarkNotTransfer: false })
+    expect(await byDescription('EXAMPLE SHOP')).toMatchObject({ categoryName: 'Loans', categoryKind: 'loans', transfer: null, notTransfer: true, canMarkNotTransfer: false })
+    // The other half is marked too, so it reads the same.
+    expect(await detail('IN')).toMatchObject({ categoryKind: 'loans', transfer: null, notTransfer: true })
   })
 })
 

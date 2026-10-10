@@ -8,7 +8,7 @@ import { api } from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import { HttpError } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
-import { notTransferSaved, transferEditHint, treatAsTransferAgainSaved, type TransferSource } from '@/lib/transfers'
+import { NOT_TRANSFER_NOTE, notTransferSaved, transferEditHint, treatAsTransferAgainSaved, type TransferSource } from '@/lib/transfers'
 
 /** What the panel needs to know about a Transaction: how to name it, and its Override and Note now. */
 export type EditableTransaction = {
@@ -19,7 +19,7 @@ export type EditableTransaction = {
   categoryId: number | null
   /** 'override' while the Category is the Admin's own choice. */
   categorySource: string | null
-  /** Set while the Transaction is a Transfer, which an Override turns into spending. */
+  /** Set while the Transaction is a Transfer, which an Override takes out of the Transfers. */
   transfer: TransferSource | null
   /** The Account of its matching Transaction, if it is paired, whether or not an Override makes this one spending. */
   transferAccountName: string | null
@@ -126,7 +126,7 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
           <h3 className="font-medium">Not a Transfer</h3>
           <p className="mt-1 text-muted-foreground">
             {row.notTransfer
-              ? 'The Admin marked this Not a Transfer, so it counts as spending and is not paired with another Transaction.'
+              ? NOT_TRANSFER_NOTE
               : row.transferAccountName === null
                 ? 'A Rule marks this as a Transfer. If that is wrong, choose Not a Transfer.'
                 : 'Fernledger pairs a Transaction with one in another Account on the same date for the same amount. If that is wrong, choose Not a Transfer.'}

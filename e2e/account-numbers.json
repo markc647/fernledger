@@ -1,5 +1,6 @@
 {
   "specs": {
+    "budgets.spec.ts": [57, 58],
     "categories.spec.ts": [88, 89],
     "change-log.spec.ts": [90, 91],
     "cutover.spec.ts": [92, 93],

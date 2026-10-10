@@ -6,7 +6,7 @@ import * as z from 'zod/mini'
 /** Rules in use. Every new Import chunk looks up the first Rule that matches each of its rows, so the list stays short (ADR 0004). */
 export const MAX_RULES = 100
 
-/** The largest amount a Rule can name: $1,000,000,000.00. Mirrored in src/lib/rules.ts. */
+/** The largest amount a Rule or a Budget can name: $1,000,000,000.00. Mirrored in src/lib/rules.ts, whose reader the Budgets page uses too. */
 export const MAX_AMOUNT_CENTS = 100_000_000_000
 
 const text = (max: number) => z.string().check(z.trim(), z.minLength(1), z.maxLength(max))

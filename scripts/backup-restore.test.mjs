@@ -159,10 +159,10 @@ test('seed, back up, restore, compare: the restored database holds exactly what 
   const r = restore(s)
 
   assert.equal(r.status, 0, r.out)
-  assert.match(r.out, /Restored 2528 rows in \d+ tables/)
+  assert.match(r.out, /Restored 2529 rows in \d+ tables/)
   assert.deepEqual(dump(s.target), dump(s.source))
   assert.equal(dump(s.target).change_log.length, 2501)
-  assert.equal(dump(s.target).categories.length, 22, 'the starter Categories are replaced by the backup rows, not added to')
+  assert.equal(dump(s.target).categories.length, 23, 'the starter Categories are replaced by the backup rows, not added to')
   assert.ok(r.loads.length > 3, 'change_log should have needed more than one part')
 })
 
@@ -347,7 +347,7 @@ test('restore loads a Category before the Transactions whose Override uses it, w
     INSERT INTO categories (name, removed_at) VALUES ('Pets', NULL), ('Old name', '2026-09-01T00:00:00Z');
     INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-97', 'Everyday');
     INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category, note)
-      VALUES (1, '2026-09-30', -4200, 'Vet', 'import', 23, 'Biscuit''s check-up'),
+      VALUES (1, '2026-09-30', -4200, 'Vet', 'import', 24, 'Biscuit''s check-up'),
              (1, '2026-10-01', -9000, 'Shop', 'import', 1, NULL),
              (1, '2026-10-02', -500, 'Cafe', 'import', NULL, NULL);
   `)
@@ -364,7 +364,7 @@ test('restore loads a Category before the Transactions whose Override uses it, w
   assert.equal(r.status, 0, r.out)
   assert.deepEqual(dumpTables(s.target, restoredTables), dumpTables(source, restoredTables))
   assert.equal(s.target.prepare("SELECT name FROM categories WHERE id = 1").get().name, 'Food shop', 'a renamed starter Category keeps its new name')
-  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 24)
+  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 25)
 })
 
 test('restore still refuses a database whose Change Log has rows, and leaves the starter Categories alone', async () => {
@@ -376,18 +376,32 @@ test('restore still refuses a database whose Change Log has rows, and leaves the
   assert.equal(r.status, 1)
   assert.match(r.out, /already has rows in change_log/)
   assert.deepEqual(r.loads, [], 'nothing was loaded, so the starter rows were not cleared either')
-  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 22)
+  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 23)
 })
 
 test('a backup from before Categories existed restores and keeps the starter Categories', async () => {
-  const s = await scenario(['1101', '2401'])
+  const s = await scenario(['1101', '1602', '2401'])
 
   const r = restore(s)
 
   assert.equal(r.status, 0, r.out)
   assert.doesNotMatch(r.out, /starter rows/)
-  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 22)
+  assert.equal(s.target.prepare('SELECT count(*) AS n FROM categories').get().n, 23)
   assert.equal(s.target.prepare('SELECT count(*) AS n FROM settings').get().n, 2)
+})
+
+test('a backup from before Category kinds restores every Category as Spending, with no starter Loans Category added', async () => {
+  const s = await scenario(['1602']) // the source has no kind column, as a database from before ADR 0012 has not
+  assert.equal(s.source.prepare("SELECT count(*) AS n FROM pragma_table_info('categories') WHERE name = 'kind'").get().n, 0)
+
+  const r = restore(s)
+
+  assert.equal(r.status, 0, r.out)
+  const restored = s.target.prepare('SELECT name, kind FROM categories ORDER BY id').all()
+  assert.equal(restored.length, 22, "the backup's Categories replace the starter list, so the starter Loans Category is not left behind")
+  assert.ok(restored.every((c) => c.kind === 'spending'))
+  assert.ok(restored.some((c) => c.name === 'Wages and salary'), 'the starter income Category is back, as Spending until the Admin sets it again')
+  assert.ok(!restored.some((c) => c.name === 'Loans'))
 })
 
 test('restore will not clear the starter Categories while a table that refers to them has rows, even one the backup lacks', async () => {
@@ -406,5 +420,5 @@ test('restore will not clear the starter Categories while a table that refers to
   assert.equal(r.status, 1)
   assert.match(r.out, /already has rows in transactions/)
   assert.deepEqual(r.loads, [])
-  assert.equal(target.prepare('SELECT count(*) AS n FROM categories').get().n, 22)
+  assert.equal(target.prepare('SELECT count(*) AS n FROM categories').get().n, 23)
 })

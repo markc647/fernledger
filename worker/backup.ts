@@ -13,6 +13,7 @@
 import { z } from 'zod/mini'
 import { BackupFormatError, quote, sha256Hex, tableSchema, type Manifest, type ManifestTable, type SkippedTable } from './backup-format.ts'
 import { logEvent } from './log.ts'
+import { nzDate } from './nz-time.ts'
 
 /** Must match the weekly entry in wrangler.jsonc (scripts/wrangler-config.test.mjs checks). */
 export const BACKUP_CRON = '0 15 * * SUN'
@@ -50,8 +51,6 @@ const runState = z.object({
   after: z.int().check(z.minimum(0)),
 })
 type RunState = z.infer<typeof runState>
-
-const nzDate = (at: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(at)
 
 /** Where the backup run for a moment in time lives in the bucket: the NZ date of that moment. Shared with the scripts that wait for a run. */
 export const backupPrefix = (time: number) => `backups/${nzDate(new Date(time))}`
