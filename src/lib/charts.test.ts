@@ -15,7 +15,7 @@ describe('barsOf', () => {
     const { rows, bars, leftOut } = barsOf([category(5000), category(300), category(0, 3), category(-2500, 4)])
 
     expect(bars.map((c) => c.cents)).toEqual([5000, 300])
-    expect(rows.map((c) => c.cents)).toEqual([5000, 300, -2500]) // a Category with nothing in it is not worth a row
+    expect(rows.map((c) => c.cents)).toEqual([5000, 300, 0, -2500]) // every Category the Worker gave is a row, a fully refunded one as $0.00, with no bar
     expect(leftOut).toBe(0)
   })
 
@@ -128,6 +128,11 @@ describe('what net worth says about itself', () => {
   it('says the months before an Account\'s history are an estimate, and that after its last Transaction it keeps its last balance', () => {
     expect(NET_WORTH_ABOUT[1]).toContain('are an estimate')
     expect(NET_WORTH_ABOUT[1]).toContain('keeps its last balance')
+  })
+
+  it('does not name Imports as where the balances come from, since Sync will supply some', () => {
+    expect(NET_WORTH_ABOUT[0]).toContain('from the bank balances Fernledger holds')
+    expect(NET_WORTH_ABOUT.join(' ')).not.toMatch(/Import/)
   })
 
   it('does not say "we"', () => {

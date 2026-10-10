@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useId, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
+import { LiveStatus } from '@/components/live-status'
 import { ResponsiveTable } from '@/components/responsive-table'
 import { Spent } from '@/components/spent'
 import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
@@ -53,7 +54,7 @@ export function SpendingByCategory() {
   const [to, setTo] = useState('')
   const problem = choice === 'custom' ? datesProblem(from, to) : null
   const request = choice === 'custom' ? { from, to } : { period: choice }
-  const { data, error, isPlaceholderData } = useQuery({ ...spendingByCategoryQuery(request), enabled: problem === null, placeholderData: keepPreviousData })
+  const { data, error, isPlaceholderData, isFetching } = useQuery({ ...spendingByCategoryQuery(request), enabled: problem === null, placeholderData: keepPreviousData })
 
   const pick = (value: string) => {
     // Choosing dates starts from the ones on the screen, so the chart stays as it is until a date is changed.
@@ -65,12 +66,15 @@ export function SpendingByCategory() {
   }
   const { rows, bars, leftOut } = barsOf(data?.categories ?? [])
   const dates = data ? describeDates(data.from, data.to) : ''
+  // What a screen reader is told as it happens, in a region that is on the page from the start (a change is announced, an arrival often is not).
+  const message = error || (!data && problem) ? '' : !data ? 'Loading spending…' : isPlaceholderData ? 'Updating spending…' : 'Spending has loaded.'
 
   return (
-    <section aria-labelledby="spending-heading" aria-busy={isPlaceholderData}>
+    <section aria-labelledby="spending-heading" aria-busy={isFetching}>
       <h2 id="spending-heading" className="mb-3 text-xl font-semibold">
         Spending by Category
       </h2>
+      <LiveStatus message={message} />
       <div className="grid gap-4 sm:grid-cols-3">
         <div>
           <label htmlFor={`${id}-period`} className="block font-medium">
@@ -115,17 +119,11 @@ export function SpendingByCategory() {
         </p>
       ) : !data ? (
         problem ? null : (
-          <p role="status" className="mt-4">
-            Loading…
-          </p>
+          <p className="mt-4">Loading…</p>
         )
       ) : (
         <div className="mt-4">
-          {isPlaceholderData && (
-            <p role="status" className="mb-2 font-medium">
-              Updating…
-            </p>
-          )}
+          {isPlaceholderData && <p className="mb-2 font-medium">Updating…</p>}
           <div className={isPlaceholderData ? 'opacity-60' : undefined}>
             <p className="mb-3 text-muted-foreground">
               What the Categories spent in {dates}, money out less money back, such as a refund. Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted.

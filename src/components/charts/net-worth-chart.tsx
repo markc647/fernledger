@@ -1,8 +1,9 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 import { Amount } from '@/components/amount'
+import { LiveStatus } from '@/components/live-status'
 import { ResponsiveTable } from '@/components/responsive-table'
 import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { Button } from '@/components/ui/button'
@@ -28,6 +29,10 @@ const config = { netWorth: { label: 'Net worth', color: 'var(--chart-2)' } } sat
 // Few enough points to mark each one; a long history is a plain line.
 const MARK_EACH_POINT_UNDER = 14
 
+const LOADING = 'Loading net worth. It reads every Transaction, so it can take a moment.'
+const UPDATING = 'Updating net worth…'
+const LOADED = 'Net worth has loaded.'
+
 const linkStyle = 'underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
 /**
@@ -50,15 +55,14 @@ export function NetWorthChart({ choosable = false, onRequest = false }: { choosa
     setRequested(true)
     heading.current?.focus()
   }
-  const [announce, setAnnounce] = useState(false)
-  useEffect(() => {
-    if (onRequest && requested && data) setAnnounce(true)
-  }, [onRequest, requested, data])
+  // What a screen reader is told as it happens, in a region that is on the page from the start (a change is announced, an arrival often is not).
+  const message = !requested || error ? '' : !data ? LOADING : isPlaceholderData ? UPDATING : LOADED
   return (
     <section aria-labelledby="net-worth-heading" aria-busy={requested && (isPlaceholderData || (!data && !error))}>
       <h2 id="net-worth-heading" ref={heading} tabIndex={-1} className="mb-3 text-xl font-semibold outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         Net worth over time
       </h2>
+      <LiveStatus message={message} />
       {!requested && (
         <>
           <p className="mb-3">Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.</p>
@@ -89,7 +93,7 @@ export function NetWorthChart({ choosable = false, onRequest = false }: { choosa
       {!requested ? null : error ? (
         <p role="alert">Fernledger couldn't load net worth. Reload the page to try again.</p>
       ) : !data ? (
-        <p role="status">Loading net worth. It reads every Transaction, so it can take a moment.</p>
+        <p>{LOADING}</p>
       ) : data.tooManyAccounts ? (
         <p>{tooManyAccountsMessage(data.tooManyAccounts.count, data.tooManyAccounts.limit)}</p>
       ) : data.points.length === 0 ? (
@@ -99,11 +103,7 @@ export function NetWorthChart({ choosable = false, onRequest = false }: { choosa
         </>
       ) : (
         <>
-          {isPlaceholderData && (
-            <p role="status" className="mb-2 font-medium">
-              Updating…
-            </p>
-          )}
+          {isPlaceholderData && <p className="mb-2 font-medium">Updating…</p>}
           {NET_WORTH_ABOUT.map((paragraph) => (
             <p key={paragraph} className="mb-3 text-muted-foreground">
               {paragraph}
@@ -168,11 +168,6 @@ export function NetWorthChart({ choosable = false, onRequest = false }: { choosa
           )}
           <NotCounted accounts={data.notCounted} />
         </>
-      )}
-      {announce && (
-        <p role="status" className="sr-only">
-          Net worth has loaded.
-        </p>
       )}
     </section>
   )

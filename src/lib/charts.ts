@@ -32,13 +32,13 @@ export const DASHBOARD_NET_WORTH_RANGE: NetWorthRange = '24-months'
 export const CHART_BARS = 12
 
 /**
- * What to draw and what to say about the Spending Categories the Worker gave: the ones that spent something (it has put the biggest first), at most `CHART_BARS`, how
- * many of those it left out, and the ones with nothing in them, which are not worth a row (Uncategorised that nets to nothing, say). `rows` is what the table lists.
+ * What to draw and what to say about the Spending Categories the Worker gave (it has put the biggest first): the table lists every one, a fully refunded Category as $0.00,
+ * so money that went out and came back is still in view; the bars are the ones that spent something, at most `CHART_BARS`; and `leftOut` is how many of those the chart
+ * left out. The Worker gives a Category only when it has Transactions in the dates, so none is listed that has nothing in it.
  */
 export function barsOf(categories: SpendingCategory[]) {
-  const rows = categories.filter((category) => category.cents !== 0)
-  const spent = rows.filter((category) => category.cents > 0)
-  return { rows, bars: spent.slice(0, CHART_BARS), leftOut: Math.max(0, spent.length - CHART_BARS) }
+  const spent = categories.filter((category) => category.cents > 0)
+  return { rows: categories, bars: spent.slice(0, CHART_BARS), leftOut: Math.max(0, spent.length - CHART_BARS) }
 }
 
 /** `name` cut to `maxChars` characters with an ellipsis, for an axis with room for only so many. The whole name is in the tooltip and the table. */
@@ -85,7 +85,7 @@ export function spendingSummary(dates: string, drawn: number) {
 
 /** What the chart is of, in a line under it: the money in the Accounts and nothing else, and how the months before an Account's history are drawn. */
 export const NET_WORTH_ABOUT = [
-  "Only the money in these Accounts, added up at the end of each month from the bank balances in your Imports. A loan to or from someone whose account isn't tracked shows as a fall or a rise.",
+  "Only the money in these Accounts, added up at the end of each month from the bank balances Fernledger holds. A loan to or from someone whose account isn't tracked shows as a fall or a rise.",
   "Months before an Account's first Transaction use the balance it had when its Transactions begin, so they are an estimate: money that moved into it by then may be counted twice. After its last Transaction an Account keeps its last balance. The last point is the latest date Fernledger holds, not the end of the month.",
 ] as const
 

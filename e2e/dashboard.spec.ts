@@ -93,6 +93,18 @@ const drawn = async (region: ReturnType<typeof netWorth>, name: RegExp) => {
   return figure
 }
 
+/**
+ * A section's live region: the one status element it has, on the page before anything happens and empty, so that what it comes to say is a change a screen reader
+ * announces. Returns it with its element, to check afterwards that it is still the same element and still on the page.
+ */
+const liveRegion = async (region: ReturnType<typeof netWorth>) => {
+  const live = region.getByRole('status')
+  await expect(live).toHaveCount(1)
+  await expect(live).toHaveText('')
+  return { live, element: (await live.elementHandle())! }
+}
+const LOADING_NET_WORTH = 'Loading net worth. It reads every Transaction, so it can take a moment.'
+
 /** Shows spending between two dates, as the person who chooses dates does. */
 async function chooseDates(page: Page, from: string, to: string) {
   await spending(page).getByLabel('Period', { exact: true }).selectOption('custom')
@@ -161,6 +173,7 @@ test('the Admin lands on the Dashboard: their tools, every part of the Summary, 
   const region = netWorth(page)
   const show = region.getByRole('button', { name: 'Show net worth' })
   await expect(show).toBeVisible()
+  const { live, element } = await liveRegion(region)
   await expect(region).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
   await expect(region.getByRole('link', { name: 'Open the Charts page for longer ranges' })).toHaveAttribute('href', '/charts')
   await expect(region.locator('svg.recharts-surface')).toHaveCount(0)
@@ -183,7 +196,8 @@ test('the Admin lands on the Dashboard: their tools, every part of the Summary, 
   await show.click()
   await expect(region.getByRole('heading', { level: 2, name: 'Net worth over time' })).toBeFocused() // focus stays where the button was
   await drawn(region, LINE)
-  await expect(region.getByRole('status').filter({ hasText: 'Net worth has loaded.' })).toHaveCount(1)
+  await expect(live).toHaveText('Net worth has loaded.') // the words arrive in the region that was already there, which is what is announced
+  expect(await element.evaluate((el) => el.isConnected)).toBe(true)
   await expect(region.getByRole('button', { name: 'Show net worth' })).toHaveCount(0)
   await expect(region.getByRole('combobox')).toHaveCount(0)
   await expect(region.getByRole('link', { name: 'Longer ranges are on the Charts page.' })).toHaveAttribute('href', '/charts')
@@ -210,14 +224,18 @@ test('the button that shows net worth is a touch target with a clear name, works
   expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44)
   await sizeButton(page, 'A++').click()
   await expect(sizeButton(page, 'A++')).toHaveAttribute('aria-pressed', 'true')
+  const { live, element } = await liveRegion(region)
 
   await show.focus()
   await page.keyboard.press('Enter')
 
   await expect(region).toHaveAttribute('aria-busy', 'true')
-  await expect(region.getByRole('status').filter({ hasText: 'Loading net worth. It reads every Transaction, so it can take a moment.' })).toBeVisible()
+  await expect(live).toHaveText(LOADING_NET_WORTH) // said in the region that was already on the page...
+  await expect(region.locator('p:not([role="status"])', { hasText: LOADING_NET_WORTH })).toBeVisible() // ...and shown on the screen
   await expect(region.getByRole('heading', { level: 2 })).toBeFocused() // not lost to the page when the button goes
   await drawn(region, LINE)
+  await expect(live).toHaveText('Net worth has loaded.') // the same region, its words changed
+  expect(await element.evaluate((el) => el.isConnected)).toBe(true)
   await expect(region).toHaveAttribute('aria-busy', 'false')
   expect(answered).toBe(1)
 })
@@ -287,7 +305,7 @@ test('net worth is drawn as a line, and says what it is: only the money in these
   const figure = await drawn(netWorth(page), LINE)
   await expect(figure.locator('path.recharts-line-curve')).toHaveAttribute('d', /^M[\d.]+/)
   expect(await figure.getAttribute('aria-label')).toContain('It was $10,000.00 at the end of August 2026 and $10,800.00 on Wed 7 Oct 2026.')
-  await expect(netWorth(page)).toContainText("Only the money in these Accounts, added up at the end of each month from the bank balances in your Imports. A loan to or from someone whose account isn't tracked shows as a fall or a rise.")
+  await expect(netWorth(page)).toContainText("Only the money in these Accounts, added up at the end of each month from the bank balances Fernledger holds. A loan to or from someone whose account isn't tracked shows as a fall or a rise.")
   await expect(netWorth(page)).toContainText("Months before an Account's first Transaction use the balance it had when its Transactions begin, so they are an estimate")
   await expect(netWorth(page)).not.toContainText(/\bwe\b/i)
   await expect(netWorth(page)).not.toContainText('Loans Report')
@@ -303,16 +321,22 @@ test('the Charts page lets the reader choose how far back net worth goes, and th
   })
   await page.goto('/charts')
   const region = netWorth(page)
+  const live = region.getByRole('status') // the one live region the section keeps on the page
+  const element = (await live.elementHandle())!
   await drawn(region, LINE)
+  await expect(live).toHaveText('Net worth has loaded.')
   await expect(region.getByLabel('Range', { exact: true })).toHaveValue('24-months')
   await expect(region.getByRole('option')).toHaveText(['Last 24 months', 'Last 5 years', 'All history'])
   expect(asked).toEqual(['24-months'])
 
   await region.getByLabel('Range', { exact: true }).selectOption('5-years')
-  await expect(region.getByRole('status').filter({ hasText: 'Updating…' })).toBeVisible() // the old range stays on the screen, marked as old
+  await expect(live).toHaveText('Updating net worth…') // said in the region that was already there
+  await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toBeVisible() // the old range stays on the screen, marked as old
   await expect(region).toHaveAttribute('aria-busy', 'true')
-  await expect(region.getByRole('status').filter({ hasText: 'Updating…' })).toHaveCount(0)
+  await expect(live).toHaveText('Net worth has loaded.')
+  await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toHaveCount(0)
   await expect(region).toHaveAttribute('aria-busy', 'false')
+  expect(await element.evaluate((el) => el.isConnected)).toBe(true)
   expect(asked).toEqual(['24-months', '5-years'])
 })
 
@@ -405,23 +429,32 @@ test('a period the Worker names is asked for by name, and a mistake in the dates
   await expect.poll(() => requests.some((url) => url.includes('from=2034-06-30') && url.includes('to=2034-06-30'))).toBe(true)
 })
 
-test('spending marks the old period as old while the new one is asked for', async ({ page, context }) => {
+test('spending is marked busy from its first load, and the old period is marked as old while a new one is asked for', async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
-  let answers = 0
   await page.route(/\/api\/charts\/spending\?/, async (route) => {
-    answers += 1
-    if (answers > 1) await new Promise((resolve) => setTimeout(resolve, 700))
+    await new Promise((resolve) => setTimeout(resolve, 700)) // slow, so the cues can be seen: the first answer as well as the second
     await route.fulfill({ json: { from: '2026-10-01', to: '2026-10-31', totalCents: 16_050, categories: SPENT } })
   })
   await page.goto('/charts')
-  await drawn(spending(page), /^Bar chart of the 3 Categories/)
+  const region = spending(page)
+  const live = region.getByRole('status') // the one live region the section keeps on the page
+  const element = (await live.elementHandle())!
 
-  await spending(page).getByLabel('Period', { exact: true }).selectOption('last-month')
+  await expect(region).toHaveAttribute('aria-busy', 'true') // the first load
+  await expect(live).toHaveText('Loading spending…')
+  await drawn(region, /^Bar chart of the 3 Categories/)
+  await expect(region).toHaveAttribute('aria-busy', 'false')
+  await expect(live).toHaveText('Spending has loaded.')
 
-  await expect(spending(page).getByRole('status').filter({ hasText: 'Updating…' })).toBeVisible()
-  await expect(spending(page)).toHaveAttribute('aria-busy', 'true')
-  await expect(spending(page).getByRole('status').filter({ hasText: 'Updating…' })).toHaveCount(0)
+  await region.getByLabel('Period', { exact: true }).selectOption('last-month')
+
+  await expect(live).toHaveText('Updating spending…')
+  await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toBeVisible()
+  await expect(region).toHaveAttribute('aria-busy', 'true')
+  await expect(live).toHaveText('Spending has loaded.')
+  await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toHaveCount(0)
+  expect(await element.evaluate((el) => el.isConnected)).toBe(true)
 })
 
 test('the charts have no WCAG 2.2 AA violations in this theme, with their data, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
@@ -553,19 +586,24 @@ test.describe('when the answers are not the usual ones', () => {
     await expect(spending(page).locator('svg.recharts-surface')).toHaveCount(0)
   })
 
-  test('draws no bar for a Category that only took money back, says so, and lists no Category with nothing in it', async ({ page, context }) => {
+  test('draws no bar for Categories that took money back or broke even, says so, and lists each, a fully refunded one as $0.00', async ({ page, context }) => {
     await signInAs(context, 'member')
     await stubNetWorth(page)
-    await stubSpending(page, [{ categoryId: 2, name: 'Fuel', cents: -2500 }, { categoryId: null, name: 'Uncategorised', cents: 0 }], -2500)
+    // Fuel took back more than it spent; Groceries spent $40.00 and had it all refunded; Uncategorised had a payment and the same money back.
+    await stubSpending(page, [{ categoryId: 2, name: 'Fuel', cents: -2500 }, { categoryId: 3, name: 'Groceries', cents: 0 }, { categoryId: null, name: 'Uncategorised', cents: 0 }], -2500)
     await page.goto('/charts')
 
     const region = spending(page)
     await expect(region).toContainText('Nothing was spent above zero in October 2026: every Category took back as much as it spent, or more. The table shows what came back.')
     await expect(region.locator('svg.recharts-surface')).toHaveCount(0)
     const table = region.getByRole('table', { name: 'Spending by Category in October 2026' })
-    await expect(table.getByRole('row')).toHaveCount(2) // the heading and Fuel: Uncategorised at $0.00 is not a row
+    await expect(table.getByRole('row')).toHaveCount(4) // the heading and three Categories: money that went out and came back stays in view
+    await expect(table.getByRole('row').nth(1)).toContainText('Fuel')
     await expect(table.getByRole('row').nth(1)).toContainText('$25.00 back')
-    await expect(table).not.toContainText('Uncategorised')
+    await expect(table.getByRole('row').nth(2)).toContainText('Groceries')
+    await expect(table.getByRole('row').nth(2)).toContainText('$0.00')
+    await expect(table.getByRole('row').nth(3)).toContainText('Uncategorised (includes money in not yet given a Category)')
+    await expect(table.getByRole('row').nth(3)).toContainText('$0.00')
     await expect(region.getByText('Total spending in October 2026: $25.00 back')).toBeVisible()
   })
 
