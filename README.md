@@ -44,12 +44,17 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Full transaction detail for record-keeping:** open any transaction to see its note and category and everything the bank supplied about it. That way you can show exactly where money went. ASB's CSV export carries none of the payment details but a cheque number, so the counterparty's account number, card suffix, and payment particulars, code and reference will come with Akahu Sync, which is planned.
 - **Search and filter:** the Transactions page finds any transaction by text (in the description, the bank's memo, the note, or the payment details the bank gave: cheque number or reference, counterparty account, particulars, code and card), account, category (or Uncategorised) and date range, sorts by date, account, description, category or amount, and pages through years of history. The search is kept in the page's address, so it survives a reload and the Back button.
 - **Your own categories**, from a starter list the Admin can add to, rename and remove. The Admin can override any single transaction's category and add a note, and a list of uncategorised transactions shows what's left. **Rules** categorise automatically: the Admin sets text to look for in the description or memo, a bank transaction type and an amount range, chooses a category (or marks the transaction as a transfer), puts the rules in order, and sees how many transactions a rule matches before saving it. Rules are used for new transactions as they're imported; applying them to existing history will ship later.
-- **Transfers between your own accounts** are detected and left out of spending.
+- **Transfers between your own accounts** will be detected and left out of spending.
 - **Monthly budgets** per category. Unspent amounts don't carry over, and changing a budget doesn't rewrite past months.
 - **A Summary for every Member:** the balance of each account, the newest transactions and any balance warnings, on the page Members land on.
 - **Dashboard:** balances, net worth over time, spending by category, budget vs actual.
 - **Printable reports:** spending by category, budget vs actual, income vs spending, balances over time, full transaction listing with notes. Print them or save as PDF from your browser.
-- **CSV export** for any date range.
+- **CSV export** for any date range: the Transactions page's **Download CSV** button saves the Transactions that match the filters you last searched with (text, account, category, dates), oldest first, to open in a spreadsheet.
+  - **Columns:** date, account, description, category, note, amount, and everything the bank supplied: its type, memo, reference, counterparty account, particulars, code and card suffix. A bank file has no counterparty account, particulars, code or card, so those columns are empty until Akahu Sync fills them, and the layout stays the same. An amount is dollars as a plain number, with a minus sign for money out, so a spreadsheet can add it up. A transaction with no category says "Uncategorised".
+  - **Totals:** Money in, Money out, Net and the number of Transactions come after a blank line, in the second column and not the Amount column, so adding up the Amount column gives the Net. An export of all accounts counts both legs of a transfer between your own accounts in Money in and Money out until transfers ship; the Net is the same.
+  - **Formulas are defused with an apostrophe:** a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return would run as a formula in a spreadsheet, so it gets an apostrophe in front. Amounts are numbers we write ourselves and are never changed.
+  - **Opens correctly in Excel:** the file starts with a UTF-8 byte order mark, so macrons (Whāngārei) show properly. A program that reads the file as plain UTF-8 will see an invisible character before the first heading; Python's `utf-8-sig` drops it.
+  - **Up to 5,000 Transactions a file** (fewer if Notes are long), because a file stops at about 0.75 MB of text and the free plan gives a request 10 ms of CPU ([ADR 0004](docs/adr/0004-runs-on-workers-free-plan.md)). A file can overshoot that by up to one chunk (about 0.25 MB), so about 1 MB at most. The Transactions page says how many match before you download, and the file says so when more matched. Export a year at a time to get a longer history. Both limits are estimates from timings, not measurements of CPU: if a request ever fails for CPU, lower the 5,000-row limit, the 0.75 MB limit or both.
 - **Change Log** of every edit the Admin makes, visible to everyone: who changed what and when, with the values before and after, newest first. Filter it by type of change and by date.
 - **Light and dark themes.**
 - **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and reports will.
@@ -126,7 +131,7 @@ We're as clear about the limits as about the protections. The full threat model 
 - **Read-only bank access.** If you use Akahu Sync, its personal-app tokens can't make payments. A leaked token exposes history, not money.
 - **Encrypted** in transit (TLS) and at rest (D1, R2). If you use Akahu Sync, its tokens are stored as encrypted Worker secrets, never in code or the database.
 - **Protection against cross-site attacks:** changes must come from the app's own address with a JSON body. Strict security headers are set: a Content Security Policy, no framing, no referrer.
-- **Safe exports:** CSV cells that would run as spreadsheet formulas, such as a payee named `=HYPERLINK(…)`, are escaped.
+- **Safe exports:** CSV cells that would run as spreadsheet formulas, such as a payee named `=HYPERLINK(…)`, are defused with an apostrophe (see CSV export under [What it does](#what-it-does)).
 - **Quiet logs:** logs contain only IDs, counts and error types, never transactions, tokens or emails. A test enforces this.
 - **Nothing calls home:** no analytics, telemetry, email or third-party scripts.
 
@@ -140,6 +145,7 @@ The breach checklist is in [docs/security.md](docs/security.md#if-something-goes
 - **Each Member's email is their key.** If someone's inbox is compromised, so is their access. Use Google or Microsoft sign-in with MFA for stronger protection.
 - **No app-level encryption.** We rely on Cloudflare's encryption at rest. Encrypting inside the app wouldn't add real protection, because the key would live in the same Worker as the data, and it would make search and reports much harder.
 - **Cloudflare can technically access data in your account,** as with any cloud host. See Cloudflare's [privacy policy](https://www.cloudflare.com/privacypolicy/).
+- **A file you download is on your own.** Once a CSV export is saved, it has no sign-in, can be read by anyone who has it, and isn't in the Change Log. Keep it somewhere private, and delete it when you're done.
 
 ### How the code is kept safe
 
@@ -326,7 +332,8 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Rules for new transactions | Done |
 | Rules over existing history, transfers, budgets | Planned |
 | Dashboard | Planned |
-| Reports and export | Planned |
+| CSV export | Done |
+| Reports | Planned |
 | Backups and teardown | Done |
 | Release process, update pull requests, upgrade tests | Done |
 | Security audit, Deploy button, v1.0 | Planned |

@@ -1,6 +1,6 @@
 import * as z from 'zod/mini'
 import { isQueryDate } from './dates'
-import { effectiveCategory } from './effective-category'
+import { effectiveCategory, type EffectiveCategory } from './effective-category'
 
 // Searching, filtering, sorting and paging the Transactions (the query for GET /api/transactions), as pure functions.
 // The SQL is built here from constants chosen by validated input; a value from the request only ever reaches SQLite as a
@@ -20,30 +20,42 @@ const digits = z.optional(z.string().check(z.regex(/^\d{1,9}$/)))
 const id = z.optional(z.string().check(z.regex(/^[1-9]\d{0,8}$/)))
 const nzDate = z.optional(z.string().check(z.refine(isQueryDate)))
 
+/**
+ * The filters, as they come in a query string. The list and the CSV export both build their query string schema from these
+ * and their SQL from `buildFilter`, so the export holds exactly the Transactions the list shows for the same filters.
+ */
+export const filterFields = {
+  accountId: id,
+  categoryId: id,
+  uncategorised: z.optional(z.literal('true')),
+  from: nzDate,
+  to: nzDate,
+  text: z.optional(z.string().check(z.trim(), z.maxLength(MAX_TEXT))),
+}
+
+/** What must hold across the filters. A refusal names the field in `path`. */
+export const filterChecks = [
+  z.refine<{ from?: string; to?: string }>((q) => !q.from || !q.to || q.from <= q.to, { path: ['to'] }),
+  // A Transaction is either in a Category or Uncategorised, never both, so asking for both is a mistake worth naming.
+  z.refine<{ categoryId?: string; uncategorised?: 'true' }>((q) => q.categoryId === undefined || q.uncategorised === undefined, { path: ['categoryId'] }),
+]
+
 /** The query string of the list, validated before anything runs. A refusal names the field. */
 export const searchQuery = z
   .object({
-    accountId: id,
-    categoryId: id,
-    uncategorised: z.optional(z.literal('true')),
-    from: nzDate,
-    to: nzDate,
-    text: z.optional(z.string().check(z.trim(), z.maxLength(MAX_TEXT))),
+    ...filterFields,
     sort: z.optional(z.enum(SORT_KEYS)),
     dir: z.optional(z.enum(['asc', 'desc'])),
     limit: digits,
     offset: digits,
     count: z.optional(z.enum(['true', 'false', 'only'])),
   })
-  .check(
-    z.refine((q) => !q.from || !q.to || q.from <= q.to, { path: ['to'] }),
-    // A Transaction is either in a Category or Uncategorised, never both, so asking for both is a mistake worth naming.
-    z.refine((q) => q.categoryId === undefined || q.uncategorised === undefined, { path: ['categoryId'] }),
-  )
+  .check(...filterChecks)
 
 export type SearchQuery = z.output<typeof searchQuery>
 
-export type Search = {
+/** What picks the Transactions: the same for the list and the export. */
+export type Filters = {
   accountId?: number
   categoryId?: number
   uncategorised: boolean
@@ -52,6 +64,9 @@ export type Search = {
   to?: string
   /** Text to find in the description, bank memo, Note or what the bank supplied about the payment; `undefined` when blank. */
   text?: string
+}
+
+export type Search = Filters & {
   sort: SortKey
   dir: SortDirection
   limit: number
@@ -74,17 +89,22 @@ const wantOf = (count: SearchQuery['count'], offset: number): Want =>
 /** A date sorts newest first unless asked otherwise, and everything else A to Z (or smallest first). */
 const defaultDirection = (sort: SortKey): SortDirection => (sort === 'date' ? 'desc' : 'asc')
 
+/** The validated filters of a query string as Filters: IDs read as numbers, blank text dropped. */
+export const toFilters = (q: { accountId?: string; categoryId?: string; uncategorised?: 'true'; from?: string; to?: string; text?: string }): Filters => ({
+  accountId: q.accountId === undefined ? undefined : Number(q.accountId),
+  categoryId: q.categoryId === undefined ? undefined : Number(q.categoryId),
+  uncategorised: q.uncategorised === 'true',
+  from: q.from,
+  to: q.to,
+  text: q.text || undefined,
+})
+
 /** The validated query as a Search: defaults filled in and the page size capped. */
 export function toSearch(q: SearchQuery): Search {
   const sort = q.sort ?? 'date'
   const offset = Number(q.offset ?? 0)
   return {
-    accountId: q.accountId === undefined ? undefined : Number(q.accountId),
-    categoryId: q.categoryId === undefined ? undefined : Number(q.categoryId),
-    uncategorised: q.uncategorised === 'true',
-    from: q.from,
-    to: q.to,
-    text: q.text || undefined,
+    ...toFilters(q),
     sort,
     dir: q.dir ?? defaultDirection(sort),
     limit: Math.min(Math.max(Number(q.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT),
@@ -112,42 +132,53 @@ const TEXT_COLUMNS = [
 export type Statement = { sql: string; binds: (string | number)[] }
 
 /**
- * The two statements a list needs: how many Transactions match (`count`), and one page of them (`page`).
- * Only the filters asked for are in the SQL, so an index on the column can serve each one, and `count` joins only what its
- * filters read. A Transaction's Category is its effective Category (effective-category.ts), the same one the list shows.
+ * The conditions that pick the Transactions, to AND together after `FROM transactions t`, and the values to bind to them in order.
+ * The one definition of what a filter means: the list, its count and the CSV export all build from it. Only the filters asked
+ * for are in the SQL, so an index on the column can serve each one. A Transaction's Category is its effective Category
+ * (effective-category.ts), the same one the list shows, so a query that filters by Category needs `category.joins`.
  * That is worked out per Transaction, through one join for each source that has a column (the Override, the Rule, and Akahu's
  * once Sync lands), and an Override's index cannot serve it once a Rule can also supply the Category. So a Category filter
  * or sort reads every Transaction the other filters keep, and each join costs a row read on top (ADR 0004: D1 bills rows
- * read). A cached count, or a column kept up to date, is a later ticket's call.
+ * read). The list, its count and the CSV export all pay that cost. A cached count, or a column kept up to date, is a later
+ * ticket's call.
+ */
+export function buildFilter(filters: Filters, category: EffectiveCategory = effectiveCategory()): { conditions: string[]; binds: (string | number)[] } {
+  const conditions: string[] = []
+  const binds: (string | number)[] = []
+  if (filters.accountId !== undefined) {
+    conditions.push('t.account_id = ?')
+    binds.push(filters.accountId)
+  }
+  if (filters.categoryId !== undefined) {
+    conditions.push(`${category.id} = ?`)
+    binds.push(filters.categoryId)
+  }
+  if (filters.uncategorised) conditions.push(`${category.id} IS NULL`)
+  if (filters.from !== undefined) {
+    conditions.push('t.date >= ?')
+    binds.push(filters.from)
+  }
+  if (filters.to !== undefined) {
+    conditions.push('t.date <= ?')
+    binds.push(filters.to)
+  }
+  if (filters.text !== undefined) {
+    // `instr`, not `LIKE`: D1 refuses a LIKE pattern over 50 bytes ("too complex") and the text can be 100 characters. `instr` also
+    // takes `%`, `_` and `\` as the characters they are. `lower()` folds A to Z only, as COLLATE NOCASE does (as Rules do too).
+    conditions.push(`(${TEXT_COLUMNS.map((column) => `instr(lower(${column}), lower(?)) > 0`).join(' OR ')})`)
+    binds.push(...TEXT_COLUMNS.map(() => filters.text!))
+  }
+  return { conditions, binds }
+}
+
+/**
+ * The two statements a list needs: how many Transactions match (`count`), and one page of them (`page`).
+ * `count` joins only what its filters read. The filters are `buildFilter`'s.
  */
 export function buildSearch(search: Search): { count: Statement; page: Statement } {
   const category = effectiveCategory()
-  const where: string[] = []
-  const binds: (string | number)[] = []
-  if (search.accountId !== undefined) {
-    where.push('t.account_id = ?')
-    binds.push(search.accountId)
-  }
-  if (search.categoryId !== undefined) {
-    where.push(`${category.id} = ?`)
-    binds.push(search.categoryId)
-  }
-  if (search.uncategorised) where.push(`${category.id} IS NULL`)
-  if (search.from !== undefined) {
-    where.push('t.date >= ?')
-    binds.push(search.from)
-  }
-  if (search.to !== undefined) {
-    where.push('t.date <= ?')
-    binds.push(search.to)
-  }
-  if (search.text !== undefined) {
-    // `instr`, not `LIKE`: D1 refuses a LIKE pattern over 50 bytes ("too complex") and the text can be 100 characters. `instr` also
-    // takes `%`, `_` and `\` as the characters they are. `lower()` folds A to Z only, as COLLATE NOCASE does (as Rules do too).
-    where.push(`(${TEXT_COLUMNS.map((column) => `instr(lower(${column}), lower(?)) > 0`).join(' OR ')})`)
-    binds.push(...TEXT_COLUMNS.map(() => search.text!))
-  }
-  const filter = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const { conditions, binds } = buildFilter(search, category)
+  const filter = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
   // The count joins only what its filters read: the Category's tables, and only when filtering by Category.
   const filterJoins = search.categoryId !== undefined || search.uncategorised ? category.joins : ''
 

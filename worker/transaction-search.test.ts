@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:workers'
 import { beforeAll, describe, expect, it } from 'vitest'
 import * as z from 'zod/mini'
-import { MAX_TEXT as PAGE_MAX_TEXT, SORT_KEYS as PAGE_SORT_KEYS } from '../src/lib/transaction-search'
+import { EXPORT_MAX_ROWS as PAGE_EXPORT_MAX_ROWS, MAX_TEXT as PAGE_MAX_TEXT, SORT_KEYS as PAGE_SORT_KEYS } from '../src/lib/transaction-search'
+import { EXPORT_MAX_ROWS } from './transaction-export'
 import { buildSearch, MAX_LIMIT, MAX_TEXT, searchQuery, SORT_KEYS, toSearch, type Search } from './transaction-search'
 
 const search = (over: Partial<Search> = {}): Search => ({ uncategorised: false, sort: 'date', dir: 'desc', limit: 50, offset: 0, want: 'both', ...over })
@@ -39,6 +40,10 @@ describe('the Transactions page', () => {
   // The page keeps its own copies (it can't import Worker code), so this is what stops them drifting apart.
   it('offers exactly the sorts the API accepts', () => {
     expect([...PAGE_SORT_KEYS]).toEqual([...SORT_KEYS])
+  })
+
+  it('tells the reader the most a CSV export holds', () => {
+    expect(PAGE_EXPORT_MAX_ROWS).toBe(EXPORT_MAX_ROWS)
   })
 
   it('stops typing at the length of text the API accepts', () => {
