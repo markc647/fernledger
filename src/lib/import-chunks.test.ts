@@ -54,8 +54,8 @@ describe('replaceWrites', () => {
     expect(replaceWrites(24_000, 10_000)).toBeGreaterThan(DAILY_ROW_WRITES)
   })
 
-  it('adds 9 writes for each Override, Note or Not a Transfer mark to carry over, at most, on top of the 3 for each row removed and imported', () => {
-    expect(replaceWrites(2000, 1000, 40)).toBe(9000 + 9 * 40)
+  it('adds 10 writes for each Override, Note or Not a Transfer mark to carry over, at most, on top of the 3 for each row removed and imported', () => {
+    expect(replaceWrites(2000, 1000, 40)).toBe(9000 + 10 * 40)
     expect(replaceWrites(23_000, 10_000, 1000)).toBeGreaterThan(DAILY_ROW_WRITES)
   })
 

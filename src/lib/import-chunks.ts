@@ -20,8 +20,8 @@ export const REPLACE_SLICE: typeof WORKER_REPLACE_SLICE = 5000
 /** The free plan's D1 row writes a day, and what one row costs (the row and its two indexes). */
 export const DAILY_ROW_WRITES: typeof WORKER_DAILY_ROW_WRITES = 100_000
 export const WRITES_PER_ROW: typeof WORKER_WRITES_PER_ROW = 3
-/** What carrying one Transaction's Override, Note or Not a Transfer mark over costs at most, on top of its row: 9 with all three (worker/import-rows.ts), 7 for an Override or a Note alone. */
-export const WRITES_PER_CARRIED: typeof WORKER_WRITES_PER_CARRIED = 9
+/** What carrying one Transaction's Override, Note or Not a Transfer mark over costs at most, on top of its row: 10 with all three (worker/import-rows.ts), 8 for an Override alone, 7 for a Note alone. */
+export const WRITES_PER_CARRIED: typeof WORKER_WRITES_PER_CARRIED = 10
 /** What a Transfer costs on top of its row: more to import (both halves are written) and to remove (the matching Transaction is let go of). */
 export const WRITES_PER_PAIRED_IMPORTED: typeof WORKER_WRITES_PER_PAIRED_IMPORTED = 4
 export const WRITES_PER_PAIRED_REMOVED: typeof WORKER_WRITES_PER_PAIRED_REMOVED = 3

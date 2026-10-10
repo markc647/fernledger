@@ -3,7 +3,7 @@ import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { APPLY_HELD, HOLD_REMOVED, MARK_APPLIED } from './carry-over'
 import worker from './index'
-import { WRITES_PER_CARRIED, WRITES_PER_MARK_REMOVED } from './import-rows'
+import { WRITES_PER_CARRIED, WRITES_PER_MARK_REMOVED, WRITES_PER_OVERRIDE_REMOVED } from './import-rows'
 import { PAIR_ONE, clearHeldNotTransferStatement, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, pairTransfersStatement } from './transfers'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
@@ -718,8 +718,10 @@ describe('replacing imported history keeps the Admin\'s Not a Transfer, as it do
     await notTransfer('OUT')
     await replaceStoppedAfterFirstPart()
 
-    await treatAsTransferAgain('OUT')
+    const res = await treatAsTransferAgain('OUT')
 
+    // Nothing is there to pair with yet, and it says so, though it did take a mark off (the held one).
+    expect(await res.json()).toEqual({ id: await idOf('OUT'), notTransfer: false, paired: false })
     expect(await heldMarks()).toBe(0)
     // The rest of the file is imported: the $50.00 in comes back as it was before the Admin said anything, and pairs with the $50.00 out again.
     await importInto(SAVINGS, [row(DAY, 5000, 'EXAMPLE REFUND', 'IN')])
@@ -728,11 +730,25 @@ describe('replacing imported history keeps the Admin\'s Not a Transfer, as it do
     expect(await pairs()).toEqual([['OUT', 'IN']])
   })
 
+  it('says it paired the half that stayed with a match from another Account, while it takes the mark off the half that is held', async () => {
+    await wrongPair()
+    await notTransfer('OUT')
+    await importInto(BILLS, [row(DAY, 5000, 'EXAMPLE DEPOSIT', 'DEPOSIT')])
+    expect(await pairs()).toEqual([])
+    await replaceStoppedAfterFirstPart()
+
+    const res = await treatAsTransferAgain('OUT')
+
+    expect(await res.json()).toEqual({ id: await idOf('OUT'), notTransfer: false, paired: true })
+    expect(await pairs()).toEqual([['OUT', 'DEPOSIT']])
+    expect(await heldMarks()).toBe(0)
+  })
+
   it('does not give a mark made later the number of a half that is still held', async () => {
     await wrongPair()
     await notTransfer('OUT')
     await replaceStoppedAfterFirstPart()
-    await treatAsTransferAgain('OUT')
+    expect(await (await treatAsTransferAgain('OUT')).json()).toMatchObject({ paired: false })
     // The $50.00 out finds another match in Bills, and the Admin says that one is wrong too. A new mark takes the lower ID of its two, here the $50.00 out's:
     // the number the held half was marked with.
     await importInto(BILLS, [row(DAY, 5000, 'EXAMPLE DEPOSIT', 'DEPOSIT')])
@@ -908,7 +924,7 @@ describe('what marking, undoing and carrying read and write (ADR 0004: free plan
     expect(clear).toMatch(/USING (COVERING )?INDEX transactions_not_transfer_with/)
   })
 
-  it('costs WRITES_PER_CARRIED writes at most to carry an Override, a Note and a mark: 8 to hold, give, mark given and clear, and 1 to remove the marked row', async () => {
+  it('costs WRITES_PER_CARRIED writes at most to carry an Override, a Note and a mark: 8 to hold, give, mark given and clear, and 1 each to take the removed row out of the Override index and the mark index', async () => {
     await wrongPair()
     const savings = await accountIdOf('Savings')
     const id = (
@@ -925,11 +941,13 @@ describe('what marking, undoing and carrying read and write (ADR 0004: free plan
 
     // Holding writes the row and its key; giving writes the row, an entry in the Override's index and one in the mark's; marking it given writes the row.
     expect([hold.rows_written, give.rows_written, marked.rows_written]).toEqual([2, 3, 1])
-    // Clearing deletes the row and its key, which D1 bills as 2 (the local runtime reports a deleted row as 1). Removing the marked row takes out its entry in the mark index.
+    // Clearing deletes the row and its key, which D1 bills as 2 (the local runtime reports a deleted row as 1). Removing the row it came from takes its entries out of
+    // the two indexes it is in because of what it carries, which the local runtime does not report either: they are there, and partial, so only such rows pay.
     const clearing = 2
-    expect(hold.rows_written + give.rows_written + marked.rows_written + clearing + WRITES_PER_MARK_REMOVED).toBe(WRITES_PER_CARRIED)
-    const indexes = (await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'transactions_not_transfer_with'").first<{ sql: string }>())!.sql
-    expect(indexes).toMatch(/WHERE not_transfer_with IS NOT NULL/)
+    expect(hold.rows_written + give.rows_written + marked.rows_written + clearing + WRITES_PER_OVERRIDE_REMOVED + WRITES_PER_MARK_REMOVED).toBe(WRITES_PER_CARRIED)
+    const index = async (name: string) => (await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?").bind(name).first<{ sql: string }>())!.sql
+    expect(await index('transactions_override_category')).toMatch(/WHERE override_category IS NOT NULL/)
+    expect(await index('transactions_not_transfer_with')).toMatch(/WHERE not_transfer_with IS NOT NULL/)
   })
 
   it('takes the mark off what is held by reading the held rows, which are none except while a replace is unfinished', async () => {

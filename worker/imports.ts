@@ -273,7 +273,7 @@ export const imports = new Hono<AppEnv>()
     })
   })
   // How many Import-sourced rows an Account holds, and how many of those carry the Admin's own work (an Override to a
-  // Category in use, or a Note), so the Admin is told what a replace will carry over before confirming. A removed
+  // Category in use, a Note or a Not a Transfer mark), so the Admin is told what a replace will carry over before confirming. A removed
   // Category's Override doesn't count: the Admin was told when they removed it that the Transactions lose it. Also how many
   // Overrides, Notes and Not a Transfer marks an earlier replace that stopped part way is still holding for the Account, and how many of the rows are
   // half of a Transfer, which cost more writes to remove and to import again (import-rows.ts: WRITES_PER_PAIRED_REMOVED).

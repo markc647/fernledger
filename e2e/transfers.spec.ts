@@ -266,8 +266,8 @@ test('the Admin can say Not a Transfer from the edit panel, and is told what an 
 test('Not a Transfer comes back with its Transaction when the history is replaced, so the wrong pair does not return', async ({ page, context, baseURL }, testInfo) => {
   // Accounts of its own: replacing imported history removes every imported Transaction the Account has.
   const dark = testInfo.project.name === 'dark'
-  const everyday = { number: `99-9999-9999999-${dark ? '52' : '50'}`, name: `Carry everyday ${testInfo.project.name}` }
-  const savingsNumber = `9999999-${dark ? '53' : '51'}`
+  const everyday = { number: `99-9999-9999999-${dark ? '46' : '44'}`, name: `Carry everyday ${testInfo.project.name}` }
+  const savingsNumber = `9999999-${dark ? '47' : '45'}`
   const savingsName = `Carry savings ${testInfo.project.name}`
   const stamp = `${testInfo.project.name}${Date.now()}`
   const out = `TFR TO SAVINGS ${stamp}`

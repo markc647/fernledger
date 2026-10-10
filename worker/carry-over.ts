@@ -117,9 +117,9 @@ export const WAITING_LIST = `
 // It is added to the chunk's row count (imports.ts COUNT_NEW_ROWS), which already reads the chunk's IDs, so it costs no
 // D1 query of its own, and it is the same query the Replace question asks with the whole file's IDs (PREVIEW).
 // ?2 = the rows (JSON) and ?3 = the Cutover Date or null, as the row count has them; ?4 = the Account whose held rows count
-// (null for a new Account); ?5 = the Account about to have its imported history replaced (null otherwise), whose Overrides
-// and Notes are about to be held. `incoming` is the chunk's IDs that will be saved (before the Cutover Date), each with
-// its amount; `pending` is every Override and Note waiting to be given: the held ones, and those about to be held.
+// (null for a new Account); ?5 = the Account about to have its imported history replaced (null otherwise), whose Overrides,
+// Notes and Not a Transfer marks are about to be held. `incoming` is the chunk's IDs that will be saved (before the Cutover Date), each with
+// its amount; `pending` is every Override, Note and mark waiting to be given: the held ones, and those about to be held.
 export const INCOMING_CTE = `
   incoming AS (
     SELECT json_extract(value, '$.uniqueId') AS id, json_extract(value, '$.amountCents') AS cents, MIN(key)
