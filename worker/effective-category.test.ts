@@ -82,12 +82,19 @@ describe('the effective Category', () => {
 
 // The one definition of a Transfer, read from the Transaction's stored pair and Rule flag, and cut off by an Override.
 describe('whether a Transaction is a Transfer', () => {
-  const resolveTransfer = async (transferOf: number | null, ruleTransfer: number | null, override: string | null, slots: readonly CategorySlot[] = CATEGORY_SLOTS) => {
+  const resolveTransfer = async (
+    transferOf: number | null,
+    ruleTransfer: number | null,
+    override: string | null,
+    slots: readonly CategorySlot[] = CATEGORY_SLOTS,
+    notTransferWith: number | null = null,
+  ) => {
     const effective = effectiveCategory(slots)
     return env.DB.prepare(
-      `SELECT ${effective.transfer} AS transfer, ${effective.isTransfer} AS isTransfer FROM (SELECT ? AS transfer_of, ? AS rule_transfer, ? AS override_category, NULL AS rule_category) t ${effective.joins}`,
+      `SELECT ${effective.transfer} AS transfer, ${effective.isTransfer} AS isTransfer
+       FROM (SELECT ? AS transfer_of, ? AS rule_transfer, ? AS override_category, ? AS not_transfer_with, NULL AS rule_category) t ${effective.joins}`,
     )
-      .bind(transferOf, ruleTransfer, override === null ? null : ids[override]!)
+      .bind(transferOf, ruleTransfer, override === null ? null : ids[override]!, notTransferWith)
       .first<{ transfer: string | null; isTransfer: number }>()
   }
 
@@ -123,5 +130,23 @@ describe('whether a Transaction is a Transfer', () => {
 
   it('has no Override to defer to when no slot supplies one', async () => {
     expect(await resolveTransfer(7, null, null, [{ source: 'override', column: null }])).toEqual({ transfer: 'pair', isTransfer: 1 })
+  })
+
+  it('is not a Transfer once the Admin has said Not a Transfer, whether it is paired, marked by a Rule, or both', async () => {
+    // Marking clears the pairing, but the marker is what decides, so it holds whatever else is stored.
+    expect(await resolveTransfer(null, 1, null, CATEGORY_SLOTS, 8)).toEqual({ transfer: null, isTransfer: 0 })
+    expect(await resolveTransfer(7, null, null, CATEGORY_SLOTS, 8)).toEqual({ transfer: null, isTransfer: 0 })
+    expect(await resolveTransfer(7, 1, null, CATEGORY_SLOTS, 8)).toEqual({ transfer: null, isTransfer: 0 })
+    // Alone, a Transaction holds its own ID; any ID marks it.
+    expect(await resolveTransfer(null, 1, null, CATEGORY_SLOTS, 1)).toEqual({ transfer: null, isTransfer: 0 })
+  })
+
+  it('is a Transfer again when the marker is taken off', async () => {
+    expect(await resolveTransfer(null, 1, null, CATEGORY_SLOTS, null)).toEqual({ transfer: 'rule', isTransfer: 1 })
+  })
+
+  it('is not a Transfer with no Override slot either, and an Override stays spending', async () => {
+    expect(await resolveTransfer(null, 1, null, [{ source: 'override', column: null }], 8)).toEqual({ transfer: null, isTransfer: 0 })
+    expect(await resolveTransfer(null, 1, 'Precedence Override', CATEGORY_SLOTS, 8)).toEqual({ transfer: null, isTransfer: 0 })
   })
 })

@@ -34,6 +34,10 @@ _Avoid_: Unsettled, provisional
 A Transaction moving money between two tracked Accounts, found as one of a pair in different Accounts or marked by a Rule; it is not spending and is excluded from Budgets. The other Transaction of a pair is its matching Transaction. How pairs are found is in README [How it works](README.md#how-it-works).
 _Avoid_: Internal payment, sweep, other half
 
+**Not a Transfer**:
+The Admin's answer to a Transaction that a pairing or a Rule has made a Transfer but is not one. A pair loses both halves at once; neither is paired again, and a Rule's Transfer flag no longer applies to them, until the Admin treats them as a Transfer again.
+_Avoid_: Unpair, false match, exception
+
 ## Sources
 
 **Import**:
@@ -103,7 +107,7 @@ The record of every change the Admin makes: who, what and when; visible to all M
 _Avoid_: Audit trail, history
 
 **Change type**:
-The kind of thing a Change Log entry changed, such as Settings, Import, Account, Category, Rule or Transaction; Members can filter the Change Log by it. Not a Category.
+The kind of thing a Change Log entry changed, such as Settings, Import, Account, Category, Rule, Transaction or Transfer; Members can filter the Change Log by it. Not a Category.
 _Avoid_: Type, kind
 
 **Report**:

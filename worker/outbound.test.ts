@@ -49,7 +49,15 @@ type Exercise = { route: string; path: (accountId: number) => string; opts?: Opt
 // IDs made by earlier exercises, for the later ones that need them (the Category and Transaction are read lazily, after they exist).
 const made = { categoryId: 0, transactionId: 0, ruleId: 0 }
 const EXERCISES: Exercise[] = [
-  // First: it creates the Account that the PATCH below renames.
+  // A second Account, with the other half of a Transfer: the next chunk's $10.00 out pairs with this $10.00 in, so the Not a Transfer routes
+  // below have a pairing to say no to. Its name sorts after the first Account's number, so the first Account is still the first listed.
+  { route: 'POST /api/imports/chunks', path: () => '/api/imports/chunks', opts: { method: 'POST', body: {
+      account: { number: '99-9999-9999999-98', name: 'Z example' },
+      chunk: { index: 0, count: 1 },
+      file: { adapterId: 'asb', rowCount: 1, skipped: 0, from: '2026-10-01', to: '2026-10-31', ledgerBalance: { cents: 0, date: '2026-10-31' } },
+      rows: [{ date: '2026-10-01', uniqueId: 'IDB', tranType: 'TFR', chequeNumber: null, payee: 'EXAMPLE TRANSFER', bankMemo: 'TFR', amountCents: 1000 }],
+    } } },
+  // Then the first Account: it creates the Account that the PATCH below renames.
   { route: 'POST /api/imports/chunks', path: () => '/api/imports/chunks', opts: { method: 'POST', body: {
       account: { number: '99-9999-9999999-99' },
       chunk: { index: 0, count: 1 },
@@ -66,6 +74,9 @@ const EXERCISES: Exercise[] = [
   { route: 'PATCH /api/categories/:id', path: () => `/api/categories/${made.categoryId}`, opts: () => ({ method: 'PATCH', body: { name: 'Example renamed' } }) },
   { route: 'PUT /api/transactions/:id/override', path: () => `/api/transactions/${made.transactionId}/override`, opts: () => ({ method: 'PUT', body: { categoryId: made.categoryId } }) },
   { route: 'PUT /api/transactions/:id/note', path: () => `/api/transactions/${made.transactionId}/note`, opts: () => ({ method: 'PUT', body: { note: 'Example note' } }) },
+  // That Transaction is half of a pairing: say it is not a Transfer, then treat it as one again (which pairs it with the other half).
+  { route: 'POST /api/transactions/:id/not-transfer', path: () => `/api/transactions/${made.transactionId}/not-transfer`, opts: { method: 'POST', body: {} } },
+  { route: 'DELETE /api/transactions/:id/not-transfer', path: () => `/api/transactions/${made.transactionId}/not-transfer`, opts: { method: 'DELETE', body: {} } },
   // The Rules, on that Category: add one, then everything that reads or changes it, and last remove it.
   { route: 'POST /api/rules', path: () => '/api/rules', opts: () => ({ method: 'POST', body: { textContains: 'EXAMPLE', categoryId: made.categoryId } }) },
   { route: 'GET /api/rules', path: () => '/api/rules' },

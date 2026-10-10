@@ -5,7 +5,7 @@
 //
 // It is also the one definition of a Transfer (`transfer` and `isTransfer` below), because a Transfer is not spending and
 // whatever totals, lists or filters by Category has to leave it out the same way. Anything that works out spending uses
-// `isTransfer`; nothing re-states "paired, or a Rule marks it" by hand.
+// `isTransfer`; nothing re-states "paired, or a Rule marks it, unless the Admin said Not a Transfer" by hand.
 
 export const CATEGORY_SOURCES = ['override', 'rule', 'akahu'] as const
 export type CategorySource = (typeof CATEGORY_SOURCES)[number]
@@ -42,8 +42,9 @@ export type EffectiveCategory = {
    * SQL for how the Transaction is a Transfer: 'pair' when it is paired with a Transaction in another Account (transfers.ts),
    * 'rule' when a Rule marks it and nothing paired it (the backstop), NULL when it is not a Transfer. A pair outranks the Rule,
    * and an Override outranks both: if the Admin has chosen a Category for this Transaction (one in use), it is spending in that
-   * Category, however it is paired. Only that Transaction: its matching Transaction stays a Transfer. Reads `t.transfer_of` and
-   * `t.rule_transfer`, and the Override's join, so `joins` must be in the query.
+   * Category, however it is paired. Only that Transaction: its matching Transaction stays a Transfer. "Not a Transfer" outranks all
+   * three: once the Admin has said so (`t.not_transfer_with`), neither a pair nor a Rule's Transfer flag makes the Transaction one. Reads
+   * `t.transfer_of`, `t.rule_transfer` and `t.not_transfer_with`, and the Override's join, so `joins` must be in the query.
    */
   transfer: string
   /** SQL that is true when the Transaction is a Transfer, so it is left out of spending. Wrap it in NOT for spending. */
@@ -61,9 +62,10 @@ export function effectiveCategory(slots: readonly CategorySlot[] = CATEGORY_SLOT
   const live = slots.filter((slot): slot is CategorySlot & { column: string } => slot.column !== null)
   const alias = (slot: CategorySlot) => `category_${slot.source}`
   // A Category chosen by hand takes the Transaction out of the Transfers; the Override's Category must be one in use, as it is for the Category itself.
+  // So does the Admin's "Not a Transfer", which also stops the pairing and the Rule's flag from making it one again (transfers.ts).
   const override = live.find((slot) => slot.source === 'override')
   const unlessOverridden = override ? `${alias(override)}.id IS NULL` : '1'
-  const transfer = `CASE WHEN ${unlessOverridden} THEN CASE WHEN t.transfer_of IS NOT NULL THEN 'pair' WHEN t.rule_transfer = 1 THEN 'rule' END END`
+  const transfer = `CASE WHEN ${unlessOverridden} AND t.not_transfer_with IS NULL THEN CASE WHEN t.transfer_of IS NOT NULL THEN 'pair' WHEN t.rule_transfer = 1 THEN 'rule' END END`
   const isTransfer = `(${transfer} IS NOT NULL)`
   const unlessTransfer = (sql: string) => `CASE WHEN ${isTransfer} THEN NULL ELSE ${sql} END`
   if (live.length === 0) return { joins: '', id: 'NULL', name: 'NULL', source: 'NULL', transfer, isTransfer, shown: { id: 'NULL', name: 'NULL', source: 'NULL' } }

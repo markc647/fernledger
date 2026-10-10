@@ -13,6 +13,11 @@
 // description: banks word the two halves of one Transfer differently, and a coincidence between two of the family's own Accounts is
 // far more likely to be a Transfer than not. A Transaction pairs with at most one other, and every pair is made of one
 // row from each of two different Accounts. A payment to an account that isn't tracked has nothing to pair with, so it stays spending.
+//
+// When it does pair two Transactions that have nothing to do with each other, the Admin says "Not a Transfer" (ticket 37). That unpairs both halves and
+// marks each (`not_transfer_with`, migrations/3701_not_a_transfer.sql), and a marked Transaction is left out of pairing from then on, as the one to pair and
+// as the one to pair with. "Treat as a Transfer again" clears the marks and pairs them again, which is `pairOneStatement`'s job: an Import only pairs the rows
+// it has just added, so without it the two would never be looked at again.
 import { IMPORTED_SLICE } from './import-rows'
 
 /**
@@ -35,18 +40,20 @@ import { IMPORTED_SLICE } from './import-rows'
  *
  * A Pending Transaction is stored apart from `transactions` (spec #1), so it is never a candidate here.
  * An amount of nothing never pairs: two empty Transactions are not money moving.
+ * A Transaction the Admin has marked Not a Transfer (`not_transfer_with`) never pairs, whether it is new or already there: it is left out of both
+ * `mine` and `others`, so it takes no part in the numbering that matches the n-th with the n-th and can't be given to another row.
  */
 export const PAIR = `
   WITH mine AS (
     SELECT t.id, t.date, t.amount_cents,
            ROW_NUMBER() OVER (PARTITION BY t.date, t.amount_cents ORDER BY t.id) AS n
     FROM transactions t NOT INDEXED
-    WHERE t.id > ?1 AND t.account_id = (SELECT id FROM accounts WHERE account_number = ?2) AND t.transfer_of IS NULL AND t.amount_cents <> 0),
+    WHERE t.id > ?1 AND t.account_id = (SELECT id FROM accounts WHERE account_number = ?2) AND t.transfer_of IS NULL AND t.not_transfer_with IS NULL AND t.amount_cents <> 0),
   others AS (
     SELECT t.id, t.date, -t.amount_cents AS amount_cents,
            ROW_NUMBER() OVER (PARTITION BY t.date, t.amount_cents ORDER BY t.id) AS n
     FROM transactions t
-    WHERE t.date IN (SELECT date FROM mine) AND t.transfer_of IS NULL
+    WHERE t.date IN (SELECT date FROM mine) AND t.transfer_of IS NULL AND t.not_transfer_with IS NULL
       AND t.account_id <> (SELECT id FROM accounts WHERE account_number = ?2)),
   pairs AS (
     SELECT mine.id AS mine_id, others.id AS other_id
@@ -83,3 +90,69 @@ export const pairTransfersStatement = (db: D1Database, scope: { accountNumber: s
 export const UNPAIR_PARTNERS = `UPDATE transactions SET transfer_of = NULL WHERE transfer_of IN (${IMPORTED_SLICE})`
 
 export const unpairPartnersOfImportedStatement = (db: D1Database, scope: { accountId: number; limit: number }) => db.prepare(UNPAIR_PARTNERS).bind(scope.accountId, scope.limit)
+
+/**
+ * Says a Transaction is Not a Transfer, and so is the matching Transaction it is paired with: both are unpaired and marked in this one statement, each
+ * holding the other's ID in `not_transfer_with`. ?1 is the Transaction, ?2 the ID of its matching Transaction, or NULL when nothing is paired with it
+ * (a Rule marks it a Transfer and nothing paired it), in which case it is marked alone and holds its own ID.
+ *
+ * It changes nothing when what the handler read has moved on since: a half that is already marked, a pairing that is no longer between these two (an
+ * Import replaced one of them), or, for a Transaction with no match, one that no Rule marks. The handler tells the Admin so from the count of rows
+ * changed (two for a pair, one alone, none when stale).
+ *
+ * The Rule's result (`rule_transfer`) and an Override are left as they are. Marking is why a Rule's Transfer flag no longer applies: `isTransfer`
+ * (effective-category.ts) stops at the marker, so treating the Transaction as a Transfer again hands the Rule's flag back with nothing re-applied.
+ *
+ * It reads and writes the two rows (each with its entry in the partial Transfer index, which loses it), however long the history is.
+ */
+export const MARK_NOT_TRANSFER = `
+  UPDATE transactions
+  SET not_transfer_with = CASE WHEN id = ?1 THEN COALESCE(?2, ?1) ELSE ?1 END, transfer_of = NULL
+  WHERE not_transfer_with IS NULL
+    AND ((id = ?1 AND transfer_of IS ?2 AND (?2 IS NOT NULL OR rule_transfer = 1)) OR (id = ?2 AND transfer_of = ?1))`
+
+/**
+ * Takes the mark off a Transaction and, if the other half still holds a mark that names it, off that one too. ?1 is the Transaction, ?2 the ID it was
+ * marked together with (its `not_transfer_with`), or NULL when it was marked alone. Nothing is paired: that is `PAIR_ONE`, next in the same batch.
+ * A half whose mark names some other Transaction is left alone, which can only happen if IDs were reused, and they are not.
+ */
+export const CLEAR_NOT_TRANSFER = `
+  UPDATE transactions
+  SET not_transfer_with = NULL
+  WHERE not_transfer_with IS NOT NULL AND (id = ?1 OR (id = ?2 AND not_transfer_with = ?1))`
+
+/**
+ * Pairs one Transaction with a match that is there now: the same NZ date, the equal and opposite amount, another Account, and neither paired nor marked
+ * Not a Transfer, as `PAIR` requires of the rows it pairs. ?1 is the Transaction; ?2 is the match to take when it still qualifies (the Transaction it was just
+ * unpaired from), or NULL; any other match is the one with the lowest ID, as `PAIR` takes the first unpaired row. It pairs nothing when ?1 is already paired,
+ * or marked, or has no match, and then writes nothing.
+ *
+ * An Import only pairs the rows it has just added, so a Transaction that was marked is never looked at again by one: treating it as a Transfer again has to
+ * pair it here, in the same batch as the marks coming off, or it would stay unpaired for good. The match is found through the date index, so what this reads
+ * is the Transactions of that one day in every Account, however long the history is (pinned in not-a-transfer.test.ts).
+ *
+ * Run it for the Transaction and then for its former match: the second does nothing when the first paired them, and finds a match of its own when the first
+ * took another.
+ */
+export const PAIR_ONE = `
+  WITH found AS (
+    SELECT a.id AS id,
+           (SELECT o.id FROM transactions o
+            WHERE o.date = a.date AND o.amount_cents = -a.amount_cents AND o.account_id <> a.account_id AND o.transfer_of IS NULL AND o.not_transfer_with IS NULL
+            ORDER BY o.id IS ?2 DESC, o.id LIMIT 1) AS partner
+    FROM transactions a
+    WHERE a.id = ?1 AND a.transfer_of IS NULL AND a.not_transfer_with IS NULL AND a.amount_cents <> 0),
+  pairs AS (SELECT id, partner FROM found WHERE partner IS NOT NULL)
+  UPDATE transactions
+  SET transfer_of = link.partner
+  FROM (SELECT id, partner FROM pairs UNION ALL SELECT partner, id FROM pairs) AS link
+  WHERE transactions.id = link.id`
+
+/** Marks the Transaction, and `matchingId` (the Transaction it is paired with, or null), Not a Transfer. */
+export const markNotTransferStatement = (db: D1Database, scope: { id: number; matchingId: number | null }) => db.prepare(MARK_NOT_TRANSFER).bind(scope.id, scope.matchingId)
+
+/** Takes the mark off the Transaction and `matchingId` (the Transaction it was marked together with, or null). */
+export const clearNotTransferStatement = (db: D1Database, scope: { id: number; matchingId: number | null }) => db.prepare(CLEAR_NOT_TRANSFER).bind(scope.id, scope.matchingId)
+
+/** Pairs the Transaction with a match that is there now, preferring `prefer`. */
+export const pairOneStatement = (db: D1Database, scope: { id: number; prefer: number | null }) => db.prepare(PAIR_ONE).bind(scope.id, scope.prefer)
