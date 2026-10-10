@@ -11,6 +11,7 @@ Fernledger's maintainers collect no one's data. Each deployment is run by whoeve
 - **Email addresses:** Members' in Cloudflare Access, and the Admin's in every Change Log entry.
 - **Notes** the Admin writes.
 - **Exported files:** a saved CSV export leaves Fernledger's protection ([what it can't protect against](../README.md#what-it-cant-protect-against)).
+- **Copies of Notes and descriptions** from replacing imported history: a holding table keeps them until the replace finishes or is discarded, and some Change Log entries keep them until teardown ([How it works](../README.md#how-it-works)).
 
 The counterparty account number and payment references are kept on purpose. An attorney may need to show exactly where money went.
 

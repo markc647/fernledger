@@ -1,5 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
+import type { PreviewRow } from '@/generated/api/import-rows'
 import { api } from './api'
+import type { CarryPreview } from './import-carry'
 import { HttpError } from './me'
 import { apiQuery, filterQuery, filtersOf, type TransactionSearch } from './transaction-search'
 
@@ -92,6 +94,33 @@ export const importedRowsQuery = (accountId: number) =>
       const res = await api.imports.imported[':accountId'].$get({ param: { accountId: String(accountId) } })
       if (!res.ok) throw new HttpError(res.status)
       return res.json()
+    },
+  })
+
+/**
+ * What a replace with this file would do with the Account's Overrides and Notes: asked of the Worker a chunk of the file's
+ * IDs and amounts at a time (the Worker takes at most CHUNK_SIZE in a request), and added up. Nothing is changed. `key` says
+ * which file and Cutover Date the chunks are of. Read fresh each time it's asked.
+ */
+export const carryPreviewQuery = (accountId: number, chunks: PreviewRow[][], key: string) =>
+  queryOptions({
+    queryKey: ['carry-preview', accountId, key],
+    gcTime: 0,
+    // Not re-asked on window focus or while open: each ask reads the Account's history (ADR 0004). Discarding refetches it.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async (): Promise<CarryPreview> => {
+      const preview: CarryPreview = { waiting: 0, carries: 0, differing: 0 }
+      for (const rows of chunks) {
+        const res = await api.imports['carry-preview'].$post({ json: { accountId, rows } })
+        if (!res.ok) throw new HttpError(res.status)
+        const body = await res.json()
+        if (!('waiting' in body)) throw new HttpError(res.status)
+        preview.waiting = body.waiting
+        preview.carries += body.carries
+        preview.differing += body.differing
+      }
+      return preview
     },
   })
 

@@ -4,6 +4,9 @@ import type { BalanceCheckOutcome } from './balance-check'
 import { planChunks } from './import-chunks'
 import { HttpError } from './me'
 
+/** A Transaction that lost its Override or Note, as the Worker reports it. */
+export type LostTransaction = { date: string; amountCents: number; description: string; category: string | null; note: string | null }
+
 export type ImportSummary = {
   added: number
   /** Rows the Account already held (matched by the bank's unique ID), left alone. */
@@ -14,6 +17,16 @@ export type ImportSummary = {
   dropped: number
   /** Imported Transactions removed first, when replacing imported history. */
   removed: number
+  /** Transactions given the Override or Note of the removed Transaction with the same bank unique ID (worker/carry-over.ts), over every part. */
+  carried: number
+  /** Of those, how many went to a Transaction whose amount is not the removed one's. */
+  differing: number
+  /** Overrides and Notes of removed Transactions that no Transaction in the file claimed, which are gone (a replace that finished). */
+  lost: number
+  /** The Transactions they were on, up to 20 (the Change Log has the same). */
+  lostTransactions: LostTransaction[]
+  /** Overrides and Notes still waiting after an Import that was not a replace. */
+  stillWaiting: number
   /** How the file's ledger balance compared with the Transactions held, once the last part is saved. */
   balanceCheck: BalanceCheckOutcome | null
 }
@@ -54,7 +67,7 @@ const MAX_CLEAR_STEPS = 40
 /** Sends a parsed file to the Worker one chunk at a time, in order, and adds up what each chunk reports. */
 export async function runImport(file: BankCsvResult, options: ImportOptions, onProgress: (sent: number, total: number) => void): Promise<ImportSummary> {
   const chunks = planChunks(file.rows)
-  const summary: ImportSummary = { added: 0, duplicates: 0, skipped: file.errors.length, dropped: 0, removed: 0, balanceCheck: null }
+  const summary: ImportSummary = { added: 0, duplicates: 0, skipped: file.errors.length, dropped: 0, removed: 0, carried: 0, differing: 0, lost: 0, lostTransactions: [], stillWaiting: 0, balanceCheck: null }
   const replacing = options.replaceAccountId !== undefined
 
   async function send(index: number, rows: (typeof chunks)[number]) {
@@ -67,6 +80,8 @@ export async function runImport(file: BankCsvResult, options: ImportOptions, onP
         // These apply to the whole Import, so they ride on the first chunk only.
         ...(index === 0 && options.cutoverDate ? { cutoverDate: options.cutoverDate } : {}),
         ...(index === 0 && replacing ? { replace: true } : {}),
+        // The last part of a replace says so: only then is what no Transaction claimed lost, and what is held cleared.
+        ...(index === chunks.length - 1 && replacing ? { completes: true } : {}),
       },
     })
   }
@@ -89,6 +104,15 @@ export async function runImport(file: BankCsvResult, options: ImportOptions, onP
       summary.duplicates += result.duplicates
       summary.dropped += result.dropped
       summary.removed += result.removed
+      // The last part says how many were carried over in all, how many went to another amount, and how many were lost or are
+      // still waiting (the Worker holds the running totals).
+      if (result.carriedTotal !== null) {
+        summary.carried = result.carriedTotal
+        summary.differing = result.differingAmount ?? 0
+        summary.lost = result.lost ?? 0
+        summary.lostTransactions = result.lostTransactions
+        summary.stillWaiting = result.stillWaiting ?? 0
+      }
       if (result.balanceCheck) summary.balanceCheck = result.balanceCheck
     } catch (error) {
       throw new ImportStopped(index, chunks.length, error, summary.removed)
