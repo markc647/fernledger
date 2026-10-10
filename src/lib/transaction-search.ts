@@ -96,6 +96,18 @@ export function filterQuery(search: TransactionSearch): Record<string, string> {
   return query
 }
 
+/** The most Transactions a CSV export holds (worker/transaction-export.ts pins the two together in its test). */
+export const EXPORT_MAX_ROWS = 10_000
+
+/**
+ * Where the CSV export of this search's filters is. The export takes the filters and nothing else, so a sort or page in the
+ * address is left out. Opened as a link, it downloads, and its file is named by its dates.
+ */
+export function exportPath(search: TransactionSearch): string {
+  const query = new URLSearchParams(filterQuery(search)).toString()
+  return `/api/transactions/export.csv${query ? `?${query}` : ''}`
+}
+
 /** The API's query string for this search and a page of `pageSize`. Blank filters are left out. */
 export function apiQuery(search: TransactionSearch, pageSize: number): Record<string, string> {
   const query = filterQuery(search)
