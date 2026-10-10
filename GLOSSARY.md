@@ -72,6 +72,22 @@ _Avoid_: Switchover, boundary
 A label grouping Transactions by purpose, such as Groceries or Care Fees.
 _Avoid_: Tag, type, bucket
 
+**Category kind**:
+What a Category is for, which the Admin sets: Spending, Income or Loans. It decides how the Category's Transactions are totalled; the rules are in [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+_Avoid_: Type (that is Change type), group
+
+**Spending**:
+What the Spending Categories took out of the Accounts in a month, less what came back, such as a refund; Uncategorised counts as Spending. Transfers, Pending Transactions and Loans are not Spending. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+_Avoid_: Expenses, outgoings
+
+**Income**:
+What the Income Categories brought into the Accounts in a month, less what went out of them. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+_Avoid_: Earnings
+
+**Loans**:
+The Category kind for money lent or borrowed, such as a loan between family: neither Spending nor Income, and left out of Budgets. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+_Avoid_: Debt
+
 **Uncategorised**:
 What a Transaction is when no Override, Rule or Akahu suggestion gives it a Category in use, so a removed Category counts as none; the Admin has a list of them. A Transfer is not Uncategorised and is left off that list. Removing a Category takes away its Overrides, and those Transactions fall back to their Rule or Akahu category, or are Uncategorised if neither applies.
 _Avoid_: Unassigned, unknown
@@ -97,7 +113,7 @@ What replacing an Account's imported history does with the Admin's Overrides and
 _Avoid_: Migrate, restore, reapply
 
 **Budget**:
-A planned monthly spending amount for a Category, effective from a given month onward; unspent amounts do not carry over.
+A planned monthly Spending amount for a Spending Category, effective from a given month onward; unspent amounts do not carry over. Budget vs actual compares it each month with what the Category spent.
 _Avoid_: Limit, allowance, envelope
 
 ## Accountability
@@ -107,8 +123,8 @@ The record of every change the Admin makes: who, what and when; visible to all M
 _Avoid_: Audit trail, history
 
 **Change type**:
-The kind of thing a Change Log entry changed, such as Settings, Import, Account, Category, Rule or Transaction; Members can filter the Change Log by it. Not a Category.
-_Avoid_: Type, kind
+What a Change Log entry changed, such as Settings, Import, Account, Category, Rule, Budget or Transaction; Members can filter the Change Log by it. Not a Category, and not a Category kind.
+_Avoid_: Type on its own
 
 **Report**:
 A print-formatted view of Transactions, or of each Account's balances, over a date range, which any Member can print or save as PDF.
@@ -121,7 +137,7 @@ _Avoid_: Report
 ## Viewing
 
 **Summary**:
-The page every Member lands on: the balance of each Account, the newest Transactions and any Balance Check warnings.
+The page every Member lands on: the balance of each Account, Budget vs actual for this month, the newest Transactions and any Balance Check warnings.
 _Avoid_: Dashboard, home page
 
 ## Configuration

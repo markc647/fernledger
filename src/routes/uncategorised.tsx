@@ -35,7 +35,7 @@ function Uncategorised() {
           search={search}
           onSearch={onSearch}
           origin="uncategorised"
-          intro={<p className="mt-2">Transactions with no Category. Edit one to set an Override; it leaves this list once it has a Category. Transfers between your own Accounts are left out, as they are not spending.</p>}
+          intro={<p className="mt-2">Transactions with no Category. Edit one to set an Override; it leaves this list once it has a Category. Transfers between your own Accounts are left out, as they are not spending. Until a Transaction has a Category it counts as Spending, so money in left here, such as a wage, reduces Spending.</p>}
           emptyMessage="There are no Uncategorised Transactions."
         />
       ) : (

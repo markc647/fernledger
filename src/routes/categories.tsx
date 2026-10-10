@@ -4,17 +4,19 @@ import { useEffect, useRef, useState } from 'react'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
+import { KIND_HINTS, KIND_LABELS, KINDS, type CategoryKind } from '@/lib/category-kinds'
 import { HttpError, meQuery } from '@/lib/me'
-import { categoriesQuery } from '@/lib/queries'
+import { budgetsQuery, categoriesQuery } from '@/lib/queries'
 
 export const Route = createFileRoute('/categories')({
   component: Categories,
   staticData: { nav: { label: 'Categories', order: 40 } },
 })
 
-type Category = { id: number; name: string }
-type Editing = { kind: 'rename' | 'remove'; id: number } | null
+type Category = { id: number; name: string; kind: CategoryKind }
+type Editing = { action: 'rename' | 'set-kind' | 'remove'; id: number } | null
 
 const NAME_TAKEN = 'A Category with that name already exists.'
 const NAME_HINT = 'Names are 1 to 40 characters, and each Category needs a different one.'
@@ -36,6 +38,9 @@ function Categories() {
   const [notice, setNotice] = useState('')
   // Until `me` arrives nobody is the Admin: the controls fail closed. The API refuses a Member's write whatever the page shows.
   const isAdmin = me?.role === 'admin'
+  // How many Budget changes each Spending Category has, for the questions that say what a change to it does to them. Only the Admin sees those.
+  const { data: budgets } = useQuery({ ...budgetsQuery, enabled: isAdmin })
+  const budgetChanges = (id: number) => budgets?.budgets.find((b) => b.categoryId === id)?.changes.length ?? 0
 
   // Back to the button that opened the form (or, if its row is gone, the message), so keyboard focus is never lost.
   const status = useRef<HTMLParagraphElement>(null)
@@ -53,22 +58,30 @@ function Categories() {
   }
   const sameName = (name: string, exceptId?: number) => categories?.some((c) => c.id !== exceptId && asciiFold(c.name) === asciiFold(name.trim())) ?? false
 
-  const columns: Column<Category>[] = [{ key: 'name', header: 'Category', cell: (c) => c.name }]
+  const columns: Column<Category>[] = [
+    { key: 'name', header: 'Category', cell: (c) => c.name },
+    { key: 'kind', header: 'Kind', cell: (c) => KIND_LABELS[c.kind] },
+  ]
   if (isAdmin)
     columns.push({
       key: 'actions',
       header: 'Actions',
       cell: (c) =>
-        editing?.id === c.id && editing.kind === 'rename' ? (
+        editing?.id === c.id && editing.action === 'rename' ? (
           <RenameForm category={c} taken={sameName} onDone={(message) => done(message, `rename-${c.id}-button`)} onCancel={() => done('', `rename-${c.id}-button`)} />
-        ) : editing?.id === c.id && editing.kind === 'remove' ? (
-          <RemoveConfirm category={c} onDone={(message) => done(message)} onCancel={() => done('', `remove-${c.id}-button`)} />
+        ) : editing?.id === c.id && editing.action === 'set-kind' ? (
+          <KindForm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message, `kind-${c.id}-button`)} onCancel={() => done('', `kind-${c.id}-button`)} />
+        ) : editing?.id === c.id && editing.action === 'remove' ? (
+          <RemoveConfirm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message)} onCancel={() => done('', `remove-${c.id}-button`)} />
         ) : (
           <div className="flex flex-wrap justify-end gap-2">
-            <Button id={`rename-${c.id}-button`} size="touch" variant="outline" aria-label={`Rename ${c.name}`} onClick={() => { setNotice(''); setEditing({ kind: 'rename', id: c.id }) }}>
+            <Button id={`rename-${c.id}-button`} size="touch" variant="outline" aria-label={`Rename ${c.name}`} onClick={() => { setNotice(''); setEditing({ action: 'rename', id: c.id }) }}>
               Rename
             </Button>
-            <Button id={`remove-${c.id}-button`} size="touch" variant="outline" aria-label={`Remove ${c.name}`} onClick={() => { setNotice(''); setEditing({ kind: 'remove', id: c.id }) }}>
+            <Button id={`kind-${c.id}-button`} size="touch" variant="outline" aria-label={`Set kind of ${c.name}`} onClick={() => { setNotice(''); setEditing({ action: 'set-kind', id: c.id }) }}>
+              Set kind
+            </Button>
+            <Button id={`remove-${c.id}-button`} size="touch" variant="outline" aria-label={`Remove ${c.name}`} onClick={() => { setNotice(''); setEditing({ action: 'remove', id: c.id }) }}>
               Remove
             </Button>
           </div>
@@ -79,7 +92,8 @@ function Categories() {
     <>
       <h1 className="text-2xl font-semibold">Categories</h1>
       <p className="mt-2">
-        A Category groups Transactions by purpose. {isAdmin ? 'Add, rename or remove them to suit you.' : 'Only the Admin can change them.'}
+        A Category groups Transactions by purpose. Its kind says how its Transactions are added up: Spending, Income or Loans (money lent or borrowed).{' '}
+        {isAdmin ? "Add, rename or remove them to suit you, and set each one's kind." : 'Only the Admin can change them.'}
       </p>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
@@ -102,15 +116,16 @@ function Categories() {
 function AddForm({ taken, onAdded }: { taken: (name: string) => boolean; onAdded: (name: string) => void }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
+  const [kind, setKind] = useState<CategoryKind>('spending')
   // The list is on the page, so a name already in use is caught here; the Worker checks too.
   const [clash, setClash] = useState(false)
   const add = useMutation({
     mutationFn: async () => {
-      const res = await api.categories.$post({ json: { name } })
+      const res = await api.categories.$post({ json: { name, kind } })
       if (!res.ok) throw new HttpError(res.status)
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['categories'] })
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['budgets'] })])
       onAdded(name.trim())
       setName('')
     },
@@ -132,11 +147,26 @@ function AddForm({ taken, onAdded }: { taken: (name: string) => boolean; onAdded
         </label>
         <Input id="new-category" value={name} maxLength={40} required aria-describedby="new-category-hint" onChange={(event) => { setName(event.target.value); setClash(false); add.reset() }} />
       </div>
+      <div className="min-w-0 basis-40">
+        <label htmlFor="new-category-kind" className="block font-medium">
+          Kind
+        </label>
+        <Select id="new-category-kind" value={kind} aria-describedby="new-category-kind-hint" onChange={(event) => { setKind(event.target.value as CategoryKind); add.reset() }}>
+          {KINDS.map((k) => (
+            <option key={k} value={k}>
+              {KIND_LABELS[k]}
+            </option>
+          ))}
+        </Select>
+      </div>
       <Button type="submit" size="touch" disabled={add.isPending || !name.trim()}>
         Add Category
       </Button>
       <p id="new-category-hint" className="basis-full text-muted-foreground">
         For example, Care Fees. {NAME_HINT}
+      </p>
+      <p id="new-category-kind-hint" className="basis-full text-muted-foreground">
+        {KIND_HINTS[kind]}
       </p>
       {(clash || add.isError) && <p role="alert" className="basis-full font-medium text-destructive">{clash ? NAME_TAKEN : whyNot(add.error)}</p>}
     </form>
@@ -154,7 +184,7 @@ function RenameForm({ category, taken, onDone, onCancel }: { category: Category;
     },
     onSuccess: async () => {
       // The Transactions list shows Category names too.
-      await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['transactions'] })])
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['transactions'] }), queryClient.invalidateQueries({ queryKey: ['budgets'] })])
       onDone(`Renamed ${category.name} to ${name.trim()}.`)
     },
   })
@@ -185,7 +215,58 @@ function RenameForm({ category, taken, onDone, onCancel }: { category: Category;
   )
 }
 
-function RemoveConfirm({ category, onDone, onCancel }: { category: Category; onDone: (message: string) => void; onCancel: () => void }) {
+function KindForm({ category, budgetChanges, onDone, onCancel }: { category: Category; budgetChanges: number; onDone: (message: string) => void; onCancel: () => void }) {
+  const queryClient = useQueryClient()
+  const [kind, setKind] = useState<CategoryKind>(category.kind)
+  const save = useMutation({
+    mutationFn: async () => {
+      const res = await api.categories[':id'].kind.$put({ param: { id: String(category.id) }, json: { kind } })
+      if (!res.ok) throw new HttpError(res.status)
+    },
+    onSuccess: async () => {
+      // Budget vs actual and the Budgets page list Spending Categories only.
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['budgets'] })])
+      onDone(kind === category.kind ? `${category.name} is already ${KIND_LABELS[kind]}.` : `${category.name} is now ${KIND_LABELS[kind]}.`)
+    },
+  })
+
+  return (
+    <form
+      className="flex flex-col items-stretch gap-2 text-start"
+      onSubmit={(event) => {
+        event.preventDefault()
+        save.mutate()
+      }}
+    >
+      <div>
+        <label htmlFor={`kind-${category.id}`} className="block font-medium">
+          Kind
+        </label>
+        <Select id={`kind-${category.id}`} value={kind} autoFocus aria-describedby={`kind-${category.id}-hint`} onChange={(event) => { setKind(event.target.value as CategoryKind); save.reset() }}>
+          {KINDS.map((k) => (
+            <option key={k} value={k}>
+              {KIND_LABELS[k]}
+            </option>
+          ))}
+        </Select>
+        <p id={`kind-${category.id}-hint`} className="mt-1 text-muted-foreground">
+          {KIND_HINTS[kind]} A change counts for every month, past ones too.{category.kind === 'spending' && kind !== 'spending' && budgetChanges > 0 && ' Its Budgets are kept but not used.'}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" size="touch" disabled={save.isPending}>
+          Save kind
+        </Button>
+        <Button type="button" size="touch" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {save.isError && <p role="alert" className="font-medium text-destructive">{whyNot(save.error)}</p>}
+    </form>
+  )
+}
+
+function RemoveConfirm({ category, budgetChanges, onDone, onCancel }: { category: Category; budgetChanges: number; onDone: (message: string) => void; onCancel: () => void }) {
   const queryClient = useQueryClient()
   // Opens on the safe answer. Cancelling puts focus back on the Remove button (Categories' `done`), and a removal on the message.
   const keep = useRef<HTMLButtonElement>(null)
@@ -197,7 +278,7 @@ function RemoveConfirm({ category, onDone, onCancel }: { category: Category; onD
       return res.json()
     },
     onSuccess: async ({ overrides }) => {
-      await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['transactions'] })])
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['transactions'] }), queryClient.invalidateQueries({ queryKey: ['budgets'] })])
       onDone(
         overrides === 0
           ? `Removed ${category.name}.`
@@ -209,6 +290,16 @@ function RemoveConfirm({ category, onDone, onCancel }: { category: Category; onD
   return (
     <div role="group" aria-label={`Remove ${category.name}`} className="space-y-2 text-start">
       <p>Remove {category.name}? Transactions with it as their Override lose that Override and fall back to their Rule or Akahu category, or Uncategorised if neither applies.</p>
+      {category.kind !== 'spending' && (
+        <p>
+          {category.name} is {category.kind === 'income' ? 'an Income' : 'a Loans'} Category, so its Transactions stop counting as {category.kind === 'income' ? 'income' : 'a loan'}. Those that end up Uncategorised count as Spending.
+        </p>
+      )}
+      {budgetChanges > 0 && (
+        <p>
+          Its Budget ({budgetChanges} {budgetChanges === 1 ? 'change' : 'changes'}) stops being used in every month, past ones too, and Budget vs actual no longer lists it.
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button size="touch" aria-label={`Yes, remove ${category.name}`} disabled={remove.isPending} onClick={() => remove.mutate()}>
           Yes, remove

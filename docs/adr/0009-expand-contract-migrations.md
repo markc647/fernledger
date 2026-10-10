@@ -1,9 +1,10 @@
 # Expand-then-contract database migrations
 
-Every release's migrations are additive only: new tables, new nullable columns, new indexes. Dropping or renaming anything happens in a *later* release, once no released code still uses it. Self-hosters roll back by redeploying the previous release. That works only if the previous code can still run against the newer schema, and D1 restore points last only 7 days on the free plan, so they're no substitute.
+Every release's migrations are additive only: new tables, new nullable columns (or NOT NULL ones with a constant default, see below), new indexes. Dropping or renaming anything happens in a *later* release, once no released code still uses it. Self-hosters roll back by redeploying the previous release. That works only if the previous code can still run against the newer schema, and D1 restore points last only 7 days on the free plan, so they're no substitute.
 
 ## Consequences
 
 - A rename takes two releases: add the new column and write to both, then stop using the old one and drop it later.
 - CI applies every migration to sample databases taken from each earlier minor release and checks that every table, column and row survives. Running the previous release's own tests against the migrated schema is still to do: it needs a first release to run them from (docs/releasing.md).
 - Large data backfills are chunked and resumable, to stay within D1 Free's 100k row writes per day (ADR 0004). A backfill keeps its place, and what it has used of the day, in a row of `data_migration_progress` (migration 1401) rather than in a table of its own; the first, re-running Rules over all Transactions, is `worker/rule-rerun.ts`.
+- A new column may be NOT NULL when it has a constant `DEFAULT` (`categories.kind`, `migrations/1602_category_kind.sql`). The previous release's inserts leave it out and get the default, and its queries never name it, so it runs unchanged on the new schema. A NOT NULL column with no default would make the previous release's inserts fail.

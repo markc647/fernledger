@@ -18,7 +18,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 ## Structure
 - Business logic lives in pure functions with their own tests. Worker handlers stay thin: authenticate, validate, call the logic, respond.
 - Every `/api` request is authenticated via the Access JWT and fails closed.
-- Spending is every Transaction that isn't a Transfer. A query that lists, filters or totals spending (Budgets, Reports, the Summary, a Category total) builds from `effectiveCategory()` in `worker/effective-category.ts` and uses its `isTransfer`, never its own version of "paired, or a Rule marks it", and a test proves a Transfer is left out.
+- A Transfer is never spending or income. A query that lists, filters or totals spending (Budgets, Reports, the Summary, a Category total) builds from `effectiveCategory()` in `worker/effective-category.ts` and uses its `isTransfer`, never its own version of "paired, or a Rule marks it", and a test proves a Transfer is left out. Spending and Income, by Category or month, come only from `buildSpending` and `rollUp` in `worker/spending.ts` ([ADR 0012](docs/adr/0012-spending-and-category-kinds.md)); don't total them again somewhere else.
 - A Category shown to a reader (a page, a Report, a CSV file) comes from `effectiveCategory().shown`, never its `id`, `name` or `source`: a Transfer has none, and shows as a Transfer rather than as Uncategorised or under a Rule's Category.
 - A batch that adds Transactions (Import today, Sync when it lands) puts `pairTransfersStatement` (`worker/transfers.ts`) in the same batch, after the insert and the Rules, so a Transfer is never missed. A batch that removes Transactions also lets go of their matching Transactions in the same batch, because a pair's pointer is deliberately not a foreign key (`migrations/1501_transfers.sql`).
 - Every Admin change is written with `recordChange` (`worker/changelog.ts`), which batches it with its Change Log entry. Never write to the Change Log separately. Each entry has a `type` from `CHANGE_TYPES`; a new kind of Admin change adds its type there so Members can filter by it.
@@ -28,7 +28,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 
 ## Migrations
 - Files in `migrations/` are named `<ticket number × 100 + n>_<name>.sql`, n from 01 to 99, lower-case name. Ticket 8 owns `0801_…` to `0899_…`; ticket 2 owns `0201_…` to `0299_…`. Parallel tickets can't collide, and wrangler applies files in numeric order.
-- Add a new file rather than editing one that has merged. Migrations are add-only (ADR 0009): new tables, nullable columns, indexes. `DROP` and `RENAME` wait for a later release.
+- Add a new file rather than editing one that has merged. Migrations are add-only (ADR 0009): new tables, nullable columns (or NOT NULL with a constant default, ADR 0009), indexes. `DROP` and `RENAME` wait for a later release.
 - `npm run migrations:check`, part of `npm run check`, fails on a duplicate prefix, a badly named file, or any `DROP` or `RENAME`.
 - `npm run check` also upgrades every sample database in `test/sample-dbs/` and fails if data is lost or a merged migration was edited ([docs/releasing.md](docs/releasing.md#sample-databases)). A migration that rewrites existing values needs its expected change written into that test.
 

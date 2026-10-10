@@ -8,6 +8,11 @@ const midnightCheck = new Intl.DateTimeFormat('en-CA', {
   hourCycle: 'h23',
 })
 
+const dateFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' })
+
+/** The NZ calendar date (`YYYY-MM-DD`) a moment falls on. Pacific/Auckland, so a day turns over at NZ midnight, not UTC midnight. */
+export const nzDate = (at: Date): string => dateFormat.format(at)
+
 /** The date after `date`, both `YYYY-MM-DD`. */
 export function nextDay(date: string): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)

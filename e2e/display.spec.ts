@@ -92,7 +92,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/reports', '/reports/transactions', '/reports/balances']
+  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -261,6 +261,161 @@ test.describe('zoom', () => {
     }
   }
 
+  // The Budgets page with its longest content: a long Category name, big amounts, a long list of changes, and the Admin's form open
+  // with every button it can have. The Budgets are stubbed, so this needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/budgets with long content and the form open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        const longName = 'Health and medical costs for the household and the long-term care fees'
+        await page.route(/\/api\/budgets(\?.*)?$/, (route) =>
+          route.fulfill({
+            json: {
+              month: '2026-10',
+              changeCount: 595,
+              changeLimit: 600,
+              budgets: [
+                {
+                  categoryId: 1,
+                  categoryName: longName,
+                  amountCents: 123456789,
+                  effectiveFrom: '2026-08',
+                  changes: [
+                    { effectiveFrom: '2026-08', amountCents: 123456789 },
+                    { effectiveFrom: '2026-12', amountCents: null },
+                    { effectiveFrom: '2027-03', amountCents: 100000000000 },
+                  ],
+                },
+                { categoryId: 2, categoryName: 'Groceries', amountCents: null, effectiveFrom: '2026-06', changes: [{ effectiveFrom: '2026-06', amountCents: null }] },
+              ],
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/budgets')
+        await sizeButton(page, size).click()
+        await page.getByRole('button', { name: `Edit Budget for ${longName}` }).click()
+        await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('1234567.89')
+        await expect(page.getByRole('button', { name: 'End Budget' })).toBeVisible()
+        const panel = page.getByRole('region', { name: `Budget for ${longName}` })
+        await expect(panel.getByText('This Category already has later changes')).toBeVisible()
+        await expect(panel.getByText('From March 2027: $1,000,000,000.00 a month')).toBeVisible()
+        await expect(page.getByText('595 are used')).toBeVisible()
+        await page.getByLabel('Monthly Budget in dollars').fill('0')
+        await page.getByRole('button', { name: 'Save Budget' }).click()
+        await expect(page.getByRole('alert')).toContainText('more than $0')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The Categories page with a long Category name and its Admin forms open: the kind form (with the Budgets it keeps), then the removal question for a
+  // Spending Category with Budget changes and for an Income one. The Categories and Budgets are stubbed.
+  const categoryForms = [
+    { form: 'the kind form', button: 'Set kind of', category: 'long' },
+    { form: 'the removal question', button: 'Remove', category: 'long' },
+    { form: 'the removal question for an Income Category', button: 'Remove', category: 'Wages and salary' },
+  ] as const
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      for (const { form, button, category } of categoryForms) {
+        test(`/categories with ${form} open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+          await signInAs(context, 'admin')
+          const longName = 'Health and medical costs for the household and the long-term care fees'
+          await page.route(/\/api\/categories$/, (route) =>
+            route.request().method() === 'GET'
+              ? route.fulfill({ json: [{ id: 1, name: longName, kind: 'spending' }, { id: 2, name: 'Wages and salary', kind: 'income' }, { id: 3, name: 'Loans', kind: 'loans' }] })
+              : route.fallback(),
+          )
+          await page.route(/\/api\/budgets(\?.*)?$/, (route) =>
+            route.fulfill({
+              json: {
+                month: '2026-10',
+                changeCount: 2,
+                changeLimit: 600,
+                budgets: [{ categoryId: 1, categoryName: longName, amountCents: 5000, effectiveFrom: '2026-08', changes: [{ effectiveFrom: '2026-08', amountCents: 5000 }, { effectiveFrom: '2026-12', amountCents: null }] }],
+              },
+            }),
+          )
+          await page.setViewportSize({ width, height })
+          await page.goto('/categories')
+          await sizeButton(page, size).click()
+          const target = category === 'long' ? longName : category
+          await page.getByRole('button', { name: `${button} ${target}` }).click()
+          if (button === 'Set kind of') {
+            await expect(page.locator('#kind-1')).toBeFocused()
+            await page.locator('#kind-1').selectOption('loans')
+            await expect(page.getByText('Its Budgets are kept but not used.')).toBeVisible()
+          } else if (category === 'long') {
+            await expect(page.getByText('Its Budget (2 changes) stops being used in every month, past ones too')).toBeVisible()
+          } else {
+            await expect(page.getByText('Wages and salary is an Income Category, so its Transactions stop counting as income. Those that end up Uncategorised count as Spending.')).toBeVisible()
+            await expect(page.getByText('stops being used in every month')).toHaveCount(0)
+          }
+          // Measure only once the size is applied and the buttons have finished their width transition.
+          await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+          const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            clientWidth: document.documentElement.clientWidth,
+          }))
+          expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        })
+      }
+    }
+  }
+
+  // The Summary's Budget vs actual with its longest content: a long Category name, big amounts, and each Status. The data is stubbed.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/ with Budget vs actual at its longest at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        const longName = 'Health and medical costs for the household and the long-term care fees'
+        await page.route(/\/api\/budgets\/vs-actual/, (route) =>
+          route.fulfill({
+            json: {
+              month: '2026-10',
+              rows: [
+                { categoryId: 1, categoryName: longName, budgetCents: 123456789, spentCents: 234567890 },
+                { categoryId: 2, categoryName: 'Groceries', budgetCents: 80000, spentCents: 80000 },
+                { categoryId: 3, categoryName: 'Fuel', budgetCents: 100000000000, spentCents: -123456789 },
+              ],
+              otherCents: 123456789012,
+              uncategorisedCents: -123456789012,
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/')
+        await sizeButton(page, size).click()
+        const widget = page.getByRole('region', { name: 'Budget vs actual' })
+        await expect(widget).toContainText('Over Budget')
+        await expect(widget).toContainText('On Budget')
+        await expect(widget).toContainText('Under Budget')
+        await expect(widget).toContainText('$1,234,567.89 back')
+        await expect(widget).toContainText('Spending outside Budgets')
+        await expect(widget).toContainText('$1,234,567,890.12')
+        await expect(widget).toContainText('Uncategorised (includes money in not yet given a Category)')
+        await expect(widget).toContainText('$1,234,567,890.12 back')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
   // A Transaction's details with every field filled in and long values, and the Admin's edit panel open: the longest text
   // that page shows. The Transaction is stubbed, so this needs no data in the database.
   for (const { name, width, height } of zoomLevels) {
@@ -288,6 +443,7 @@ test.describe('zoom', () => {
               categoryId: 3,
               categoryName: 'Eating out',
               categorySource: 'override',
+              categoryKind: 'loans', // the longest kind note, so it is measured too
               note: `${long} note that goes on and on`,
               bankTime: '2026-10-07T20:15:00.000Z',
               firstSeenAt: '2026-10-08T06:30:00.000Z',

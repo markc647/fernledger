@@ -33,7 +33,7 @@ export const filterFields = {
   accountId: id,
   categoryId: id,
   uncategorised: z.optional(z.literal('true')),
-  // 'exclude' is the Transactions that count as spending: everything that is not a Transfer (effective-category.ts).
+  // 'exclude' is everything that is not a Transfer (effective-category.ts): what is left to be counted by its Category's kind (ADR 0012).
   transfers: z.optional(z.enum(TRANSFERS_FILTERS)),
   from: nzDate,
   to: nzDate,
@@ -280,7 +280,7 @@ export function buildSearch(search: Search, slots: readonly CategorySlot[] = CAT
       // Sorted by date (the default) the page is read off the date index and stops after `limit` rows. Any other sort, and any
       // text filter, reads every Transaction the other filters keep (ADR 0004: D1 bills rows read, so those are the dear requests).
       sql: `SELECT t.id, t.account_id AS accountId, a.name AS accountName, t.date, t.description, t.bank_type AS bankType, t.amount_cents AS amountCents,
-                   ${category.shown.id} AS categoryId, ${category.shown.name} AS categoryName, ${category.shown.source} AS categorySource, t.note,
+                   ${category.shown.id} AS categoryId, ${category.shown.name} AS categoryName, ${category.shown.source} AS categorySource, ${category.shown.kind} AS categoryKind, t.note,
                    ${category.transfer} AS transfer, partner_account.name AS transferAccountName
             FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
             ${PARTNER_JOIN}
