@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils'
+import { cn, MONEY_TEXT } from '@/lib/utils'
 import { formatAmount, formatBalance, moneyLabel } from '@/lib/format'
 
 /**
@@ -21,7 +21,7 @@ export function Amount({
   const label = showLabel ? moneyLabel(cents) : null
   return (
     <span className={cn('inline-flex flex-col items-end', className)}>
-      <span className={cn('font-medium whitespace-nowrap tabular-nums [font-kerning:none]', cents < 0 && 'text-danger', cents > 0 && !balance && 'text-success')}>
+      <span className={cn('font-medium', MONEY_TEXT, cents < 0 && 'text-danger', cents > 0 && !balance && 'text-success')}>
         {balance ? formatBalance(cents) : formatAmount(cents)}
       </span>
       {label && <span className="whitespace-nowrap text-muted-foreground">{label}</span>}

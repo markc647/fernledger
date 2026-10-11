@@ -3,6 +3,7 @@ import { expect, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 import {
   dateText,
+  ensureCategory,
   expectBareMargins,
   expectBlackOnWhite,
   expectIdentityOnEveryPage,
@@ -14,12 +15,18 @@ import {
   expectPageNumbers,
   expectTitleBlock,
   GENERATED,
+  importRows,
   noAxeViolations,
+  NOT_COUNTED,
   NOW,
+  overrideCategories,
   restoreAppTitleAfterEach,
   setTitle,
+  spent,
   squash,
   TITLE,
+  UNCATEGORISED,
+  type SeedRow,
 } from './report-helpers'
 
 // Ticket 20: the spending-by-Category Report (spec story 93). It uses the Report frame of ticket 18, so it opens in a new window, says on its face
@@ -50,13 +57,6 @@ const dataFor = (project: string) => {
   }
 }
 
-/** What the Dashboard calls Uncategorised in a table, which is what a row of the Report says too. */
-const UNCATEGORISED = 'Uncategorised (includes money in not yet given a Category)'
-/** What the Report says is not counted, in the Dashboard's words; the table's heading repeats it on every printed page. */
-const NOT_COUNTED = "Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted."
-/** What a Spent cell says: no sign, and "back" after an amount that is less than nothing. */
-const spent = (cents: number) => `$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2 })}${cents < 0 ? ' back' : ''}`
-
 // What the year holds, by Account, in cents (money out is negative). The Transfer, the wages (Income) and the loan are not Spending. The Report puts the
 // most spent first, so Uncategorised ($4.00) is above the Category that took money back, and a Category that took back more than it paid out is last.
 const EVERYDAY = { rates: 30_000, fuel: 9000, food: 5550, uncategorised: 400, back: -2500 }
@@ -67,36 +67,26 @@ const total = (figures: Record<string, number>) => Object.values(figures).reduce
 type Seeded = { everydayId: number; savingsId: number; incomeId: number }
 const seeded = new Map<string, Seeded>()
 
-type Row = { date: string; payee: string; amountCents: number; category?: string }
 /** The project's three Accounts and their Categories and Transactions (see EVERYDAY). Safe to repeat: an Import recognises rows it already holds. */
 async function seed(context: BrowserContext, baseURL: string, project: string): Promise<Seeded> {
   const known = seeded.get(project)
   if (known) return known
   const d = dataFor(project)
   const { year } = d
-  const headers = { Origin: baseURL }
   await signInAs(context, 'admin')
 
   // Categories of this project's own, found again if an earlier run left them.
-  const existing = (await (await context.request.get('/api/categories')).json()) as { id: number; name: string }[]
-  const categoryId = async (name: string, kind: 'spending' | 'income' | 'loans') => {
-    const found = existing.find((c) => c.name === name)
-    if (found) return found.id
-    const res = await context.request.post('/api/categories', { headers, data: { name, kind } })
-    expect(res.ok()).toBe(true)
-    return ((await res.json()) as { id: number }).id
-  }
   const categories: Record<string, number> = {
-    [d.rates]: await categoryId(d.rates, 'spending'),
-    [d.fuel]: await categoryId(d.fuel, 'spending'),
-    [d.food]: await categoryId(d.food, 'spending'),
-    [d.back]: await categoryId(d.back, 'spending'),
-    [d.pay]: await categoryId(d.pay, 'income'),
-    [d.loan]: await categoryId(d.loan, 'loans'),
+    [d.rates]: await ensureCategory(context, baseURL, d.rates, 'spending'),
+    [d.fuel]: await ensureCategory(context, baseURL, d.fuel, 'spending'),
+    [d.food]: await ensureCategory(context, baseURL, d.food, 'spending'),
+    [d.back]: await ensureCategory(context, baseURL, d.back, 'spending'),
+    [d.pay]: await ensureCategory(context, baseURL, d.pay, 'income'),
+    [d.loan]: await ensureCategory(context, baseURL, d.loan, 'loans'),
   }
 
   const say = (what: string) => `SPENDRPT ${project} ${what}`
-  const everydayRows: Row[] = [
+  const everydayRows: SeedRow[] = [
     { date: `${year}-01-10`, payee: say('food 1'), amountCents: -4000, category: d.food },
     { date: `${year}-02-05`, payee: say('food 2'), amountCents: -2550, category: d.food },
     { date: `${year}-02-20`, payee: say('food refund'), amountCents: 1000, category: d.food }, // a refund comes off
@@ -109,40 +99,21 @@ async function seed(context: BrowserContext, baseURL: string, project: string): 
     { date: `${year}-03-20`, payee: say('a loan'), amountCents: -50_000, category: d.loan }, // Loans: not Spending
     { date: `${year}-05-05`, payee: say('to savings'), amountCents: -20_000 }, // the other half is in Savings: a Transfer
   ]
-  const savingsRows: Row[] = [
+  const savingsRows: SeedRow[] = [
     { date: `${year}-01-12`, payee: say('food in savings'), amountCents: -2000, category: d.food },
     { date: `${year}-05-05`, payee: say('from everyday'), amountCents: 20_000 },
   ]
   // An Account with a Transaction but no Spending: the Report for it has nothing to add up.
-  const incomeRows: Row[] = [{ date: `${year}-09-09`, payee: say('wages in the Income-only Account'), amountCents: 100_000, category: d.pay }]
-  const importRows = async (account: { number: string; name: string }, rows: Row[], tag: string) => {
-    const res = await context.request.post('/api/imports/chunks', {
-      headers,
-      data: {
-        account,
-        chunk: { index: 0, count: 1 },
-        file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: `${year}-01-01`, to: `${year}-12-31`, ledgerBalance: { cents: 0, date: `${year}-12-31` } },
-        rows: rows.map((r, i) => ({ date: r.date, uniqueId: `SPR${year}${tag}${i}`, tranType: 'EFTPOS', chequeNumber: null, payee: r.payee, bankMemo: 'EFTPOS', amountCents: r.amountCents })),
-      },
-    })
-    expect(res.ok()).toBe(true)
-  }
-  await importRows(d.everyday, everydayRows, 'E')
-  await importRows(d.savings, savingsRows, 'S') // the second Account pairs its $200.00 in with the first's $200.00 out
-  await importRows(d.income, incomeRows, 'I')
+  const incomeRows: SeedRow[] = [{ date: `${year}-09-09`, payee: say('wages in the Income-only Account'), amountCents: 100_000, category: d.pay }]
+  await importRows(context, baseURL, { account: d.everyday, year, rows: everydayRows, idPrefix: `SPR${year}E` })
+  await importRows(context, baseURL, { account: d.savings, year, rows: savingsRows, idPrefix: `SPR${year}S` }) // the second Account pairs its $200.00 in with the first's $200.00 out
+  await importRows(context, baseURL, { account: d.income, year, rows: incomeRows, idPrefix: `SPR${year}I` })
 
   const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
   const idOf = (name: string) => accounts.find((a) => a.name === name)!.id
   const result = { everydayId: idOf(d.everyday.name), savingsId: idOf(d.savings.name), incomeId: idOf(d.income.name) }
   for (const [accountId, rows] of [[result.everydayId, everydayRows], [result.savingsId, savingsRows], [result.incomeId, incomeRows]] as const) {
-    const { transactions } = (await (await context.request.get(`/api/transactions?accountId=${accountId}&from=${year}-01-01&to=${year}-12-31&limit=200&count=false`)).json()) as { transactions: { id: number; description: string }[] }
-    expect(transactions).toHaveLength(rows.length)
-    for (const row of rows) {
-      if (!row.category) continue
-      const found = transactions.find((t) => t.description === row.payee)
-      expect(found, row.payee).toBeDefined()
-      expect((await context.request.put(`/api/transactions/${found!.id}/override`, { headers, data: { categoryId: categories[row.category] } })).ok()).toBe(true)
-    }
+    await overrideCategories(context, baseURL, { accountId, year, rows, categories })
   }
   seeded.set(project, result)
   return result
@@ -188,8 +159,7 @@ test.describe('opening the Report', () => {
   test('the Reports page has no WCAG 2.2 AA violations with all its forms on it', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/reports')
-    await expect(page.getByRole('form').first()).toBeVisible()
-    await expect(page.getByRole('form')).toHaveCount(await page.getByRole('heading', { level: 2 }).count()) // one form for each Report, however many there are
+    await expect(page.getByRole('form')).toHaveCount(5)
     await noAxeViolations(page)
   })
 

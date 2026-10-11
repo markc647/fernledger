@@ -1,27 +1,40 @@
-import type { LoanPage, LoanRow } from '@/generated/api/report-loans'
+import type { LoanPage, LoanRow } from '../generated/api/report-loans' // relative, not '@/': a Worker test imports this file (worker/report-loans.test.ts)
 import { formatBalance } from './format'
-import { REPORT_PAGE_SIZE, REPORT_ROW_CAP, searchDate, searchId, type ListingStatus } from './report-transactions'
+import { readUpToCap, searchDate, searchId, statusAt, type ListingStatus } from './report-transactions'
 
 // The Loans Report's data, put together in the browser from the API's pages (worker/report-loans.ts), one Loans Category after another, a page at a time
-// (ADR 0004), up to the Transaction listing's cap. The Worker finds which Transactions are loans; this file only adds them up and words the result.
-// Money is integer cents. A Transaction's amount is signed as in every list (money out is negative); what is *owed* is the other way round: it is positive
-// while more has gone out than come back, which is a person who owes the Accounts, and negative while more has come in, which is a person the Accounts owe.
+// (ADR 0004), up to a cap, by the same loop as the Transaction listing's (`readUpToCap`). The Worker finds which Transactions are loans; this file only adds them up and
+// words the result. Money is integer cents. A Transaction's amount is signed as in every list (money out is negative); what is *owed* is the other way round: it is
+// positive while more has gone out than come back, which is a person who owes the Accounts, and negative while more has come in, which is a person the Accounts owe.
+
+/**
+ * The most Transactions the API gives in a page of a loan, and the most a Report lists across its loans. Larger pages and a lower cap than the Transaction listing's (200 and
+ * 10,000), because every page of a loan re-reads the whole loan (ADR 0004): a family's loan is a page, and the worst Report is a handful. The Worker keeps its own copy of the
+ * page size (worker/report-loans.ts); worker/report-loans.test.ts pins the two together.
+ */
+export const LOANS_PAGE_SIZE = 1000
+export const LOANS_ROW_CAP = 5000
 
 /** What is owed once the Transactions in `netCents` (money in less money out) have happened. Written as a subtraction so that nothing owed is 0, never -0. */
 export const owedOf = (netCents: number) => 0 - netCents
 
-/**
- * The person a Loans Category is named for, to say who owes whom: "Loan – Alice" is Alice's loan, so "Alice owes $300.00". A name that starts "Loan" or "Loans" and a
- * dash or colon is read that way, and any other name is used as it stands, so a Category the Admin called "Alice" says "Alice owes". Null for a name that is only "Loan" or
- * "Loans" (the starter Category, before it is renamed), which names no one: the Report then says the Accounts are owed, or owe, and not a name.
- */
-export const loanPerson = (categoryName: string) => categoryName.trim().replace(/^loans?\s*(?:[-–—:]\s*|$)/i, '').trim() || null
+// A Category is named for its person in the form "Loan – Alice" (the Categories page says so). The dashes people type or paste for it: hyphen, the Unicode hyphens (U+2010,
+// U+2011), figure dash (U+2012), en and em dash, horizontal bar and the minus sign (U+2212), and a colon. "Loan Alice", "Loans to Alice" and "Loan from Alice" are read too.
+const LOAN_PREFIX = /^loans?(?:\s*[-‐-―−:]\s*|\s+(?:(?:to|from)\s+)?|$)/i
 
-/** Who owes whom, in a sentence: "Alice owes $300.00" when more went out than came in, "Alice is owed $300.00" when more came in, "Alice owes nothing" when they are level. */
+/**
+ * The person a Loans Category is named for, to say who owes whom: "Loan – Alice" is Alice's loan, so "Alice owes $300.00 to the Accounts". A name that starts "Loan" or "Loans"
+ * and then a dash or colon, or "to" or "from", or just a space, is read that way, and any other name is used as it stands ("Alice" says "Alice owes", and "Alice's car" says
+ * "Alice's car owes", which is odd but is what the Admin called it). Null for a name that is only "Loan" or "Loans" (the starter Category, before it is renamed), which
+ * names no one: the Report then says the Accounts are owed, or owe, and not a name.
+ */
+export const loanPerson = (categoryName: string) => categoryName.trim().replace(LOAN_PREFIX, '').trim() || null
+
+/** Who owes whom, in a sentence: "Alice owes $300.00 to the Accounts" when more went out than came in, "Alice is owed $300.00" when more came in, "Alice owes nothing" when they are level. */
 export function owedSentence(person: string | null, owedCents: number): string {
   const amount = formatBalance(Math.abs(owedCents))
   if (owedCents === 0) return person ? `${person} owes nothing` : 'Nothing is owed'
-  if (owedCents > 0) return person ? `${person} owes ${amount}` : `${amount} is owed to the Accounts`
+  if (owedCents > 0) return person ? `${person} owes ${amount} to the Accounts` : `${amount} is owed to the Accounts`
   return person ? `${person} is owed ${amount}` : `${amount} is owed by the Accounts`
 }
 
@@ -43,6 +56,8 @@ export type LoanSection = {
   status: ListingStatus
   /** What was owed before the start date, from every Transaction before it. Zero when there is no start date, or when the loan was not listed. */
   openingOwedCents: number
+  /** How many Transactions are before the start date, so a loan that was paid off can be told from one that was never used. Zero when there is no start date. */
+  openingCount: number
   lines: LoanLine[]
   /** What came in and went out among the lines. Money out is negative. */
   moneyInCents: number
@@ -57,16 +72,15 @@ export type LoanPageRequest = { categoryId: number; from: string | undefined; to
 
 /**
  * Reads each of `loans` in turn, a page at a time, until every Transaction is in or the cap is reached, and adds each up. It stops as the Transaction listing does
- * (`loadListing`): with no room left it asks for one more Transaction only to learn whether any are being left out (`capped`), so a loan of exactly the cap's size is
- * not called capped; the loan where one is found is 'partial' if some of it was listed and 'not-listed' if none was; every loan after it is 'not-listed' and is not
- * asked about, so the Report never says a loan has nothing in the dates when it simply stopped before reading it. A failed page fails the whole Report.
+ * (`readUpToCap`): the loan where the cap falls is 'partial' if some of it was listed and 'not-listed' if none was, and every loan after it is 'not-listed' and is not asked
+ * about, so the Report never says a loan has nothing in the dates when it simply stopped before reading it. A failed page fails the whole Report.
  */
 export async function loadLoans({
   loans,
   from,
   to,
   fetchPage,
-  cap = REPORT_ROW_CAP,
+  cap = LOANS_ROW_CAP,
 }: {
   loans: { id: number; name: string }[]
   /** Left out, the Report begins at the first Transaction. */
@@ -75,46 +89,53 @@ export async function loadLoans({
   fetchPage: (request: LoanPageRequest) => Promise<LoanPage>
   cap?: number
 }): Promise<Loans> {
-  const sections: LoanSection[] = loans.map(({ id, name }) => ({ categoryId: id, name, status: 'complete', openingOwedCents: 0, lines: [], moneyInCents: 0, moneyOutCents: 0, owedCents: null }))
-  let rowCount = 0
-  let stoppedAt = -1 // the index of the loan where the Report found Transactions it had no room for
-  find: for (const [index, section] of sections.entries()) {
-    let owed = 0
-    let after: string | undefined
-    for (;;) {
-      const room = cap - rowCount
-      const page = await fetchPage({ categoryId: section.categoryId, from, to, after, limit: room === 0 ? 1 : Math.min(REPORT_PAGE_SIZE, room) })
-      if (room === 0) {
-        // The probe: anything it finds is left out. If it finds nothing this loan is done, and the next one is probed in turn.
-        if (page.transactions.length === 0) break
-        stoppedAt = index
-        break find
+  const sections: LoanSection[] = loans.map(({ id, name }) => ({ categoryId: id, name, status: 'complete', openingOwedCents: 0, openingCount: 0, lines: [], moneyInCents: 0, moneyOutCents: 0, owedCents: null }))
+  const { rowCount, stoppedAt } = await readUpToCap({
+    sections,
+    cap,
+    pageSize: LOANS_PAGE_SIZE,
+    fetchPage: (section, after, limit) => fetchPage({ categoryId: section.categoryId, from, to, after, limit }),
+    take: (section, page) => {
+      // Only a loan's first page says what was owed before its start date, and the balance goes on from there.
+      if (page.opening !== null) {
+        section.openingOwedCents = owedOf(page.opening.cents)
+        section.openingCount = page.opening.count
       }
-      // Only a loan's first page says what was owed before its start date.
-      if (page.openingCents !== null) {
-        section.openingOwedCents = owedOf(page.openingCents)
-        owed = section.openingOwedCents
-      }
+      let owed = section.lines.at(-1)?.owedAfterCents ?? section.openingOwedCents
       for (const row of page.transactions) {
         owed += owedOf(row.amountCents)
         section.lines.push({ ...row, owedAfterCents: owed })
         if (row.amountCents > 0) section.moneyInCents += row.amountCents
         else section.moneyOutCents += row.amountCents
       }
-      rowCount += page.transactions.length
       section.owedCents = owed
-      if (page.next === null) break
-      after = page.next
-    }
-  }
+    },
+  })
   for (const [index, section] of sections.entries()) {
-    // A cut-off loan with no lines listed is 'not-listed', not 'partial' (intended): the cap fell at the end of the loan before it, so none of this one was read.
-    if (stoppedAt >= 0 && index >= stoppedAt) {
-      section.status = index === stoppedAt && section.lines.length > 0 ? 'partial' : 'not-listed'
-      section.owedCents = null
-    }
+    section.status = statusAt(index, stoppedAt, section.lines.length)
+    if (section.status !== 'complete') section.owedCents = null
   }
   return { sections, rowCount, capped: stoppedAt >= 0 }
+}
+
+/** A loan nothing has happened on: the Report read all of it, and it has no Transaction in the dates or before them. A loan that was paid off is not unused. */
+export const isUnused = (section: LoanSection) => section.status === 'complete' && section.lines.length === 0 && section.openingCount === 0
+
+/**
+ * What the loans owe added up, for the top of a Report of several: what the Accounts are owed (the loans where more went out than came back) and what they owe (where more came in),
+ * each added on its own and never netted, because a person's debt is not paid by another's loan. A loan the cap stopped has no amount, so it is counted in `notWorkedOut` and
+ * is in neither total.
+ */
+export function totalLoans(sections: LoanSection[]) {
+  let owedToCents = 0
+  let owedByCents = 0
+  let notWorkedOut = 0
+  for (const section of sections) {
+    if (section.owedCents === null) notWorkedOut += 1
+    else if (section.owedCents > 0) owedToCents += section.owedCents
+    else owedByCents -= section.owedCents
+  }
+  return { owedToCents, owedByCents, notWorkedOut }
 }
 
 /** What the Loans Report's address holds: the Loans Category (all of them when left out) and the dates, both ends included. A start date is optional. */

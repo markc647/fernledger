@@ -1,33 +1,23 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
+import { budgetColumns } from '@/components/budget-columns'
 import { ResponsiveTable } from '@/components/responsive-table'
-import { Spent } from '@/components/spent'
-import { Status } from '@/components/status'
-import { budgetStatus, UNCATEGORISED_SPENDING } from '@/lib/budgets'
-import { formatBalance, formatMonth } from '@/lib/format'
+import { budgetRows } from '@/lib/budgets'
+import { formatMonth } from '@/lib/format'
 import { meQuery } from '@/lib/me'
 import { budgetVsActualQuery } from '@/lib/queries'
 
-const money = 'whitespace-nowrap tabular-nums [font-kerning:none]'
-
-/** A Category with a Budget, or a row for what has none: Spending Categories without a Budget, and Uncategorised. */
-type Row = { key: string; name: string; budgetCents: number | null; spentCents: number }
+const columns = budgetColumns()
 
 /**
  * Summary widget: this month's Budget for each Spending Category that has one, against what it spent, and whether it is over or under,
  * then what the rest spent, and Uncategorised on its own. Which Budget a month has and what was spent come from the Worker (ADR 0012); the browser only words how they compare.
+ * The Budget vs actual Report writes each of its months the same way (`budgetRows`, `budgetColumns`).
  */
 export function BudgetVsActualWidget() {
   const { data, error } = useQuery(budgetVsActualQuery)
   const { data: me } = useQuery(meQuery)
-  const rows: Row[] =
-    data && data.rows.length > 0
-      ? [
-          ...data.rows.map((row) => ({ key: String(row.categoryId), name: row.categoryName, budgetCents: row.budgetCents, spentCents: row.spentCents })),
-          { key: 'other', name: 'Spending outside Budgets', budgetCents: null, spentCents: data.otherCents },
-          { key: 'uncategorised', name: UNCATEGORISED_SPENDING, budgetCents: null, spentCents: data.uncategorisedCents },
-        ]
-      : []
+  const rows = data && data.rows.length > 0 ? budgetRows(data) : []
   return (
     <section aria-labelledby="budget-heading">
       <h2 id="budget-heading" className="mb-3 text-xl font-semibold">
@@ -50,30 +40,7 @@ export function BudgetVsActualWidget() {
             rows={rows}
             getRowKey={(row) => row.key}
             emptyMessage={`No Category has a Budget in ${formatMonth(data.month)}.${me?.role === 'admin' ? ' Set one on the Budgets page.' : ''}`}
-            columns={[
-              { key: 'category', header: 'Category', cell: (row) => row.name },
-              { key: 'budget', header: 'Budget', align: 'end', cell: (row) => (row.budgetCents === null ? 'No Budget' : <span className={money}>{formatBalance(row.budgetCents)}</span>) },
-              {
-                key: 'spent',
-                header: 'Spent',
-                align: 'end',
-                cell: (row) => <Spent cents={row.spentCents} />,
-              },
-              {
-                key: 'status',
-                header: 'Status',
-                cell: (row) => {
-                  if (row.budgetCents === null) return <Status tone="neutral">Not in a Budget</Status>
-                  const status = budgetStatus(row.budgetCents, row.spentCents)
-                  return (
-                    <span className="inline-flex flex-col items-start">
-                      <Status tone={status.tone}>{status.words}</Status>
-                      <span className="text-muted-foreground tabular-nums">{status.detail}</span>
-                    </span>
-                  )
-                },
-              },
-            ]}
+            columns={columns}
           />
           <p className="mt-3">
             <Link to="/budgets" className="inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">

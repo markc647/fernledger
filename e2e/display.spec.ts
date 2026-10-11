@@ -93,7 +93,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/loans']
+  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/loans']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -320,7 +320,7 @@ test.describe('zoom', () => {
   // The Categories page with a long Category name and its Admin forms open: the kind form (with the Budgets it keeps), then the removal question for a
   // Spending Category with Budget changes and for an Income one. The Categories and Budgets are stubbed.
   const categoryForms = [
-    { form: 'the kind form', button: 'Set kind of', category: 'long' },
+    { form: 'the kind form', button: 'Select kind of', category: 'long' },
     { form: 'the removal question', button: 'Remove', category: 'long' },
     { form: 'the removal question for an Income Category', button: 'Remove', category: 'Wages and salary' },
   ] as const
@@ -350,7 +350,7 @@ test.describe('zoom', () => {
           await sizeButton(page, size).click()
           const target = category === 'long' ? longName : category
           await page.getByRole('button', { name: `${button} ${target}` }).click()
-          if (button === 'Set kind of') {
+          if (button === 'Select kind of') {
             await expect(page.locator('#kind-1')).toBeFocused()
             await page.locator('#kind-1').selectOption('loans')
             await expect(page.getByText('Its Budgets are kept but not used.')).toBeVisible()
@@ -702,7 +702,7 @@ test.describe('zoom', () => {
           return route.fulfill({
             json: {
               category: { id: category, name: category === 1 ? `Loan – ${person}` : 'Loan – Ben' },
-              openingCents: category === 1 ? -123456789 : 123456789,
+              opening: { cents: category === 1 ? -123456789 : 123456789, count: 1 },
               transactions: [
                 { id: category, date: '2026-10-08', description: `${long} payment with a long enough name to wrap on a narrow screen`, amountCents: category === 1 ? -123456789 : 123456789, accountName: 'Example account with a long name'.padEnd(60, 'y'), note: `${long} note that goes on and on` },
               ],
@@ -717,6 +717,60 @@ test.describe('zoom', () => {
         await expect(report).toContainText('$2,469,135.78') // the opening balance and the loan together, the largest amount owed
         await expect(report).toContainText(`${person} owes`)
         await expect(report).toContainText('Ben is owed')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The Budget vs actual Report with its longest content: a long app title, Account and Category name, the largest amounts, a notice that the dates were part of a
+  // month, a Budget that changed, a month that is not over and the months together, on screen (cards on a narrow window). The data is stubbed, so the test needs
+  // nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/reports/budget-vs-actual with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        const long = 'Category with a long name'.padEnd(60, 'z')
+        const month = (m: string, state: string, budgetCents: number, spentCents: number, changed: boolean) => ({
+          month: m,
+          state,
+          rows: [{ categoryId: 1, categoryName: long, budgetCents, spentCents, effectiveFrom: m, changed }],
+          otherCents: 123456789,
+          uncategorisedCents: -123456789,
+          budgetCents,
+          budgetedSpentCents: spentCents,
+          spentCents,
+        })
+        await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
+        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
+        await page.route('**/api/reports/budget-vs-actual?**', (route) =>
+          route.fulfill({
+            json: {
+              from: '2026-08-15',
+              to: '2026-10-31',
+              covers: { from: '2026-08-01', to: '2026-10-31' },
+              months: [month('2026-08', 'ended', 123456789, 123456790, false), month('2026-09', 'ended', 123456789, -123456789, true), month('2026-10', 'under-way', 123456789, 5, false)],
+              together: { first: '2026-08', last: '2026-09', months: 2 },
+              total: { budgetCents: 246913578, budgetedSpentCents: 1, spentCents: 1, otherCents: 246913578, uncategorisedCents: -246913578, budgetMonths: 2, overMonths: 1 },
+              categories: [{ categoryId: 1, categoryName: long, months: 2, overMonths: 1, budgetCents: 246913578, spentCents: 1 }],
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/reports/budget-vs-actual?from=2026-08-15&to=2026-10-31')
+        await sizeButton(page, size).click()
+        const report = page.getByRole('article', { name: 'Budget vs actual' })
+        await expect(report).toContainText('$1,234,567.89')
+        await expect(report).toContainText('You chose')
+        await expect(report).toContainText('$1,234,567.89 back')
+        await expect(report).toContainText('Budget changed from September 2026')
+        await expect(report).toContainText('August 2026 to September 2026, the 2 months that have ended')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))

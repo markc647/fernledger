@@ -77,7 +77,7 @@ A label grouping Transactions by purpose, such as Groceries or Care Fees.
 _Avoid_: Tag, type, bucket
 
 **Category kind**:
-What a Category is for, which the Admin sets: Spending, Income or Loans. It decides how the Category's Transactions are totalled; the rules are in [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+What a Category is for, which the Admin sets: Spending, Income or Loans. It decides how the Category's Transactions are totalled, and a Loans Category is what the Loans Report lists; the rules are in [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
 _Avoid_: Type (that is Change type), group
 
 **Spending**:
@@ -120,6 +120,10 @@ _Avoid_: Migrate, restore, reapply
 A planned monthly Spending amount for a Spending Category, effective from a given month onward; unspent amounts do not carry over. Budget vs actual compares it each month with what the Category spent.
 _Avoid_: Limit, allowance, envelope
 
+**Budget vs actual**:
+A month's Budgets set against what the Spending Categories spent in it: each Category with a Budget that month, with its Budget, what it spent and where it stands (Under Budget, On Budget or Over Budget), then **Spending outside Budgets** (the Spending Categories with no Budget that month) and Uncategorised. The Summary shows this month's; the Budget vs actual Report shows every month of a range, for all Accounts together, and adds together only the months that have ended, because the month it is now has had part of its spending set against the whole of its Budget.
+_Avoid_: Variance, forecast
+
 ## Accountability
 
 **Change Log**:
@@ -131,11 +135,11 @@ What a Change Log entry changed, such as Settings, Import, Account, Category, Ru
 _Avoid_: Type on its own
 
 **Report**:
-A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, or of what is owed on a loan, over a date range, which any Member can print or save as PDF.
+A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, of Budget vs actual, or of what is owed on a loan, over a date range, which any Member can print or save as PDF.
 _Avoid_: Statement, export
 
 **Loans Report**:
-The Report of one Loans Category, or of each of them with a section each, from the first Transaction or a start date up to a date. A section lists the Category's Transactions with what is owed after each and at the end: "Alice owes $300.00" when more money went out than came in, "Alice is owed $300.00" when more came in. It says "is owed", not "we owe", because in Fernledger "we" is Fernledger itself. A start date begins it with what was owed before that date.
+The Report of one Loans Category, or of each of them with a section each, from the first Transaction or a start date up to a date. A section lists the Category's Transactions with what is owed after each and on the last date: "Alice owes $300.00 to the Accounts" when more money went out than came in, "Alice is owed $300.00" when more came in. The person is named by the Category ("Loan – Alice"), and "the Accounts" are the household's side. It never says "we owe", because in Fernledger "we" is Fernledger itself ("the last Transaction we hold"). A start date begins it with what was owed before that date.
 _Avoid_: Loan statement, debt report
 
 **CSV export**:

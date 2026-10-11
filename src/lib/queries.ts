@@ -141,6 +141,22 @@ export const reportSpendingQuery = (accountId: number | undefined, from: string,
     },
   })
 
+/**
+ * The Budget vs actual Report's data: each month the dates touch, in one request for all the months (a Budget is for all Accounts together). Read once and kept, as
+ * the other Reports are: a Report is a snapshot.
+ */
+export const reportBudgetQuery = (from: string, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'budget-vs-actual', from, to],
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const res = await api.reports['budget-vs-actual'].$get({ query: { from, to } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
 /** The Categories in use, by name. */
 export const categoriesQuery = queryOptions({
   queryKey: ['categories'],

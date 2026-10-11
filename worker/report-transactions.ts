@@ -24,12 +24,12 @@ export const pagingFields = {
   limit: z.optional(digits),
 }
 
-/** The validated `after` and `limit` as a page asks for them: the cursor read into a date and ID, and the size defaulted and kept between one and `REPORT_PAGE_SIZE`. */
-export function toPaging(q: { after?: string; limit?: string }): { after?: { date: string; id: number }; limit: number } {
+/** The validated `after` and `limit` as a page asks for them: the cursor read into a date and ID, and the size defaulted and kept between one and `pageSize` (a Report's own largest page; `REPORT_PAGE_SIZE` unless it says). */
+export function toPaging(q: { after?: string; limit?: string }, pageSize = REPORT_PAGE_SIZE): { after?: { date: string; id: number }; limit: number } {
   const cursor = q.after === undefined ? null : CURSOR.exec(q.after)
   return {
     after: cursor ? { date: cursor[1]!, id: Number(cursor[2]) } : undefined,
-    limit: Math.min(Math.max(Number(q.limit ?? REPORT_PAGE_SIZE), 1), REPORT_PAGE_SIZE),
+    limit: Math.min(Math.max(Number(q.limit ?? pageSize), 1), pageSize),
   }
 }
 

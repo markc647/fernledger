@@ -13,15 +13,16 @@ const Identity = createContext<ReportIdentity | null>(null)
  * The heading to give each printed table (`ResponsiveTable`'s `printHeading`), for the Account it lists: two lines, "<app> –
  * <Report> – <Account> – <dates>" and "Generated … by …". A browser repeats a table's heading at the top of every page the
  * table runs onto, so every printed page says what it is and who made it, in every browser, with no help from page margins.
- * Null outside a Report.
+ * `also` is a third line for what a reader of a loose page must know about the figures, such as what is not counted. Null outside a Report.
  */
 export function useReportIdentity() {
   const identity = useContext(Identity)
-  return (accounts: string) =>
+  return (accounts: string, also?: string) =>
     identity && (
       <>
         <span className="block font-semibold">{reportHeading({ ...identity, accounts })}</span>
         <span className="block">{identity.generated}</span>
+        {also && <span className="block">{also}</span>}
       </>
     )
 }
@@ -56,10 +57,13 @@ export function ReportFrame({
   name: string
   /** The Account(s) it covers, in words, for the title block: each with its bank number. */
   accounts: string
-  /** The same for the browser's page title, which is the name "Save as PDF" suggests: "All Accounts", or the one Account's name. */
+  /**
+   * What goes in the browser's page title where the Account(s) do, which is the name "Save as PDF" suggests: "All Accounts", or the one Account's name, or for the Loans
+   * Report the Loans Category (which has no one Account), such as "Loan – Alice" or "All loans".
+   */
   accountsInTitle: string
-  /** NZ dates, both ends included. A Report that may begin at the first Transaction (Loans) leaves `from` out, and its dates say so. */
-  from?: string
+  /** NZ dates, both ends included. A Report that may begin at the first Transaction (Loans) says so by passing `null`, and its dates read "From the first Transaction to …". */
+  from: string | null
   to: string
   /** What the Report is about when that is not an Account (the Loans Report's Loans Category), as one more line of the title block: "Loans: Loan – Alice". */
   subject?: { label: string; text: string }

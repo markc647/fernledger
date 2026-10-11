@@ -33,7 +33,7 @@ function LoansReportPage() {
 
 /**
  * How much each Loans Category's person owes, or is owed, with the lending and repayments that make it up (the family's record of a loan to a child, or from one). It is
- * read a page at a time and stops at the Transaction listing's cap, which it says. It lists the Loans Category chosen, or each one, and says so when there is none to list.
+ * read a page at a time and stops at its cap (`LOANS_ROW_CAP`), which it says. It lists the Loans Category chosen, or each one, and says so when there is none to list.
  */
 function Loans({ scope, search }: { scope: ReportScope; search: LoansSearch }) {
   const loans = useQuery(reportLoansQuery(search.category, search.from, scope.to))
@@ -45,7 +45,7 @@ function Loans({ scope, search }: { scope: ReportScope; search: LoansSearch }) {
     return <Needs name={NAME} form={<LoansForm defaults={search} />} message="There are no Loans Categories to report on yet." />
   }
   if (listing.sections.length === 0) {
-    return <Needs name={NAME} form={<LoansForm defaults={search} />} alert message="There is no such Loans Category. Choose one below." />
+    return <Needs name={NAME} form={<LoansForm defaults={search} />} alert message="There is no such Loans Category. It may have been removed, or may no longer be a Loans Category. Choose one below." />
   }
   const chosen = search.category === undefined ? null : listing.sections[0]!
   return (
@@ -53,13 +53,13 @@ function Loans({ scope, search }: { scope: ReportScope; search: LoansSearch }) {
       name={NAME}
       accounts={scope.accountsText}
       accountsInTitle={chosen ? chosen.name : 'All loans'}
-      from={search.from}
+      from={search.from ?? null}
       to={scope.to}
       subject={{ label: 'Loans', text: chosen ? chosen.name : 'All Loans Categories' }}
       generatedAt={loans.dataUpdatedAt}
       notice={listing.capped ? <LoansCappedNotice alert /> : undefined}
     >
-      <LoansReport loans={listing} from={search.from} />
+      <LoansReport loans={listing} from={search.from ?? null} to={scope.to} all={chosen === null} />
       <BackToReports />
     </ReportFrame>
   )

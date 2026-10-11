@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { addMonths, budgetStatus, capNotice, changeLine, laterChanges, monthChoices, savedMessage, spentParts } from './budgets'
+import { addMonths, budgetRows, budgetStatus, capNotice, changeLine, laterChanges, monthChoices, savedMessage, spentParts } from './budgets'
+
+describe('budgetRows', () => {
+  it('has a row for each Category with a Budget, then Spending outside Budgets, then Uncategorised, which have no Budget', () => {
+    const rows = budgetRows({ rows: [{ categoryId: 7, categoryName: 'Groceries', budgetCents: 80_000, spentCents: 55_050 }], otherCents: 1_200, uncategorisedCents: -300 })
+
+    expect(rows).toEqual([
+      { key: '7', name: 'Groceries', budgetCents: 80_000, spentCents: 55_050 },
+      { key: 'other', name: 'Spending outside Budgets', budgetCents: null, spentCents: 1_200 },
+      { key: 'uncategorised', name: 'Uncategorised (includes money in not yet given a Category)', budgetCents: null, spentCents: -300 },
+    ])
+  })
+
+  it('still has the two rows that are not in a Budget when no Category has one', () => {
+    expect(budgetRows({ rows: [], otherCents: 0, uncategorisedCents: 0 }).map((row) => row.key)).toEqual(['other', 'uncategorised'])
+  })
+})
 
 describe('budgetStatus', () => {
   it('is under Budget, with what is left, while less than the Budget has been spent', () => {

@@ -1,11 +1,11 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { REPORT_PAGE_SIZE as PAGE_REPORT_PAGE_SIZE } from '../src/lib/report-transactions'
+import { isLoansKind as browserIsLoansKind, LOANS as BROWSER_LOANS } from '../src/lib/category-kinds'
+import { LOANS_PAGE_SIZE as PAGE_LOANS_PAGE_SIZE } from '../src/lib/report-loans'
 import worker from './index'
-import { isLoansKind } from './category-kinds'
-import type { LoanPage, LoanRow } from './report-loans'
-import { REPORT_PAGE_SIZE } from './report-transactions'
+import { CATEGORY_KINDS, isLoansKind, LOANS } from './category-kinds'
+import { LOANS_PAGE_SIZE, type LoanPage, type LoanRow } from './report-loans'
 import { buildSpending, rollUp, type SpendingRow } from './spending'
 import type { SpendingByCategory } from './spending-by-category'
 
@@ -143,7 +143,7 @@ describe('what the Report lists', () => {
   })
 
   it('is empty, with nothing owed, for a Category with no Transactions', async () => {
-    expect(await page()).toEqual({ category: { id: ids[ALICE], name: ALICE }, openingCents: 0, transactions: [], next: null })
+    expect(await page()).toEqual({ category: { id: ids[ALICE], name: ALICE }, opening: { cents: 0, count: 0 }, transactions: [], next: null })
   })
 })
 
@@ -199,25 +199,25 @@ describe('the dates', () => {
   it('goes from the first Transaction up to the date, both included, when no start date is given, and has no opening balance', async () => {
     const p = await page({ to: '2026-08-31' })
     expect(lines(p)).toEqual([['2026-07-31', -50_000], ['2026-08-01', -10_000], ['2026-08-31', 4000]])
-    expect(p.openingCents).toBe(0)
+    expect(p.opening).toEqual({ cents: 0, count: 0 })
   })
 
   it('starts at the start date, which is included, and adds up everything before it as the opening balance', async () => {
     const p = await page({ from: '2026-08-01', to: '2026-08-31' })
     expect(lines(p)).toEqual([['2026-08-01', -10_000], ['2026-08-31', 4000]])
-    expect(p.openingCents).toBe(-50_000)
+    expect(p.opening).toEqual({ cents: -50_000, count: 1 })
   })
 
   it('has an opening balance of everything before a start date that is after every Transaction, and no rows', async () => {
     const p = await page({ from: '2026-10-01', to: '2026-10-31' })
     expect(p.transactions).toEqual([])
-    expect(p.openingCents).toBe(-50_000 - 10_000 + 4000 + 2500)
+    expect(p.opening).toEqual({ cents: -50_000 - 10_000 + 4000 + 2500, count: 4 })
   })
 
   it('makes a single day a range, and takes the opening balance from the day before', async () => {
     const p = await page({ from: '2026-08-31', to: '2026-08-31' })
     expect(lines(p)).toEqual([['2026-08-31', 4000]])
-    expect(p.openingCents).toBe(-60_000)
+    expect(p.opening).toEqual({ cents: -60_000, count: 2 })
   })
 
   it('counts only the Category\'s own Transactions, and no Transfer, in the opening balance', async () => {
@@ -227,7 +227,7 @@ describe('the dates', () => {
     const { out } = await pair('2026-07-04', 6000)
     await env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(ids[ALICE], out).run() // lending to the child's tracked Account
 
-    expect((await page({ from: '2026-08-01' })).openingCents).toBe(-50_000 - 6000)
+    expect((await page({ from: '2026-08-01' })).opening).toEqual({ cents: -50_000 - 6000, count: 2 })
   })
 
   it('reads each date as the NZ date it is, across the end of a year', async () => {
@@ -235,7 +235,7 @@ describe('the dates', () => {
     await add(parent, '2027-01-01', -200, { override: ALICE })
     const p = await page({ from: '2026-12-31', to: '2027-01-01' })
     expect(lines(p)).toEqual([['2026-12-31', -100], ['2027-01-01', -200]])
-    expect(p.openingCents).toBe(-50_000 - 10_000 + 4000 + 2500)
+    expect(p.opening?.cents).toBe(-50_000 - 10_000 + 4000 + 2500)
   })
 })
 
@@ -253,11 +253,11 @@ describe('paging', () => {
     const first = await page({ from: '2026-08-01', limit: '2' })
     expect(first.transactions.map((t) => t.id)).toEqual(all.slice(0, 2))
     expect(first.next).toBe(`2026-08-02:${all[1]}`)
-    expect(first.openingCents).toBe(-1000)
+    expect(first.opening).toEqual({ cents: -1000, count: 1 })
 
     const second = await page({ from: '2026-08-01', limit: '2', after: first.next! })
     expect(second.transactions.map((t) => t.id)).toEqual(all.slice(2, 4))
-    expect(second.openingCents).toBeNull()
+    expect(second.opening).toBeNull()
 
     const third = await page({ from: '2026-08-01', limit: '2', after: second.next! })
     expect(third.transactions.map((t) => t.id)).toEqual(all.slice(4))
@@ -272,9 +272,9 @@ describe('paging', () => {
     expect(p.next).toBeNull()
   })
 
-  it('keeps a page to the size asked for, at most the Transaction listing\'s page, and at least one', async () => {
+  it('keeps a page to the size asked for, at most the Loans Report\'s page of 1,000 (larger than the Transaction listing\'s 200), and at least one', async () => {
     await env.DB.prepare(
-      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${REPORT_PAGE_SIZE + 20})
+      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${LOANS_PAGE_SIZE + 20})
        INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category) SELECT ?, '2026-08-01', -100, 'EXAMPLE ' || i, 'import', ? FROM seq`,
     )
       .bind(parent, ids[ALICE])
@@ -282,13 +282,14 @@ describe('paging', () => {
     expect((await page({ limit: '1' })).transactions).toHaveLength(1)
     expect((await page({ limit: '0' })).transactions).toHaveLength(1)
     const huge = await page({ limit: '100000' })
-    expect(huge.transactions).toHaveLength(REPORT_PAGE_SIZE)
+    expect(huge.transactions).toHaveLength(LOANS_PAGE_SIZE)
     expect(huge.next).not.toBeNull()
-    expect((await page()).transactions).toHaveLength(REPORT_PAGE_SIZE) // and that is the page when none is asked for
+    expect((await page()).transactions).toHaveLength(LOANS_PAGE_SIZE) // and that is the page when none is asked for
   })
 
-  it('uses the page size the Report page asks for, the Transaction listing\'s', () => {
-    expect(PAGE_REPORT_PAGE_SIZE).toBe(REPORT_PAGE_SIZE)
+  it('uses the page size the Report page asks for (the page keeps its own copy), 1,000: the loan is re-read for every page, so a page is large', () => {
+    expect(PAGE_LOANS_PAGE_SIZE).toBe(LOANS_PAGE_SIZE)
+    expect(LOANS_PAGE_SIZE).toBe(1000)
   })
 })
 
@@ -310,6 +311,11 @@ describe('only a Loans Category', () => {
     expect(lines(await named('Groceries'))).toEqual([['2026-08-01', -4000]])
     await env.DB.prepare("UPDATE categories SET kind = 'spending' WHERE name = 'Groceries'").run()
     expect((await call(`/api/reports/loans?${query({ categoryId: String(ids['Groceries']) })}`)).status).toBe(404)
+  })
+
+  it('means by a Loans Category what the pages mean: the browser\'s LOANS and isLoansKind are the Worker\'s, for every kind', () => {
+    expect(BROWSER_LOANS).toBe(LOANS)
+    for (const kind of CATEGORY_KINDS) expect(browserIsLoansKind(kind), kind).toBe(isLoansKind(kind))
   })
 
   it('is a 404 for a Category that does not exist, and for one of fifteen digits, the most an ID has', async () => {
@@ -448,6 +454,16 @@ describe('the same loans as everywhere else that sets Loans apart from Spending 
     expect(vsActual.rows.map((r) => r.categoryId)).not.toContain(ids[ALICE])
     // August's Spending is the Groceries Transaction the Admin put back, the other one, and the one with no Category; none of the loans' $500.00, $300.00 or $77.70.
     expect(vsActual.otherCents + vsActual.uncategorisedCents).toBe(888 + 4000 + 700)
+
+    // And the Budget vs actual Report, for the months the loans fall in: August holds the loans' $500.00 and the rest, September their repayments and the lending by Transfer.
+    const budgets = (await (await call('/api/reports/budget-vs-actual?from=2026-08-01&to=2026-09-30')).json()) as {
+      months: { month: string; rows: { categoryId: number }[]; otherCents: number; uncategorisedCents: number; spentCents: number }[]
+      total: { spentCents: number; otherCents: number; uncategorisedCents: number }
+    }
+    expect(budgets.months.map((m) => [m.month, m.spentCents])).toEqual([['2026-08', 888 + 4000 + 700], ['2026-09', 0]])
+    expect(budgets.months.flatMap((m) => m.rows.map((r) => r.categoryId))).not.toContain(ids[ALICE])
+    expect(budgets.total.spentCents).toBe(888 + 4000 + 700)
+    expect(budgets.total.otherCents + budgets.total.uncategorisedCents).toBe(888 + 4000 + 700)
   })
 
   it('would count the same Transactions as Spending if their Category were Spending, which is what leaving out a loan is', async () => {
@@ -581,10 +597,53 @@ describe('what a request costs (ADR 0004)', () => {
     expect(first.usage.rowsRead).toBeLessThanOrEqual(LOAN * PER_TRANSACTION + SLACK)
   })
 
+  it('reads a family\'s loan in one request: a few hundred Transactions are a single page, with nothing to continue', async () => {
+    const { db, usage } = metered()
+
+    const res = await requestWith(db)
+
+    const p = (await res.json()) as LoanPage
+    expect(p.transactions).toHaveLength(LOAN)
+    expect(p.next).toBeNull()
+    expect(usage.queries).toBe(2)
+    expect(usage.rowsRead).toBeLessThanOrEqual(LOAN * PER_TRANSACTION + SLACK)
+  })
+
+  it('pins what a loan of several pages costs in all: every page re-reads the whole loan, so three pages of a 2,400 Transaction loan cost three times one', async () => {
+    await env.DB.prepare(
+      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < 2100)
+       INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category, rule_category)
+       SELECT ?, date('2021-01-01', '+' || (i / 4) || ' days'), -100, 'EXAMPLE MORE ' || i, 'import', ?, CASE WHEN i % 3 = 0 THEN ? END FROM seq`,
+    )
+      .bind(parent, ids[ALICE], ids['Fuel'])
+      .run()
+    const size = LOAN + 2100
+    let after: string | undefined
+    const totals = { pages: 0, rows: 0, queries: 0, rowsRead: 0 }
+    for (;;) {
+      const { db, usage } = metered()
+      const res = await requestWith(db, after ? { after } : {})
+      const p = (await res.json()) as LoanPage
+      totals.pages += 1
+      totals.rows += p.transactions.length
+      totals.queries += usage.queries
+      totals.rowsRead += usage.rowsRead
+      if (p.next === null) break
+      after = p.next
+    }
+
+    expect(totals.pages).toBe(Math.ceil(size / LOANS_PAGE_SIZE))
+    expect(totals.rows).toBe(size)
+    expect(totals.queries).toBe(2 * totals.pages)
+    // About 6.3 reads for each Transaction of the loan, for every page: not for the page's own thousand. The household's other 4,000 are never read.
+    expect(totals.rowsRead).toBeLessThanOrEqual(totals.pages * (size * PER_TRANSACTION + SLACK))
+    expect(totals.rowsRead).toBeGreaterThan(totals.pages * size * 4)
+  })
+
   it('reads the Transactions before a start date, once, for the opening balance, and not the history around them', async () => {
     const { db, usage } = metered()
     const res = await requestWith(db, { from: '2022-04-11', limit: '1' }) // the loan's Transactions are dated 2022-01-01 plus 1 to 300 days: 99 of them are before this
-    expect(((await res.json()) as LoanPage).openingCents).toBe(-99 * 100)
+    expect(((await res.json()) as LoanPage).opening).toEqual({ cents: -99 * 100, count: 99 })
     // The opening balance and the page each find the loan's Transactions; the 4,000 are not read.
     expect(usage.rowsRead).toBeLessThanOrEqual(2 * LOAN * PER_TRANSACTION + SLACK)
   })
