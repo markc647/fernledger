@@ -105,6 +105,26 @@ const liveRegion = async (region: ReturnType<typeof netWorth>) => {
 }
 const LOADING_NET_WORTH = 'Loading net worth. It reads every Transaction, so it can take a moment.'
 
+type Live = { __live: Record<string, string[]> }
+/**
+ * Records every text a section's status region comes to have, from the moment it is first on the page (the page's scripts run before anything is drawn). A section
+ * that loads as soon as it is shown has no moment a test can stop at to see its region empty, so the test reads the history afterwards: empty, then loading, then loaded.
+ */
+const watchLiveRegions = (page: Page) =>
+  page.addInitScript(() => {
+    const seen: Record<string, string[]> = {}
+    ;(window as unknown as Live).__live = seen
+    new MutationObserver(() => {
+      for (const section of document.querySelectorAll('section[aria-labelledby]')) {
+        const live = section.querySelector(':scope > [role="status"]')
+        if (!live) continue
+        const history = (seen[section.getAttribute('aria-labelledby')!] ??= [])
+        if (history.at(-1) !== live.textContent) history.push(live.textContent ?? '')
+      }
+    }).observe(document, { childList: true, subtree: true, characterData: true })
+  })
+const liveHistory = (page: Page, heading: string) => page.evaluate((id) => (window as unknown as Live).__live[id], heading)
+
 /** Shows spending between two dates, as the person who chooses dates does. */
 async function chooseDates(page: Page, from: string, to: string) {
   await spending(page).getByLabel('Period', { exact: true }).selectOption('custom')
@@ -314,17 +334,21 @@ test('net worth is drawn as a line, and says what it is: only the money in these
 test('the Charts page lets the reader choose how far back net worth goes, and the page is busy while it asks', async ({ page, context }) => {
   await signInAs(context, 'member')
   const asked: string[] = []
+  await watchLiveRegions(page)
   await page.route(/\/api\/charts\/net-worth/, async (route) => {
     asked.push(new URL(route.request().url()).searchParams.get('range')!)
-    if (asked.length > 1) await new Promise((resolve) => setTimeout(resolve, 700)) // the second answer is slow, so the busy cue can be seen
+    await new Promise((resolve) => setTimeout(resolve, asked.length > 1 ? 700 : 400)) // slow, so the cues can be seen: the first answer as well as the second
     await route.fulfill({ json: { ...NET_WORTH, range: asked.at(-1) } })
   })
   await page.goto('/charts')
   const region = netWorth(page)
   const live = region.getByRole('status') // the one live region the section keeps on the page
   const element = (await live.elementHandle())!
+  await expect(region).toHaveAttribute('aria-busy', 'true') // the first load
+  await expect(live).toHaveText(LOADING_NET_WORTH)
   await drawn(region, LINE)
   await expect(live).toHaveText('Net worth has loaded.')
+  await expect(region).toHaveAttribute('aria-busy', 'false')
   await expect(region.getByLabel('Range', { exact: true })).toHaveValue('24-months')
   await expect(region.getByRole('option')).toHaveText(['Last 24 months', 'Last 5 years', 'All history'])
   expect(asked).toEqual(['24-months'])
@@ -337,6 +361,8 @@ test('the Charts page lets the reader choose how far back net worth goes, and th
   await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toHaveCount(0)
   await expect(region).toHaveAttribute('aria-busy', 'false')
   expect(await element.evaluate((el) => el.isConnected)).toBe(true)
+  // The one element went from empty to loading to loaded, and on to updating and loaded again.
+  expect(await liveHistory(page, 'net-worth-heading')).toEqual(['', LOADING_NET_WORTH, 'Net worth has loaded.', 'Updating net worth…', 'Net worth has loaded.'])
   expect(asked).toEqual(['24-months', '5-years'])
 })
 
@@ -422,6 +448,9 @@ test('a period the Worker names is asked for by name, and a mistake in the dates
   await expect(region.getByRole('alert')).toHaveText('The “To” date is before the “From” date. Change one of them to see the chart.')
   await expect(region.getByLabel('To', { exact: true })).toHaveAttribute('aria-invalid', 'true')
   expect(requests).toEqual([])
+  // The old period stays on the screen as it was, and is not "updating" or busy: nothing is being asked for.
+  await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toHaveCount(0)
+  await expect(region).toHaveAttribute('aria-busy', 'false')
 
   // Putting them right asks, and the explanation goes.
   await region.getByLabel('To', { exact: true }).fill('2034-06-30')
@@ -432,6 +461,7 @@ test('a period the Worker names is asked for by name, and a mistake in the dates
 test('spending is marked busy from its first load, and the old period is marked as old while a new one is asked for', async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
+  await watchLiveRegions(page)
   await page.route(/\/api\/charts\/spending\?/, async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 700)) // slow, so the cues can be seen: the first answer as well as the second
     await route.fulfill({ json: { from: '2026-10-01', to: '2026-10-31', totalCents: 16_050, categories: SPENT } })
@@ -455,6 +485,8 @@ test('spending is marked busy from its first load, and the old period is marked 
   await expect(live).toHaveText('Spending has loaded.')
   await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toHaveCount(0)
   expect(await element.evaluate((el) => el.isConnected)).toBe(true)
+  // The one element went from empty to loading to loaded, and on to updating and loaded again.
+  expect(await liveHistory(page, 'spending-heading')).toEqual(['', 'Loading spending…', 'Spending has loaded.', 'Updating spending…', 'Spending has loaded.'])
 })
 
 test('the charts have no WCAG 2.2 AA violations in this theme, with their data, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {

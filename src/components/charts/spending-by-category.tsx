@@ -66,8 +66,10 @@ export function SpendingByCategory() {
   }
   const { rows, bars, leftOut } = barsOf(data?.categories ?? [])
   const dates = data ? describeDates(data.from, data.to) : ''
+  // The period on the screen is the old one only while the new one is being asked for: with dates that cannot be asked about, nothing is updating and it stays as it is.
+  const updating = isPlaceholderData && isFetching
   // What a screen reader is told as it happens, in a region that is on the page from the start (a change is announced, an arrival often is not).
-  const message = error || (!data && problem) ? '' : !data ? 'Loading spending…' : isPlaceholderData ? 'Updating spending…' : 'Spending has loaded.'
+  const message = error || (!data && problem) ? '' : !data ? 'Loading spending…' : updating ? 'Updating spending…' : 'Spending has loaded.'
 
   return (
     <section aria-labelledby="spending-heading" aria-busy={isFetching}>
@@ -123,8 +125,8 @@ export function SpendingByCategory() {
         )
       ) : (
         <div className="mt-4">
-          {isPlaceholderData && <p className="mb-2 font-medium">Updating…</p>}
-          <div className={isPlaceholderData ? 'opacity-60' : undefined}>
+          {updating && <p className="mb-2 font-medium">Updating…</p>}
+          <div className={updating ? 'opacity-60' : undefined}>
             <p className="mb-3 text-muted-foreground">
               What the Categories spent in {dates}, money out less money back, such as a refund. Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted.
               Uncategorised counts as spending, so money in that has no Category yet comes off it.
