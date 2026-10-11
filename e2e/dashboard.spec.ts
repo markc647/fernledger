@@ -141,6 +141,28 @@ const NET_WORTH = {
 const stubNetWorth = (page: Page, answer: object = NET_WORTH) => page.route(/\/api\/charts\/net-worth/, (route) => route.fulfill({ json: answer }))
 const stubSpending = (page: Page, categories: object[], totalCents: number) =>
   page.route(/\/api\/charts\/spending\?/, (route) => route.fulfill({ json: { from: '2026-10-01', to: '2026-10-31', totalCents, categories } }))
+/**
+ * Answers the requests the page makes for `pattern` only when the test lets each one go (`release`), oldest first. A test of what a section shows while it waits for its
+ * answer must not race a timer in the stub: an answer that comes by itself after 400 or 700 ms is gone when a slow run reaches the assertion about the wait (a full run
+ * did that once, at "Loading net worth"), and a timer long enough for the slowest run makes every run slow. `answer` is given the URL asked for.
+ */
+async function holdAnswers(page: Page, pattern: RegExp, answer: (url: URL) => object) {
+  const asked: URL[] = []
+  const waiting: Array<() => Promise<void>> = []
+  await page.route(pattern, (route) => {
+    const url = new URL(route.request().url())
+    asked.push(url)
+    waiting.push(() => route.fulfill({ json: answer(url) })) // not answered yet: the request stays with the test
+  })
+  return {
+    asked,
+    /** Answers the oldest request that is waiting, once the page has made one. */
+    release: async () => {
+      await expect.poll(() => waiting.length, { message: 'a request for the test to answer' }).toBeGreaterThan(0)
+      await waiting.shift()!()
+    },
+  }
+}
 const SPENT = [
   { categoryId: 1, name: 'Fuel', cents: 9000 },
   { categoryId: 2, name: 'Groceries', cents: 4550 },
@@ -224,12 +246,7 @@ test('the Admin lands on the Dashboard: their tools, every part of the Summary, 
 
 test('the button that shows net worth is a touch target with a clear name, works from the keyboard, and shows a busy cue while it loads', async ({ page, context }) => {
   await signInAs(context, 'admin')
-  let answered = 0
-  await page.route(/\/api\/charts\/net-worth/, async (route) => {
-    answered += 1
-    await new Promise((resolve) => setTimeout(resolve, 700)) // slow enough to see the cue
-    await route.fulfill({ json: NET_WORTH })
-  })
+  const net = await holdAnswers(page, /\/api\/charts\/net-worth/, () => NET_WORTH) // the cue is there for as long as the test looks at it
   await stubSpending(page, SPENT, 16_050)
   await page.goto('/')
   const region = netWorth(page)
@@ -247,11 +264,12 @@ test('the button that shows net worth is a touch target with a clear name, works
   await expect(live).toHaveText(LOADING_NET_WORTH) // said in the region that was already on the page...
   await expect(region.locator('p:not([role="status"])', { hasText: LOADING_NET_WORTH })).toBeVisible() // ...and shown on the screen
   await expect(region.getByRole('heading', { level: 2 })).toBeFocused() // not lost to the page when the button goes
+  await net.release()
   await drawn(region, LINE)
   await expect(live).toHaveText('Net worth has loaded.') // the same region, its words changed
   expect(await element.evaluate((el) => el.isConnected)).toBe(true)
   await expect(region).toHaveAttribute('aria-busy', 'false')
-  expect(answered).toBe(1)
+  expect(net.asked).toHaveLength(1)
 })
 
 test('a Member lands on the Summary, which leads to the Charts, and sees none of the Admin\'s tools', async ({ page, context }) => {
@@ -327,37 +345,36 @@ test('net worth is drawn as a line, and says what it is: only the money in these
 
 test('the Charts page lets the reader choose how far back net worth goes, and the page is busy while it asks', async ({ page, context }) => {
   await signInAs(context, 'member')
-  const asked: string[] = []
   await watchLiveRegions(page)
-  await page.route(/\/api\/charts\/net-worth/, async (route) => {
-    asked.push(new URL(route.request().url()).searchParams.get('range')!)
-    await new Promise((resolve) => setTimeout(resolve, asked.length > 1 ? 700 : 400)) // slow, so the cues can be seen: the first answer as well as the second
-    await route.fulfill({ json: { ...NET_WORTH, range: asked.at(-1) } })
-  })
+  // Each answer waits for the test to let it go, so the cues are there for as long as the test looks at them, the first answer as well as the second.
+  const net = await holdAnswers(page, /\/api\/charts\/net-worth/, (url) => ({ ...NET_WORTH, range: url.searchParams.get('range') }))
+  const asked = () => net.asked.map((url) => url.searchParams.get('range'))
   await page.goto('/charts')
   const region = netWorth(page)
   const live = region.getByRole('status') // the one live region the section keeps on the page
   const element = (await live.elementHandle())!
   await expect(region).toHaveAttribute('aria-busy', 'true') // the first load
   await expect(live).toHaveText(LOADING_NET_WORTH)
+  await net.release()
   await drawn(region, LINE)
   await expect(live).toHaveText('Net worth has loaded.')
   await expect(region).toHaveAttribute('aria-busy', 'false')
   await expect(region.getByLabel('Range', { exact: true })).toHaveValue('24-months')
   await expect(region.getByRole('option')).toHaveText(['Last 24 months', 'Last 5 years', 'All history'])
-  expect(asked).toEqual(['24-months'])
+  expect(asked()).toEqual(['24-months'])
 
   await region.getByLabel('Range', { exact: true }).selectOption('5-years')
   await expect(live).toHaveText('Updating net worth…') // said in the region that was already there
   await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toBeVisible() // the old range stays on the screen, marked as old
   await expect(region).toHaveAttribute('aria-busy', 'true')
+  await net.release()
   await expect(live).toHaveText('Net worth has loaded.')
   await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toHaveCount(0)
   await expect(region).toHaveAttribute('aria-busy', 'false')
   expect(await element.evaluate((el) => el.isConnected)).toBe(true)
   // The one element went from empty to loading to loaded, and on to updating and loaded again.
   expect(await liveHistory(page, 'net-worth-heading')).toEqual(['', LOADING_NET_WORTH, 'Net worth has loaded.', 'Updating net worth…', 'Net worth has loaded.'])
-  expect(asked).toEqual(['24-months', '5-years'])
+  expect(asked()).toEqual(['24-months', '5-years'])
 })
 
 test('net worth\'s figures open from the keyboard, and the control is a touch target', async ({ page, context }) => {
@@ -456,10 +473,7 @@ test('spending is marked busy from its first load, and the old period is marked 
   await signInAs(context, 'member')
   await stubNetWorth(page)
   await watchLiveRegions(page)
-  await page.route(/\/api\/charts\/spending\?/, async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 700)) // slow, so the cues can be seen: the first answer as well as the second
-    await route.fulfill({ json: { from: '2026-10-01', to: '2026-10-31', totalCents: 16_050, categories: SPENT } })
-  })
+  const answers = await holdAnswers(page, /\/api\/charts\/spending\?/, () => ({ from: '2026-10-01', to: '2026-10-31', totalCents: 16_050, categories: SPENT })) // held, so the cues can be seen: the first answer as well as the second
   await page.goto('/charts')
   const region = spending(page)
   const live = region.getByRole('status') // the one live region the section keeps on the page
@@ -467,6 +481,7 @@ test('spending is marked busy from its first load, and the old period is marked 
 
   await expect(region).toHaveAttribute('aria-busy', 'true') // the first load
   await expect(live).toHaveText('Loading spending…')
+  await answers.release()
   await drawn(region, /^Bar chart of the 3 Categories/)
   await expect(region).toHaveAttribute('aria-busy', 'false')
   await expect(live).toHaveText('Spending has loaded.')
@@ -476,6 +491,7 @@ test('spending is marked busy from its first load, and the old period is marked 
   await expect(live).toHaveText('Updating spending…')
   await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toBeVisible()
   await expect(region).toHaveAttribute('aria-busy', 'true')
+  await answers.release()
   await expect(live).toHaveText('Spending has loaded.')
   await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toHaveCount(0)
   expect(await element.evaluate((el) => el.isConnected)).toBe(true)
