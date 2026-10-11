@@ -2,6 +2,7 @@ import * as z from 'zod/mini'
 import { UNCOUNTED_SQL } from './balance-check'
 import type { BalanceStatus } from './balance-rules'
 import { ANCHOR, HISTORY_CTES } from './balances'
+import { carryForward } from './month-balances'
 import { datesInOrder, reportRange } from './report-query'
 
 // The data of the balances-over-time Report (GET /api/reports/balances), one Account at a time. Its numbers are balance history
@@ -147,12 +148,13 @@ export function balancesReport(
   const bank = new Map(data.bank.map((b) => [b.date, b.bankCents]))
   const rows: MonthBalance[] = []
   let previous = opening.balanceCents
-  for (let month = start.slice(0, 7); month <= end.slice(0, 7); month = nextMonth(month)) {
+  let month = start.slice(0, 7)
+  for (const balanceCents of carryForward(lastOfMonth, month, end.slice(0, 7), opening.balanceCents)) {
     const monthEnd = lastDay(month)
     const date = monthEnd < end ? monthEnd : end
-    const balanceCents = lastOfMonth.get(month) ?? previous
     rows.push({ date, balanceCents, changeCents: balanceCents - previous, bankCents: bank.get(date) ?? null })
     previous = balanceCents
+    month = nextMonth(month)
   }
   return { ...common, held, opening, rows, closing: { date: end, balanceCents: previous }, changeCents: previous - opening.balanceCents }
 }

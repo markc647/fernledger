@@ -2,6 +2,7 @@ import * as z from 'zod/mini'
 import { isQueryDate } from './dates'
 import { CATEGORY_SLOTS, categoryColumns, effectiveCategory, type CategorySlot, type EffectiveCategory } from './effective-category'
 import { PARTNER_JOIN } from './transfers'
+import { ID } from './validate'
 
 // Searching, filtering, sorting and paging the Transactions (the query for GET /api/transactions), as pure functions.
 // The SQL is built here from constants chosen by validated input; a value from the request only ever reaches SQLite as a
@@ -22,7 +23,7 @@ export const TRANSFERS_FILTERS = ['only', 'exclude'] as const
 export type TransfersFilter = (typeof TRANSFERS_FILTERS)[number]
 
 const digits = z.optional(z.string().check(z.regex(/^\d{1,9}$/)))
-const id = z.optional(z.string().check(z.regex(/^[1-9]\d{0,8}$/)))
+const id = z.optional(z.string().check(z.regex(ID)))
 const nzDate = z.optional(z.string().check(z.refine(isQueryDate)))
 
 /**

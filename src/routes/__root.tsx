@@ -25,8 +25,10 @@ function Layout() {
   }, [appTitle])
   const router = useRouter()
   // Each route file declares its own navigation entry in `staticData.nav`.
+  // A link the Admin knows by another name waits until who is signed in is known, so it is never the Member's name for a moment and then the Admin's.
+  const roleKnown = me !== undefined || meError !== null
   const entries = Object.values(router.routesByPath).flatMap((route) =>
-    route.options.staticData?.nav ? [{ ...route.options.staticData.nav, to: route.fullPath }] : [],
+    route.options.staticData?.nav && (roleKnown || !route.options.staticData.nav.adminLabel) ? [{ ...route.options.staticData.nav, to: route.fullPath }] : [],
   )
 
   return (

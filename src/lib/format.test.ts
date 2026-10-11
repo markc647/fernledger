@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAmount, formatBalance, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, moneyLabel } from './format'
+import { formatAmount, formatAxisDollars, formatBalance, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, formatMonthShort, moneyLabel } from './format'
 
 describe('formatDateAtTime (when a Report was generated)', () => {
   it.each([
@@ -159,5 +159,34 @@ describe('formatMonth (an NZ calendar month, such as the one a Budget is effecti
   it.each(['2026-13', '2026-00', '2026-1', '2026-10-01', '', 'October'])('refuses %j, without echoing it', (value) => {
     expect(() => formatMonth(value)).toThrow(RangeError)
     expect(() => formatMonth(value)).toThrow(/^Months are YYYY-MM$/)
+  })
+})
+
+describe('formatMonthShort (a month on a chart\'s axis)', () => {
+  it.each([
+    ['2026-10', 'Oct 2026'],
+    ['2026-09', 'Sept 2026'], // the dates' own short name, so an axis and a date never disagree
+    ['2027-01', 'Jan 2027'],
+  ])('writes %s as "%s"', (month, text) => {
+    expect(formatMonthShort(month)).toBe(text)
+  })
+
+  it.each(['2026-13', '2026-1', '2026-10-01', '', 'Oct'])('refuses %j, without echoing it', (value) => {
+    expect(() => formatMonthShort(value)).toThrow(/^Months are YYYY-MM$/)
+  })
+})
+
+describe('formatAxisDollars (the numbers along a chart\'s axis)', () => {
+  it.each([
+    [0, '$0'],
+    [1_200_000, '$12,000'],
+    [-120_000, '−$1,200'], // a real minus sign
+    [123_456, '$1,235'], // rounded to a whole dollar
+    [49, '$0'],
+    [-49, '$0'], // never "−$0"
+    [50, '$1'],
+    [100_000_000_000, '$1,000,000,000'],
+  ])('writes %i cents as "%s"', (cents, text) => {
+    expect(formatAxisDollars(cents)).toBe(text)
   })
 })

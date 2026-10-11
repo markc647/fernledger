@@ -91,7 +91,7 @@ describe('filtering by Account', () => {
     expect(await search('?accountId=99999')).toEqual({ total: 0, transactions: [] })
   })
 
-  it.each(['abc', '0', '-1', '1.5', '1234567890', ''])('rejects %j, naming only the field', async (value) => {
+  it.each(['abc', '0', '-1', '1.5', '1234567890123456', ''])('rejects %j, naming only the field', async (value) => {
     expect(await refusal(`?accountId=${value}`)).toEqual({ status: 400, body: { error: 'Invalid request', field: 'accountId' } })
   })
 })

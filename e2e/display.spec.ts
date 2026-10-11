@@ -93,7 +93,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending']
+  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -413,6 +413,106 @@ test.describe('zoom', () => {
           clientWidth: document.documentElement.clientWidth,
         }))
         expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The charts with their longest content, on the Charts page (a Member's) and on the Dashboard (the Admin's): ten years of months, big amounts, Accounts
+  // and Categories with long names, a Category below zero, and the figures open. The charts' data is stubbed, so this needs nothing in the database.
+  const longChartName = 'Health and medical costs for the household and the long-term care fees'
+  const stubCharts = async (page: Page) => {
+    await page.route(/\/api\/charts\/net-worth/, (route) =>
+      route.fulfill({
+        json: {
+          range: '24-months',
+          counted: [{ accountId: 1, accountName: longChartName, lastDate: '2027-02-28' }, { accountId: 4, accountName: `${longChartName} term deposit`, lastDate: '2020-03-12' }],
+          notCounted: [{ accountId: 2, accountName: `${longChartName} credit card`, latestStatus: 'after-cutover' }, { accountId: 3, accountName: 'Example savings', latestStatus: null }],
+          points: Array.from({ length: 120 }, (_, i) => ({ date: new Date(Date.UTC(2017, i + 1, 0)).toISOString().slice(0, 10), cents: 123_456_789 - i * 2_000_000 })),
+          tooManyAccounts: null,
+        },
+      }),
+    )
+    await page.route(/\/api\/charts\/spending\?/, (route) =>
+      route.fulfill({
+        json: {
+          from: '2026-10-01',
+          to: '2026-10-31',
+          totalCents: 123_456_789_012,
+          categories: [
+            ...Array.from({ length: 13 }, (_, i) => ({ categoryId: i + 1, name: `${longChartName} ${i + 1}`, cents: 123_456_789_012 - i * 9_000_000_000 })),
+            { categoryId: null, name: 'Uncategorised', cents: 5000 },
+            { categoryId: 99, name: 'Fuel', cents: -123_456_789 },
+          ],
+        },
+      }),
+    )
+  }
+  for (const { path, role } of [{ path: '/charts', role: 'member' }, { path: '/', role: 'admin' }] as const) {
+    for (const { name, width, height } of zoomLevels) {
+      for (const size of ['A', 'A++'] as const) {
+        test(`${path} with long charts (${role}) at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+          await signInAs(context, role)
+          await stubCharts(page)
+          await page.setViewportSize({ width, height })
+          await page.goto(path)
+          await sizeButton(page, size).click()
+          const netWorth = page.getByRole('region', { name: 'Net worth over time' })
+          const spending = page.getByRole('region', { name: 'Spending by Category' })
+          // The Dashboard draws net worth when it is asked to; the Charts page draws it at once.
+          if (path === '/') await netWorth.getByRole('button', { name: 'Show net worth' }).click()
+          await expect(netWorth.getByRole('img', { name: /^Line chart of net worth by month/ }).locator('svg.recharts-surface')).toBeVisible()
+          await expect(spending.getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
+          await expect(netWorth).toContainText('These Accounts are not in the total:')
+          await expect(netWorth).toContainText('its balance stays the same after that')
+          await netWorth.getByText('Show the figures').click()
+          await expect(spending).toContainText('The chart shows the biggest 12 Categories. The table has the other 2 too.')
+          await expect(spending).toContainText('$1,234,567.89 back')
+          // Measure only once the size is applied and the buttons have finished their width transition.
+          await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+          const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            clientWidth: document.documentElement.clientWidth,
+          }))
+          expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+          // The pictures fit the window too, and keep a size worth reading: no chart is squeezed to nothing.
+          for (const svg of await page.locator('[data-slot="chart"] svg.recharts-surface').all()) {
+            const box = await svg.boundingBox()
+            expect(box!.width).toBeLessThanOrEqual(clientWidth)
+            expect(box!.width).toBeGreaterThan(100)
+          }
+        })
+      }
+    }
+  }
+
+  // The Dashboard as the Admin lands on it, net worth not yet asked for: its explanation, its button (a touch target that may wrap) and its link to the Charts page, beside
+  // spending drawn from long data. The charts' data is stubbed, so this needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/ with the Show net worth button at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await stubCharts(page)
+        await page.setViewportSize({ width, height })
+        await page.goto('/')
+        await sizeButton(page, size).click()
+        const netWorth = page.getByRole('region', { name: 'Net worth over time' })
+        const button = netWorth.getByRole('button', { name: 'Show net worth' })
+        await expect(button).toBeVisible()
+        await expect(netWorth).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
+        await expect(netWorth.getByRole('link', { name: 'Open the Charts page for longer ranges' })).toBeVisible()
+        await expect(page.getByRole('region', { name: 'Spending by Category' }).getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        const box = await button.boundingBox()
+        expect(box!.width).toBeLessThanOrEqual(clientWidth)
+        expect(box!.height).toBeGreaterThanOrEqual(44)
       })
     }
   }

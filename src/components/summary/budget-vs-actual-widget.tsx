@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { ResponsiveTable } from '@/components/responsive-table'
+import { Spent } from '@/components/spent'
 import { Status } from '@/components/status'
-import { budgetStatus, spentParts } from '@/lib/budgets'
+import { budgetStatus, UNCATEGORISED_SPENDING } from '@/lib/budgets'
 import { formatBalance, formatMonth } from '@/lib/format'
 import { meQuery } from '@/lib/me'
 import { budgetVsActualQuery } from '@/lib/queries'
@@ -24,7 +25,7 @@ export function BudgetVsActualWidget() {
       ? [
           ...data.rows.map((row) => ({ key: String(row.categoryId), name: row.categoryName, budgetCents: row.budgetCents, spentCents: row.spentCents })),
           { key: 'other', name: 'Spending outside Budgets', budgetCents: null, spentCents: data.otherCents },
-          { key: 'uncategorised', name: 'Uncategorised (includes money in not yet given a Category)', budgetCents: null, spentCents: data.uncategorisedCents },
+          { key: 'uncategorised', name: UNCATEGORISED_SPENDING, budgetCents: null, spentCents: data.uncategorisedCents },
         ]
       : []
   return (
@@ -56,15 +57,7 @@ export function BudgetVsActualWidget() {
                 key: 'spent',
                 header: 'Spent',
                 align: 'end',
-                cell: (row) => {
-                  const { amount, back } = spentParts(row.spentCents)
-                  return (
-                    <>
-                      <span className={money}>{amount}</span>
-                      {back && ' back'}
-                    </>
-                  )
-                },
+                cell: (row) => <Spent cents={row.spentCents} />,
               },
               {
                 key: 'status',

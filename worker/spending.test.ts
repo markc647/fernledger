@@ -94,13 +94,26 @@ describe('money out and in by month and Category', () => {
     expect(of(rows, '2026-10', 'Fuel')).toBeUndefined()
   })
 
+  it('names each row after the Category it is shown under: the Override\'s over the Rule\'s, none for Uncategorised, and the next one\'s when a Category is removed', async () => {
+    await add(accountA, '2026-10-02', -100, { override: 'Fuel', rule: 'Groceries' })
+    await add(accountA, '2026-10-03', -200, { rule: 'Groceries' })
+    await add(accountA, '2026-10-04', -400)
+    await add(accountA, '2026-10-05', -800, { override: 'Eating out', rule: 'Groceries' })
+    await env.DB.prepare("UPDATE categories SET removed_at = '2026-10-09T00:00:00.000Z' WHERE name = 'Eating out'").run()
+
+    const names = (await inMonth('2026-10')).map((r) => [r.categoryName, r.outCents])
+
+    expect(names).toEqual(expect.arrayContaining([['Fuel', 100], ['Groceries', 1000], [null, 400]])) // the Override gone with its Category, the Rule's counts
+    expect(names).toHaveLength(3)
+  })
+
   it('reads a Transaction date as the NZ date it is, so the last and first days of a month fall where they should', async () => {
     await add(accountA, '2026-09-30', -100, { override: 'Fuel' })
     await add(accountA, '2026-10-01', -200, { override: 'Fuel' })
     await add(accountA, '2026-10-31', -400, { override: 'Fuel' })
     await add(accountA, '2026-11-01', -800, { override: 'Fuel' })
 
-    expect(await inMonth('2026-10')).toEqual([{ month: '2026-10', categoryId: ids['Fuel'], kind: 'spending', outCents: 600, inCents: 0 }])
+    expect(await inMonth('2026-10')).toEqual([{ month: '2026-10', categoryId: ids['Fuel'], categoryName: 'Fuel', kind: 'spending', outCents: 600, inCents: 0 }])
   })
 
   it('spans the end of a year', async () => {
@@ -161,14 +174,14 @@ describe('what is not spending', () => {
     await pair('2026-10-05', 5000)
     await add(accountA, '2026-10-06', -300, { override: 'Fuel' })
 
-    expect(await inMonth('2026-10')).toEqual([{ month: '2026-10', categoryId: ids['Fuel'], kind: 'spending', outCents: 300, inCents: 0 }])
+    expect(await inMonth('2026-10')).toEqual([{ month: '2026-10', categoryId: ids['Fuel'], categoryName: 'Fuel', kind: 'spending', outCents: 300, inCents: 0 }])
   })
 
   it('leaves out a Transaction a Rule marks as a Transfer when nothing paired it', async () => {
     await add(accountA, '2026-10-05', -7000, { ruleTransfer: true })
     await add(accountA, '2026-10-06', -300, { override: 'Fuel' })
 
-    expect(await inMonth('2026-10')).toEqual([{ month: '2026-10', categoryId: ids['Fuel'], kind: 'spending', outCents: 300, inCents: 0 }])
+    expect(await inMonth('2026-10')).toEqual([{ month: '2026-10', categoryId: ids['Fuel'], categoryName: 'Fuel', kind: 'spending', outCents: 300, inCents: 0 }])
   })
 
   it('leaves out a Transfer even when a Rule would have given it a Category', async () => {
@@ -183,7 +196,7 @@ describe('what is not spending', () => {
     const { out } = await pair('2026-10-05', 5000)
     await env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(ids['Fuel'], out).run()
 
-    expect(await inMonth('2026-10')).toEqual([{ month: '2026-10', categoryId: ids['Fuel'], kind: 'spending', outCents: 5000, inCents: 0 }])
+    expect(await inMonth('2026-10')).toEqual([{ month: '2026-10', categoryId: ids['Fuel'], categoryName: 'Fuel', kind: 'spending', outCents: 5000, inCents: 0 }])
   })
 
   it('counts money sent to an account that is not tracked, which has nothing to pair with', async () => {
@@ -234,7 +247,8 @@ describe('the kind of each Category', () => {
 })
 
 describe('rollUp', () => {
-  const row = (month: string, categoryId: number | null, kind: SpendingRow['kind'], outCents: number, inCents: number): SpendingRow => ({ month, categoryId, kind, outCents, inCents })
+  // A Category's name goes with its ID, as `buildSpending` gives it; Uncategorised has none.
+  const row = (month: string, categoryId: number | null, kind: SpendingRow['kind'], outCents: number, inCents: number): SpendingRow => ({ month, categoryId, categoryName: categoryId === null ? null : `Category ${categoryId}`, kind, outCents, inCents })
 
   it('works out Spending as money out less money in, and Income as money in less money out', () => {
     const { categories } = rollUp([
@@ -244,9 +258,9 @@ describe('rollUp', () => {
     ])
 
     expect(categories).toEqual([
-      { month: '2026-10', categoryId: 1, kind: 'spending', cents: 4550 },
-      { month: '2026-10', categoryId: 2, kind: 'income', cents: 299_750 },
-      { month: '2026-10', categoryId: null, kind: 'spending', cents: 700 },
+      { month: '2026-10', categoryId: 1, categoryName: 'Category 1', kind: 'spending', cents: 4550 },
+      { month: '2026-10', categoryId: 2, categoryName: 'Category 2', kind: 'income', cents: 299_750 },
+      { month: '2026-10', categoryId: null, categoryName: null, kind: 'spending', cents: 700 },
     ])
   })
 
@@ -260,7 +274,7 @@ describe('rollUp', () => {
   it('leaves a Loans Category out of everything', () => {
     const { categories, months } = rollUp([row('2026-10', 1, 'spending', 1000, 0), row('2026-10', 3, 'loans', 50_000, 20_000), row('2026-11', 3, 'loans', 0, 5_000)])
 
-    expect(categories).toEqual([{ month: '2026-10', categoryId: 1, kind: 'spending', cents: 1000 }])
+    expect(categories).toEqual([{ month: '2026-10', categoryId: 1, categoryName: 'Category 1', kind: 'spending', cents: 1000 }])
     expect(months).toEqual([{ month: '2026-10', spendingCents: 1000, incomeCents: 0 }]) // November had only a loan, so it has no entry
   })
 
@@ -290,14 +304,29 @@ describe('rollUp', () => {
     ])
 
     expect(byCategory).toEqual([
-      { categoryId: 1, kind: 'spending', cents: 4400 },
-      { categoryId: null, kind: 'spending', cents: -993 },
-      { categoryId: 2, kind: 'income', cents: 599_980 },
+      { categoryId: 1, categoryName: 'Category 1', kind: 'spending', cents: 4400 },
+      { categoryId: null, categoryName: null, kind: 'spending', cents: -993 },
+      { categoryId: 2, categoryName: 'Category 2', kind: 'income', cents: 599_980 },
     ])
   })
 
+  it('adds Spending and Income over every row given, apart, so a range\'s total is not added up by the caller; a Loans Category is not in it', () => {
+    const { totals, months } = rollUp([
+      row('2026-09', 1, 'spending', 4000, 0),
+      row('2026-10', 1, 'spending', 500, 100),
+      row('2026-10', null, 'spending', 0, 1000), // money in with no Category yet comes off Spending
+      row('2026-09', 2, 'income', 0, 300_000),
+      row('2026-10', 2, 'income', 20, 0),
+      row('2026-10', 3, 'loans', 50_000, 0),
+    ])
+
+    expect(totals).toEqual({ spendingCents: 4000 + 400 - 1000, incomeCents: 300_000 - 20 })
+    expect(totals.spendingCents).toBe(months.reduce((sum, month) => sum + month.spendingCents, 0)) // it is the months added up
+    expect(totals.incomeCents).toBe(months.reduce((sum, month) => sum + month.incomeCents, 0))
+  })
+
   it('has nothing for no rows', () => {
-    expect(rollUp([])).toEqual({ categories: [], byCategory: [], months: [] })
+    expect(rollUp([])).toEqual({ categories: [], byCategory: [], months: [], totals: { spendingCents: 0, incomeCents: 0 } })
   })
 })
 
@@ -366,7 +395,7 @@ describe('what it reads from D1', () => {
 
     const { rows, reads: n } = await reads({ from: '2026-10-01', to: '2026-10-31' })
 
-    expect(rows).toEqual([{ month: '2026-10', categoryId: ids['Groceries'], kind: 'spending', outCents: 40_000, inCents: 0 }])
+    expect(rows).toEqual([{ month: '2026-10', categoryId: ids['Groceries'], categoryName: 'Groceries', kind: 'spending', outCents: 40_000, inCents: 0 }])
     expect(n).toBeLessThanOrEqual(400 * 3 + 20) // index entry, row and the Override's Category
   })
 
@@ -399,7 +428,7 @@ describe('what it reads from D1', () => {
 
     const { rows, reads: n } = await reads({ from: '2026-10-01', to: '2026-10-31', accountId: accountB })
 
-    expect(rows).toEqual([{ month: '2026-10', categoryId: ids['Groceries'], kind: 'spending', outCents: 6000, inCents: 0 }])
+    expect(rows).toEqual([{ month: '2026-10', categoryId: ids['Groceries'], categoryName: 'Groceries', kind: 'spending', outCents: 6000, inCents: 0 }])
     expect(n).toBeLessThanOrEqual(60 * 3 + 20) // its 60 Transactions, not the other 540 on the same days
   })
 })

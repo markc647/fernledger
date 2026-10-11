@@ -30,5 +30,11 @@ export function nextMonth(month: string): string {
   return number === 12 ? `${String(year + 1).padStart(4, '0')}-01` : `${month.slice(0, 5)}${String(number + 1).padStart(2, '0')}`
 }
 
+/** The month `count` months before `month`, across the start of a year (`2026-02` less 3 is `2025-11`). */
+export function monthsBefore(month: string, count: number): string {
+  const index = Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7)) - 1 - count
+  return `${String(Math.floor(index / 12)).padStart(4, '0')}-${String((index % 12) + 1).padStart(2, '0')}`
+}
+
 /** The NZ calendar month a moment falls in (Pacific/Auckland, so a month changes at NZ midnight, not UTC midnight). */
 export const nzMonth = (at: Date): string => nzDate(at).slice(0, 7)
