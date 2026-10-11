@@ -346,6 +346,8 @@ describe('a big history', () => {
 
       // Every step: the 50 queries an invocation may make are far off. (Finding the job, the end of the chunk, the batch of 2, the day's tally, and when it ends 3 more.)
       expect(Math.max(...steps.map((s) => s.queries))).toBeLessThanOrEqual(1 + QUERIES_PER_CHUNK + QUERIES_TO_FINISH)
+      // Exactly: 1 to find the job and 4 for the chunk it wins, and the step that finishes the job 3 more (rule-rerun.ts `advance` says so).
+      expect(steps.map((s) => s.queries)).toEqual([...Array<number>(BIG / RERUN_CHUNK - 1).fill(1 + 4), 1 + 4 + QUERIES_TO_FINISH])
       // The chunk is read twice (the walk and the row it updates) and each row is checked against the Rules it has to get past.
       expect(Math.max(...steps.map((s) => s.rowsRead))).toBeLessThanOrEqual(RERUN_CHUNK * (RULES + 10))
       // At most a table row and an index entry for each Transaction changed, plus the progress row and the Change Log entry. (Measured
@@ -457,6 +459,7 @@ describe('a big history', () => {
       // The end of the chunk was read (1,000 rows) and the walk and the move found nothing to do. Walking the chunk would add about 9,000.
       expect(usage.rowsRead).toBeLessThanOrEqual(RERUN_CHUNK + 100)
       expect(usage.rowsWritten).toBe(1) // only the job's tally of what the step read, which D1 bills though it did nothing
+      expect(usage.queries).toBe(1 + 5) // finding the job, then the 4 of a chunk and the job read again for what it is now (`QUERIES_PER_CHUNK`)
     })
 
     it('a step that was stopped meanwhile does no work either', LONG, async () => {
@@ -470,6 +473,7 @@ describe('a big history', () => {
       expect(job).toMatchObject({ status: 'stopped', doneRows: 0 })
       expect(await stored()).toEqual(before)
       expect(usage.rowsRead).toBeLessThanOrEqual(RERUN_CHUNK + 100)
+      expect(usage.queries).toBe(1 + 5)
     })
   })
 })

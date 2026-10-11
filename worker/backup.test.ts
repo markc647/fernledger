@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BACKUP_CRON, BACKUP_STATE_KEY, CHUNK_BYTES, INVOCATION_BYTES } from './backup'
 import { BackupFormatError, checkPart, insertStatements, loadOrder, parseManifest, type Manifest } from './backup-format'
 import worker from './index'
+import { BACKUP_CHUNKS, CRON_CHUNKS, cronQueries } from './rule-rerun'
 
 // Seam 1: a scheduled event into the Worker, with the real local D1 and R2 from wrangler.jsonc.
 const sunday = new Date('2026-10-11T15:00:00Z') // 04:00 Monday 12 Oct in NZ (NZDT)
@@ -238,11 +239,13 @@ describe('free-plan limits', () => {
     // D1: 5 for the backup and 1 more, which the Rules re-run spends to look for a job to carry on (the weekly cron does not).
     expect(next.ops).toMatchObject({ d1: 5 + 1, r2: 1 + 5 * 2 })
 
-    // The 50-query and 50-subrequest limits leave room: Sync shares the daily crons. (A running re-run adds at most 16 queries on those,
-    // or 8 in a run that is also carrying a backup on, as worker/rule-rerun.ts says and rule-rerun.test.ts pins: the backup's 20 and the
-    // re-run's 8 are well inside 50.)
+    // The 50-query and 50-subrequest limits leave room: Sync shares the daily crons. A running re-run adds at most cronQueries(CRON_CHUNKS) queries to a daily cron,
+    // or cronQueries(BACKUP_CHUNKS) to one that is also carrying a backup on (worker/rule-rerun.ts; rule-rerun.test.ts pins them), so the backup's 20 and the re-run's
+    // share are well inside 50.
     expect(weekly.ops.d1 + weekly.ops.r2).toBeLessThanOrEqual(40)
     expect(next.ops.d1 + next.ops.r2).toBeLessThanOrEqual(20 + 1) // the backup's 20, and the re-run's look
+    expect(cronQueries(CRON_CHUNKS)).toBeLessThan(50)
+    expect(20 + cronQueries(BACKUP_CHUNKS)).toBeLessThan(50)
   })
 
   it('stops at about 1 MB of NDJSON per invocation, so the CPU spent on encoding and hashing stays small', async () => {

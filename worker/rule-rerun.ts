@@ -347,8 +347,11 @@ async function finish(db: D1Database, job: JobRow): Promise<JobRow> {
 }
 
 /**
- * One chunk of a running job, then the job as it is. At most 8 queries: the end of the chunk, the batch of 2, the day's tally,
- * and when it ends the Change Log batch of 2 and a read. A job that is paused is returned as it is, having cost nothing.
+ * One chunk of a running job, then the job as it is. Its queries, not counting the one that found the job (stepRerun, continueRerun):
+ * - 4 for a chunk it wins: the end of the chunk, the batch of 2, the day's tally;
+ * - 7 for a win that finishes the job, which adds the Change Log batch of 2 and a read;
+ * - 5 for a step that lost its chunk to another request, a Stop or a change to the Rules: the same 4, and the job read again for what it is now.
+ * A job that is paused is returned as it is, having cost nothing.
  */
 async function advance(db: D1Database, job: JobRow): Promise<JobRow> {
   const now = new Date()
