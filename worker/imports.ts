@@ -140,7 +140,7 @@ const COUNT_IMPORTED_AND_ANNOTATED = `SELECT COUNT(*) AS imported,
 // each of its rows that has an Override, Note or Not a Transfer mark costs 2 more to hold (the row and its key): at worst 10,000 more. A removed
 // row that was paired costs up to 3 more, for its own Transfer index entry and to let go of its matching Transaction (transfers.ts): at worst
 // 15,000 more again.
-const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (${IMPORTED_SLICE})`
+export const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (${IMPORTED_SLICE})`
 
 type AccountRow = { id: number; name: string; cutover_date: string | null }
 
