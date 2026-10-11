@@ -77,28 +77,29 @@ export async function ensureCategory(context: BrowserContext, baseURL: string, n
 export type SeedRow = { date: string; payee: string; amountCents: number; category?: string; uniqueId?: string; chequeNumber?: string }
 
 /**
- * Imports `rows` into `account` as one file: the whole of `year` unless `from` and `to` say otherwise (a spec that gives both needs no `year`), with a bank balance of
- * nothing on the last day unless `ledger` says otherwise. A row has the unique ID it gives, else `${idPrefix}${index}`. An Import recognises rows it already holds.
+ * The dates of an Import's file: the whole of `year`, with either end moved by `from` or `to`, or both ends and no year. One of the two is required, so a file can't be
+ * dated "undefined-01-01" (the compiler refuses it: report-helpers.type-check.ts).
+ */
+export type FileDates = { year: number; from?: string; to?: string } | { year?: undefined; from: string; to: string }
+const fileDates = (dates: FileDates) => ({ from: dates.from ?? `${dates.year}-01-01`, to: dates.to ?? `${dates.year}-12-31` })
+
+/**
+ * Imports `rows` into `account` as one file dated by `FileDates`, with a bank balance of nothing on the last day unless `ledger` says otherwise. A row has the unique ID it
+ * gives, else `${idPrefix}${index}`. An Import recognises rows it already holds.
  */
 export async function importRows(
   context: BrowserContext,
   baseURL: string,
-  {
-    account,
-    rows,
-    idPrefix = '',
-    year,
-    from = `${year}-01-01`,
-    to = `${year}-12-31`,
-    ledger = { date: to, cents: 0 },
-  }: { account: { number: string; name: string }; rows: SeedRow[]; idPrefix?: string; year?: number; from?: string; to?: string; ledger?: { date: string; cents: number } },
+  { account, rows, idPrefix = '', ledger, ...dates }: { account: { number: string; name: string }; rows: SeedRow[]; idPrefix?: string; ledger?: { date: string; cents: number } } & FileDates,
 ) {
+  const { from, to } = fileDates(dates)
+  const bankBalance = ledger ?? { date: to, cents: 0 }
   const res = await context.request.post('/api/imports/chunks', {
     headers: { Origin: baseURL },
     data: {
       account,
       chunk: { index: 0, count: 1 },
-      file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from, to, ledgerBalance: { cents: ledger.cents, date: ledger.date } },
+      file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from, to, ledgerBalance: { cents: bankBalance.cents, date: bankBalance.date } },
       rows: rows.map((r, i) => ({ date: r.date, uniqueId: r.uniqueId ?? `${idPrefix}${i}`, tranType: 'EFTPOS', chequeNumber: r.chequeNumber ?? null, payee: r.payee, bankMemo: 'EFTPOS', amountCents: r.amountCents })),
     },
   })
