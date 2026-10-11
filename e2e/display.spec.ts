@@ -320,7 +320,7 @@ test.describe('zoom', () => {
   // The Categories page with a long Category name and its Admin forms open: the kind form (with the Budgets it keeps), then the removal question for a
   // Spending Category with Budget changes and for an Income one. The Categories and Budgets are stubbed.
   const categoryForms = [
-    { form: 'the kind form', button: 'Set kind of', category: 'long' },
+    { form: 'the kind form', button: 'Select kind of', category: 'long' },
     { form: 'the removal question', button: 'Remove', category: 'long' },
     { form: 'the removal question for an Income Category', button: 'Remove', category: 'Wages and salary' },
   ] as const
@@ -350,7 +350,7 @@ test.describe('zoom', () => {
           await sizeButton(page, size).click()
           const target = category === 'long' ? longName : category
           await page.getByRole('button', { name: `${button} ${target}` }).click()
-          if (button === 'Set kind of') {
+          if (button === 'Select kind of') {
             await expect(page.locator('#kind-1')).toBeFocused()
             await page.locator('#kind-1').selectOption('loans')
             await expect(page.getByText('Its Budgets are kept but not used.')).toBeVisible()

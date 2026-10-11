@@ -75,7 +75,7 @@ test('a Member sees Categories and Notes but cannot change them', async ({ page,
   await nav.getByRole('link', { name: 'Categories' }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Categories' })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'Groceries', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: /^(Rename|Set kind|Remove)/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^(Rename|Select kind|Remove)/ })).toHaveCount(0)
   await expect(page.getByRole('row', { name: /Wages and salary/ })).toContainText('Income')
   await expect(page.getByRole('row', { name: /^Loans/ })).toContainText('Loans')
   await expect(page.getByRole('row', { name: /^Groceries/ })).toContainText('Spending')
@@ -143,7 +143,7 @@ test('the Admin sets the kind of a Category, Members see it, and only a Spending
   await expect(page.getByRole('row', { name })).toContainText('Loans')
 
   // WCAG 2.5.3: each button's accessible name contains the text it shows.
-  const setKind = page.getByRole('button', { name: `Set kind of ${name}` })
+  const setKind = page.getByRole('button', { name: `Select kind of ${name}` })
   expect(await setKind.getAttribute('aria-label')).toContain((await setKind.innerText()).trim())
 
   // A Loans Category has no Budget. Making it Spending gives it one to set.
@@ -158,14 +158,14 @@ test('the Admin sets the kind of a Category, Members see it, and only a Spending
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save kind' }).click()
   await expect(page.getByRole('status').filter({ hasText: `${name} is now Spending.` })).toBeVisible()
-  await expect(page.getByRole('button', { name: `Set kind of ${name}` })).toBeFocused()
+  await expect(page.getByRole('button', { name: `Select kind of ${name}` })).toBeFocused()
   await expect(page.getByRole('row', { name })).toContainText('Spending')
   await page.goto('/budgets')
   await expect(page.getByRole('button', { name: `Edit Budget for ${name}` })).toBeVisible()
 
   // Making it Income takes it away again. With no Budgets there is nothing to say about them; with some, they are kept but not used.
   await page.goto('/categories')
-  await page.getByRole('button', { name: `Set kind of ${name}` }).click()
+  await page.getByRole('button', { name: `Select kind of ${name}` }).click()
   await page.locator('select[id^="kind-"]').selectOption('income')
   await expect(page.getByText('A change counts for every month, past ones too.')).toBeVisible()
   await expect(page.getByText('Its Budgets are kept but not used.')).toHaveCount(0)
@@ -174,7 +174,7 @@ test('the Admin sets the kind of a Category, Members see it, and only a Spending
   const budget = await context.request.put(`/api/budgets/${categories.find((c) => c.name === name)!.id}`, { headers: { Origin: baseURL! }, data: { effectiveFrom: '2026-10', amountCents: 1000 } })
   expect(budget.ok()).toBe(true)
   await page.goto('/categories')
-  await page.getByRole('button', { name: `Set kind of ${name}` }).click()
+  await page.getByRole('button', { name: `Select kind of ${name}` }).click()
   await page.locator('select[id^="kind-"]').selectOption('income')
   await expect(page.getByText('Its Budgets are kept but not used.')).toBeVisible()
   await page.getByRole('button', { name: 'Save kind' }).click()
@@ -191,5 +191,5 @@ test('the Admin sets the kind of a Category, Members see it, and only a Spending
   await signInAs(context, 'member')
   await page.goto('/categories')
   await expect(page.getByRole('row', { name })).toContainText('Income')
-  await expect(page.getByRole('button', { name: /^Set kind/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^Select kind/ })).toHaveCount(0)
 })
