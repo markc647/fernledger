@@ -115,11 +115,15 @@ export const categories = new Hono<AppEnv>()
     const overrides = used?.n ?? 0
 
     // A Rule whose Category is removed no longer counts (rule-apply.ts), so a re-run that is running would have to look at its Transactions again.
-    await recordChange(db, [db.prepare("UPDATE categories SET removed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?").bind(id), restartRerun(db)], {
+    // The UPDATE is the last statement, which `onlyIfChanged` looks at: if another request removed the Category first, this one wrote nothing, logs nothing and answers
+    // as it does for a Category that is not there.
+    const [, removed] = await recordChange(db, [restartRerun(db), db.prepare("UPDATE categories SET removed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND removed_at IS NULL").bind(id)], {
       actor: c.var.member,
       type: 'category',
       summary: `Removed Category ${category.name}`,
       before: { name: category.name, overrides },
+      onlyIfChanged: true,
     })
+    if (removed!.meta.changes === 0) return c.json({ error: 'Not found' }, 404)
     return c.json({ id, name: category.name, overrides })
   })
