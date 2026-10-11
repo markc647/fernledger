@@ -47,6 +47,7 @@ export function ReportFrame({
   accountsInTitle,
   from,
   to,
+  subject,
   generatedAt,
   notice,
   children,
@@ -57,9 +58,11 @@ export function ReportFrame({
   accounts: string
   /** The same for the browser's page title, which is the name "Save as PDF" suggests: "All Accounts", or the one Account's name. */
   accountsInTitle: string
-  /** NZ dates, both ends included. */
-  from: string
+  /** NZ dates, both ends included. A Report that may begin at the first Transaction (Loans) leaves `from` out, and its dates say so. */
+  from?: string
   to: string
+  /** What the Report is about when that is not an Account (the Loans Report's Loans Category), as one more line of the title block: "Loans: Loan – Alice". */
+  subject?: { label: string; text: string }
   /** When the data was read, as a timestamp. */
   generatedAt: number
   /** Something the reader must know before the figures, such as "this Report stops at 10,000 Transactions". Printed under the title block. */
@@ -115,6 +118,11 @@ export function ReportFrame({
           </h1>
           <dl className="mt-3 grid gap-1">
             {/* The space between each term and its details is for copying the text out; the gap does the spacing on the page. */}
+            {subject && (
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-semibold">{subject.label}:</dt> <dd>{subject.text}</dd>
+              </div>
+            )}
             <div className="flex flex-wrap gap-x-2">
               <dt className="font-semibold">Account:</dt> <dd>{accounts}</dd>
             </div>

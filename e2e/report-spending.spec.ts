@@ -185,10 +185,11 @@ test.describe('opening the Report', () => {
     expect(Object.fromEntries(new URL(one.url()).searchParams)).toEqual({ account: String(everydayId), from: `${d.year}-01-01`, to: `${d.year}-12-31` })
   })
 
-  test('the Reports page has no WCAG 2.2 AA violations with all three forms on it', async ({ page, context }) => {
+  test('the Reports page has no WCAG 2.2 AA violations with all its forms on it', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/reports')
-    await expect(page.getByRole('form')).toHaveCount(3)
+    await expect(page.getByRole('form').first()).toBeVisible()
+    await expect(page.getByRole('form')).toHaveCount(await page.getByRole('heading', { level: 2 }).count()) // one form for each Report, however many there are
     await noAxeViolations(page)
   })
 

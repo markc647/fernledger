@@ -1,0 +1,66 @@
+import { useQuery } from '@tanstack/react-query'
+import { createFileRoute } from '@tanstack/react-router'
+import { LoansCappedNotice, LoansReport } from '@/components/loans-report'
+import { LoansForm } from '@/components/report-form'
+import { ReportFrame } from '@/components/report-frame'
+import { BackToReports, Needs, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
+import { reportLoansQuery } from '@/lib/queries'
+import { parseLoansSearch, type LoansSearch } from '@/lib/report-loans'
+
+// The Report lives in its address (?category=3&from=2026-01-01&to=2026-10-31), so it can be reopened or sent on, and the Reports page opens it by link. It opens in a
+// new window (target="_blank" with rel="noopener"). Without a category it is every Loans Category; without `from` it begins at the first Transaction.
+export const Route = createFileRoute('/reports_/loans')({
+  component: LoansReportPage,
+  validateSearch: parseLoansSearch,
+})
+
+const NAME = 'Loans'
+
+function LoansReportPage() {
+  const search = Route.useSearch()
+  return (
+    <ReportGate
+      name={NAME}
+      search={{ ...(search.from === undefined ? {} : { from: search.from }), ...(search.to === undefined ? {} : { to: search.to }) }}
+      fromOptional
+      form={<LoansForm defaults={search} />}
+      noAccounts="There are no Accounts yet, so there is no loan to list."
+    >
+      {(scope) => <Loans scope={scope} search={search} />}
+    </ReportGate>
+  )
+}
+
+/**
+ * How much each Loans Category's person owes, or is owed, with the lending and repayments that make it up (the family's record of a loan to a child, or from one). It is
+ * read a page at a time and stops at the Transaction listing's cap, which it says. It lists the Loans Category chosen, or each one, and says so when there is none to list.
+ */
+function Loans({ scope, search }: { scope: ReportScope; search: LoansSearch }) {
+  const loans = useQuery(reportLoansQuery(search.category, search.from, scope.to))
+  const waiting = reportWaiting(loans)
+  if (waiting) return waiting
+  const { available, listing } = loans.data!
+
+  if (available === 0) {
+    return <Needs name={NAME} form={<LoansForm defaults={search} />} message="There are no Loans Categories to report on yet." />
+  }
+  if (listing.sections.length === 0) {
+    return <Needs name={NAME} form={<LoansForm defaults={search} />} alert message="There is no such Loans Category. Choose one below." />
+  }
+  const chosen = search.category === undefined ? null : listing.sections[0]!
+  return (
+    <ReportFrame
+      name={NAME}
+      accounts={scope.accountsText}
+      accountsInTitle={chosen ? chosen.name : 'All loans'}
+      from={search.from}
+      to={scope.to}
+      subject={{ label: 'Loans', text: chosen ? chosen.name : 'All Loans Categories' }}
+      generatedAt={loans.dataUpdatedAt}
+      notice={listing.capped ? <LoansCappedNotice alert /> : undefined}
+    >
+      <LoansReport loans={listing} from={search.from} />
+      <BackToReports />
+    </ReportFrame>
+  )
+}

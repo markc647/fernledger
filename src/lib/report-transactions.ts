@@ -143,15 +143,17 @@ export async function loadListing({
 /** What a Report's address holds: the Account (all of them when left out) and the dates, both ends included. */
 export type ReportSearch = { account?: number; from?: string; to?: string }
 
-const accountId = (value: unknown) => {
+/** An ID in an address (an Account's, or the Loans Report's Category): a whole number from 1 to 999,999,999, or nothing. */
+export const searchId = (value: unknown) => {
   const number = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,9}$/.test(value) ? Number(value) : NaN
   return Number.isSafeInteger(number) && number >= 1 && number <= 999_999_999 ? number : undefined
 }
 
-const searchDate = (value: unknown) => (typeof value === 'string' && isSearchDate(value) ? value : undefined)
+/** A date in an address: a real date within the years the API accepts, or nothing. */
+export const searchDate = (value: unknown) => (typeof value === 'string' && isSearchDate(value) ? value : undefined)
 
 /** Reads the address's search parameters (already parsed by the router) into a ReportSearch. Anything that isn't valid is left out rather than refused. */
 export function parseReportSearch(raw: Record<string, unknown>): ReportSearch {
-  const search = { account: accountId(raw.account), from: searchDate(raw.from), to: searchDate(raw.to) }
+  const search = { account: searchId(raw.account), from: searchDate(raw.from), to: searchDate(raw.to) }
   return Object.fromEntries(Object.entries(search).filter(([, value]) => value !== undefined))
 }

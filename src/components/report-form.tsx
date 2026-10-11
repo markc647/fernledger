@@ -1,20 +1,24 @@
 import { useQuery } from '@tanstack/react-query'
 import { useId, useState, type ReactNode } from 'react'
+import { LiveStatus } from '@/components/live-status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
+import { isLoansKind } from '@/lib/category-kinds'
 import { MAX_DATE, MIN_DATE, isSearchDate } from '@/lib/date-range'
-import { accountsQuery } from '@/lib/queries'
+import { accountsQuery, categoriesQuery } from '@/lib/queries'
+import type { LoansSearch } from '@/lib/report-loans'
 import { REPORT_ROW_CAP, type ReportSearch } from '@/lib/report-transactions'
 
-/** What is wrong with the dates, if anything, and the field to mark. */
-function problemWith(from: string, to: string): { field: 'from' | 'to'; message: string } | null {
-  if (from === '') return { field: 'from', message: 'Choose a From date.' }
+/** What is wrong with the dates, if anything, and the field to mark. A Report that may begin at the first Transaction (`fromOptional`) can have no From date. */
+function problemWith(from: string, to: string, fromOptional: boolean): { field: 'from' | 'to'; message: string } | null {
+  if (from === '' && !fromOptional) return { field: 'from', message: 'Choose a From date.' }
   if (to === '') return { field: 'to', message: 'Choose a To date.' }
   for (const [field, value] of [['from', from], ['to', to]] as const) {
+    if (value === '' && field === 'from') continue
     if (!isSearchDate(value)) return { field, message: `The “${field === 'from' ? 'From' : 'To'}” date must be a real date from the year 2000 to 2100.` }
   }
-  if (from > to) return { field: 'to', message: 'The “To” date is before the “From” date. Change one of them to open the Report.' }
+  if (from !== '' && from > to) return { field: 'to', message: 'The “To” date is before the “From” date. Change one of them to open the Report.' }
   return null
 }
 
@@ -22,9 +26,25 @@ function problemWith(from: string, to: string): { field: 'from' | 'to'; message:
  * Asks which Account (or all of them) and which dates, then opens a Report in a new window. It is a plain form that sends the
  * choice in the Report's address (`?account=2&from=…&to=…`), so it opens in a new window without scripting and the Report can be
  * reopened, bookmarked or sent on from its address. `defaults` fills it in, and `note` says what the Report will hold. Every Report
- * on the Reports page has one, so each names itself (its `aria-label`) and its fields have ids of their own.
+ * on the Reports page has one, so each names itself (its `aria-label`) and its fields have ids of their own. `choose` is a choice of the
+ * Report's own, in the Account's place (the Loans Report asks which Loans Category); `fromOptional` lets the From date stay blank, for a
+ * Report that can begin at the first Transaction.
  */
-function ReportForm({ name, action, defaults = {}, note }: { name: string; action: string; defaults?: ReportSearch; note: ReactNode }) {
+function ReportForm({
+  name,
+  action,
+  defaults = {},
+  note,
+  choose,
+  fromOptional = false,
+}: {
+  name: string
+  action: string
+  defaults?: ReportSearch
+  note: ReactNode
+  choose?: ReactNode
+  fromOptional?: boolean
+}) {
   const accounts = useQuery(accountsQuery)
   const id = useId()
   const [account, setAccount] = useState(defaults.account === undefined ? '' : String(defaults.account))
@@ -41,29 +61,31 @@ function ReportForm({ name, action, defaults = {}, note }: { name: string; actio
       aria-label={name}
       noValidate
       onSubmit={(event) => {
-        const found = problemWith(from, to)
+        const found = problemWith(from, to, fromOptional)
         setProblem(found)
         if (found) event.preventDefault()
       }}
     >
       <div className="grid gap-4 sm:grid-cols-3">
-        <div>
-          <label htmlFor={`${id}-account`} className="block font-medium">
-            Account
-          </label>
-          <Select id={`${id}-account`} name="account" value={account} onChange={(event) => setAccount(event.target.value)}>
-            <option value="">All Accounts</option>
-            {accounts.data?.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
-        </div>
+        {choose ?? (
+          <div>
+            <label htmlFor={`${id}-account`} className="block font-medium">
+              Account
+            </label>
+            <Select id={`${id}-account`} name="account" value={account} onChange={(event) => setAccount(event.target.value)}>
+              <option value="">All Accounts</option>
+              {accounts.data?.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         {(['from', 'to'] as const).map((field) => (
           <div key={field}>
             <label htmlFor={`${id}-${field}`} className="block font-medium">
-              {field === 'from' ? 'From' : 'To'}
+              {field === 'from' ? (fromOptional ? 'From (optional)' : 'From') : 'To'}
             </label>
             <Input
               id={`${id}-${field}`}
@@ -79,7 +101,7 @@ function ReportForm({ name, action, defaults = {}, note }: { name: string; actio
           </div>
         ))}
       </div>
-      {accounts.isError && (
+      {!choose && accounts.isError && (
         <p role="alert" className="mt-3 font-medium text-destructive">
           The Accounts could not be loaded. Reload the page to try again.
         </p>
@@ -113,6 +135,50 @@ export function SpendingForm({ defaults }: { defaults?: ReportSearch }) {
       action="/reports/spending"
       defaults={defaults}
       note="A Report has one row for each Category with spending in your dates, the most spent first, and one for Uncategorised when there is any."
+    />
+  )
+}
+
+/**
+ * The Loans Report's form (#38): which Loans Category (or all of them), an optional start date and the date to go up to. It lists the Loans Categories the Admin has made,
+ * read from the Categories (the same list the Categories page shows), by kind; none is a Category that is not Loans. A start date left blank begins at the first Transaction.
+ */
+export function LoansForm({ defaults }: { defaults?: LoansSearch }) {
+  const id = useId()
+  const categories = useQuery(categoriesQuery)
+  const [category, setCategory] = useState(defaults?.category === undefined ? '' : String(defaults.category))
+  const loans = categories.data?.filter((c) => isLoansKind(c.kind))
+  // The list arrives after the form is on the page, so screen readers are told what it holds; a sighted reader sees the choices, or the line about there being none.
+  const message = categories.isError ? '' : loans === undefined ? '' : loans.length === 0 ? 'There are no Loans Categories yet.' : `${loans.length} ${loans.length === 1 ? 'Loans Category' : 'Loans Categories'} to choose from.`
+  return (
+    <ReportForm
+      name="Loans"
+      action="/reports/loans"
+      defaults={{ from: defaults?.from, to: defaults?.to }}
+      fromOptional
+      note="A Report has a section for each Loans Category you choose: its lending and repayments, oldest first, with what is owed after each and at the end. Leave From blank to begin at the first Transaction, or choose a date to see what was owed before it."
+      choose={
+        <div>
+          <label htmlFor={`${id}-category`} className="block font-medium">
+            Loan
+          </label>
+          <Select id={`${id}-category`} name="category" value={category} onChange={(event) => setCategory(event.target.value)}>
+            <option value="">All loans</option>
+            {loans?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+          <LiveStatus message={message} />
+          {categories.isError && (
+            <p role="alert" className="mt-2 font-medium text-destructive">
+              The Categories could not be loaded. Reload the page to try again.
+            </p>
+          )}
+          {loans?.length === 0 && <p className="mt-2">There are no Loans Categories yet. The Admin makes one for each person on the Categories page, such as Loan – Alice, and sets its kind to Loans.</p>}
+        </div>
+      }
     />
   )
 }

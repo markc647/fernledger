@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { AppEnv } from './app-env'
 import { balancesReportQuery, readBalancesReport } from './report-balances'
+import { loansQuery, readLoanPage, toLoansQuery } from './report-loans'
 import { readSpendingReport, spendingReportQuery } from './report-spending'
 import { buildReportPage, pageOf, reportQuery, toReportQuery, type ReportRow } from './report-transactions'
 import { validate } from './validate'
@@ -22,6 +23,11 @@ export const reports = new Hono<AppEnv>()
     const { accountId, from, to } = c.req.valid('query')
     const report = await readSpendingReport(c.env.DB, { from, to, ...(accountId === undefined ? {} : { accountId: Number(accountId) }) })
     return report ? c.json(report) : c.json({ error: 'Not found' }, 404)
+  })
+  // The Transactions of one Loans Category, a page at a time (report-loans.ts). One request is one Category, so a Report of all the Loans Categories is several.
+  .get('/loans', validate('query', loansQuery), async (c) => {
+    const page = await readLoanPage(c.env.DB, toLoansQuery(c.req.valid('query')))
+    return page ? c.json(page) : c.json({ error: 'Not found' }, 404)
   })
   // Balances over time for one Account: its balance history (worker/balances.ts) at the end of each month. One request is one
   // Account, so a Report of several Accounts is several small requests.

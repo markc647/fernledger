@@ -8,6 +8,9 @@ describe('describeRange', () => {
   it('writes a single day once', () => {
     expect(describeRange('2026-10-08', '2026-10-08')).toBe('Thu 8 Oct 2026')
   })
+  it('says a Report with no start date begins at the first Transaction', () => {
+    expect(describeRange(undefined, '2026-10-31')).toBe('From the first Transaction to Sat 31 Oct 2026')
+  })
 })
 
 describe('generatedLine', () => {

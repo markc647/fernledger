@@ -15,5 +15,5 @@ export const reportRange = {
 /** For a Report that can cover every Account in one request (spending by Category): the same fields with the Account left out for all of them. */
 export const reportRangeOfAll = { ...reportRange, accountId: z.optional(reportRange.accountId) }
 
-/** The last check of a Report's query: `from` is not after `to`. A refusal names `to`. */
-export const datesInOrder = z.refine<{ from: string; to: string }>((q) => q.from <= q.to, { path: ['to'] })
+/** The last check of a Report's query: `from` is not after `to`. A refusal names `to`. A Report that may begin at the first Transaction (Loans) leaves `from` out, and there is then nothing to put in order. */
+export const datesInOrder = z.refine<{ from?: string; to: string }>((q) => q.from === undefined || q.from <= q.to, { path: ['to'] })

@@ -6,6 +6,10 @@ export type { CategoryKind }
 /** In the order the Admin is offered them. */
 export const KINDS: CategoryKind[] = ['spending', 'income', 'loans']
 
+/** Loans: neither Spending nor Income. The Worker's `isLoansKind` (category-kinds.ts) and SQL `isLoan` (spending.ts) say so for the Worker; this is the same word for the pages, checked against the Worker's kinds by its type. */
+export const LOANS = 'loans' satisfies CategoryKind
+export const isLoansKind = (kind: CategoryKind): kind is typeof LOANS => kind === LOANS
+
 export const KIND_LABELS: Record<CategoryKind, string> = { spending: 'Spending', income: 'Income', loans: 'Loans' }
 
 /** One line on what each kind means, shown beside the choice. */

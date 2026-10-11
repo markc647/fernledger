@@ -130,10 +130,11 @@ test.describe('opening the Report', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible() // the Reports page is still where it was
   })
 
-  test('the Reports page has no WCAG 2.2 AA violations with all three forms on it', async ({ page, context }) => {
+  test('the Reports page has no WCAG 2.2 AA violations with all its forms on it', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/reports')
-    await expect(page.getByRole('form')).toHaveCount(3)
+    await expect(page.getByRole('form').first()).toBeVisible()
+    await expect(page.getByRole('form')).toHaveCount(await page.getByRole('heading', { level: 2 }).count()) // one form for each Report, however many there are
     await noAxeViolations(page)
   })
 
