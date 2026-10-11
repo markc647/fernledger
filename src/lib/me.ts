@@ -3,10 +3,19 @@ import { api } from './api'
 
 export class HttpError extends Error {
   status: number
-  constructor(status: number) {
+  /** What the Worker says a 409 means, when a page needs to tell one 409 from another (`reason` in the body; worker/validate.ts `CHANGED_MEANWHILE`). */
+  reason?: string
+  constructor(status: number, reason?: string) {
     super(`API request failed with ${status}`)
     this.status = status
+    this.reason = reason
   }
+}
+
+/** The `reason` a refusal's body gives, if it has one. */
+export const reasonOf = async (res: { json: () => Promise<unknown> }): Promise<string | undefined> => {
+  const body = (await res.json().catch(() => null)) as { reason?: unknown } | null
+  return typeof body?.reason === 'string' ? body.reason : undefined
 }
 
 /** True when the API said the visitor isn't signed in (401), as opposed to the API or network failing. */

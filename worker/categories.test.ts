@@ -126,6 +126,54 @@ describe('renaming a Category', () => {
     expect(await changeLog()).toEqual([])
   })
 
+  // Another request can land between the handler's read and its write. The UPDATE renames only the Category that still has the name that was read and is still in use,
+  // and with `onlyIfChanged` a request that changes nothing writes no entry.
+  describe('when another request lands between this one\'s read and its write', () => {
+    const rename = (id: number, name: string) => () => call(`/api/categories/${id}`, { method: 'PATCH', body: { name } })
+
+    it('writes no second entry for the same name, and says it is so', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}`, 'PATCH', { name: 'Food shopping' }, rename(id, 'Food shopping'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id, name: 'Food shopping', kind: 'spending' })
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Renamed Category Groceries to Food shopping', before: '{"name":"Groceries"}' })])
+    })
+
+    it('does not overwrite a name given meanwhile, writes no entry, and says to try again', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}`, 'PATCH', { name: 'Shopping' }, rename(id, 'Food shopping'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect((await categories()).find((c) => c.id === id)?.name).toBe('Food shopping')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Renamed Category Groceries to Food shopping' })])
+    })
+
+    it('does not rename a Category removed meanwhile, writes no entry for it, and answers 404', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}`, 'PATCH', { name: 'Food shopping' }, () => call(`/api/categories/${id}`, { method: 'DELETE', body: {} }))
+
+      expect(res.status).toBe(404)
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Removed Category Groceries' })])
+      expect((await env.DB.prepare('SELECT name FROM categories WHERE id = ?').bind(id).first<{ name: string }>())!.name).toBe('Groceries')
+    })
+
+    it('still answers that the name is taken, and not that the Category changed, for a name another Category took meanwhile', async () => {
+      const [id, fuel] = [await idOf('Groceries'), await idOf('Fuel')]
+
+      const res = await callWhileInterrupted(`/api/categories/${id}`, 'PATCH', { name: 'Fuel station' }, rename(fuel, 'Fuel station'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'A Category with that name already exists' })
+      expect((await categories()).find((c) => c.id === id)?.name).toBe('Groceries')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Renamed Category Fuel to Fuel station' })])
+    })
+  })
+
   it('refuses a name another Category has', async () => {
     const id = await idOf('Groceries')
     const res = await call(`/api/categories/${id}`, { method: 'PATCH', body: { name: 'fuel' } })
@@ -205,6 +253,42 @@ describe('the kind of a Category', () => {
 
     expect(res.status).toBe(200)
     expect(await changeLog()).toEqual([])
+  })
+
+  // Another request can land between the handler's read and its write: the UPDATE changes only a Category in use that still has the kind that was read.
+  describe('when another request lands between this one\'s read and its write', () => {
+    const setTo = (id: number, kind: string) => () => setKind(id, { kind })
+
+    it('writes no second entry for the same kind, and says it is so', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}/kind`, 'PUT', { kind: 'income' }, setTo(id, 'income'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id, name: 'Groceries', kind: 'income' })
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Changed the kind of Category Groceries from Spending to Income', before: '{"name":"Groceries","kind":"Spending"}' })])
+    })
+
+    it('does not overwrite a kind set meanwhile, writes no entry, and says to try again', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}/kind`, 'PUT', { kind: 'loans' }, setTo(id, 'income'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await kindOf('Groceries')).toBe('income')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Changed the kind of Category Groceries from Spending to Income' })])
+    })
+
+    it('does not change a Category removed meanwhile, writes no entry for it, and answers 404', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}/kind`, 'PUT', { kind: 'income' }, () => call(`/api/categories/${id}`, { method: 'DELETE', body: {} }))
+
+      expect(res.status).toBe(404)
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Removed Category Groceries' })])
+      expect((await env.DB.prepare('SELECT kind FROM categories WHERE id = ?').bind(id).first<{ kind: string }>())!.kind).toBe('spending')
+    })
   })
 
   it.each([

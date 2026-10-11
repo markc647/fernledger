@@ -122,6 +122,37 @@ test('the Admin adds, renames and removes a Category', async ({ page, context },
   await expect(page.getByRole('cell', { name: renamed, exact: true })).toHaveCount(0)
 })
 
+// The Worker's answers are stubbed (worker/categories.test.ts holds the real ones), so nothing about Groceries changes. Each refusal is a 409, which Chrome logs.
+test.describe('a refused rename or kind', () => {
+  test.use({ expectedStatuses: [409] })
+
+  test('says the Category changed under it, and still says a name in use is taken', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    const changed = { error: 'This changed while your request was being handled. Try again.', reason: 'changed' }
+    let renameRefusal: object = changed
+    await page.route(/\/api\/categories\/\d+$/, (route) => (route.request().method() === 'PATCH' ? route.fulfill({ status: 409, json: renameRefusal }) : route.fallback()))
+    await page.route(/\/api\/categories\/\d+\/kind$/, (route) => (route.request().method() === 'PUT' ? route.fulfill({ status: 409, json: changed }) : route.fallback()))
+    await page.goto('/categories')
+    await expect(page.getByRole('cell', { name: 'Groceries', exact: true })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Rename Groceries' }).click()
+    await page.getByLabel('Category name').fill('Food shopping')
+    await page.getByRole('button', { name: 'Save name' }).click()
+    await expect(page.getByRole('alert')).toHaveText('This Category was changed just now. Try again.')
+    renameRefusal = { error: 'A Category with that name already exists' }
+    await page.getByRole('button', { name: 'Save name' }).click()
+    await expect(page.getByRole('alert')).toHaveText('A Category with that name already exists.')
+    await noAxeViolations(page)
+    await page.getByRole('button', { name: 'Cancel' }).click()
+
+    await page.getByRole('button', { name: 'Select kind of Groceries' }).click()
+    await page.locator('select[id^="kind-"]').selectOption('income')
+    await page.getByRole('button', { name: 'Save kind' }).click()
+    await expect(page.getByRole('alert')).toHaveText('This Category was changed just now. Try again.')
+    await expect(page.getByRole('row', { name: 'Groceries' })).toContainText('Spending')
+  })
+})
+
 test('the Admin sets the kind of a Category, Members see it, and only a Spending Category has a Budget', async ({ page, context, baseURL }, testInfo) => {
   await signInAs(context, 'admin')
   const name = `Kind ${testInfo.project.name} ${Date.now() % 1000000}`

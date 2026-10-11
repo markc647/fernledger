@@ -4,7 +4,7 @@ import type { AppEnv } from './app-env'
 import { CATEGORY_KINDS, KIND_LABELS, type CategoryKind } from './category-kinds'
 import { recordChange } from './changelog'
 import { restartRerun } from './rule-rerun'
-import { nothing, pathId, validate } from './validate'
+import { CHANGED_MEANWHILE, nothing, pathId, validate } from './validate'
 
 type CategoryRow = { id: number; name: string; kind: CategoryKind }
 
@@ -56,13 +56,21 @@ export const categories = new Hono<AppEnv>()
     if (category.name === name) return c.json({ id, name, kind: category.kind })
 
     try {
-      await recordChange(db, db.prepare('UPDATE categories SET name = ? WHERE id = ?').bind(name, id), {
+      // Another request can land between the read and the write, so the UPDATE renames only a Category still in use that has the name that was read, and an entry
+      // is written only if it changed something (`onlyIfChanged`).
+      const [update] = await recordChange(db, db.prepare('UPDATE categories SET name = ?1 WHERE id = ?2 AND removed_at IS NULL AND name = ?3').bind(name, id, category.name), {
         actor: c.var.member,
         type: 'category',
         summary: `Renamed Category ${category.name} to ${name}`,
         before: { name: category.name },
         after: { name },
+        onlyIfChanged: true,
       })
+      if (update!.meta.changes === 0) {
+        const now = await findCategory(db, id)
+        if (!now) return c.json({ error: 'Not found' }, 404)
+        return now.name === name ? c.json({ id, name, kind: now.kind }) : c.json(CHANGED_MEANWHILE, 409)
+      }
     } catch (error) {
       if (isDuplicateName(error)) return c.json(alreadyThere, 409)
       throw error
@@ -79,13 +87,20 @@ export const categories = new Hono<AppEnv>()
     if (!category) return c.json({ error: 'Not found' }, 404)
     if (category.kind === kind) return c.json({ id, name: category.name, kind })
 
-    await recordChange(db, db.prepare('UPDATE categories SET kind = ? WHERE id = ?').bind(kind, id), {
+    // As the rename is: only a Category still in use that has the kind that was read, and an entry only if it changed something.
+    const [update] = await recordChange(db, db.prepare('UPDATE categories SET kind = ?1 WHERE id = ?2 AND removed_at IS NULL AND kind = ?3').bind(kind, id, category.kind), {
       actor: c.var.member,
       type: 'category',
       summary: `Changed the kind of Category ${category.name} from ${KIND_LABELS[category.kind]} to ${KIND_LABELS[kind]}`,
       before: { name: category.name, kind: KIND_LABELS[category.kind] },
       after: { name: category.name, kind: KIND_LABELS[kind] },
+      onlyIfChanged: true,
     })
+    if (update!.meta.changes === 0) {
+      const now = await findCategory(db, id)
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      return now.kind === kind ? c.json({ id, name: now.name, kind }) : c.json(CHANGED_MEANWHILE, 409)
+    }
     return c.json({ id, name: category.name, kind })
   })
   // Removing keeps the row (see migrations/1101_categories.sql), so it is one write however many Transactions use the Category.
