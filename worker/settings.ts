@@ -14,14 +14,6 @@ export const isSettingKey = (key: string): key is SettingKey => (SETTING_KEYS as
 /** What a Setting reads as until the Admin sets it. */
 export const DEFAULT_SETTINGS: Settings = { app_title: 'Fernledger', about_contact: '', about_retention: '' }
 
-/** A statement that sets a Setting. Pass it to `recordChange` so the change is logged with it. */
-export const putSetting = (db: D1Database, key: SettingKey, value: string): D1PreparedStatement =>
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').bind(key, value)
-
-/** The Setting's value, or null if it has never been set. */
-export const getSetting = (db: D1Database, key: SettingKey): Promise<string | null> =>
-  db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<string>('value')
-
 /** The Settings the Admin has set, and none of the others. One query. */
 async function readStored(db: D1Database): Promise<Partial<Settings>> {
   const { results } = await db.prepare('SELECT key, value FROM settings').all<{ key: SettingKey; value: string }>()

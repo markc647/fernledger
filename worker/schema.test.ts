@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { getSetting, putSetting } from './settings'
+import { getSetting, putSetting } from './test-support'
 
 describe('settings', () => {
   it('hold the app title and About-your-data fields, one value per key', async () => {
