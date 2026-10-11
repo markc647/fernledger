@@ -93,7 +93,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances']
+  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/budget-vs-actual']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -632,6 +632,49 @@ test.describe('zoom', () => {
         await sizeButton(page, size).click()
         await expect(page.getByRole('article', { name: 'Balances over time' })).toContainText('$1,234,567.89')
         await expect(page.getByRole('article', { name: 'Balances over time' })).toContainText('Balance differs from bank by $1,234,567.89')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The Budget vs actual Report with its longest content: a long app title, Account and Category name, the largest amounts, a notice that the dates were part of a
+  // month, and the months together, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/reports/budget-vs-actual with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        const long = 'Category with a long name'.padEnd(60, 'z')
+        await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
+        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
+        await page.route('**/api/reports/budget-vs-actual?**', (route) =>
+          route.fulfill({
+            json: {
+              from: '2026-09-15',
+              to: '2026-10-31',
+              covers: { from: '2026-09-01', to: '2026-10-31' },
+              thisMonth: '2026-10',
+              months: [
+                { month: '2026-09', rows: [{ categoryId: 1, categoryName: long, budgetCents: 123456789, spentCents: 123456790 }], otherCents: 123456789, uncategorisedCents: -123456789, budgetCents: 123456789, spentCents: 123456790 },
+                { month: '2026-10', rows: [{ categoryId: 1, categoryName: long, budgetCents: 123456789, spentCents: -123456789 }], otherCents: 0, uncategorisedCents: 0, budgetCents: 123456789, spentCents: -123456789 },
+              ],
+              total: { budgetCents: 246913578, spentCents: 1, otherCents: 123456789, uncategorisedCents: -123456789 },
+              categories: [{ categoryId: 1, categoryName: long, months: 2, budgetCents: 246913578, spentCents: 1 }],
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/reports/budget-vs-actual?from=2026-09-15&to=2026-10-31')
+        await sizeButton(page, size).click()
+        await expect(page.getByRole('article', { name: 'Budget vs actual' })).toContainText('$1,234,567.89')
+        await expect(page.getByRole('article', { name: 'Budget vs actual' })).toContainText('You chose')
+        await expect(page.getByRole('article', { name: 'Budget vs actual' })).toContainText('$1,234,567.89 back')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))

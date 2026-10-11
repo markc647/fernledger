@@ -25,6 +25,24 @@ export function budgetStatus(budgetCents: number, spentCents: number): BudgetSta
 /** What Uncategorised is called where it is a row of Spending, so a reader knows money in with no Category yet is in it. */
 export const UNCATEGORISED_SPENDING = 'Uncategorised (includes money in not yet given a Category)'
 
+/** What the Spending Categories with no Budget are called together, where they have a row of their own. */
+export const SPENDING_OUTSIDE_BUDGETS = 'Spending outside Budgets'
+
+/** A row of Budget vs actual: a Category with a Budget, or what has none (Spending Categories without a Budget, and Uncategorised), which has `budgetCents: null`. */
+export type BudgetRow = { key: string; name: string; budgetCents: number | null; spentCents: number }
+
+/**
+ * The rows of a month of Budget vs actual as the Worker gave it (`/api/budgets/vs-actual`, and each month of the Budget vs actual Report): the Categories with a Budget,
+ * then Spending outside Budgets, then Uncategorised. The Summary and the Report write them the same way.
+ */
+export function budgetRows(vsActual: { rows: { categoryId: number; categoryName: string; budgetCents: number; spentCents: number }[]; otherCents: number; uncategorisedCents: number }): BudgetRow[] {
+  return [
+    ...vsActual.rows.map((row) => ({ key: String(row.categoryId), name: row.categoryName, budgetCents: row.budgetCents, spentCents: row.spentCents })),
+    { key: 'other', name: SPENDING_OUTSIDE_BUDGETS, budgetCents: null, spentCents: vsActual.otherCents },
+    { key: 'uncategorised', name: UNCATEGORISED_SPENDING, budgetCents: null, spentCents: vsActual.uncategorisedCents },
+  ]
+}
+
 /** What a Category spent in two parts, so the amount can be kept in one piece and "back" left free to wrap: "$55.50", or "$15.00" with `back` when more came back than went out (a refund). Never a minus sign for spending. */
 export const spentParts = (spentCents: number) => ({ amount: formatBalance(Math.abs(spentCents)), back: spentCents < 0 })
 

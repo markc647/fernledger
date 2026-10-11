@@ -5,26 +5,43 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { MAX_DATE, MIN_DATE, isSearchDate } from '@/lib/date-range'
 import { accountsQuery } from '@/lib/queries'
+import { MAX_REPORT_MONTHS, tooManyMonths } from '@/lib/report-budget'
 import { REPORT_ROW_CAP, type ReportSearch } from '@/lib/report-transactions'
 
-/** What is wrong with the dates, if anything, and the field to mark. */
-function problemWith(from: string, to: string): { field: 'from' | 'to'; message: string } | null {
+/** What is wrong with the dates, if anything, and the field to mark. `rangeProblem` is a Report's own limit on dates that are in order (Budget vs actual's months). */
+function problemWith(from: string, to: string, rangeProblem?: (from: string, to: string) => string | null): { field: 'from' | 'to'; message: string } | null {
   if (from === '') return { field: 'from', message: 'Choose a From date.' }
   if (to === '') return { field: 'to', message: 'Choose a To date.' }
   for (const [field, value] of [['from', from], ['to', to]] as const) {
     if (!isSearchDate(value)) return { field, message: `The “${field === 'from' ? 'From' : 'To'}” date must be a real date from the year 2000 to 2100.` }
   }
   if (from > to) return { field: 'to', message: 'The “To” date is before the “From” date. Change one of them to open the Report.' }
-  return null
+  const limit = rangeProblem?.(from, to)
+  return limit ? { field: 'to', message: limit } : null
 }
 
 /**
  * Asks which Account (or all of them) and which dates, then opens a Report in a new window. It is a plain form that sends the
  * choice in the Report's address (`?account=2&from=…&to=…`), so it opens in a new window without scripting and the Report can be
  * reopened, bookmarked or sent on from its address. `defaults` fills it in, and `note` says what the Report will hold. Every Report
- * on the Reports page has one, so each names itself (its `aria-label`) and its fields have ids of their own.
+ * on the Reports page has one, so each names itself (its `aria-label`) and its fields have ids of their own. A Report that is
+ * of all Accounts together asks for dates alone (`accounts={false}`).
  */
-function ReportForm({ name, action, defaults = {}, note }: { name: string; action: string; defaults?: ReportSearch; note: ReactNode }) {
+function ReportForm({
+  name,
+  action,
+  defaults = {},
+  note,
+  accounts: askAccount = true,
+  rangeProblem,
+}: {
+  name: string
+  action: string
+  defaults?: ReportSearch
+  note: ReactNode
+  accounts?: boolean
+  rangeProblem?: (from: string, to: string) => string | null
+}) {
   const accounts = useQuery(accountsQuery)
   const id = useId()
   const [account, setAccount] = useState(defaults.account === undefined ? '' : String(defaults.account))
@@ -41,25 +58,27 @@ function ReportForm({ name, action, defaults = {}, note }: { name: string; actio
       aria-label={name}
       noValidate
       onSubmit={(event) => {
-        const found = problemWith(from, to)
+        const found = problemWith(from, to, rangeProblem)
         setProblem(found)
         if (found) event.preventDefault()
       }}
     >
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div>
-          <label htmlFor={`${id}-account`} className="block font-medium">
-            Account
-          </label>
-          <Select id={`${id}-account`} name="account" value={account} onChange={(event) => setAccount(event.target.value)}>
-            <option value="">All Accounts</option>
-            {accounts.data?.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
-        </div>
+      <div className={askAccount ? 'grid gap-4 sm:grid-cols-3' : 'grid gap-4 sm:grid-cols-2'}>
+        {askAccount && (
+          <div>
+            <label htmlFor={`${id}-account`} className="block font-medium">
+              Account
+            </label>
+            <Select id={`${id}-account`} name="account" value={account} onChange={(event) => setAccount(event.target.value)}>
+              <option value="">All Accounts</option>
+              {accounts.data?.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         {(['from', 'to'] as const).map((field) => (
           <div key={field}>
             <label htmlFor={`${id}-${field}`} className="block font-medium">
@@ -79,7 +98,7 @@ function ReportForm({ name, action, defaults = {}, note }: { name: string; actio
           </div>
         ))}
       </div>
-      {accounts.isError && (
+      {askAccount && accounts.isError && (
         <p role="alert" className="mt-3 font-medium text-destructive">
           The Accounts could not be loaded. Reload the page to try again.
         </p>
@@ -108,4 +127,18 @@ export function TransactionListingForm({ defaults }: { defaults?: ReportSearch }
 /** The balances-over-time Report's form (spec story 96). */
 export function BalancesForm({ defaults }: { defaults?: ReportSearch }) {
   return <ReportForm name="Balances over time" action="/reports/balances" defaults={defaults} note="A Report has one balance for the end of each month, with the balance when your dates begin and when they end." />
+}
+
+/** The Budget vs actual Report's form (spec story 94): dates only, because a Budget is for all Accounts together. */
+export function BudgetVsActualForm({ defaults }: { defaults?: ReportSearch }) {
+  return (
+    <ReportForm
+      name="Budget vs actual"
+      action="/reports/budget-vs-actual"
+      defaults={defaults}
+      accounts={false}
+      rangeProblem={tooManyMonths}
+      note={`A Budget is for a whole month, so a Report shows every month your dates touch, in full, up to ${MAX_REPORT_MONTHS} months. It is of all Accounts together.`}
+    />
+  )
 }
