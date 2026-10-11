@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { buildSpending, isLoan, rollUp, type SpendingRow } from './spending'
+import { buildSpending, isLoan, rollUp, rollUpMonths, type SpendingRow } from './spending'
 import { effectiveCategory } from './effective-category'
 
 // Spending and Income (spending.ts, ADR 0012), tested directly against D1. How Budgets use them, through the real request
@@ -327,6 +327,54 @@ describe('rollUp', () => {
 
   it('has nothing for no rows', () => {
     expect(rollUp([])).toEqual({ categories: [], byCategory: [], months: [], totals: { spendingCents: 0, incomeCents: 0 } })
+  })
+})
+
+describe('rollUpMonths', () => {
+  const row = (month: string, categoryId: number | null, kind: SpendingRow['kind'], outCents: number, inCents: number): SpendingRow => ({ month, categoryId, categoryName: categoryId === null ? null : `Category ${categoryId}`, kind, outCents, inCents })
+  // Everything that tells the two apart: both kinds, Uncategorised, a Loans Category, money back and money out of Income, rows of months out of order, and a month that is only a loan.
+  const mixed = [
+    row('2026-09', 1, 'spending', 4000, 0),
+    row('2026-10', 1, 'spending', 500, 100),
+    row('2026-09', null, 'spending', 7, 0),
+    row('2026-10', null, 'spending', 0, 1000),
+    row('2026-09', 2, 'income', 0, 300_000),
+    row('2026-10', 2, 'income', 20, 300_000),
+    row('2026-10', 3, 'loans', 50_000, 0),
+    row('2026-11', 3, 'loans', 0, 5_000),
+    row('2026-09', 4, 'spending', 0, 900),
+    row('2026-12', 5, 'income', 800, 0),
+  ]
+
+  it("gives the months and totals rollUp gives, so Spending and Income are worked out one way (ADR 0012)", () => {
+    const full = rollUp(mixed)
+    const lean = rollUpMonths(mixed)
+
+    expect(lean.months.map(({ month, spendingCents, incomeCents }) => ({ month, spendingCents, incomeCents }))).toEqual(full.months)
+    expect(lean.totals.spendingCents).toBe(full.totals.spendingCents)
+    expect(lean.totals.incomeCents).toBe(full.totals.incomeCents)
+    expect(rollUpMonths([])).toEqual({ months: [], totals: { spendingCents: 0, incomeCents: 0, uncategorisedInCents: 0, counted: 0 } })
+  })
+
+  it('adds up the money in that has no Category, from the rows with no Category ID, for each month and in all', () => {
+    const none = (month: string, outCents: number, inCents: number): SpendingRow => row(month, null, 'spending', outCents, inCents)
+    const r = rollUpMonths([none('2026-01', 100, 40), row('2026-01', 1, 'spending', 0, 999), none('2026-03', 0, 15), none('2026-03', 5, 10), row('2026-03', 2, 'income', 0, 70)])
+
+    expect(r.months.map((m) => m.uncategorisedInCents)).toEqual([40, 25]) // money in to a Category is not Uncategorised, whichever kind it is
+    expect(r.totals.uncategorisedInCents).toBe(65)
+  })
+
+  it('counts the Categories with something in each month and in all, leaves a Loans Category out of the count, and counts a month that nets out to nothing', () => {
+    const r = rollUpMonths([row('2026-09', 1, 'spending', 4000, 4000), row('2026-09', null, 'spending', 0, 0), row('2026-10', 3, 'loans', 50_000, 0), row('2026-11', 2, 'income', 0, 5)])
+
+    expect(r.months.map((m) => [m.month, m.counted, m.spendingCents])).toEqual([['2026-09', 2, 0], ['2026-11', 1, 0]]) // October had only a loan, so it has no entry
+    expect(r.totals.counted).toBe(3)
+  })
+
+  it('looks a month up again when the rows come back to it', () => {
+    const r = rollUpMonths([row('2026-09', 1, 'spending', 100, 0), row('2026-10', 1, 'spending', 7, 0), row('2026-09', 2, 'spending', 50, 0)])
+
+    expect(r.months.map((m) => [m.month, m.spendingCents, m.counted])).toEqual([['2026-09', 150, 2], ['2026-10', 7, 1]])
   })
 })
 

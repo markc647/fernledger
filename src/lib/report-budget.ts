@@ -1,5 +1,6 @@
 // A relative path, not `@/`: the Worker's test pins MAX_REPORT_MONTHS to the Worker's by importing this file, and the Worker's compiler has no `@` alias.
-import type { BudgetReport, CategoryPeriod, MonthRow, MonthState, ReportMonth } from '../generated/api/report-budget'
+import type { MonthState } from '../generated/api/months'
+import type { BudgetReport, CategoryPeriod, MonthRow, ReportMonth } from '../generated/api/report-budget'
 import { SPENDING_OUTSIDE_BUDGETS, UNCATEGORISED_SPENDING, type BudgetRow } from './budgets'
 import { formatMonth } from './format'
 import { describeRange } from './report-frame'

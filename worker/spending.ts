@@ -67,6 +67,15 @@ export type RollUp = {
   totals: { spendingCents: number; incomeCents: number }
 }
 
+/**
+ * A row's figure, which is the one place that says which way round it is (ADR 0012): money in less money out for an Income Category, money out less money in for a
+ * Spending one (and for Uncategorised), so a refund comes off. Not for a Loans row, which is neither: callers leave those out first (`isLoansKind`).
+ */
+const centsOf = (row: SpendingRow) => (row.kind === 'income' ? row.inCents - row.outCents : row.outCents - row.inCents)
+
+/** Whether a row is Uncategorised: the one Category with no ID, which counts as Spending. A removed Category has already fallen through to it (`buildSpending`'s `shown`). */
+const isUncategorised = (row: SpendingRow) => row.categoryId === null
+
 /** Spending and Income from the rows of `buildSpending`. */
 export function rollUp(rows: SpendingRow[]): RollUp {
   const categories: CategoryFigure[] = []
@@ -75,7 +84,7 @@ export function rollUp(rows: SpendingRow[]): RollUp {
   const totals = { spendingCents: 0, incomeCents: 0 }
   for (const row of rows) {
     if (isLoansKind(row.kind)) continue
-    const cents = row.kind === 'income' ? row.inCents - row.outCents : row.outCents - row.inCents
+    const cents = centsOf(row)
     const categoryName = row.categoryName ?? null
     categories.push({ month: row.month, categoryId: row.categoryId, categoryName, kind: row.kind, cents })
     const category = byCategory.get(row.categoryId) ?? { categoryId: row.categoryId, categoryName, kind: row.kind, cents: 0 }
@@ -92,4 +101,53 @@ export function rollUp(rows: SpendingRow[]): RollUp {
     months.set(row.month, month)
   }
   return { categories, byCategory: [...byCategory.values()], months: [...months.values()], totals }
+}
+
+/** One month of `rollUpMonths`: Spending and Income, and what a Report of months says besides. */
+export type MonthRollUp = MonthTotals & {
+  /** Money in that had no Category (Uncategorised): it is in `spendingCents` as money back, and not in `incomeCents`. */
+  uncategorisedInCents: number
+  /** How many Categories (Uncategorised is one) had something counted in the month, Transfers and Loans left out. Zero when nothing was, however the figures net out: a month of $40 spent and refunded counts one. */
+  counted: number
+}
+
+export type MonthsRollUp = {
+  /** Spending and Income for each month that has any rows, in the order the rows came, as `rollUp`'s `months` have them. */
+  months: MonthRollUp[]
+  /** Over all the rows given: the months added together, with `counted` and `uncategorisedInCents` added up too. */
+  totals: { spendingCents: number; incomeCents: number; uncategorisedInCents: number; counted: number }
+}
+
+/**
+ * The same Spending and Income by month and in all as `rollUp` gives (the same `centsOf`, and Loans left out the same way), and nothing by Category: a Report of months
+ * never reads `categories` or `byCategory`, and building them costs an object for every row (about 72,000 at 600 Categories over 120 months, ADR 0004). `rollUp` and this
+ * must not drift: spending.test.ts holds the two to the same figures.
+ */
+export function rollUpMonths(rows: SpendingRow[]): MonthsRollUp {
+  const months = new Map<string, MonthRollUp>()
+  const totals = { spendingCents: 0, incomeCents: 0, uncategorisedInCents: 0, counted: 0 }
+  let month: MonthRollUp | undefined
+  for (const row of rows) {
+    if (isLoansKind(row.kind)) continue
+    // The rows come a month at a time, so the month is looked up only when it changes.
+    if (month?.month !== row.month) {
+      month = months.get(row.month) ?? { month: row.month, spendingCents: 0, incomeCents: 0, uncategorisedInCents: 0, counted: 0 }
+      months.set(row.month, month)
+    }
+    const cents = centsOf(row)
+    if (row.kind === 'income') {
+      month.incomeCents += cents
+      totals.incomeCents += cents
+    } else {
+      month.spendingCents += cents
+      totals.spendingCents += cents
+    }
+    if (isUncategorised(row)) {
+      month.uncategorisedInCents += row.inCents
+      totals.uncategorisedInCents += row.inCents
+    }
+    month.counted += 1
+    totals.counted += 1
+  }
+  return { months: [...months.values()], totals }
 }

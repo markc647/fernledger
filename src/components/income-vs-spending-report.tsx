@@ -85,8 +85,9 @@ export function IncomeVsSpendingReport({ report, accounts }: { report: IncomeVsS
   const notice = uncategorisedNotice(totals.uncategorisedInCents)
   // The sentences every printed page repeats under the lines that say what it is: what the Difference is, what is not counted, and the money in with no Category.
   const printHeading = useReportIdentity()(accounts, [DIFFERENCE_SENTENCE, NOT_COUNTED_AS_SPENDING_OR_INCOME, notice].filter(Boolean).join(' '))
-  // A Report of dates with nothing in them says so rather than show a table of zeros.
-  const nothing = report.months.every((month) => month.incomeCents === 0 && month.spendingCents === 0)
+  // A Report of dates with no income or spending of any kind says so rather than show a table of zeros. That is not the same as figures that net out to nothing: $40
+  // spent and refunded is $0.00 and has its row, so it is the Worker's count of what it counted that says (Transfers and Loans are not counted).
+  const nothing = totals.counted === 0
   return (
     <>
       <AboutIncomeVsSpending />
@@ -108,10 +109,13 @@ export function IncomeVsSpendingReport({ report, accounts }: { report: IncomeVsS
               <dd className="text-end font-medium">
                 <Spent cents={totals.spendingCents} />
               </dd>
-              <dt className="border-t pt-1 font-semibold">{DIFFERENCE}</dt>
-              <dd className="border-t pt-1 text-end">
-                <Amount cents={totals.differenceCents} />
-              </dd>
+              {/* One row that spans the grid, so its line is one line and not two with a gap between them. */}
+              <div className="col-span-2 mt-1 grid grid-cols-subgrid items-baseline border-t pt-1">
+                <dt className="font-semibold">{DIFFERENCE}</dt>
+                <dd className="text-end">
+                  <Amount cents={totals.differenceCents} />
+                </dd>
+              </div>
             </dl>
             <div className="mt-4">
               <ResponsiveTable

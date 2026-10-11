@@ -1,5 +1,5 @@
 // Relative paths, not `@/`: the Worker's test pins MAX_INCOME_MONTHS to the Worker's by importing this file, and the Worker's compiler has no `@` alias.
-import type { MonthState } from '../generated/api/report-budget'
+import type { MonthState } from '../generated/api/months'
 import { lastDay } from './date-range'
 import { formatBalance } from './format'
 import { monthsTouched } from './report-budget'
@@ -31,7 +31,7 @@ export function partOfMonth(month: string, from: string, to: string): string | n
 
 /**
  * What a reader needs to know about a month whose figures are not a whole month's yet, so that a row of zeros is not read as a quiet one; null for a month that has
- * ended. The Worker says which (`monthState`, worker/report-budget.ts).
+ * ended. The Worker says which (`monthState`, worker/months.ts).
  */
 export function monthNote(state: MonthState): string | null {
   if (state === 'under-way') return 'This month is not over yet, so these are the figures so far.'

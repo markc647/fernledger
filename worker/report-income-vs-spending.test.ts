@@ -3,7 +3,7 @@ import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import worker from './index'
 import { MAX_INCOME_MONTHS as PAGE_MAX_INCOME_MONTHS } from '../src/lib/income-vs-spending'
-import { nzMonth } from './months'
+import { monthEnd, nzMonth } from './months'
 import type { BudgetReport } from './report-budget'
 import { incomeVsSpending, MAX_INCOME_MONTHS, type IncomeVsSpending } from './report-income-vs-spending'
 import { buildSpending, rollUp, type SpendingRow } from './spending'
@@ -156,10 +156,10 @@ describe('what the Report totals', () => {
     const r = await report({ from: '2026-10-01', to: '2026-11-30' })
 
     // Whether a month is over depends on the day the test runs (the calendar describe below fixes it), so the months are not compared whole.
-    expect(r).toMatchObject({ from: '2026-10-01', to: '2026-11-30', totals: { incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 } })
+    expect(r).toMatchObject({ from: '2026-10-01', to: '2026-11-30', totals: { incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0, counted: 0 } })
     expect(r.months.map(({ state: _state, ...figures }) => figures)).toEqual([
-      { month: '2026-10', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 },
-      { month: '2026-11', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 },
+      { month: '2026-10', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0, counted: 0 },
+      { month: '2026-11', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0, counted: 0 },
     ])
   })
 
@@ -204,6 +204,34 @@ describe('what the Report totals', () => {
   it('covers 120 months, 10 years, and the page and the Worker say so alike', () => {
     expect(MAX_INCOME_MONTHS).toBe(120)
     expect(PAGE_MAX_INCOME_MONTHS).toBe(MAX_INCOME_MONTHS)
+  })
+})
+
+describe('what was counted, apart from what the figures come to', () => {
+  it('counts a month of $40 spent and refunded, which nets out to nothing, and not a month of only a Transfer and a loan', async () => {
+    await add(accountA, '2026-09-10', -4000, { override: 'Groceries' })
+    await add(accountA, '2026-09-20', 4000, { override: 'Groceries' }) // refunded in full
+    await pair('2026-10-05', 5000)
+    await add(accountA, '2026-10-20', -50_000, { override: 'Loans' })
+
+    const r = await report({ from: '2026-09-01', to: '2026-10-31' })
+
+    expect(lines(r)).toEqual([['2026-09', 0, 0, 0], ['2026-10', 0, 0, 0]]) // both come to nothing
+    expect(r.months.map((m) => m.counted)).toEqual([1, 0]) // but one has Transactions that count and the other has none
+    expect(r.totals.counted).toBe(1)
+  })
+
+  it('counts each Category with something in the month, Uncategorised as one, and adds them up for all the dates', async () => {
+    await add(accountA, '2026-10-02', -100, { override: 'Groceries' })
+    await add(accountA, '2026-10-03', -100, { override: 'Fuel' })
+    await add(accountA, '2026-10-04', 5000, { override: 'Wages and salary' })
+    await add(accountA, '2026-10-05', -700)
+    await add(accountA, '2026-11-05', -200, { override: 'Groceries' })
+
+    const r = await report({ from: '2026-10-01', to: '2026-11-30' })
+
+    expect(r.months.map((m) => m.counted)).toEqual([4, 1])
+    expect(r.totals.counted).toBe(5)
   })
 })
 
@@ -271,7 +299,7 @@ describe('which months are over', () => {
     const future = await report({ from: '2100-01-01', to: '2100-02-28' })
     expect(future.months.map((m) => m.state)).toEqual(['not-begun', 'not-begun'])
 
-    const current = await report({ from: `${now}-01`, to: `${now}-28` })
+    const current = await report({ from: `${now}-01`, to: monthEnd(now) }) // dates that run to the end of the month, so past today
     expect(current.months.map((m) => [m.month, m.state])).toEqual([[now, 'under-way']])
   })
 })
@@ -505,30 +533,30 @@ describe('the same figures as everywhere else that totals Spending and Income (A
 describe('the calendar, with no database (incomeVsSpending)', () => {
   const row = (month: string, kind: SpendingRow['kind'], outCents: number, inCents: number): SpendingRow => ({ month, categoryId: 1, categoryName: 'A', kind, outCents, inCents })
 
-  it('puts a month rollUp has no row for among the others in order, with zeros, and takes the rest from rollUp', () => {
+  it('puts a month rollUpMonths has no row for among the others in order, with zeros, and takes the rest from it', () => {
     const range = { from: '2026-01-15', to: '2026-04-02' }
     const rows = [row('2026-01', 'spending', 500, 100), row('2026-03', 'income', 20, 1000), row('2026-03', 'loans', 9999, 0)]
 
-    expect(incomeVsSpending(range, rows, '2026-03')).toEqual({
+    expect(incomeVsSpending(range, rows, '2026-03-10')).toEqual({
       ...range,
       months: [
-        { month: '2026-01', state: 'ended', incomeCents: 0, spendingCents: 400, differenceCents: -400, uncategorisedInCents: 0 },
-        { month: '2026-02', state: 'ended', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 },
-        { month: '2026-03', state: 'under-way', incomeCents: 980, spendingCents: 0, differenceCents: 980, uncategorisedInCents: 0 },
-        { month: '2026-04', state: 'not-begun', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 },
+        { month: '2026-01', state: 'ended', incomeCents: 0, spendingCents: 400, differenceCents: -400, uncategorisedInCents: 0, counted: 1 },
+        { month: '2026-02', state: 'ended', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0, counted: 0 },
+        { month: '2026-03', state: 'under-way', incomeCents: 980, spendingCents: 0, differenceCents: 980, uncategorisedInCents: 0, counted: 1 }, // the loan is not counted
+        { month: '2026-04', state: 'not-begun', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0, counted: 0 },
       ],
-      totals: { incomeCents: 980, spendingCents: 400, differenceCents: 580, uncategorisedInCents: 0 },
+      totals: { incomeCents: 980, spendingCents: 400, differenceCents: 580, uncategorisedInCents: 0, counted: 2 },
     })
   })
 
   it('is one month for dates in one month, and carries its Account', () => {
     const range = { from: '2026-10-05', to: '2026-10-05', accountId: 7 }
-    expect(incomeVsSpending(range, [], '2026-10').months.map((m) => m.month)).toEqual(['2026-10'])
-    expect(incomeVsSpending(range, [], '2026-10')).toMatchObject({ accountId: 7 })
+    expect(incomeVsSpending(range, [], '2026-10-20').months.map((m) => m.month)).toEqual(['2026-10'])
+    expect(incomeVsSpending(range, [], '2026-10-20')).toMatchObject({ accountId: 7 })
   })
 
   it('crosses the end of a year', () => {
-    expect(incomeVsSpending({ from: '2025-11-30', to: '2026-02-01' }, [], '2026-01').months.map((m) => [m.month, m.state])).toEqual([
+    expect(incomeVsSpending({ from: '2025-11-30', to: '2026-02-01' }, [], '2026-01-31').months.map((m) => [m.month, m.state])).toEqual([
       ['2025-11', 'ended'],
       ['2025-12', 'ended'],
       ['2026-01', 'under-way'],
@@ -536,12 +564,26 @@ describe('the calendar, with no database (incomeVsSpending)', () => {
     ])
   })
 
-  it('adds the money in that has no Category from the rows with no Category ID, month by month', () => {
-    const none = (month: string, outCents: number, inCents: number): SpendingRow => ({ month, categoryId: null, categoryName: null, kind: 'spending', outCents, inCents })
-    const r = incomeVsSpending({ from: '2026-01-01', to: '2026-03-31' }, [none('2026-01', 100, 40), row('2026-01', 'spending', 0, 999), none('2026-03', 0, 15), none('2026-03', 5, 10)], '2026-06')
+  it('says the month it is now is over for dates that ended before today, and under way for dates that reach it', () => {
+    const state = (from: string, to: string, today: string) => incomeVsSpending({ from, to }, [], today).months.map((m) => [m.month, m.state])
 
-    expect(r.months.map((m) => m.uncategorisedInCents)).toEqual([40, 0, 25])
-    expect(r.totals.uncategorisedInCents).toBe(65)
+    expect(state('2026-10-01', '2026-10-15', '2026-10-20')).toEqual([['2026-10', 'ended']]) // 1 to 15 October, opened on the 20th: those dates are over
+    expect(state('2026-10-01', '2026-10-20', '2026-10-20')).toEqual([['2026-10', 'under-way']]) // up to and including today
+    expect(state('2026-10-01', '2026-10-19', '2026-10-20')).toEqual([['2026-10', 'ended']])
+    expect(state('2026-10-01', '2026-10-31', '2026-10-20')).toEqual([['2026-10', 'under-way']])
+    expect(state('2026-09-10', '2026-10-15', '2026-10-20')).toEqual([['2026-09', 'ended'], ['2026-10', 'ended']])
+    expect(state('2026-10-01', '2026-11-15', '2026-10-20')).toEqual([['2026-10', 'under-way'], ['2026-11', 'not-begun']])
+    expect(state('2026-10-31', '2026-10-31', '2026-10-31')).toEqual([['2026-10', 'under-way']]) // the last day
+  })
+
+  it('counts a month whose figures net out to nothing, apart from a month with nothing counted', () => {
+    const range = { from: '2026-01-01', to: '2026-03-31' }
+    const rows = [row('2026-01', 'spending', 4000, 4000), row('2026-03', 'loans', 500, 0)] // $40 spent and fully refunded; a loan
+
+    const r = incomeVsSpending(range, rows, '2026-06-01')
+
+    expect(r.months.map((m) => [m.month, m.spendingCents, m.counted])).toEqual([['2026-01', 0, 1], ['2026-02', 0, 0], ['2026-03', 0, 0]])
+    expect(r.totals).toMatchObject({ spendingCents: 0, incomeCents: 0, counted: 1 }) // something was counted, so the Report has a row for January and not "nothing"
   })
 })
 

@@ -67,7 +67,7 @@ const DIFFERENCE = 'Difference (income less spending)'
 const noCategoryNotice = (cents: number) => `${money(cents)} of money in has no Category, so it comes off Spending and isn't counted as Income. Give it an Income Category to count it. The Difference is unaffected.`
 
 // What September to December hold, by month, as [Income, Spending] in cents (September first). Everything that is not Spending or Income is left out of both: the
-// Transfer and the loan in October, which has nothing else. November has $3.00 of money in that has no Category, which comes off Spending (the Report says so, and
+// Transfer and the loan in October, and $40 spent and refunded in full on the 25th and 26th, so October counts something and comes to nothing. November has $3.00 of money in that has no Category, which comes off Spending (the Report says so, and
 // the Difference does not change). December has Spending below zero (money back) and Income below zero (money out of an Income Category) in one month.
 type Figures = [income: number, spending: number][]
 const quiet: [number, number] = [0, 0]
@@ -108,6 +108,8 @@ async function seed(context: BrowserContext, baseURL: string, project: string): 
     { date: `${year}-09-25`, payee: say('food refund'), amountCents: 1000, category: d.food }, // a refund comes off Spending
     { date: `${year}-10-05`, payee: say('to savings'), amountCents: -20_000 }, // the other half is in Savings: a Transfer
     { date: `${year}-10-20`, payee: say('a loan'), amountCents: -50_000, category: d.loan }, // Loans: neither Spending nor Income, so October has nothing
+    { date: `${year}-10-25`, payee: say('food 2'), amountCents: -4000, category: d.food }, // $40 spent ...
+    { date: `${year}-10-26`, payee: say('food 2 refunded'), amountCents: 4000, category: d.food }, // ... and refunded in full: October nets out to nothing, and still has a row
     { date: `${year}-11-02`, payee: say('nobody has a Category for this'), amountCents: -700 },
     { date: `${year}-11-03`, payee: say('a payment in with no Category'), amountCents: NO_CATEGORY }, // Uncategorised is Spending, so this comes off it
     { date: `${year}-11-15`, payee: say('wages 2'), amountCents: 300_000, category: d.pay },
@@ -217,7 +219,7 @@ test.describe('opening the Report', () => {
     await expect(form.getByLabel('To')).toHaveAttribute('aria-invalid', 'true')
     expect(context.pages()).toHaveLength(1)
 
-    await form.getByLabel('To').fill('2009-12-01') // 120 months
+    await form.getByLabel('To').fill('2009-12-01') // 120 months. This opens a Report of every Account over 2000 to 2009, which holds other specs' Transactions too: assert nothing of its figures
     const [opened] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
     await expect(opened.getByRole('heading', { level: 1, name: NAME })).toBeVisible()
   })
@@ -309,12 +311,22 @@ test.describe('on screen', () => {
 
     expect(await totalsOf(page)).toEqual(expectedTotals(ALL))
     expect(await totalsOf(page)).toEqual(['Total income', '$5,999.50', 'Total spending', '$119.00', DIFFERENCE, '+$5,880.50']) // the same, written out
+    // The line over the Difference is one line across the totals, not a piece over each of its two cells with a gap between them.
+    const line = await section(page).locator('dl').evaluate((dl) => {
+      const row = Array.from(dl.children).find((el) => el.tagName === 'DIV')!
+      const box = (el: Element) => el.getBoundingClientRect()
+      const border = (el: Element) => getComputedStyle(el).borderTopWidth
+      return { sameWidth: Math.abs(box(row).width - box(dl).width) < 1, row: border(row), cells: Array.from(row.children).map(border) }
+    })
+    expect(line.sameWidth).toBe(true)
+    expect(parseFloat(line.row)).toBeGreaterThan(0)
+    expect(line.cells).toEqual(['0px', '0px'])
     await expect(tableOf(page).getByRole('columnheader')).toHaveText(['Month', 'Income', 'Spending', DIFFERENCE])
     // A row for every month in the dates, oldest first, quiet ones too: a month with only a Transfer and a loan is a row of zeros, not a gap.
     const rows = await rowsOf(page)
     expect(rows).toEqual(ALL.map((figures, i) => cells(d.year, i, figures)))
     expect(rows[0]).toEqual([`September ${d.year}`, '$3,000.00', '$140.00', '+$2,860.00'])
-    expect(rows[1]).toEqual([`October ${d.year}`, '$0.00', '$0.00', '$0.00']) // only the Transfer and the loan
+    expect(rows[1]).toEqual([`October ${d.year}`, '$0.00', '$0.00', '$0.00']) // the Transfer and the loan are not counted, and $40 spent and refunded nets out to nothing
     await expect(report).not.toContainText('Counts only') // the dates cover whole months
     await expect(report).not.toContainText('not over yet') // and they are over, long since
     // The Transfer ($200.00) and the loan ($500.00) are in neither column or total.
@@ -398,16 +410,35 @@ test.describe('on screen', () => {
 
   test('says there was no income or spending, and shows no table or totals, for dates with none', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
-    await seed(context, baseURL!, testInfo.project.name)
+    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
-    await page.goto(address(null, `${d.year}-10-01`, `${d.year}-10-31`)) // only a Transfer and a loan: a whole month is named by its name
+    await page.goto(address(savingsId, `${d.year}-10-01`, `${d.year}-10-31`)) // this Account has only the Transfer in October: a whole month is named by its name
     await expect(section(page)).toContainText(`There was no income or spending in October ${d.year}.`)
     await expect(section(page).getByRole('table')).toHaveCount(0)
     await expect(section(page).locator('dl')).toHaveCount(0)
     await expect(article(page).getByRole('region', { name: 'About these figures' })).toBeVisible()
 
-    await page.goto(address(null, `${d.year}-10-02`, `${d.year}-10-19`)) // several days
+    await page.goto(address(null, `${d.year}-10-02`, `${d.year}-10-19`)) // every Account, several days: the Transfer is not counted, and the loan and the refunded food are later
     await expect(section(page)).toContainText(`There was no income or spending in ${dateText(`${d.year}-10-02`)} to ${dateText(`${d.year}-10-19`)}.`)
+    await expect(section(page).getByRole('table')).toHaveCount(0)
+  })
+
+  test('shows its row, and the totals, for a month that nets out to nothing, which is not the same as no income or spending', async ({ page, context, baseURL }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    // $40 spent on the 25th and refunded on the 26th: $0.00 spent, but something was counted.
+    await page.goto(address(null, `${d.year}-10-24`, `${d.year}-10-31`))
+    expect(await rowsOf(page)).toEqual([[`October ${d.year} Counts only ${dateText(`${d.year}-10-24`)} to ${dateText(`${d.year}-10-31`)}`, '$0.00', '$0.00', '$0.00']])
+    expect(await totalsOf(page)).toEqual(['Total income', '$0.00', 'Total spending', '$0.00', DIFFERENCE, '$0.00'])
+    await expect(section(page)).not.toContainText('There was no income or spending')
+    // One day of it has $40 spent and nothing back yet.
+    await page.goto(address(null, `${d.year}-10-25`, `${d.year}-10-25`))
+    expect((await rowsOf(page))[0]).toEqual([`October ${d.year} Counts only ${dateText(`${d.year}-10-25`)}`, '$0.00', '$40.00', '−$40.00'])
+    // The whole month: the Transfer and the loan are not counted, and the food is, so October is a row and the Report is not "nothing".
+    await page.goto(address(null, `${d.year}-10-01`, `${d.year}-10-31`))
+    expect(await rowsOf(page)).toEqual([[`October ${d.year}`, '$0.00', '$0.00', '$0.00']])
+    await expect(section(page)).not.toContainText('There was no income or spending')
   })
 
   test('is titled for Save as PDF: the app, the Report, the Accounts and the dates', async ({ page, context, request, baseURL }, testInfo) => {
@@ -534,6 +565,8 @@ test.describe('120 months', () => {
   test('a Report of the most months is a row for each of them, and one of a month more is refused before it is asked for', async ({ page, context, baseURL }, testInfo) => {
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
+    // Every Account over 2000 to 2009 holds other specs' Transactions too (the Budget vs actual spec's, and 2002 and 2003 are the Spending by Category spec's and the
+    // Loans Report spec's): this test asserts the number of rows and the names of the months, and never a figure.
     await page.goto(address(null, '2000-01-01', '2009-12-31'))
     await expect(tableOf(page)).toBeVisible()
     await expect(tableOf(page).locator('tbody tr')).toHaveCount(120)

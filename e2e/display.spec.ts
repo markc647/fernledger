@@ -820,6 +820,29 @@ test.describe('responsive table', () => {
     await expect(cards.first()).toContainText('−$1,111.11')
   })
 
+  // A card's label and value sit side by side, the value taking the rest of the line, unless the value's narrowest form (a word, or an amount, that cannot be broken)
+  // will not fit beside the label: then it goes under it, at any text size. Ordinary content at size A is as it always was; a value that cannot fit is what moves.
+  test('keeps a card\'s label beside its value for ordinary content, and puts a value that cannot fit beside its label under it', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/styleguide')
+    const cards = page.getByRole('list', { name: 'Sample transactions' }).getByRole('listitem')
+    await expect(cards).toHaveCount(3)
+    /** For each label and value of each card: whether the value starts on the label's line. */
+    const beside = () =>
+      cards.evaluateAll((items) =>
+        items.flatMap((item) =>
+          Array.from(item.querySelectorAll('dl > div'), (row) => row.querySelector('dd')!.getBoundingClientRect().top < row.querySelector('dt')!.getBoundingClientRect().bottom - 1),
+        ),
+      )
+
+    expect(await beside()).toEqual(Array(9).fill(true)) // three cards of a date, a description and an amount
+
+    // A description with a word too wide to sit beside "Description" goes under it, and the page does not grow sideways.
+    await cards.first().locator('dd').nth(1).evaluate((dd) => (dd.textContent = 'Example'.padEnd(60, 'x')))
+    expect(await beside()).toEqual([true, false, true, true, true, true, true, true, true])
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  })
+
   test('sorts by a column heading on a wide screen and from a menu on cards', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 })
     await page.goto('/styleguide')
