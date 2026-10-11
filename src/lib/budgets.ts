@@ -28,16 +28,29 @@ export const UNCATEGORISED_SPENDING = 'Uncategorised (includes money in not yet 
 /** What the Spending Categories with no Budget are called together, where they have a row of their own. */
 export const SPENDING_OUTSIDE_BUDGETS = 'Spending outside Budgets'
 
-/** A row of Budget vs actual: a Category with a Budget, or what has none (Spending Categories without a Budget, and Uncategorised), which has `budgetCents: null`. */
-export type BudgetRow = { key: string; name: string; budgetCents: number | null; spentCents: number }
+/** What is left out of Spending, in the Dashboard's words. The Reports of Spending say it before their figures and again in the heading of each table, so every printed page says it. */
+export const NOT_COUNTED = "Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted."
+
+/** A row of Budget vs actual: a Category with a Budget, or what has none (Spending Categories without a Budget, and Uncategorised), which has `budgetCents: null`. `note` is said under the name. */
+export type BudgetRow = { key: string; name: string; budgetCents: number | null; spentCents: number; note?: string }
 
 /**
  * The rows of a month of Budget vs actual as the Worker gave it (`/api/budgets/vs-actual`, and each month of the Budget vs actual Report): the Categories with a Budget,
- * then Spending outside Budgets, then Uncategorised. The Summary and the Report write them the same way.
+ * then Spending outside Budgets, then Uncategorised. The Summary and the Report write them the same way. A Report's row that is a `changed` Budget says from which month.
  */
-export function budgetRows(vsActual: { rows: { categoryId: number; categoryName: string; budgetCents: number; spentCents: number }[]; otherCents: number; uncategorisedCents: number }): BudgetRow[] {
+export function budgetRows(vsActual: {
+  rows: { categoryId: number; categoryName: string; budgetCents: number; spentCents: number; changed?: boolean; effectiveFrom?: string }[]
+  otherCents: number
+  uncategorisedCents: number
+}): BudgetRow[] {
   return [
-    ...vsActual.rows.map((row) => ({ key: String(row.categoryId), name: row.categoryName, budgetCents: row.budgetCents, spentCents: row.spentCents })),
+    ...vsActual.rows.map((row) => ({
+      key: String(row.categoryId),
+      name: row.categoryName,
+      budgetCents: row.budgetCents,
+      spentCents: row.spentCents,
+      ...(row.changed && row.effectiveFrom ? { note: `Budget changed from ${formatMonth(row.effectiveFrom)}` } : {}),
+    })),
     { key: 'other', name: SPENDING_OUTSIDE_BUDGETS, budgetCents: null, spentCents: vsActual.otherCents },
     { key: 'uncategorised', name: UNCATEGORISED_SPENDING, budgetCents: null, spentCents: vsActual.uncategorisedCents },
   ]

@@ -2,14 +2,11 @@ import type { SpendingByCategory, SpendingCategory } from '@/generated/api/spend
 import { useReportIdentity } from '@/components/report-frame'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Spent } from '@/components/spent'
-import { UNCATEGORISED_SPENDING } from '@/lib/budgets'
+import { NOT_COUNTED, UNCATEGORISED_SPENDING } from '@/lib/budgets'
 import { describeDates } from '@/lib/charts'
 
 /** Tighter cells on paper, where a page is 680px wide and a Report is many pages long. */
 const PAPER = 'print:px-2 print:py-2'
-
-/** What is left out, in the Dashboard's words. It is said before the figures and again in the heading of the table, so every printed page says it. */
-const NOT_COUNTED = "Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted."
 
 // The Category keeps its words together as far as it can, and breaks a very long one rather than push the page wider. Uncategorised is named as the Summary and the
 // Dashboard name it, so the row itself says that it includes money in that has no Category yet, wherever it falls in the order.
@@ -38,13 +35,7 @@ function AboutSpending() {
  * the Accounts: a browser repeats that heading, and with it what is not counted, at the top of every page the table runs onto.
  */
 export function SpendingByCategoryReport({ report, accounts }: { report: SpendingByCategory; accounts: string }) {
-  const identity = useReportIdentity()(accounts)
-  const printHeading = identity && (
-    <>
-      {identity}
-      <span className="block">{NOT_COUNTED}</span>
-    </>
-  )
+  const printHeading = useReportIdentity()(accounts, NOT_COUNTED)
   return (
     <>
       <AboutSpending />

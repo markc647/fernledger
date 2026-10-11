@@ -3,17 +3,29 @@ import { Spent } from '@/components/spent'
 import { Status } from '@/components/status'
 import { budgetStatus, type BudgetRow } from '@/lib/budgets'
 import { formatBalance } from '@/lib/format'
-
-const money = 'whitespace-nowrap tabular-nums [font-kerning:none]'
+import { MONEY_TEXT } from '@/lib/utils'
 
 /**
- * The columns of a month of Budget vs actual, the same on the Summary and in the Report: Category, Budget, Spent and where it stands (an icon and words, never colour
- * alone). `className` is for the table's cells and headings, such as the Report's tighter padding on paper.
+ * The columns of a month of Budget vs actual, the same on the Summary and in the Report: Category (with a note under it where the Report has one), Budget, Spent
+ * and where it stands (an icon and words, never colour alone). `className` is for the table's cells and headings, such as the Report's tighter padding on paper.
  */
 export function budgetColumns(className?: string): Column<BudgetRow>[] {
   return [
-    { key: 'category', header: 'Category', className, cell: (row) => row.name },
-    { key: 'budget', header: 'Budget', align: 'end', className, cell: (row) => (row.budgetCents === null ? 'No Budget' : <span className={money}>{formatBalance(row.budgetCents)}</span>) },
+    {
+      key: 'category',
+      header: 'Category',
+      className,
+      cell: (row) =>
+        row.note ? (
+          <>
+            {row.name}
+            <span className="block text-muted-foreground">{row.note}</span>
+          </>
+        ) : (
+          row.name
+        ),
+    },
+    { key: 'budget', header: 'Budget', align: 'end', className, cell: (row) => (row.budgetCents === null ? 'No Budget' : <span className={MONEY_TEXT}>{formatBalance(row.budgetCents)}</span>) },
     { key: 'spent', header: 'Spent', align: 'end', className, cell: (row) => <Spent cents={row.spentCents} /> },
     {
       key: 'status',

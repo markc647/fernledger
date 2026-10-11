@@ -1,11 +1,11 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { budgetStatus } from '../src/lib/budgets'
 import { MAX_REPORT_MONTHS as PAGE_MAX_REPORT_MONTHS } from '../src/lib/report-budget'
-import type { Change, InEffect } from './budget-rules'
+import { MAX_BUDGET_CHANGES, type Change, type InEffect } from './budget-rules'
 import worker from './index'
-import { nzMonth } from './months'
-import { budgetReport, MAX_REPORT_MONTHS, type BudgetReport } from './report-budget'
+import { budgetReport, isOver, MAX_REPORT_MONTHS, monthState, readBudgetReport, type BudgetReport } from './report-budget'
 import type { SpendingRow } from './spending'
 
 // Seam 1: the Budget vs actual Report's data (GET /api/reports/budget-vs-actual), through the Worker's exported handler as the local-development Admin or a
@@ -232,7 +232,8 @@ describe('the Report’s months and the Summary’s Budget vs actual', () => {
     expect(r.months.map((m) => m.month)).toEqual(['2026-01', '2026-02', '2026-03', '2026-04'])
     for (const month of r.months) {
       const summary = await vsActual(month.month)
-      expect({ rows: month.rows, otherCents: month.otherCents, uncategorisedCents: month.uncategorisedCents }, month.month).toEqual({
+      // The Report's rows also say when the Budget began and whether it changed, which the Summary does not.
+      expect({ rows: month.rows.map(({ categoryId, categoryName, budgetCents, spentCents }) => ({ categoryId, categoryName, budgetCents, spentCents })), otherCents: month.otherCents, uncategorisedCents: month.uncategorisedCents }, month.month).toEqual({
         rows: summary.rows,
         otherCents: summary.otherCents,
         uncategorisedCents: summary.uncategorisedCents,
@@ -245,11 +246,12 @@ describe('the Report’s months and the Summary’s Budget vs actual', () => {
 
     const r = await report('2026-01-01', '2026-04-30')
 
-    expect(r.months.map((m) => [m.month, glance(m), m.otherCents, m.uncategorisedCents, m.budgetCents, m.spentCents])).toEqual([
-      ['2026-01', [['Eating out', 15_000, 4_000], ['Groceries', 80_000, 75_000]], 6_000, 1_234, 95_000, 86_234], // Fuel has no Budget yet: its $60.00 is outside Budgets
-      ['2026-02', [['Eating out', 15_000, 0], ['Fuel', 20_000, 18_000], ['Groceries', 80_000, 77_000]], 0, 0, 115_000, 95_000], // $800.00 out less a $30.00 refund; wages and the loan are not spending
-      ['2026-03', [['Eating out', 15_000, 15_100], ['Fuel', 20_000, 21_000], ['Groceries', 80_000, 95_000]], 0, -2_000, 115_000, 129_100], // money in with no Category comes off Uncategorised
-      ['2026-04', [['Fuel', 20_000, 0], ['Groceries', 80_000, 10_000]], 6_000, 0, 100_000, 16_000], // Eating out's Budget has ended: its $60.00 is outside Budgets
+    // [month, rows, outside Budgets, Uncategorised, Budgets, spent against Budgets, all spending]
+    expect(r.months.map((m) => [m.month, glance(m), m.otherCents, m.uncategorisedCents, m.budgetCents, m.budgetedSpentCents, m.spentCents])).toEqual([
+      ['2026-01', [['Eating out', 15_000, 4_000], ['Groceries', 80_000, 75_000]], 6_000, 1_234, 95_000, 79_000, 86_234], // Fuel has no Budget yet: its $60.00 is outside Budgets
+      ['2026-02', [['Eating out', 15_000, 0], ['Fuel', 20_000, 18_000], ['Groceries', 80_000, 77_000]], 0, 0, 115_000, 95_000, 95_000], // $800.00 out less a $30.00 refund; wages and the loan are not spending
+      ['2026-03', [['Eating out', 15_000, 15_100], ['Fuel', 20_000, 21_000], ['Groceries', 80_000, 95_000]], 0, -2_000, 115_000, 131_100, 129_100], // money in with no Category comes off Uncategorised
+      ['2026-04', [['Fuel', 20_000, 0], ['Groceries', 80_000, 10_000]], 6_000, 0, 100_000, 10_000, 16_000], // Eating out's Budget has ended: its $60.00 is outside Budgets
     ])
   })
 })
@@ -262,6 +264,7 @@ describe('the Report’s totals', () => {
       const parts = month.rows.reduce((sum, r) => sum + r.spentCents, 0) + month.otherCents + month.uncategorisedCents
       expect(parts, month.month).toBe(month.spentCents)
       expect(month.rows.reduce((sum, r) => sum + r.budgetCents, 0), month.month).toBe(month.budgetCents)
+      expect(month.rows.reduce((sum, r) => sum + r.spentCents, 0), month.month).toBe(month.budgetedSpentCents)
     }
   })
 
@@ -280,13 +283,16 @@ describe('the Report’s totals', () => {
 
     const r = await report('2026-01-01', '2026-04-30')
 
+    // Every Category was over its Budget in March only.
     expect(r.categories).toEqual([
-      { categoryId: ids['Eating out'], categoryName: 'Eating out', months: 3, budgetCents: 45_000, spentCents: 19_100 },
-      { categoryId: ids['Fuel'], categoryName: 'Fuel', months: 3, budgetCents: 60_000, spentCents: 39_000 },
-      { categoryId: ids['Groceries'], categoryName: 'Groceries', months: 4, budgetCents: 320_000, spentCents: 257_000 },
+      { categoryId: ids['Eating out'], categoryName: 'Eating out', months: 3, overMonths: 1, budgetCents: 45_000, spentCents: 19_100 },
+      { categoryId: ids['Fuel'], categoryName: 'Fuel', months: 3, overMonths: 1, budgetCents: 60_000, spentCents: 39_000 },
+      { categoryId: ids['Groceries'], categoryName: 'Groceries', months: 4, overMonths: 1, budgetCents: 320_000, spentCents: 257_000 },
     ])
-    expect(r.total).toEqual({ budgetCents: 425_000, spentCents: 326_334, otherCents: 12_000, uncategorisedCents: -766 })
-    expect(r.categories.reduce((sum, c) => sum + c.spentCents, 0) + r.total.otherCents + r.total.uncategorisedCents).toBe(r.total.spentCents)
+    expect(r.total).toEqual({ budgetCents: 425_000, budgetedSpentCents: 315_100, spentCents: 326_334, otherCents: 12_000, uncategorisedCents: -766, budgetMonths: 4, overMonths: 1 })
+    expect(r.together).toEqual({ first: '2026-01', last: '2026-04', months: 4 })
+    expect(r.categories.reduce((sum, c) => sum + c.spentCents, 0)).toBe(r.total.budgetedSpentCents)
+    expect(r.total.budgetedSpentCents + r.total.otherCents + r.total.uncategorisedCents).toBe(r.total.spentCents)
     expect(r.categories.reduce((sum, c) => sum + c.budgetCents, 0)).toBe(r.total.budgetCents)
     expect(r.months.reduce((sum, m) => sum + m.budgetCents, 0)).toBe(r.total.budgetCents)
   })
@@ -312,7 +318,7 @@ describe('the Report’s totals', () => {
     const out = (await env.DB.prepare("SELECT id FROM transactions WHERE bank_unique_id = 'OUT'").first<{ id: number }>())!.id
     expect((await call(`/api/transactions/${out}/override`, { method: 'PUT', body: { categoryId: ids['Groceries'] } })).status).toBe(200)
 
-    expect((await report('2026-04-01', '2026-04-30')).months[0]!.rows).toEqual([{ categoryId: ids['Groceries'], categoryName: 'Groceries', budgetCents: 80_000, spentCents: 30_000 }])
+    expect((await report('2026-04-01', '2026-04-30')).months[0]!.rows).toEqual([{ categoryId: ids['Groceries'], categoryName: 'Groceries', budgetCents: 80_000, spentCents: 30_000, effectiveFrom: '2026-04', changed: false }])
   })
 
   it('take a refund off a Category’s spending, and show one that took in more than it paid out below zero', async () => {
@@ -357,23 +363,134 @@ describe('the months a Report covers', () => {
   it('include a month with nothing in it, with no Budget and no spending', async () => {
     const r = await report('2026-01-01', '2026-02-28')
 
-    expect(r.months).toEqual([
-      { month: '2026-01', rows: [], otherCents: 0, uncategorisedCents: 0, budgetCents: 0, spentCents: 0 },
-      { month: '2026-02', rows: [], otherCents: 0, uncategorisedCents: 0, budgetCents: 0, spentCents: 0 },
-    ])
+    const nothing = { state: 'ended', rows: [], otherCents: 0, uncategorisedCents: 0, budgetCents: 0, budgetedSpentCents: 0, spentCents: 0 }
+    expect(r.months).toEqual([{ month: '2026-01', ...nothing }, { month: '2026-02', ...nothing }])
     expect(r.categories).toEqual([])
-    expect(r.total).toEqual({ budgetCents: 0, spentCents: 0, otherCents: 0, uncategorisedCents: 0 })
+    expect(r.total).toEqual({ budgetCents: 0, budgetedSpentCents: 0, spentCents: 0, otherCents: 0, uncategorisedCents: 0, budgetMonths: 0, overMonths: 0 })
+    expect(r.together).toEqual({ first: '2026-01', last: '2026-02', months: 2 })
   })
 
   it('are one month for dates in the same month, and as many as 24', async () => {
     expect((await report('2026-03-05', '2026-03-05')).months.map((m) => m.month)).toEqual(['2026-03'])
     expect((await report('2024-01-31', '2025-12-01')).months).toHaveLength(MAX_REPORT_MONTHS)
   })
+})
 
-  it('say which month it is now, in New Zealand, so the Report can say that month is not over', async () => {
-    const before = nzMonth(new Date())
-    const { thisMonth } = await report('2026-03-05', '2026-03-05')
-    expect([before, nzMonth(new Date())]).toContain(thisMonth)
+describe('the months together', () => {
+  // Groceries has $800.00 all of 2026. It spends $300.00 in each of January to September, $100.00 so far in October, and nothing in the months to come.
+  async function seedGroceries() {
+    await rule('EXAMPLE COUNTDOWN', 'Groceries')
+    await mustSet('Groceries', '2026-01', 80_000)
+    const months = ['01', '02', '03', '04', '05', '06', '07', '08', '09']
+    await importInto(EVERYDAY, [...months.map((m) => row(`2026-${m}-10`, -30_000, 'EXAMPLE COUNTDOWN')), row('2026-10-05', -10_000, 'EXAMPLE COUNTDOWN')])
+  }
+  const OCTOBER = new Date('2026-10-15T01:00:00Z') // 2:00 pm on 15 October in New Zealand
+  const read = (request: { from: string; to: string }, now: Date) => readBudgetReport(env.DB, request, now)
+
+  it('are the months that have ended: January to December seen in October add up January to September, not the month part spent or the months to come', async () => {
+    await seedGroceries()
+
+    const r = await read({ from: '2026-01-01', to: '2026-12-31' }, OCTOBER)
+
+    expect(r.months.map((m) => [m.month, m.state])).toEqual([
+      ...['01', '02', '03', '04', '05', '06', '07', '08', '09'].map((m) => [`2026-${m}`, 'ended']),
+      ['2026-10', 'under-way'],
+      ['2026-11', 'not-begun'],
+      ['2026-12', 'not-begun'],
+    ])
+    expect(r.together).toEqual({ first: '2026-01', last: '2026-09', months: 9 })
+    // Nine months of $800.00 against nine of $300.00. With October's whole Budget against $100.00, and November's and December's against nothing, the Budgets would be
+    // $9,600.00 against $2,800.00 and the Category would look $6,800.00 under Budget instead of $4,500.00.
+    expect(r.total).toEqual({ budgetCents: 720_000, budgetedSpentCents: 270_000, spentCents: 270_000, otherCents: 0, uncategorisedCents: 0, budgetMonths: 9, overMonths: 0 })
+    expect(r.categories).toEqual([{ categoryId: ids['Groceries'], categoryName: 'Groceries', months: 9, overMonths: 0, budgetCents: 720_000, spentCents: 270_000 }])
+    expect(r.total.spentCents).toBe(await chartTotal('2026-01-01', '2026-09-30')) // the total is Spending over the months that ended, not the whole range's
+    // The months that have not ended are still in the Report, each with its own Budget and spending.
+    expect(r.months[9]).toMatchObject({ month: '2026-10', state: 'under-way', budgetCents: 80_000, budgetedSpentCents: 10_000, spentCents: 10_000 })
+    expect(r.months[10]).toMatchObject({ month: '2026-11', state: 'not-begun', budgetCents: 80_000, budgetedSpentCents: 0, spentCents: 0 })
+    expect(r.months[11]).toMatchObject({ month: '2026-12', state: 'not-begun', budgetCents: 80_000, budgetedSpentCents: 0, spentCents: 0 })
+  })
+
+  it('count a month that goes over the Budgets together, and a Category over its own, only when the month has ended', async () => {
+    await rule('EXAMPLE COUNTDOWN', 'Groceries')
+    await mustSet('Groceries', '2026-01', 80_000)
+    await importInto(EVERYDAY, [row('2026-01-10', -90_000, 'EXAMPLE COUNTDOWN'), row('2026-02-10', -80_000, 'EXAMPLE COUNTDOWN'), row('2026-03-10', -10_000, 'EXAMPLE COUNTDOWN'), row('2026-10-10', -200_000, 'EXAMPLE COUNTDOWN')])
+
+    const r = await read({ from: '2026-01-01', to: '2026-10-31' }, OCTOBER)
+
+    // January was over, February exactly on its Budget (not over), March under, and October is over but has not ended.
+    expect(r.total).toMatchObject({ budgetMonths: 9, overMonths: 1 })
+    expect(r.categories[0]).toMatchObject({ months: 9, overMonths: 1 })
+  })
+
+  it('are nothing while no month has ended, with every month still shown', async () => {
+    await seedGroceries()
+
+    const r = await read({ from: '2026-10-01', to: '2026-12-31' }, OCTOBER)
+
+    expect(r.together).toBeNull()
+    expect(r.total).toEqual({ budgetCents: 0, budgetedSpentCents: 0, spentCents: 0, otherCents: 0, uncategorisedCents: 0, budgetMonths: 0, overMonths: 0 })
+    expect(r.categories).toEqual([])
+    expect(r.months.map((m) => [m.month, m.state, m.budgetCents])).toEqual([['2026-10', 'under-way', 80_000], ['2026-11', 'not-begun', 80_000], ['2026-12', 'not-begun', 80_000]])
+  })
+
+  it('go by the New Zealand month, not the UTC one: at 23:30 UTC on the last day of a month it is already the next month in New Zealand', async () => {
+    await seedGroceries()
+    const states = async (now: string) => (await read({ from: '2026-08-01', to: '2026-10-31' }, new Date(now))).months.map((m) => [m.month, m.state])
+
+    // 11:30 am on 1 September in New Zealand (winter time, UTC+12), still 31 August in UTC.
+    expect(await states('2026-08-31T23:30:00Z')).toEqual([['2026-08', 'ended'], ['2026-09', 'under-way'], ['2026-10', 'not-begun']])
+    // 12:30 am on 1 October in New Zealand (summer time, UTC+13), still 30 September in UTC.
+    expect(await states('2026-09-30T11:30:00Z')).toEqual([['2026-08', 'ended'], ['2026-09', 'ended'], ['2026-10', 'under-way']])
+    // And 12:30 am on 30 September in UTC is 1:30 pm that day in New Zealand: September has not ended.
+    expect(await states('2026-09-30T00:30:00Z')).toEqual([['2026-08', 'ended'], ['2026-09', 'under-way'], ['2026-10', 'not-begun']])
+  })
+
+  it('call a month over its Budget by the rule the Summary uses: exactly the Budget is not over', () => {
+    for (const [budget, spent] of [[80_000, 0], [80_000, 79_999], [80_000, 80_000], [80_000, 80_001], [80_000, -1_500], [1, 2]] as const) {
+      expect(isOver(budget, spent), `${budget} ${spent}`).toBe(budgetStatus(budget, spent).kind === 'over')
+    }
+  })
+
+  it('call a month ended, under way or not begun by comparing it with the NZ month it is now', () => {
+    expect(monthState('2026-09', '2026-10')).toBe('ended')
+    expect(monthState('2026-10', '2026-10')).toBe('under-way')
+    expect(monthState('2026-11', '2026-10')).toBe('not-begun')
+    expect(monthState('2025-12', '2026-01')).toBe('ended') // across a year end
+    expect(monthState('2026-01', '2025-12')).toBe('not-begun')
+  })
+})
+
+describe('a Budget that changes inside the Report', () => {
+  it('says so in the month it changes, with the month it began, and not before, after or for a Budget that begins or ends', async () => {
+    await mustSet('Groceries', '2026-01', 80_000)
+    await mustSet('Groceries', '2026-03', 90_000)
+    await mustSet('Groceries', '2026-05', null)
+    await mustSet('Groceries', '2026-07', 50_000) // begins again: nothing before it in the Report to change from
+    await mustSet('Fuel', '2026-02', 20_000) // begins in February: not a change either
+
+    const r = await report('2026-01-01', '2026-08-31')
+
+    const changed = r.months.map((m) => [m.month, m.rows.filter((x) => x.changed).map((x) => [x.categoryName, x.effectiveFrom])])
+    expect(changed).toEqual([
+      ['2026-01', []], // the first month of the Report is never a change
+      ['2026-02', []],
+      ['2026-03', [['Groceries', '2026-03']]],
+      ['2026-04', []],
+      ['2026-05', []],
+      ['2026-06', []],
+      ['2026-07', []],
+      ['2026-08', []],
+    ])
+    // The month a Budget began is kept on every row it covers.
+    expect(r.months[3]!.rows.find((x) => x.categoryName === 'Groceries')).toMatchObject({ budgetCents: 90_000, effectiveFrom: '2026-03', changed: false })
+    expect(r.months[7]!.rows.find((x) => x.categoryName === 'Groceries')).toMatchObject({ budgetCents: 50_000, effectiveFrom: '2026-07', changed: false })
+  })
+
+  it('is not a change when a Budget is set again to what it was', async () => {
+    await mustSet('Groceries', '2026-01', 80_000)
+    await mustSet('Groceries', '2026-03', 80_000)
+
+    expect((await report('2026-01-01', '2026-04-30')).months.flatMap((m) => m.rows.filter((x) => x.changed))).toEqual([])
   })
 })
 
@@ -415,7 +532,7 @@ describe('who can read the Report, and what it refuses', () => {
     await seedYear()
     const [member, admin] = await Promise.all([report('2026-01-01', '2026-04-30', 'member'), report('2026-01-01', '2026-04-30', 'admin')])
 
-    expect(member).toEqual({ ...admin, thisMonth: expect.any(String) })
+    expect(member).toEqual(admin)
     expect(member.months).toHaveLength(4)
     expect((await call(path, { who: null })).status).toBe(401)
   })
@@ -474,21 +591,34 @@ describe('the Report put together from the rows (no database)', () => {
   it('writes a month for each from the first to the last across a year end, in order, whatever order the rows came in', () => {
     const r = budgetReport(request, { inEffect, changes: [], spending: [spent('2027-02', 1, 100), spent('2026-12', 1, 200)], thisMonth: '2026-12' })
 
-    expect(r.months.map((m) => [m.month, m.otherCents])).toEqual([['2026-11', 0], ['2026-12', 200], ['2027-01', 0], ['2027-02', 100]])
+    expect(r.months.map((m) => [m.month, m.otherCents, m.spentCents, m.state])).toEqual([['2026-11', 0, 0, 'ended'], ['2026-12', 200, 200, 'under-way'], ['2027-01', 0, 0, 'not-begun'], ['2027-02', 100, 100, 'not-begun']])
     expect(r.covers).toEqual({ from: '2026-11-01', to: '2027-02-28' })
-    expect(r.thisMonth).toBe('2026-12')
+    expect(r.together).toEqual({ first: '2026-11', last: '2026-11', months: 1 })
   })
 
-  it('lists a Category in the all-months figures only if it had a Budget in some month, and counts the months it had one', () => {
+  it('lists a Category in the figures together only if it had a Budget in an ended month, and counts the months it had one and was over', () => {
     const r = budgetReport(request, {
       inEffect,
       changes: [change(2, '2026-12', 1_000), change(2, '2027-02', null)],
-      spending: [spent('2026-11', 2, 50), spent('2026-12', 2, 300), spent('2027-01', 2, 500), spent('2027-02', 2, 7)],
+      spending: [spent('2026-11', 2, 50), spent('2026-12', 2, 1_300), spent('2027-01', 2, 500), spent('2027-02', 2, 7)],
       thisMonth: '2027-02',
     })
 
-    expect(r.categories).toEqual([{ categoryId: 2, categoryName: 'Category 2', months: 2, budgetCents: 2_000, spentCents: 800 }])
-    expect(r.total).toEqual({ budgetCents: 2_000, spentCents: 857, otherCents: 57, uncategorisedCents: 0 }) // November and February are outside Budgets
+    // November has no Budget yet, so its 50 cents are outside Budgets; December was over; and February, with no Budget left and its own 7 cents, has not ended.
+    expect(r.categories).toEqual([{ categoryId: 2, categoryName: 'Category 2', months: 2, overMonths: 1, budgetCents: 2_000, spentCents: 1_800 }])
+    expect(r.total).toEqual({ budgetCents: 2_000, budgetedSpentCents: 1_800, spentCents: 1_850, otherCents: 50, uncategorisedCents: 0, budgetMonths: 2, overMonths: 1 })
+    expect(r.together).toEqual({ first: '2026-11', last: '2027-01', months: 3 })
+  })
+
+  it('sets the Budgets and the spending of the Categories with a Budget side by side in a month, apart from the rest', () => {
+    const r = budgetReport(request, {
+      inEffect,
+      changes: [change(1, '2026-11', 1_000)],
+      spending: [spent('2026-11', 1, 400), spent('2026-11', 2, 250), spent('2026-11', null, 30)],
+      thisMonth: '2027-03',
+    })
+
+    expect(r.months[0]).toMatchObject({ budgetCents: 1_000, budgetedSpentCents: 400, otherCents: 250, uncategorisedCents: 30, spentCents: 680 })
   })
 
   it('leaves Income and Loans out of every figure', () => {
@@ -510,6 +640,8 @@ describe('what the Report reads from D1 (ADR 0004)', () => {
   // row and its Override's Category), plus the Categories and the Budget changes.
   const IN_RANGE = 2_000
   const CHANGES = 5 * 24
+  const FROM = '2023-01-01'
+  const TO = '2024-12-31'
 
   beforeEach(async () => {
     await env.DB.prepare("INSERT INTO accounts (id, account_number, name) VALUES (1, '99-9999-9999999-01', 'Example everyday')").run()
@@ -523,11 +655,11 @@ describe('what the Report reads from D1 (ADR 0004)', () => {
     await env.DB.prepare(
       `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${IN_RANGE})
        INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category)
-       SELECT 1, date('2025-01-01', '+' || (i % 24) || ' months', '+' || (i % 28) || ' days'), -100, 'EXAMPLE ' || i, 'import', ? FROM seq`,
+       SELECT 1, date('2023-01-01', '+' || (i % 24) || ' months', '+' || (i % 28) || ' days'), -100, 'EXAMPLE ' || i, 'import', ? FROM seq`,
     )
       .bind(ids['Groceries'])
       .run()
-    const months = Array.from({ length: 24 }, (_, i) => `${2025 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`)
+    const months = Array.from({ length: 24 }, (_, i) => `${2023 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`)
     const spendingCategories = (await env.DB.prepare("SELECT id FROM categories WHERE kind = 'spending' AND removed_at IS NULL ORDER BY id LIMIT 5").all<{ id: number }>()).results
     expect(spendingCategories).toHaveLength(5)
     await env.DB.batch(
@@ -538,7 +670,7 @@ describe('what the Report reads from D1 (ADR 0004)', () => {
   it('takes three of the 50 queries: the Categories, the Budget changes, and the spending, which reads each Transaction in the months three times and none of the history around them', async () => {
     const categories = (await env.DB.prepare('SELECT COUNT(*) AS n FROM categories').first<{ n: number }>())!.n
 
-    const { res, watched } = await measured('/api/reports/budget-vs-actual?from=2025-01-01&to=2026-12-31')
+    const { res, watched } = await measured(`/api/reports/budget-vs-actual?from=${FROM}&to=${TO}`)
 
     expect(res.status).toBe(200)
     const body = (await res.json()) as BudgetReport
@@ -546,7 +678,8 @@ describe('what the Report reads from D1 (ADR 0004)', () => {
     expect(body.total.spentCents).toBe(IN_RANGE * 100)
     expect(watched.prepared).toHaveLength(3)
     const [categoriesRead, changesRead, spendingRead] = watched.reads as [number, number, number]
-    expect(categoriesRead).toBeLessThanOrEqual(categories * 3) // each Category and a seek into its Budget changes
+    expect(categoriesRead).toBeLessThanOrEqual(categories * 2) // each Category and, for one with a Budget, the single seek that finds its latest change
+    expect(categoriesRead).toBeGreaterThan(categories) // the bound above means something: the seeks are read
     expect(changesRead).toBeLessThanOrEqual(CHANGES + 5) // every Budget change, once
     expect(changesRead).toBeGreaterThanOrEqual(CHANGES)
     expect(spendingRead).toBeLessThanOrEqual(IN_RANGE * 3 + 50) // the index entry, the row and the Override's Category: not the 3,000 Transactions of 2020
@@ -554,12 +687,37 @@ describe('what the Report reads from D1 (ADR 0004)', () => {
   })
 
   it('reads only the Transactions in the months asked for: a single month reads that month’s, and the Categories and Budget changes the same', async () => {
-    const year = await measured('/api/reports/budget-vs-actual?from=2025-01-01&to=2025-12-31')
-    const month = await measured('/api/reports/budget-vs-actual?from=2025-03-01&to=2025-03-31')
+    const year = await measured('/api/reports/budget-vs-actual?from=2023-01-01&to=2023-12-31')
+    const month = await measured('/api/reports/budget-vs-actual?from=2023-03-01&to=2023-03-31')
 
     const spent = (m: typeof year) => m.watched.reads[2]!
     expect(month.watched.reads.slice(0, 2)).toEqual(year.watched.reads.slice(0, 2))
     expect(spent(year)).toBeGreaterThan(spent(month) * 6)
     expect(spent(month)).toBeLessThanOrEqual((IN_RANGE / 24) * 3 + 50)
+  })
+
+  it('stays within the 600 Budget changes the database keeps, however many months: 600 Categories each with a Budget over the most months give 14,400 rows from three queries', async () => {
+    // The months are capped, but the Categories are not: what bounds the Report's rows is the Budget changes (MAX_BUDGET_CHANGES), because a Category has a row in
+    // a month only while it has a Budget, and every Category with a Budget has at least one change. So 600 Categories, with one change each, is the most rows.
+    await env.DB.prepare('DELETE FROM budgets').run()
+    await env.DB.prepare(
+      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${MAX_BUDGET_CHANGES})
+       INSERT INTO categories (name, kind) SELECT 'Many ' || i, 'spending' FROM seq`,
+    ).run()
+    await env.DB.prepare("INSERT INTO budgets (category_id, effective_from_month, amount_cents) SELECT id, '2023-01', 1000 FROM categories WHERE name LIKE 'Many %'").run()
+    const categories = (await env.DB.prepare('SELECT COUNT(*) AS n FROM categories').first<{ n: number }>())!.n
+
+    const { res, watched } = await measured(`/api/reports/budget-vs-actual?from=${FROM}&to=${TO}`)
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as BudgetReport
+    expect(body.months.map((m) => m.rows.length)).toEqual(Array(24).fill(MAX_BUDGET_CHANGES))
+    expect(body.categories).toHaveLength(MAX_BUDGET_CHANGES)
+    expect(JSON.stringify(body).length).toBeLessThan(3_000_000) // about 14,400 rows of a hundred bytes or so, not a response that grows with the months and the Categories together
+    expect(watched.prepared).toHaveLength(3)
+    const [categoriesRead, changesRead] = watched.reads as [number, number, number]
+    expect(categoriesRead).toBeLessThanOrEqual(categories * 3) // each Category, and for one with a Budget the seek to its latest change and the row it finds
+    expect(categoriesRead).toBeGreaterThan(categories * 2.5) // the bound above means something
+    expect(changesRead).toBeLessThanOrEqual(MAX_BUDGET_CHANGES + 5)
   })
 })

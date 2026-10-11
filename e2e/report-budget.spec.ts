@@ -1,34 +1,56 @@
-import { AxeBuilder } from '@axe-core/playwright'
-import type { APIRequestContext, BrowserContext, Locator, Page } from '@playwright/test'
+import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
+import {
+  dateText,
+  ensureCategory,
+  expectBareMargins,
+  expectBlackOnWhite,
+  expectIdentityOnEveryPage,
+  expectJustTheReport,
+  expectNoTextUnder12pt,
+  expectNoTypeUnder12pt,
+  expectOwnPage,
+  expectPageNumbers,
+  expectTitleBlock,
+  GENERATED,
+  importRows,
+  money,
+  noAxeViolations,
+  NOT_COUNTED,
+  NOW,
+  overrideCategories,
+  restoreAppTitleAfterEach,
+  setTitle,
+  spent,
+  squash,
+  TITLE,
+  UNCATEGORISED,
+  type SeedRow,
+} from './report-helpers'
 
 // Ticket 21: the Budget vs actual Report (spec story 94). It uses the Report frame of ticket 18, so it opens in a new window, says on its face what it is,
 // and prints with its table headings on every page. The Report's numbers are held to the Summary's Budget vs actual and to Spending in
 // worker/report-budget.test.ts; this file checks what a reader sees and what comes out of the printer: the page under print media, and the PDF it makes
 // (page count, the text on each page, the margins and the size of the type).
 
-// TODO: e2e/report-helpers.ts (ticket 20) will hold WCAG, dateText, setTitle, blackOnWhite, squash and the 12pt, margin and title checks; switch to them then.
-const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
-const MEMBER_EMAIL = 'dev.member@example.com'
-const TITLE = `Mum's "family" finances \\ Report` // quote, apostrophe and backslash: the Admin can type any of them
-const NOW = new Date('2026-10-08T02:42:00.000Z') // 3:42 pm in NZ
-const GENERATED = `Generated Thu 8 Oct 2026 at 3:42 pm by ${MEMBER_EMAIL}`
-
 test.describe.configure({ mode: 'serial' })
 
-// The light and dark projects share one local database, so each has Accounts, Categories and a year of its own (2001 and 2000, before every other spec's: tickets 17 and 20 have 2002 to 2004).
-// The Report is of all Accounts, so it lists what other specs made too, but they have nothing in these years and no Budget reaches back to them.
+// The light and dark projects share one local database, so each has Accounts, Categories and a year of its own (2001 and 2000, before every other spec's:
+// the Dashboard has 2004 and the Spending by Category Report 2002 and 2003). The Report is of all Accounts, so it lists what other specs made too, but they have
+// nothing in these years and no Budget reaches back to them.
 //
 // A year's worth of everything the Report has to get right, January to June:
-// - Eating out has $150.00 from January, ended from April; Fuel has $200.00 from February; Groceries has $800.00 from January. Both of those are ended
-//   from July, so the Budgets do not reach the months other specs use;
-// - Fuel in January has no Budget yet and Eating out in April has none any more, so that spending is outside Budgets;
+// - Coffee has $150.00 from January, ended from April; Petrol has $200.00 from February, changed to $250.00 from May; Supermarket has $800.00 from January.
+//   Petrol and Supermarket are ended from July, so the Budgets do not reach the months other specs use;
+// - Petrol in January has no Budget yet and Coffee in April has none any more, so that spending is outside Budgets;
 // - February has a refund, wages ($2,000.00, Income) and money lent ($500.00, Loans); March has money in with no Category, so Uncategorised is below zero;
 // - April has a Transfer of $300.00 between the two Accounts, which is neither spending nor income.
+// Payees avoid "EXAMPLE", which other specs' Rules look for.
 const dataFor = (project: string) => {
   const light = project !== 'dark'
   return {
+    project,
     year: light ? 2001 : 2000,
     // Names that no other spec's name is part of (and that are part of none): a spec finds an Account or Category by a part of its name, case aside.
     everyday: { number: light ? '99-9999-9999999-80' : '99-9999-9999999-82', name: `Monthly budgets everyday ${project}` },
@@ -45,56 +67,50 @@ const dataFor = (project: string) => {
 }
 type Names = ReturnType<typeof dataFor>['names']
 
-// Dates and money, written the way the app writes them.
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
-const dateText = (iso: string) => {
-  const d = new Date(`${iso}T00:00:00Z`)
-  return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`
-}
 const FULL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const monthText = (month: string) => `${FULL_MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`
-const money = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2 })}`
-/** What a Spent figure reads: "$55.50", or "$15.00 back" below zero. */
-const spent = (cents: number) => `${money(Math.abs(cents))}${cents < 0 ? ' back' : ''}`
 const two = (n: number) => String(n).padStart(2, '0')
 
-type Row = { tag: string; date: string; cents: number; category?: keyof Names }
-const everydayRows = (year: number): Row[] => {
+const everydayRows = (project: string): (SeedRow & { tag: string })[] => {
+  const { year, names } = dataFor(project)
   const d = (month: number, day: number) => `${year}-${two(month)}-${two(day)}`
+  const row = (tag: string, date: string, amountCents: number, category?: keyof Names) => ({ tag, date, payee: `BUDGETRPT ${project} ${tag}`, amountCents, category: category && names[category] })
   return [
-    { tag: 'G1', date: d(1, 5), cents: -70_000, category: 'groceries' },
-    { tag: 'G2', date: d(1, 20), cents: -5_000, category: 'groceries' },
-    { tag: 'F1', date: d(1, 12), cents: -6_000, category: 'fuel' },
-    { tag: 'C1', date: d(1, 15), cents: -4_000, category: 'cafe' },
-    { tag: 'U1', date: d(1, 25), cents: -1_234 },
-    { tag: 'G3', date: d(2, 3), cents: -80_000, category: 'groceries' },
-    { tag: 'G4', date: d(2, 17), cents: 3_000, category: 'groceries' },
-    { tag: 'F2', date: d(2, 10), cents: -18_000, category: 'fuel' },
-    { tag: 'W1', date: d(2, 14), cents: 200_000, category: 'wages' },
-    { tag: 'L1', date: d(2, 20), cents: -50_000, category: 'loan' },
-    { tag: 'G5', date: d(3, 4), cents: -95_000, category: 'groceries' },
-    { tag: 'F3', date: d(3, 9), cents: -21_000, category: 'fuel' },
-    { tag: 'C2', date: d(3, 12), cents: -15_100, category: 'cafe' },
-    { tag: 'U2', date: d(3, 30), cents: 2_000 },
-    { tag: 'G6', date: d(4, 2), cents: -10_000, category: 'groceries' },
-    { tag: 'C3', date: d(4, 8), cents: -6_000, category: 'cafe' },
-    { tag: 'T1', date: d(4, 15), cents: -30_000 }, // the Transfer's first half
+    row('G1', d(1, 5), -70_000, 'groceries'),
+    row('G2', d(1, 20), -5_000, 'groceries'),
+    row('F1', d(1, 12), -6_000, 'fuel'),
+    row('C1', d(1, 15), -4_000, 'cafe'),
+    row('U1', d(1, 25), -1_234),
+    row('G3', d(2, 3), -80_000, 'groceries'),
+    row('G4', d(2, 17), 3_000, 'groceries'),
+    row('F2', d(2, 10), -18_000, 'fuel'),
+    row('W1', d(2, 14), 200_000, 'wages'),
+    row('L1', d(2, 20), -50_000, 'loan'),
+    row('G5', d(3, 4), -95_000, 'groceries'),
+    row('F3', d(3, 9), -21_000, 'fuel'),
+    row('C2', d(3, 12), -15_100, 'cafe'),
+    row('U2', d(3, 30), 2_000),
+    row('G6', d(4, 2), -10_000, 'groceries'),
+    row('C3', d(4, 8), -6_000, 'cafe'),
+    row('T1', d(4, 15), -30_000), // the Transfer's first half
   ]
 }
 
-// The months, as the Report should show them (Budget, spent), worked out by hand from the rows above.
+// The months, as the Report should show them, worked out by hand from the rows above: the Budgets added up, what the Categories with a Budget spent, and all
+// the spending, and the rows with a Budget that month (Category, Budget, spent), what is outside Budgets and Uncategorised.
+type Figures = { budget: number; budgeted: number; spending: number; rows: [keyof Names, number, number][]; outside: number; uncategorised: number; changed?: keyof Names }
 const MONTHS = ['01', '02', '03', '04', '05', '06']
-const TOTAL_BUDGET = 625_000 // 950 + 1,150 + 1,150 + 1,000 + 1,000 + 1,000, in dollars
-const TOTAL_SPENDING = 326_334
-const MONTH_FIGURES: Record<string, { budget: number; spending: number; rows: [keyof Names, number, number][]; outside: number; uncategorised: number }> = {
-  '01': { budget: 95_000, spending: 86_234, rows: [['cafe', 15_000, 4_000], ['groceries', 80_000, 75_000]], outside: 6_000, uncategorised: 1_234 },
-  '02': { budget: 115_000, spending: 95_000, rows: [['cafe', 15_000, 0], ['fuel', 20_000, 18_000], ['groceries', 80_000, 77_000]], outside: 0, uncategorised: 0 },
-  '03': { budget: 115_000, spending: 129_100, rows: [['cafe', 15_000, 15_100], ['fuel', 20_000, 21_000], ['groceries', 80_000, 95_000]], outside: 0, uncategorised: -2_000 },
-  '04': { budget: 100_000, spending: 16_000, rows: [['fuel', 20_000, 0], ['groceries', 80_000, 10_000]], outside: 6_000, uncategorised: 0 },
-  '05': { budget: 100_000, spending: 0, rows: [['fuel', 20_000, 0], ['groceries', 80_000, 0]], outside: 0, uncategorised: 0 },
-  '06': { budget: 100_000, spending: 0, rows: [['fuel', 20_000, 0], ['groceries', 80_000, 0]], outside: 0, uncategorised: 0 },
+const MONTH_FIGURES: Record<string, Figures> = {
+  '01': { budget: 95_000, budgeted: 79_000, spending: 86_234, rows: [['cafe', 15_000, 4_000], ['groceries', 80_000, 75_000]], outside: 6_000, uncategorised: 1_234 },
+  '02': { budget: 115_000, budgeted: 95_000, spending: 95_000, rows: [['cafe', 15_000, 0], ['fuel', 20_000, 18_000], ['groceries', 80_000, 77_000]], outside: 0, uncategorised: 0 },
+  '03': { budget: 115_000, budgeted: 131_100, spending: 129_100, rows: [['cafe', 15_000, 15_100], ['fuel', 20_000, 21_000], ['groceries', 80_000, 95_000]], outside: 0, uncategorised: -2_000 },
+  '04': { budget: 100_000, budgeted: 10_000, spending: 16_000, rows: [['fuel', 20_000, 0], ['groceries', 80_000, 10_000]], outside: 6_000, uncategorised: 0 },
+  '05': { budget: 105_000, budgeted: 0, spending: 0, rows: [['fuel', 25_000, 0], ['groceries', 80_000, 0]], outside: 0, uncategorised: 0, changed: 'fuel' },
+  '06': { budget: 105_000, budgeted: 0, spending: 0, rows: [['fuel', 25_000, 0], ['groceries', 80_000, 0]], outside: 0, uncategorised: 0 },
 }
+const TOTAL = { budget: 635_000, budgeted: 315_100, spending: 326_334, outside: 12_000, uncategorised: -766 }
+/** Where Budgets stand against what the Categories with a Budget spent: the words and what is left or over, as a row's Status says them. */
+const standing = (budget: number, budgeted: number) => (budget - budgeted < 0 ? { words: 'Over Budget', detail: `${money(budgeted - budget)} over` } : budget === budgeted ? { words: 'On Budget', detail: 'Nothing left' } : { words: 'Under Budget', detail: `${money(budget - budgeted)} left` })
 
 const seeded = new Set<string>()
 
@@ -103,75 +119,41 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
   if (seeded.has(project)) return
   const { year, everyday, savings, names } = dataFor(project)
   await signInAs(context, 'admin')
-  const headers = { Origin: baseURL }
-  const existing = (await (await context.request.get('/api/categories')).json()) as { id: number; name: string }[]
-  const category = async (name: string, kind: 'spending' | 'income' | 'loans') => {
-    const found = existing.find((c) => c.name === name)
-    if (found) return found.id
-    const res = await context.request.post('/api/categories', { headers, data: { name, kind } })
-    expect(res.status()).toBe(201)
-    return ((await res.json()) as { id: number }).id
+  const categories: Record<string, number> = {
+    [names.groceries]: await ensureCategory(context, baseURL, names.groceries, 'spending'),
+    [names.fuel]: await ensureCategory(context, baseURL, names.fuel, 'spending'),
+    [names.cafe]: await ensureCategory(context, baseURL, names.cafe, 'spending'),
+    [names.wages]: await ensureCategory(context, baseURL, names.wages, 'income'),
+    [names.loan]: await ensureCategory(context, baseURL, names.loan, 'loans'),
   }
-  const id = {
-    groceries: await category(names.groceries, 'spending'),
-    fuel: await category(names.fuel, 'spending'),
-    cafe: await category(names.cafe, 'spending'),
-    wages: await category(names.wages, 'income'),
-    loan: await category(names.loan, 'loans'),
-  }
-  const budget = async (name: keyof typeof id, month: string, amountCents: number | null) =>
-    expect((await context.request.put(`/api/budgets/${id[name]}`, { headers, data: { effectiveFrom: `${year}-${month}`, amountCents } })).ok()).toBe(true)
+  const budget = async (name: keyof Names, month: string, amountCents: number | null) =>
+    expect((await context.request.put(`/api/budgets/${categories[names[name]]}`, { headers: { Origin: baseURL }, data: { effectiveFrom: `${year}-${month}`, amountCents } })).ok()).toBe(true)
   await budget('groceries', '01', 80_000)
   await budget('groceries', '07', null)
   await budget('fuel', '02', 20_000)
+  await budget('fuel', '05', 25_000)
   await budget('fuel', '07', null)
   await budget('cafe', '01', 15_000)
   await budget('cafe', '04', null)
 
-  const importRows = async (account: { number: string; name: string }, rows: { tag: string; date: string; cents: number }[]) => {
-    const dates = rows.map((r) => r.date).sort()
-    const res = await context.request.post('/api/imports/chunks', {
-      headers,
-      data: {
-        account,
-        chunk: { index: 0, count: 1 },
-        file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: dates[0], to: dates.at(-1), ledgerBalance: { date: dates.at(-1), cents: 0 } },
-        rows: rows.map((r) => ({ date: r.date, uniqueId: `BR${year}${r.tag}`, tranType: 'EFTPOS', chequeNumber: null, payee: `EXAMPLE BUDGETSHOP ${year} ${r.tag}`, bankMemo: 'EFTPOS', amountCents: r.cents })),
-      },
-    })
-    expect(res.ok()).toBe(true)
-  }
-  const rows = everydayRows(year)
-  await importRows(everyday, rows)
-  await importRows(savings, [{ tag: 'T2', date: `${year}-04-15`, cents: 30_000 }]) // the Transfer's other half, imported second so the two are paired
-
-  const { transactions } = (await (await context.request.get(`/api/transactions?from=${year}-01-01&to=${year}-12-31&limit=200&count=false`)).json()) as { transactions: { id: number; description: string }[] }
-  expect(transactions).toHaveLength(rows.length + 1)
-  for (const r of rows) {
-    if (!r.category) continue
-    const tx = transactions.find((t) => t.description === `EXAMPLE BUDGETSHOP ${year} ${r.tag}`)!
-    expect((await context.request.put(`/api/transactions/${tx.id}/override`, { headers, data: { categoryId: id[r.category] } })).ok()).toBe(true)
-  }
+  const rows = everydayRows(project)
+  const savingsRows: SeedRow[] = [{ date: `${year}-04-15`, payee: `BUDGETRPT ${project} T2`, amountCents: 30_000 }] // the Transfer's other half, imported second so the two are paired
+  await importRows(context, baseURL, { account: everyday, year, rows, idPrefix: `BR${year}E` })
+  await importRows(context, baseURL, { account: savings, year, rows: savingsRows, idPrefix: `BR${year}S` })
+  const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
+  await overrideCategories(context, baseURL, { accountId: accounts.find((a) => a.name === everyday.name)!.id, year, rows, categories })
   seeded.add(project)
 }
 
-// The Settings are shared by every test and both themes, so each test leaves the defaults behind (as reports.spec.ts does).
-test.afterEach(async ({ request, baseURL }) => {
-  const reset = await request.patch('/api/settings', { headers: { Origin: baseURL! }, data: { app_title: 'Fernledger' } })
-  expect(reset.ok()).toBe(true)
-})
-// TODO: e2e/report-helpers.ts
-const setTitle = async (request: APIRequestContext, baseURL: string | undefined, app_title: string) =>
-  expect((await request.patch('/api/settings', { headers: { Origin: baseURL! }, data: { app_title } })).ok()).toBe(true)
+restoreAppTitleAfterEach() // the Settings are shared by every test and both themes (as reports.spec.ts does)
 
 const address = (from: string, to: string, extra = '') => `/reports/budget-vs-actual?from=${from}&to=${to}${extra}`
 const article = (page: Page) => page.getByRole('article', { name: 'Budget vs actual' })
 const month = (page: Page, text: string) => article(page).getByRole('region', { name: text })
+const together = (page: Page) => article(page).getByRole('region', { name: 'All months together' })
+/** Words only a row of a table has: the name of one of the spec's Categories. The About and the totals say none, so a page with them and no row is not taken for one with rows. */
+const rowsMarker = (names: Names) => new RegExp(Object.values(names).join('|'))
 const tableIn = (region: Locator, text: string) => region.getByRole('table', { name: new RegExp(`^Budget and spending in ${text}`) })
-const noAxeViolations = async (page: Page) => {
-  const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
-  expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Opening a Report
@@ -276,32 +258,42 @@ test.describe('on screen', () => {
     await expect(report.getByText('You chose')).toHaveCount(0) // whole months: nothing to say about the dates
 
     const about = report.getByRole('region', { name: 'About these figures' })
+    await expect(about).toContainText('Each month is compared with the Budget in effect for it.')
     await expect(about).toContainText('A Budget applies from the month it begins until it is changed or ended, so changing a Budget never alters an earlier month')
-    await expect(about).toContainText('Transfers between your own Accounts, Pending Transactions, Income and Loans are not counted.')
+    await expect(about).toContainText('Where a Category\'s Budget changes, its row says so.')
+    await expect(about).toContainText("A refund comes off what a Category spent, so what's left can be more than the Budget")
+    await expect(about).toContainText('a Category\'s spending in a month it has no Budget is in Spending outside Budgets')
+    await expect(about).toContainText(NOT_COUNTED)
+    await expect(about).toContainText('Categories are taken as they are now. A Category that has since been made Income or Loans, or removed, is out of every month shown, past ones too')
 
     await expect(report.getByRole('heading', { level: 2 })).toHaveText(['About these figures', 'All months together', ...MONTHS.map((m) => monthText(`${year}-${m}`))])
   })
 
-  test('adds the months together: each Category’s Budgets and spending while it had a Budget, the months it was over, and what is outside Budgets', async ({ page, context, baseURL }, testInfo) => {
+  test('adds the months that have ended together: each Category’s Budgets and spending while it had a Budget, the months it was over, and what is outside Budgets', async ({ page, context, baseURL }, testInfo) => {
     const { year, names } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await page.goto(address(`${year}-01-01`, `${year}-06-30`))
 
-    const together = article(page).getByRole('region', { name: 'All months together' })
-    await expect(together).toContainText(`${monthText(`${year}-01`)} to ${monthText(`${year}-06`)}.`)
-    await expect(together.locator('dl')).toContainText('Total Budget')
-    await expect(together.locator('dl')).toContainText(money(TOTAL_BUDGET))
-    await expect(together.locator('dl')).toContainText('Total spending')
-    await expect(together.locator('dl')).toContainText(money(TOTAL_SPENDING)) // not the Transfer, the wages or the loan
-    const table = together.getByRole('table', { name: new RegExp(`^Budget and spending from ${monthText(`${year}-01`)} to ${monthText(`${year}-06`)}`) })
-    await expect(table.getByRole('columnheader')).toHaveText(['Category', 'Budget', 'Spent', 'Over Budget'])
+    const section = together(page)
+    // Which months, and why: all six have ended.
+    await expect(section).toContainText(`These figures cover ${monthText(`${year}-01`)} to ${monthText(`${year}-06`)}, the 6 months that have ended.`)
+    await expect(section).not.toContainText('left out of these figures')
+    const net = standing(TOTAL.budget, TOTAL.budgeted)
+    await expect(section.locator('dl')).toContainText(`Total Budget${money(TOTAL.budget)}`)
+    await expect(section.locator('dl')).toContainText(`Spent in Categories with a Budget${money(TOTAL.budgeted)}`)
+    await expect(section.locator('dl')).toContainText(`Against the Budgets${net.words}${net.detail}`) // like for like: not the Transfer, the wages or the loan, and not what is outside Budgets
+    await expect(section.locator('dl')).toContainText('Months over Budget1 of 6 months') // March, when the Budgets together were overspent
+    await expect(section.locator('dl')).toContainText(`Total spending${money(TOTAL.spending)}`)
+    await expect(section.locator('dl dt').first()).toHaveCSS('font-weight', '600')
+    const table = section.getByRole('table', { name: new RegExp(`^Budget and spending in the months that have ended from ${monthText(`${year}-01`)} to ${monthText(`${year}-06`)}`) })
+    await expect(table.getByRole('columnheader')).toHaveText(['Category', 'Budget', 'Spent', 'Months over Budget'])
     await expect(table.locator('tbody tr')).toHaveCount(5)
     await expect(table.locator('tbody tr').nth(0)).toContainText(`${names.cafe}${money(45_000)}${money(19_100)}1 of 3 months`) // January to March, over in March only
-    await expect(table.locator('tbody tr').nth(1)).toContainText(`${names.fuel}${money(100_000)}${money(39_000)}1 of 5 months`) // February to June
+    await expect(table.locator('tbody tr').nth(1)).toContainText(`${names.fuel}${money(110_000)}${money(39_000)}1 of 5 months`) // February to April at $200.00, May and June at $250.00
     await expect(table.locator('tbody tr').nth(2)).toContainText(`${names.groceries}${money(480_000)}${money(257_000)}1 of 6 months`)
-    await expect(table.locator('tbody tr').nth(3)).toContainText(`Spending outside BudgetsNo Budget${money(12_000)}Not in a Budget`) // January's fuel and April's cafe
-    await expect(table.locator('tbody tr').nth(4)).toContainText(`Uncategorised (includes money in not yet given a Category)No Budget${spent(-766)}Not in a Budget`)
+    await expect(table.locator('tbody tr').nth(3)).toContainText(`Spending outside BudgetsNo Budget${money(TOTAL.outside)}–Not in a Budget`) // January's petrol and April's coffee
+    await expect(table.locator('tbody tr').nth(4)).toContainText(`${UNCATEGORISED}No Budget${spent(TOTAL.uncategorised)}–Not in a Budget`)
   })
 
   for (const m of MONTHS) {
@@ -313,8 +305,12 @@ test.describe('on screen', () => {
 
       const figures = MONTH_FIGURES[m]!
       const region = month(page, monthText(`${year}-${m}`))
+      const net = standing(figures.budget, figures.budgeted)
       await expect(region.locator('dl')).toContainText(`Total Budget${money(figures.budget)}`)
+      await expect(region.locator('dl')).toContainText(`Spent in Categories with a Budget${spent(figures.budgeted)}`)
+      await expect(region.locator('dl')).toContainText(`Against the Budgets${net.words}${net.detail}`)
       await expect(region.locator('dl')).toContainText(`Total spending${spent(figures.spending)}`)
+      await expect(region.locator('dl')).not.toContainText('Months over Budget') // a month has one standing; the months together count them
       const table = tableIn(region, monthText(`${year}-${m}`))
       await expect(table.getByRole('columnheader')).toHaveText(['Category', 'Budget', 'Spent', 'Status'])
       await expect(table.locator('tbody tr')).toHaveCount(figures.rows.length + 2) // the Categories with a Budget that month, and the two that are not in one
@@ -326,13 +322,16 @@ test.describe('on screen', () => {
         const left = budget - spentCents
         await expect(row).toContainText(left < 0 ? `Over Budget${money(-left)} over` : left === 0 ? 'On BudgetNothing left' : `Under Budget${money(left)} left`)
         await expect(row.locator('svg[aria-hidden="true"]')).toHaveCount(1) // an icon as well as the words
+        // Where a Budget changes inside the Report, the row says so, in the month it changes and in no other.
+        if (figures.changed === key) await expect(row).toContainText(`Budget changed from ${monthText(`${year}-${m}`)}`)
+        else await expect(row).not.toContainText('Budget changed from')
       }
       const outside = table.locator('tbody tr').nth(figures.rows.length)
       await expect(outside).toContainText('Spending outside Budgets')
       await expect(outside).toContainText(spent(figures.outside))
       await expect(outside).toContainText('Not in a Budget')
       const uncategorised = table.locator('tbody tr').nth(figures.rows.length + 1)
-      await expect(uncategorised).toContainText('Uncategorised (includes money in not yet given a Category)')
+      await expect(uncategorised).toContainText(UNCATEGORISED)
       await expect(uncategorised).toContainText(spent(figures.uncategorised))
     })
   }
@@ -344,10 +343,15 @@ test.describe('on screen', () => {
     await page.goto(address(`${year}-01-01`, `${year}-06-30`))
 
     await expect(month(page, monthText(`${year}-06`)).getByRole('table')).toBeVisible() // the Report has arrived
-    const inMonth = async (m: string) => (await tableIn(month(page, monthText(`${year}-${m}`)), monthText(`${year}-${m}`)).locator('tbody tr td:first-child').allTextContents()).filter((t) => t.startsWith('Budget report'))
-    expect(await inMonth('01')).toEqual([names.cafe, names.groceries]) // Fuel's Budget begins in February
+    const ours = Object.values(names)
+    /** Our Categories that have a row in the month, in the table's order (a row may say under its name that the Budget changed). */
+    const inMonth = async (m: string) => {
+      const cells = await tableIn(month(page, monthText(`${year}-${m}`)), monthText(`${year}-${m}`)).locator('tbody tr td:first-child').allTextContents()
+      return cells.flatMap((cell) => ours.find((name) => cell.startsWith(name)) ?? [])
+    }
+    expect(await inMonth('01')).toEqual([names.cafe, names.groceries]) // Petrol's Budget begins in February
     expect(await inMonth('02')).toEqual([names.cafe, names.fuel, names.groceries])
-    expect(await inMonth('04')).toEqual([names.fuel, names.groceries]) // Eating out's has ended
+    expect(await inMonth('04')).toEqual([names.fuel, names.groceries]) // Coffee's has ended
     expect(await inMonth('06')).toEqual([names.fuel, names.groceries])
   })
 
@@ -359,21 +363,38 @@ test.describe('on screen', () => {
 
     await expect(month(page, monthText(`${year}-02`)).locator('dl')).toContainText(`Total spending${money(95_000)}`)
     await expect(month(page, monthText(`${year}-04`)).locator('dl')).toContainText(`Total spending${money(16_000)}`)
-    const together = article(page).getByRole('region', { name: 'All months together' })
-    await expect(together.locator('dl')).toContainText(`Total spending${money(95_000 + 129_100 + 16_000)}`)
+    await expect(together(page).locator('dl')).toContainText(`Total spending${money(95_000 + 129_100 + 16_000)}`)
   })
 
-  test('says a month with no Budget and no spending has neither, in one sentence', async ({ page, context, baseURL }, testInfo) => {
+  test('says once at the top that no Category has a Budget, and not for each month, when none has', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await page.goto(address(`${year}-07-01`, `${year}-08-31`)) // both Budgets have ended
 
-    const july = month(page, monthText(`${year}-07`))
-    await expect(july).toContainText(`No Category has a Budget in ${monthText(`${year}-07`)}, and nothing was spent.`)
-    await expect(july.getByRole('table')).toHaveCount(0)
-    await expect(article(page).getByRole('region', { name: 'All months together' })).toBeVisible()
-    await expect(article(page).getByRole('region', { name: 'All months together' }).getByRole('table').locator('tbody tr')).toHaveCount(2) // only what is not in a Budget
+    const report = article(page)
+    await expect(report.getByText('No Category has a Budget in these months, so all of the spending is outside Budgets.')).toHaveCount(1)
+    for (const m of ['07', '08']) {
+      const region = month(page, monthText(`${year}-${m}`))
+      await expect(region).toContainText(`Nothing was spent in ${monthText(`${year}-${m}`)}.`)
+      await expect(region.getByRole('table')).toHaveCount(0)
+      await expect(region).not.toContainText('No Category has a Budget in')
+    }
+    const section = together(page)
+    await expect(section).toContainText(`These figures cover ${monthText(`${year}-07`)} to ${monthText(`${year}-08`)}, the 2 months that have ended.`)
+    await expect(section.locator('dl')).not.toContainText('Total Budget') // without a Budget there is nothing to set the spending against
+    await expect(section.getByRole('table').locator('tbody tr')).toHaveCount(2) // only what is not in a Budget
+  })
+
+  test('says a month in a Report that has Budgets elsewhere has no Budget, in one sentence with whether anything was spent', async ({ page, context, baseURL }, testInfo) => {
+    const { year } = dataFor(testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    await page.goto(address(`${year}-06-01`, `${year}-08-31`)) // June has Budgets; July and August have none and nothing spent
+
+    await expect(article(page).getByText('No Category has a Budget in these months')).toHaveCount(0) // June has
+    await expect(month(page, monthText(`${year}-07`))).toContainText(`No Category has a Budget in ${monthText(`${year}-07`)}, and nothing was spent.`)
+    await expect(month(page, monthText(`${year}-07`)).getByRole('table')).toHaveCount(0)
   })
 
   test('is one month for dates in one month: no months together, only that month', async ({ page, context, baseURL }, testInfo) => {
@@ -383,7 +404,7 @@ test.describe('on screen', () => {
     await page.goto(address(`${year}-03-01`, `${year}-03-31`))
 
     await expect(article(page).getByRole('heading', { level: 2 })).toHaveText(['About these figures', monthText(`${year}-03`)])
-    await expect(article(page).getByRole('region', { name: 'All months together' })).toHaveCount(0)
+    await expect(together(page)).toHaveCount(0)
   })
 
   test('shows whole months for dates that are part of a month, and says which dates were chosen and which are covered', async ({ page, context, baseURL }, testInfo) => {
@@ -399,7 +420,7 @@ test.describe('on screen', () => {
     )
     await expect(report.getByRole('heading', { level: 2 })).toHaveText(['About these figures', 'All months together', monthText(`${year}-01`), monthText(`${year}-02`), monthText(`${year}-03`)])
     await expect(page).toHaveTitle(`Fernledger – Budget vs actual – All Accounts – ${dateText(`${year}-01-01`)} to ${dateText(`${year}-03-31`)}`)
-    // The whole of March is in, not only the first ten days: its $950.00 of Groceries was spent on the 4th, and Fuel's $210.00 on the 9th.
+    // The whole of March is in, not only the first ten days: its $950.00 of Supermarket was spent on the 4th, and Petrol's $210.00 on the 9th.
     await expect(month(page, monthText(`${year}-03`)).locator('dl')).toContainText(`Total spending${money(129_100)}`)
   })
 
@@ -414,16 +435,37 @@ test.describe('on screen', () => {
     await expect(month(page, monthText(`${year}-01`)).locator('dl')).toContainText(`Total spending${money(86_234)}`)
   })
 
-  test('says a month that is not over yet is not, and a month to come has not begun', async ({ page, context }) => {
+  test('leaves the month it is now and the months to come out of the months together, says so and why, and still shows each', async ({ page, context }) => {
     // The Worker decides which month it is now, in New Zealand; the Report asks it, so the test finds out the way budgets.spec.ts does.
-    const thisMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7)
+    const now = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7)
+    const around = (by: number) => {
+      const index = Number(now.slice(0, 4)) * 12 + Number(now.slice(5, 7)) - 1 + by
+      return `${Math.floor(index / 12)}-${two((index % 12) + 1)}`
+    }
+    const [before, next] = [around(-1), around(1)]
     await signInAs(context, 'member')
 
-    await page.goto(address(`${thisMonth}-01`, `${thisMonth}-28`))
-    await expect(month(page, monthText(thisMonth))).toContainText('This month is not over yet, so what has been spent so far is compared with the whole month’s Budget.')
+    await page.goto(address(`${before}-01`, `${next}-28`))
+    const section = together(page)
+    await expect(section).toContainText(
+      `These figures are for ${monthText(before)}, the one month that has ended. ${monthText(now)} is not over yet, so part of its spending would be set against the whole of its Budget. ` +
+        `${monthText(next)} has not begun, so its Budget would be set against no spending at all. They are left out of these figures, and shown on their own below.`,
+    )
+    await expect(month(page, monthText(now))).toContainText('This month is not over yet, so what has been spent so far is compared with the whole month’s Budget. It is not in the months together.')
+    await expect(month(page, monthText(next))).toContainText('This month has not begun, so nothing has been spent yet. It is not in the months together.')
+    await expect(month(page, monthText(before))).not.toContainText('It is not in the months together')
 
+    // With no month ended there is nothing to add together, and the months are still there.
+    await page.goto(address(`${now}-01`, `${next}-28`))
+    await expect(together(page)).toContainText('No month in these dates has ended, so there is nothing to add together yet.')
+    await expect(together(page).getByRole('table')).toHaveCount(0)
+    await expect(together(page).locator('dl')).toHaveCount(0)
+    await expect(month(page, monthText(now))).toBeVisible()
+    await expect(month(page, monthText(next))).toBeVisible()
+
+    // A month to come far off, in a Report of its own.
     await page.goto(address('2100-01-01', '2100-01-31'))
-    await expect(month(page, 'January 2100')).toContainText('This month has not begun, so nothing has been spent yet.')
+    await expect(month(page, 'January 2100')).toContainText('This month has not begun, so nothing has been spent yet. It is not in the months together.')
   })
 
   for (const role of ['member', 'admin'] as const) {
@@ -435,7 +477,8 @@ test.describe('on screen', () => {
       await expect(article(page).getByRole('table').first()).toBeVisible()
       await expect(article(page).getByText('Over Budget').first()).toBeVisible()
       await expect(article(page).getByText('Under Budget').first()).toBeVisible()
-      await expect(article(page).getByText('Not in a Budget').first()).toBeVisible()
+      await expect(article(page).getByText('Not in a Budget').first()).toBeAttached()
+      await expect(article(page).getByText('Budget changed from').first()).toBeVisible()
       await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
@@ -452,7 +495,8 @@ test.describe('on screen', () => {
     await expect(cards.first()).toContainText(names.cafe)
     await expect(cards.first()).toContainText(money(15_000))
     await expect(cards.first()).toContainText('Status')
-    await expect(article(page).getByRole('region', { name: 'All months together' }).getByRole('listitem').first()).toContainText('Over Budget')
+    await expect(together(page).getByRole('listitem').first()).toContainText('Months over Budget')
+    await expect(together(page).getByRole('listitem').first()).toContainText('1 of 3 months')
   })
 
   test.describe('when the request fails', () => {
@@ -488,25 +532,16 @@ test.describe('printed', () => {
   const range = (year: number) => `${dateText(`${year}-01-01`)} to ${dateText(`${year}-06-30`)}`
 
   test('is just the Report: no app header, navigation or buttons', async ({ page }) => {
-    await expect(page.getByRole('banner')).toBeHidden()
-    await expect(page.getByRole('navigation', { name: 'Main' })).toBeHidden()
-    await expect(page.getByRole('button')).toHaveCount(0) // hidden elements are not in the accessibility tree
-    await expect(page.getByRole('link')).toHaveCount(0)
-    await expect(page.getByText('In the print window')).toBeHidden()
+    await expectJustTheReport(page)
   })
 
   test('writes its own title block: the app title, the Report, the Accounts, the dates, and who generated it and when', async ({ page }, testInfo) => {
     const { year, everyday } = dataFor(testInfo.project.name)
-    const header = article(page).locator('header')
-    await expect(header).toBeVisible()
-    await expect(header.getByText(TITLE, { exact: true })).toBeVisible() // the Admin's words, as typed
-    await expect(header.getByRole('heading', { level: 1, name: 'Budget vs actual' })).toBeVisible()
-    await expect(header).toContainText(`${everyday.name} (${everyday.number})`)
-    await expect(header).toContainText(`Dates: ${range(year)}`)
-    await expect(header.getByText(GENERATED, { exact: true })).toBeVisible()
+    await expectTitleBlock(article(page), { name: 'Budget vs actual', account: 'All Accounts: ', dates: range(year) })
+    await expect(article(page).locator('header')).toContainText(`${everyday.name} (${everyday.number})`)
   })
 
-  test('puts the same identifying lines in every table heading, which a browser repeats on every page', async ({ page }, testInfo) => {
+  test('puts the same identifying lines, and what is not counted, in every table heading, which a browser repeats on every page', async ({ page }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     const tables = article(page).getByRole('table')
     expect(await tables.count()).toBe(7) // the months together, and six months
@@ -515,6 +550,7 @@ test.describe('printed', () => {
       await expect(identity).toBeVisible() // on screen it is not
       await expect(identity).toContainText(`${TITLE} – Budget vs actual – All Accounts – ${range(year)}`)
       await expect(identity).toContainText(GENERATED)
+      await expect(identity).toContainText(NOT_COUNTED) // so a loose page does not have to be read with the first
       // It is one of the table's heading rows, with the column headings: that is what makes a browser repeat it.
       expect(await tables.nth(i).locator('thead').evaluate((el) => [getComputedStyle(el).display, el.querySelectorAll('tr').length])).toEqual(['table-header-group', 2])
     }
@@ -525,72 +561,26 @@ test.describe('printed', () => {
     await expect(page).toHaveTitle(`${TITLE} – Budget vs actual – All Accounts – ${range(year)}`)
   })
 
-  /** Every word of the Report is black, including the muted ones, the money and an over-Budget status, and the paper is white. */
-  // TODO: e2e/report-helpers.ts
-  const blackOnWhite = (page: Page) =>
-    page.evaluate(() => {
-      const rgb = (css: string) => {
-        const ctx = document.createElement('canvas').getContext('2d')!
-        ctx.fillStyle = '#fff'
-        ctx.fillStyle = css
-        ctx.fillRect(0, 0, 1, 1)
-        return Array.from(ctx.getImageData(0, 0, 1, 1).data.slice(0, 3))
-      }
-      const walker = document.createTreeWalker(document.querySelector('.report-frame')!, NodeFilter.SHOW_TEXT)
-      const unreadable: string[] = []
-      let texts = 0
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.trim()) continue
-        texts += 1
-        const [r, g, b] = rgb(getComputedStyle(node.parentElement!).color)
-        if (Math.max(r!, g!, b!) > 40) unreadable.push(`${node.textContent.trim().slice(0, 30)}: rgb(${r}, ${g}, ${b})`)
-      }
-      return { unreadable, paper: rgb(getComputedStyle(document.body).backgroundColor), texts }
-    })
-
   test('is black text on white paper, even from the dark theme, and an over-Budget status is black too', async ({ page }, testInfo) => {
     // In the dark project the page is the dark theme on screen, and must still print like this.
     await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
     await expect(article(page).getByText('Over Budget').first()).toBeVisible()
-    const printed = await blackOnWhite(page)
-    expect(printed.texts).toBeGreaterThan(100)
-    expect(printed.unreadable).toEqual([]) // every word, including the muted ones, the money and the statuses, is black
-    expect(Math.min(...printed.paper)).toBeGreaterThan(240)
+    await expectBlackOnWhite(page, 100) // every word, including the muted ones, the money and the statuses, is black
   })
 
   test('has no text under 12pt', async ({ page }) => {
-    const small = await page.evaluate(() => {
-      const walker = document.createTreeWalker(document.querySelector('.report-frame')!, NodeFilter.SHOW_TEXT)
-      const found: string[] = []
-      let texts = 0
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.trim()) continue
-        texts += 1
-        const size = parseFloat(getComputedStyle(node.parentElement!).fontSize)
-        if (size < 16) found.push(`${size}px: ${node.textContent.trim().slice(0, 30)}`)
-      }
-      return { found, texts }
-    })
-    expect(small.texts).toBeGreaterThan(100)
-    expect(small.found).toEqual([]) // 12pt is 16px
-    // The table's own text is set to 12pt, not left to the 15px it has on screen.
-    const cell = await article(page).locator('tbody td').first().evaluate((el) => getComputedStyle(el).fontSize)
-    expect(parseFloat(cell)).toBeGreaterThanOrEqual(16)
+    await expectNoTextUnder12pt(page, article(page), 100)
   })
 
   test('is its own page with its own margins, repeats table headings and keeps a row whole', async ({ page }) => {
-    const styles = await page.evaluate(() => {
-      const style = (selector: string) => getComputedStyle(document.querySelector(selector)!)
-      return { page: style('.report-frame').page, thead: style('thead').display, row: style('tbody tr').breakInside, main: style('main').paddingLeft }
-    })
-    expect(styles).toEqual({ page: 'report', thead: 'table-header-group', row: 'avoid', main: '0px' })
+    await expectOwnPage(page)
   })
 
   test('is several A4 pages with the table headings on every page that has rows, and no row lost, repeated or cut across pages', async ({ page }, testInfo) => {
     const { year, names } = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     expect(pages.length).toBeGreaterThanOrEqual(3)
-    const withRows = pages.filter((p) => /Under Budget|Over Budget|Not in a Budget/.test(textOf(p)))
+    const withRows = pages.filter((p) => rowsMarker(names).test(textOf(p)))
     expect(withRows.length).toBeGreaterThanOrEqual(3)
 
     // Headings come back on every page the tables run onto, not only the first.
@@ -604,7 +594,8 @@ test.describe('printed', () => {
       const label = monthText(`${year}-${m}`)
       expect(pages.flatMap((p) => p.text).filter((t) => t.str === label), label).toHaveLength(1)
       for (const [key, budget, spentCents] of MONTH_FIGURES[m]!.rows) {
-        const row = `${names[key]} ${money(budget)} ${spent(spentCents)}`
+        // A row whose Budget changed says so under its name, between the name and the figures.
+        const row = [names[key], MONTH_FIGURES[m]!.changed === key && `Budget changed from ${label}`, money(budget), spent(spentCents)].filter(Boolean).join(' ')
         expected.set(row, (expected.get(row) ?? 0) + 1)
       }
     }
@@ -615,44 +606,24 @@ test.describe('printed', () => {
   })
 
   test('numbers every page "Page 2 of 5" in the bottom margin', async ({ page }) => {
-    const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    const margin = (20 / 25.4) * 72 // the bottom margin, 20mm, in points
-    pages.forEach((p, index) => {
-      const numbered = p.text.filter((t) => t.str === `Page ${index + 1} of ${pages.length}`)
-      expect(numbered, `page ${index + 1}`).toHaveLength(1)
-      expect(numbered[0]!.y).toBeLessThan(margin)
-    })
+    expectPageNumbers(await readPdf(await page.pdf({ format: 'A4' })))
   })
 
-  test('says what the Report is, which Accounts and dates, and who generated it and when, at the top of every page the tables run onto', async ({ page }, testInfo) => {
-    const { year } = dataFor(testInfo.project.name)
+  test('says what the Report is, which Accounts and dates, who generated it and when, and what is not counted, at the top of every page the tables run onto', async ({ page }, testInfo) => {
+    const { year, names } = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    const withRows = pages.filter((p) => /Under Budget|Over Budget|Not in a Budget/.test(textOf(p)))
-    expect(withRows.length).toBeGreaterThanOrEqual(3)
-    // In each page's own body, not its margins, so every browser prints it. The Admin's title comes through as typed, quote and backslash too.
-    // (The line may wrap, so the comparison ignores where it broke.)
-    // TODO: e2e/report-helpers.ts
-    const squash = (text: string) => text.replace(/\s+/g, '')
-    for (const p of withRows) {
-      const text = squash(textOf(p))
-      expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(`${TITLE} – Budget vs actual – All Accounts – ${range(year)}`))
-      expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(GENERATED))
-    }
+    const withRows = expectIdentityOnEveryPage(pages, rowsMarker(names), `${TITLE} – Budget vs actual – All Accounts – ${range(year)}`, 3)
+    // What is not counted is in each page's own body too, not only in the first page's notes, so a loose page can be read alone.
+    for (const p of withRows) expect(squash(textOf(p)), `page ${pages.indexOf(p) + 1}`).toContain(squash(NOT_COUNTED))
+    expect(withRows.slice(1).length).toBeGreaterThanOrEqual(2) // and that is true of pages after the first, where the notes are not
   })
 
   test('has nothing in the top margin and only the page number in the bottom one', async ({ page }) => {
-    const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    for (const [index, p] of pages.entries()) {
-      expect(p.text.filter((t) => t.y > p.height - (18 / 25.4) * 72), `top margin of page ${index + 1}`).toEqual([])
-      expect(p.text.filter((t) => t.y < (20 / 25.4) * 72).map((t) => t.str), `bottom margin of page ${index + 1}`).toEqual([`Page ${index + 1} of ${pages.length}`])
-    }
+    expectBareMargins(await readPdf(await page.pdf({ format: 'A4' })))
   })
 
   test('sets every word of it, the page numbers and the statuses included, in at least 12pt type', async ({ page }) => {
-    const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    const small = pages.flatMap((p, index) => p.text.filter((t) => t.size < 11.95).map((t) => `page ${index + 1}: ${t.size}pt "${t.str}"`))
-    expect(small).toEqual([])
-    expect(pages.flatMap((p) => p.text).length).toBeGreaterThan(300)
+    expectNoTypeUnder12pt(await readPdf(await page.pdf({ format: 'A4' })), 300)
   })
 
   test('prints the same from a phone-width window: still tables', async ({ page }) => {
@@ -661,7 +632,7 @@ test.describe('printed', () => {
     await expect(article(page).getByRole('list')).toHaveCount(0)
   })
 
-  test('says a month is part way on paper too, and a part-month request, so a printout never claims more than it covers', async ({ page }, testInfo) => {
+  test('says on paper too which dates were chosen when they are part of a month, so a printout never claims more than it covers', async ({ page }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await page.goto(address(`${year}-02-10`, `${year}-03-31`))
     await expect(article(page).getByRole('table').first()).toBeVisible()
@@ -694,7 +665,7 @@ test.describe('around the Report', () => {
     for (const role of ['member', 'admin'] as const) {
       await signInAs(context, role)
       await page.goto(address(`${year}-01-01`, `${year}-06-30`))
-      await expect(article(page).getByRole('region', { name: 'All months together' }).getByRole('table')).toBeVisible()
+      await expect(together(page).getByRole('table')).toBeVisible()
       seen.push((await article(page).getByRole('table').locator('tbody tr').allTextContents()).join('|'))
     }
     expect(seen[0]).toBe(seen[1])

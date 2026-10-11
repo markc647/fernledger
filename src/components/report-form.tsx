@@ -20,31 +20,60 @@ function problemWith(from: string, to: string, rangeProblem?: (from: string, to:
   return limit ? { field: 'to', message: limit } : null
 }
 
+/** Which Account, or all of them. It is its own component so a form that does not ask for one does not ask the Worker for the Accounts either. */
+function AccountField({ id, defaultAccount }: { id: string; defaultAccount: number | undefined }) {
+  const accounts = useQuery(accountsQuery)
+  const [account, setAccount] = useState(defaultAccount === undefined ? '' : String(defaultAccount))
+  return (
+    <div>
+      <label htmlFor={`${id}-account`} className="block font-medium">
+        Account
+      </label>
+      <Select id={`${id}-account`} name="account" value={account} onChange={(event) => setAccount(event.target.value)}>
+        <option value="">All Accounts</option>
+        {accounts.data?.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.name}
+          </option>
+        ))}
+      </Select>
+    </div>
+  )
+}
+
+/** Says so when the Accounts could not be loaded, under the fields. */
+function AccountsError() {
+  const accounts = useQuery(accountsQuery)
+  return accounts.isError ? (
+    <p role="alert" className="mt-3 font-medium text-destructive">
+      The Accounts could not be loaded. Reload the page to try again.
+    </p>
+  ) : null
+}
+
 /**
  * Asks which Account (or all of them) and which dates, then opens a Report in a new window. It is a plain form that sends the
  * choice in the Report's address (`?account=2&from=…&to=…`), so it opens in a new window without scripting and the Report can be
  * reopened, bookmarked or sent on from its address. `defaults` fills it in, and `note` says what the Report will hold. Every Report
  * on the Reports page has one, so each names itself (its `aria-label`) and its fields have ids of their own. A Report that is
- * of all Accounts together asks for dates alone (`accounts={false}`).
+ * of all Accounts together asks for dates alone (`askAccount={false}`).
  */
 function ReportForm({
   name,
   action,
   defaults = {},
   note,
-  accounts: askAccount = true,
+  askAccount = true,
   rangeProblem,
 }: {
   name: string
   action: string
   defaults?: ReportSearch
   note: ReactNode
-  accounts?: boolean
+  askAccount?: boolean
   rangeProblem?: (from: string, to: string) => string | null
 }) {
-  const accounts = useQuery(accountsQuery)
   const id = useId()
-  const [account, setAccount] = useState(defaults.account === undefined ? '' : String(defaults.account))
   const [from, setFrom] = useState(defaults.from ?? '')
   const [to, setTo] = useState(defaults.to ?? '')
   const [problem, setProblem] = useState<ReturnType<typeof problemWith>>(null)
@@ -64,21 +93,7 @@ function ReportForm({
       }}
     >
       <div className={askAccount ? 'grid gap-4 sm:grid-cols-3' : 'grid gap-4 sm:grid-cols-2'}>
-        {askAccount && (
-          <div>
-            <label htmlFor={`${id}-account`} className="block font-medium">
-              Account
-            </label>
-            <Select id={`${id}-account`} name="account" value={account} onChange={(event) => setAccount(event.target.value)}>
-              <option value="">All Accounts</option>
-              {accounts.data?.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-        )}
+        {askAccount && <AccountField id={id} defaultAccount={defaults.account} />}
         {(['from', 'to'] as const).map((field) => (
           <div key={field}>
             <label htmlFor={`${id}-${field}`} className="block font-medium">
@@ -98,11 +113,7 @@ function ReportForm({
           </div>
         ))}
       </div>
-      {askAccount && accounts.isError && (
-        <p role="alert" className="mt-3 font-medium text-destructive">
-          The Accounts could not be loaded. Reload the page to try again.
-        </p>
-      )}
+      {askAccount && <AccountsError />}
       {problem && (
         <p id={`${id}-problem`} role="alert" className="mt-3 font-medium text-destructive">
           {problem.message}
@@ -148,7 +159,7 @@ export function BudgetVsActualForm({ defaults }: { defaults?: ReportSearch }) {
       name="Budget vs actual"
       action="/reports/budget-vs-actual"
       defaults={defaults}
-      accounts={false}
+      askAccount={false}
       rangeProblem={tooManyMonths}
       note={`A Budget is for a whole month, so a Report shows every month your dates touch, in full, up to ${MAX_REPORT_MONTHS} months. It is of all Accounts together.`}
     />

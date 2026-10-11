@@ -1,25 +1,29 @@
 import { describe, expect, it } from 'vitest'
+import { budgetRows } from './budgets'
 import {
+  hasNoBudgets,
   monthNote,
-  monthsOver,
   monthsTouched,
-  monthState,
   MAX_REPORT_MONTHS,
   overMonthsText,
   parseBudgetReportSearch,
   periodRows,
+  togetherCovers,
   tooManyMonths,
   wholeMonthsNotice,
   type BudgetReport,
+  type MonthState,
   type ReportMonth,
 } from './report-budget'
 
-const month = (name: string, rows: [number, number, number][]): ReportMonth => ({
+const month = (name: string, state: MonthState = 'ended', rows: [number, number, number][] = []): ReportMonth => ({
   month: name,
-  rows: rows.map(([categoryId, budgetCents, spentCents]) => ({ categoryId, categoryName: `Category ${categoryId}`, budgetCents, spentCents })),
+  state,
+  rows: rows.map(([categoryId, budgetCents, spentCents]) => ({ categoryId, categoryName: `Category ${categoryId}`, budgetCents, spentCents, effectiveFrom: name, changed: false })),
   otherCents: 0,
   uncategorisedCents: 0,
   budgetCents: 0,
+  budgetedSpentCents: 0,
   spentCents: 0,
 })
 
@@ -27,9 +31,9 @@ const report = (over: Partial<BudgetReport> = {}): BudgetReport => ({
   from: '2026-01-01',
   to: '2026-03-31',
   covers: { from: '2026-01-01', to: '2026-03-31' },
-  thisMonth: '2026-10',
   months: [],
-  total: { budgetCents: 0, spentCents: 0, otherCents: 0, uncategorisedCents: 0 },
+  together: null,
+  total: { budgetCents: 0, budgetedSpentCents: 0, spentCents: 0, otherCents: 0, uncategorisedCents: 0, budgetMonths: 0, overMonths: 0 },
   categories: [],
   ...over,
 })
@@ -65,19 +69,13 @@ describe('the months a Report covers', () => {
   })
 })
 
-describe('monthState and monthNote', () => {
-  it('know a finished month, the month it is now and one to come', () => {
-    expect(monthState('2026-09', '2026-10')).toBe('finished')
-    expect(monthState('2026-10', '2026-10')).toBe('under-way')
-    expect(monthState('2026-11', '2026-10')).toBe('not-begun')
-    expect(monthState('2025-12', '2026-01')).toBe('finished') // across a year end
-  })
-
-  it('say so for a month that is not finished, and nothing for one that is', () => {
-    expect(monthNote('finished')).toBeNull()
+describe('monthNote', () => {
+  it('says so for a month that has not ended, and that it is left out of the months together, and nothing for one that has', () => {
+    expect(monthNote('ended')).toBeNull()
     expect(monthNote('under-way')).toContain('not over yet')
     expect(monthNote('under-way')).toContain('whole month’s Budget')
-    expect(monthNote('not-begun')).toBe('This month has not begun, so nothing has been spent yet.')
+    expect(monthNote('under-way')).toContain('not in the months together')
+    expect(monthNote('not-begun')).toBe('This month has not begun, so nothing has been spent yet. It is not in the months together.')
   })
 })
 
@@ -94,18 +92,38 @@ describe('wholeMonthsNotice', () => {
   })
 })
 
-describe('monthsOver', () => {
-  const months = [
-    month('2026-01', [[1, 1_000, 900], [2, 500, 600]]), // 2 is over
-    month('2026-02', [[1, 1_000, 1_000], [2, 500, 500]]), // exactly the Budget is on Budget, not over
-    month('2026-03', [[1, 1_000, 1_001]]), // 1 is over by a cent
-    month('2026-04', [[2, 500, -200]]), // money back is not over
-  ]
+describe('togetherCovers', () => {
+  const months = (states: MonthState[]) => states.map((state, i) => month(`2026-${String(i + 1).padStart(2, '0')}`, state))
+  const ended = (n: number) => ({ first: '2026-01', last: `2026-${String(n).padStart(2, '0')}`, months: n })
 
-  it('counts the months a Category was over its Budget, by the rule the Summary uses', () => {
-    expect(monthsOver(months, 1)).toBe(1)
-    expect(monthsOver(months, 2)).toBe(1)
-    expect(monthsOver(months, 3)).toBe(0)
+  it('names the months that have ended when all of them have', () => {
+    expect(togetherCovers(report({ months: months(['ended', 'ended', 'ended']), together: ended(3) }))).toBe('These figures cover January 2026 to March 2026, the 3 months that have ended.')
+  })
+
+  it('says why the month it is now and the months to come are left out, and that each is shown on its own', () => {
+    const states = ['ended', 'ended', 'under-way', 'not-begun', 'not-begun'] as MonthState[]
+
+    expect(togetherCovers(report({ months: months(states), together: ended(2) }))).toBe(
+      'These figures cover January 2026 to February 2026, the 2 months that have ended. March 2026 is not over yet, so part of its spending would be set against the whole of its Budget. ' +
+        'April 2026 to May 2026 have not begun, so their Budget would be set against no spending at all. They are left out of these figures, and shown on their own below.',
+    )
+  })
+
+  it('says so for one month left out, and for one month that has ended', () => {
+    expect(togetherCovers(report({ months: months(['ended', 'not-begun']), together: ended(1) }))).toBe(
+      'These figures are for January 2026, the one month that has ended. February 2026 has not begun, so its Budget would be set against no spending at all. It is left out of these figures, and shown on its own below.',
+    )
+  })
+
+  it('says there is nothing to add together while no month has ended', () => {
+    expect(togetherCovers(report({ months: months(['under-way', 'not-begun']), together: null }))).toBe('No month in these dates has ended, so there is nothing to add together yet.')
+  })
+})
+
+describe('hasNoBudgets', () => {
+  it('is true only while no month has a Category with a Budget', () => {
+    expect(hasNoBudgets(report({ months: [month('2026-01'), month('2026-02')] }))).toBe(true)
+    expect(hasNoBudgets(report({ months: [month('2026-01'), month('2026-02', 'ended', [[1, 1_000, 0]])] }))).toBe(false)
   })
 })
 
@@ -120,13 +138,10 @@ describe('overMonthsText', () => {
 
 describe('periodRows', () => {
   it('has a row for each Category with a Budget, then Spending outside Budgets and Uncategorised, which have no months over', () => {
-    const months = [month('2026-01', [[1, 1_000, 1_100]]), month('2026-02', [[1, 1_000, 900]]), month('2026-03', [])]
-
     const rows = periodRows(
       report({
-        months,
-        categories: [{ categoryId: 1, categoryName: 'Category 1', months: 2, budgetCents: 2_000, spentCents: 2_000 }],
-        total: { budgetCents: 2_000, spentCents: 2_500, otherCents: 700, uncategorisedCents: -200 },
+        categories: [{ categoryId: 1, categoryName: 'Category 1', months: 2, overMonths: 1, budgetCents: 2_000, spentCents: 2_000 }],
+        total: { budgetCents: 2_000, budgetedSpentCents: 2_000, spentCents: 2_500, otherCents: 700, uncategorisedCents: -200, budgetMonths: 2, overMonths: 1 },
       }),
     )
 
@@ -139,5 +154,21 @@ describe('periodRows', () => {
 
   it('still has the two rows that are not in a Budget when no Category had one', () => {
     expect(periodRows(report()).map((row) => row.key)).toEqual(['other', 'uncategorised'])
+  })
+})
+
+describe('a month’s rows with a Budget that changed', () => {
+  it('say from which month under the Category’s name, for a changed Budget only', () => {
+    const rows = budgetRows({
+      rows: [
+        { categoryId: 1, categoryName: 'Groceries', budgetCents: 90_000, spentCents: 100, effectiveFrom: '2026-03', changed: true },
+        { categoryId: 2, categoryName: 'Fuel', budgetCents: 9_000, spentCents: 100, effectiveFrom: '2026-01', changed: false },
+      ],
+      otherCents: 0,
+      uncategorisedCents: 0,
+    })
+
+    expect(rows[0]).toMatchObject({ name: 'Groceries', note: 'Budget changed from March 2026' })
+    expect(rows[1]!.note).toBeUndefined()
   })
 })

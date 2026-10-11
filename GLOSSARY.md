@@ -121,7 +121,7 @@ A planned monthly Spending amount for a Spending Category, effective from a give
 _Avoid_: Limit, allowance, envelope
 
 **Budget vs actual**:
-A month's Budgets set against what the Spending Categories spent in it: each Category with a Budget that month, with its Budget, what it spent and where it stands (Under Budget, On Budget or Over Budget), then **Spending outside Budgets** (the Spending Categories with no Budget that month) and Uncategorised. The Summary shows this month's; the Budget vs actual Report shows every month of a range, for all Accounts together, with the months added together.
+A month's Budgets set against what the Spending Categories spent in it: each Category with a Budget that month, with its Budget, what it spent and where it stands (Under Budget, On Budget or Over Budget), then **Spending outside Budgets** (the Spending Categories with no Budget that month) and Uncategorised. The Summary shows this month's; the Budget vs actual Report shows every month of a range, for all Accounts together, and adds together only the months that have ended, because the month it is now has had part of its spending set against the whole of its Budget.
 _Avoid_: Variance, forecast
 
 ## Accountability
