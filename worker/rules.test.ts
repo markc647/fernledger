@@ -3,6 +3,8 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { applyRulesStatement } from './rule-apply'
 import { MAX_RULES, toCriteria } from './rule-criteria'
 import { previewStatements } from './rule-preview'
+import { callWhileInterrupted } from './test-support'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -188,6 +190,119 @@ describe('adding a Rule', () => {
     expect(res.status).toBe(409)
     expect(await res.text()).not.toContain('one too many')
     expect((await rules()).length).toBe(MAX_RULES)
+  })
+})
+
+// Another request can land between a handler's reads and its write. Each change writes only what the handler read (a Rule still in use, with the criteria it read; the
+// Rules in use in the order it read; room for one more), with `onlyIfChanged`, and answers 404, 200 or the shared 409 when it wrote nothing, so the Change Log never
+// records a change that did not happen.
+describe('when another request lands between this one\'s reads and its write', () => {
+  const put = (id: number, body: Record<string, unknown>) => () => call(`/api/rules/${id}`, { method: 'PUT', body })
+  const entries = async () => (await changeLog()).map((e) => e.summary)
+  const settle = async () => env.DB.prepare('DELETE FROM change_log').run()
+
+  describe('changing a Rule', () => {
+    it('writes no entry, and answers 404, for a Rule removed meanwhile', async () => {
+      const id = await addRule({ textContains: 'wool', categoryId: await categoryId('Groceries') })
+      await settle()
+
+      const res = await callWhileInterrupted(`/api/rules/${id}`, 'PUT', { textContains: 'woolworths', categoryId: await categoryId('Groceries') }, () => call(`/api/rules/${id}`, { method: 'DELETE', body: {} }))
+
+      expect(res.status).toBe(404)
+      expect(await entries()).toEqual(['Removed a Rule: text contains "wool", category Groceries'])
+      expect((await env.DB.prepare('SELECT text_contains FROM rules WHERE id = ?').bind(id).first<{ text_contains: string }>())!.text_contains).toBe('wool')
+    })
+
+    it('writes no second entry for the same change, and says it is so', async () => {
+      const groceries = await categoryId('Groceries')
+      const id = await addRule({ textContains: 'wool', categoryId: groceries })
+      await settle()
+
+      const res = await callWhileInterrupted(`/api/rules/${id}`, 'PUT', { textContains: 'woolworths', categoryId: groceries }, put(id, { textContains: 'woolworths', categoryId: groceries }))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id })
+      expect(await entries()).toEqual(['Changed a Rule: text contains "woolworths", category Groceries'])
+    })
+
+    it('does not overwrite a Rule changed meanwhile, writes no entry, and says to try again', async () => {
+      const groceries = await categoryId('Groceries')
+      const id = await addRule({ textContains: 'wool', categoryId: groceries })
+      await settle()
+
+      const res = await callWhileInterrupted(`/api/rules/${id}`, 'PUT', { textContains: 'countdown', categoryId: groceries }, put(id, { textContains: 'woolworths', categoryId: groceries }))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect((await rules()).map((r) => r.textContains)).toEqual(['woolworths'])
+      expect(await entries()).toEqual(['Changed a Rule: text contains "woolworths", category Groceries'])
+    })
+  })
+
+  describe('removing a Rule', () => {
+    it('writes one entry when two requests remove it, and answers the second 404', async () => {
+      const id = await addRule({ textContains: 'wool', categoryId: await categoryId('Groceries') })
+      await settle()
+
+      const res = await callWhileInterrupted(`/api/rules/${id}`, 'DELETE', {}, () => call(`/api/rules/${id}`, { method: 'DELETE', body: {} }))
+
+      expect(res.status).toBe(404)
+      expect(await entries()).toEqual(['Removed a Rule: text contains "wool", category Groceries'])
+    })
+  })
+
+  describe('adding a Rule', () => {
+    it('does not add the one too many when another request took the last place meanwhile (409)', async () => {
+      const groceries = await categoryId('Groceries')
+      await env.DB.batch(Array.from({ length: MAX_RULES - 1 }, (_, i) => env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(i + 1, `filler ${i}`, groceries)))
+
+      const res = await callWhileInterrupted('/api/rules', 'POST', { textContains: 'one too many', categoryId: groceries }, () => call('/api/rules', { method: 'POST', body: { textContains: 'the last', categoryId: groceries } }))
+
+      expect(res.status).toBe(409)
+      expect(await res.text()).not.toContain('one too many')
+      expect((await rules()).length).toBe(MAX_RULES)
+      expect(await entries()).toEqual(['Added a Rule: text contains "the last", category Groceries'])
+    })
+  })
+
+  describe('putting the Rules in order', () => {
+    const twoRules = async () => [await addRule({ textContains: 'a', categoryId: await categoryId('Groceries') }), await addRule({ textContains: 'b', categoryId: await categoryId('Fuel') })] as const
+
+    it('answers 409, not 500, and writes nothing, when a Rule was added meanwhile', async () => {
+      const [a, b] = await twoRules()
+      await settle()
+
+      const res = await callWhileInterrupted('/api/rules/order', 'PUT', { ids: [b, a] }, () => call('/api/rules', { method: 'POST', body: { textContains: 'c', categoryId: undefined, transfer: true } }))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect((await rules()).map((r) => r.textContains)).toEqual(['a', 'b', 'c'])
+      expect(await entries()).toEqual(['Added a Rule: text contains "c", marked as a Transfer'])
+    })
+
+    it('does not put an order over one made meanwhile, and writes no entry', async () => {
+      const [a, b] = await twoRules()
+      const c = await addRule({ textContains: 'c', categoryId: await categoryId('Tax') })
+      await settle()
+
+      const res = await callWhileInterrupted('/api/rules/order', 'PUT', { ids: [c, b, a] }, () => call('/api/rules/order', { method: 'PUT', body: { ids: [b, a, c] } }))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect((await rules()).map((r) => r.id)).toEqual([b, a, c])
+      expect(await entries()).toEqual(['Changed the order of Rules'])
+    })
+
+    it('writes no second entry for the same order, and says it is so', async () => {
+      const [a, b] = await twoRules()
+      await settle()
+
+      const res = await callWhileInterrupted('/api/rules/order', 'PUT', { ids: [b, a] }, () => call('/api/rules/order', { method: 'PUT', body: { ids: [b, a] } }))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ ids: [b, a] })
+      expect(await entries()).toEqual(['Changed the order of Rules'])
+    })
   })
 })
 

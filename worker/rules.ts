@@ -5,7 +5,7 @@ import { recordChange } from './changelog'
 import { criteriaBody, describeRule, MAX_RULES, ruleBody, ruleRecord, toCriteria, type Criteria } from './rule-criteria'
 import { previewStatements, type PreviewSample } from './rule-preview'
 import { latestRerun, restartRerun, startRerun, stepRerun, stopRerun } from './rule-rerun'
-import { nothing, pathId, validate } from './validate'
+import { CHANGED_MEANWHILE, nothing, pathId, validate } from './validate'
 
 // Rules are applied to Transactions an Import adds (rule-apply.ts); saving, changing or removing a Rule here never
 // touches a Transaction that is already stored. The Admin applies the Rules to all of those with a re-run (rule-rerun.ts),
@@ -50,6 +50,7 @@ async function targetCategory(db: D1Database, categoryId: number | null | undefi
 }
 
 const badCategory = { error: 'Invalid request', field: 'categoryId' }
+const RULES_FULL = { error: `There are already ${MAX_RULES} Rules; remove one first` }
 
 export const rules = new Hono<AppEnv>()
   .get('/', async (c) => c.json(await listRules(c.env.DB)))
@@ -65,23 +66,27 @@ export const rules = new Hono<AppEnv>()
     const category = await targetCategory(db, body.categoryId)
     if (category === null) return c.json(badCategory, 400)
     const inUse = (await db.prepare('SELECT COUNT(*) AS n FROM rules WHERE removed_at IS NULL').first<{ n: number }>())!.n
-    if (inUse >= MAX_RULES) return c.json({ error: `There are already ${MAX_RULES} Rules; remove one first` }, 409)
+    if (inUse >= MAX_RULES) return c.json(RULES_FULL, 409)
 
     const criteria = toCriteria(body)
     const target = { category: category?.name ?? null, transfer: body.transfer === true }
-    const [added] = await recordChange(
+    // The check above can be beaten by another request adding the last place first, so the INSERT checks the count again. It is the last statement (what `onlyIfChanged`
+    // looks at): it adds a Rule, and logs it, only while there is room.
+    const [, added] = await recordChange(
       db,
       [
+        restartRerun(db),
         db
           .prepare(
             `INSERT INTO rules (position, text_contains, bank_type, direction, min_cents, max_cents, category_id, is_transfer)
-             VALUES ((SELECT COALESCE(MAX(position), 0) + 1 FROM rules WHERE removed_at IS NULL), ?, ?, ?, ?, ?, ?, ?)`,
+             SELECT (SELECT COALESCE(MAX(position), 0) + 1 FROM rules WHERE removed_at IS NULL), ?, ?, ?, ?, ?, ?, ?
+             WHERE (SELECT COUNT(*) FROM rules WHERE removed_at IS NULL) < ?`,
           )
-          .bind(criteria.textContains, criteria.bankType, criteria.direction, criteria.minCents, criteria.maxCents, category?.id ?? null, target.transfer ? 1 : 0),
-        restartRerun(db),
+          .bind(criteria.textContains, criteria.bankType, criteria.direction, criteria.minCents, criteria.maxCents, category?.id ?? null, target.transfer ? 1 : 0, MAX_RULES),
       ],
-      { actor: c.var.member, type: 'rule', summary: `Added a Rule: ${describeRule(criteria, target)}`, after: ruleRecord(criteria, target) },
+      { actor: c.var.member, type: 'rule', summary: `Added a Rule: ${describeRule(criteria, target)}`, after: ruleRecord(criteria, target), onlyIfChanged: true },
     )
+    if (added!.meta.changes === 0) return c.json(RULES_FULL, 409)
     return c.json({ id: added!.meta.last_row_id }, 201)
   })
   // Registered before `/:id`, which would take "order" for an ID. The list must be exactly the Rules in use, so a page
@@ -95,13 +100,32 @@ export const rules = new Hono<AppEnv>()
     if (ids.every((id, i) => id === current[i]!.id)) return c.json({ ids })
 
     const byId = new Map(current.map((rule) => [rule.id, rule]))
-    await recordChange(db, [db.prepare('UPDATE rules SET position = (SELECT j.key + 1 FROM json_each(?1) j WHERE j.value = rules.id) WHERE removed_at IS NULL').bind(JSON.stringify(ids)), restartRerun(db)], {
-      actor: c.var.member,
-      type: 'rule',
-      summary: 'Changed the order of Rules',
-      before: { order: current.map(numbered) },
-      after: { order: ids.map((id, i) => numbered(byId.get(id)!, i)) },
-    })
+    // Only if the Rules in use are still the ones that were read, in the order they were read in: another request can add, remove or move one between the read and the write,
+    // and a Rule left out of the list would be given no place. The check is on the whole order at once, and the UPDATE is the last statement, which `onlyIfChanged` looks at.
+    const [, moved] = await recordChange(
+      db,
+      [
+        restartRerun(db),
+        db
+          .prepare(
+            `UPDATE rules SET position = (SELECT j.key + 1 FROM json_each(?1) j WHERE j.value = rules.id)
+             WHERE removed_at IS NULL AND (SELECT group_concat(id) FROM (SELECT id FROM rules WHERE removed_at IS NULL ORDER BY position, id)) IS ?2`,
+          )
+          .bind(JSON.stringify(ids), current.map((rule) => rule.id).join(',')),
+      ],
+      {
+        actor: c.var.member,
+        type: 'rule',
+        summary: 'Changed the order of Rules',
+        before: { order: current.map(numbered) },
+        after: { order: ids.map((id, i) => numbered(byId.get(id)!, i)) },
+        onlyIfChanged: true,
+      },
+    )
+    if (moved!.meta.changes === 0) {
+      const now = (await listRules(db)).map((rule) => rule.id)
+      return now.length === ids.length && now.every((id, i) => id === ids[i]) ? c.json({ ids }) : c.json(CHANGED_MEANWHILE, 409)
+    }
     return c.json({ ids })
   })
   .put('/:id', validate('json', ruleBody), async (c) => {
@@ -118,16 +142,42 @@ export const rules = new Hono<AppEnv>()
     const next: RuleView = { id, ...criteria, categoryId: category?.id ?? null, categoryName: category?.name ?? null, categoryRemoved: false, transfer: body.transfer === true }
     if (sameRule(rule, next)) return c.json({ id })
 
-    await recordChange(
+    // Only over the Rule that was read, still in use and with the criteria it was read with (`IS` is `=` that also matches NULL): another request can remove or change it
+    // between the read and the write, and the entry must not say it changed from what it no longer was. The UPDATE is the last statement, which `onlyIfChanged` looks at.
+    const [, changed] = await recordChange(
       db,
       [
-        db
-          .prepare('UPDATE rules SET text_contains = ?, bank_type = ?, direction = ?, min_cents = ?, max_cents = ?, category_id = ?, is_transfer = ? WHERE id = ? AND removed_at IS NULL')
-          .bind(criteria.textContains, criteria.bankType, criteria.direction, criteria.minCents, criteria.maxCents, next.categoryId, next.transfer ? 1 : 0, id),
         restartRerun(db),
+        db
+          .prepare(
+            `UPDATE rules SET text_contains = ?1, bank_type = ?2, direction = ?3, min_cents = ?4, max_cents = ?5, category_id = ?6, is_transfer = ?7
+             WHERE id = ?8 AND removed_at IS NULL AND text_contains IS ?9 AND bank_type IS ?10 AND direction IS ?11 AND min_cents IS ?12 AND max_cents IS ?13 AND category_id IS ?14 AND is_transfer IS ?15`,
+          )
+          .bind(
+            criteria.textContains,
+            criteria.bankType,
+            criteria.direction,
+            criteria.minCents,
+            criteria.maxCents,
+            next.categoryId,
+            next.transfer ? 1 : 0,
+            id,
+            rule.textContains,
+            rule.bankType,
+            rule.direction,
+            rule.minCents,
+            rule.maxCents,
+            rule.categoryId,
+            rule.transfer ? 1 : 0,
+          ),
       ],
-      { actor: c.var.member, type: 'rule', summary: `Changed a Rule: ${describe(next)}`, before: record(rule), after: record(next) },
+      { actor: c.var.member, type: 'rule', summary: `Changed a Rule: ${describe(next)}`, before: record(rule), after: record(next), onlyIfChanged: true },
     )
+    if (changed!.meta.changes === 0) {
+      const now = await findRule(db, id)
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      return sameRule(now, next) ? c.json({ id }) : c.json(CHANGED_MEANWHILE, 409)
+    }
     return c.json({ id })
   })
   // Removing keeps the row (see migrations/1301_rules.sql): Transactions it categorised point at it, and the Change Log keeps its details.
@@ -138,12 +188,16 @@ export const rules = new Hono<AppEnv>()
     const rule = await findRule(db, id)
     if (!rule) return c.json({ error: 'Not found' }, 404)
 
-    await recordChange(db, [db.prepare("UPDATE rules SET removed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND removed_at IS NULL").bind(id), restartRerun(db)], {
+    // The UPDATE is the last statement, which `onlyIfChanged` looks at: if another request removed the Rule first, this one wrote nothing, logs nothing and answers as it does
+    // for a Rule that is not there.
+    const [, removed] = await recordChange(db, [restartRerun(db), db.prepare("UPDATE rules SET removed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND removed_at IS NULL").bind(id)], {
       actor: c.var.member,
       type: 'rule',
       summary: `Removed a Rule: ${describe(rule)}`,
       before: record(rule),
+      onlyIfChanged: true,
     })
+    if (removed!.meta.changes === 0) return c.json({ error: 'Not found' }, 404)
     return c.json({ id })
   })
   // Applying the Rules to the Transactions already on file (rule-rerun.ts): start a run, then step it, one chunk a request, until

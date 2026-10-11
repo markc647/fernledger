@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api'
 import { formatDate } from '@/lib/format'
-import { HttpError, meQuery } from '@/lib/me'
+import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
 import { announcement, estimateSentence, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
 import { dollarsForInput, readDollars, ruleConditions, ruleResult, type RuleView } from '@/lib/rules'
@@ -110,7 +110,7 @@ function AdminRules() {
       setNotice(change.message)
     },
     onError: (failure) =>
-      setProblem(failure instanceof HttpError && failure.status === 400 ? 'The Rules have changed since this page loaded. Reload the page, then try again.' : 'That did not work. Try again.'),
+      setProblem(failure instanceof HttpError && (failure.status === 400 || failure.status === 409) ? 'The Rules have changed since this page loaded. Reload the page, then try again.' : 'That did not work. Try again.'),
   })
 
   // The buttons are disabled while a move is in flight, so this waits until it has finished and the new order is on the page.
@@ -490,7 +490,7 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
     mutationFn: async () => {
       const json = { ...criteria, categoryId: values.target === 'transfer' ? null : Number(values.target), transfer: values.target === 'transfer' }
       const res = rule ? await api.rules[':id'].$put({ param: { id: String(rule.id) }, json }) : await api.rules.$post({ json })
-      if (!res.ok) throw new HttpError(res.status)
+      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined) // 409: 100 Rules already, or the Rule changed under the Admin
     },
     onSuccess: async () => {
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
@@ -511,7 +511,9 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
 
   const saveFailure =
     save.error instanceof HttpError && save.error.status === 409
-      ? 'There are already 100 Rules. Remove one before adding another.'
+      ? save.error.reason === 'changed'
+        ? 'This Rule was changed just now. Try again.'
+        : 'There are already 100 Rules. Remove one before adding another.'
       : save.isError
         ? 'The Rule could not be saved. Check the boxes above and try again.'
         : ''

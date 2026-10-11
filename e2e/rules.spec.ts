@@ -148,6 +148,34 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
   }
 })
 
+// The Worker's answers are stubbed (worker/rules.test.ts holds the real ones). Each refusal is a 409, which Chrome logs.
+test.describe('a refused Rule', () => {
+  test.use({ expectedStatuses: [409] })
+
+  test('says the Rule changed under it, and still says there are 100 Rules already', async ({ page, context, baseURL }, testInfo) => {
+    await signInAs(context, 'admin')
+    const stamp = `${testInfo.project.name}${Date.now()}`
+    const id = await addRule(context, baseURL!, { textContains: `EXAMPLE THREE ${stamp}`, categoryId: await categoryId(context, 'Fuel') })
+    let refusal: object = { error: 'This changed while your request was being handled. Try again.', reason: 'changed' }
+    await page.route(/\/api\/rules\/\d+$/, (route) => (route.request().method() === 'PUT' ? route.fulfill({ status: 409, json: refusal }) : route.fallback()))
+
+    try {
+      await page.goto('/rules')
+      await page.locator(`#rule-${id}-edit`).click()
+      await page.getByLabel('What the Rule does').selectOption({ label: 'Mark as a Transfer' })
+      await page.getByRole('button', { name: 'Save Rule' }).click()
+      await expect(page.getByRole('alert').filter({ hasText: 'changed just now' })).toHaveText('This Rule was changed just now. Try again.')
+
+      refusal = { error: 'There are already 100 Rules; remove one first' }
+      await page.getByRole('button', { name: 'Save Rule' }).click()
+      await expect(page.getByRole('alert').filter({ hasText: 'already 100 Rules' })).toHaveText('There are already 100 Rules. Remove one before adding another.')
+      await noAxeViolations(page)
+    } finally {
+      await removeRule(context, baseURL!, id)
+    }
+  })
+})
+
 test('boxes changed while a check is out do not take its result, so Save stays off until they are checked', async ({ page, context }) => {
   await signInAs(context, 'admin')
   let release = () => {}
