@@ -89,7 +89,7 @@ What the Income Categories brought into the Accounts in a month, less what went 
 _Avoid_: Earnings
 
 **Difference**:
-Income less Spending: in a month, or over the dates of the Income vs spending by month Report. Below zero when more was spent than came in. Money in that has no Category comes off Spending and is not Income, but the Difference is the same whichever Category it is given.
+Income less Spending: in a month, or over the dates of the Income vs spending by month Report. Below zero when more was spent than came in. Money in that has no Category comes off Spending and is not Income, but the Difference is the same whichever Income or Spending Category it is given. A Loans Category drops the money out of the Difference.
 _Avoid_: Net, surplus, profit
 
 **Loans**:

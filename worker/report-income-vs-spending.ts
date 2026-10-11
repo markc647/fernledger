@@ -1,5 +1,5 @@
 import * as z from 'zod/mini'
-import { monthCount, monthEnd, monthState, nextMonth, type MonthState } from './months'
+import { monthCount, monthEnd, monthStart, monthState, nextMonth, type MonthState } from './months'
 import { nzDate } from './nz-time'
 import { accountMissing, datesInOrder, reportRangeOfAll } from './report-query'
 import { buildMonthlySpending, rollUpMonthly, type MonthlyRow, type SpendingRange } from './spending'
@@ -34,8 +34,9 @@ export const incomeVsSpendingQuery = z
  * `spendingCents` is Spending (money out less money in, of the Spending Categories and Uncategorised); either is below zero when the other way round.
  * `differenceCents` (the Report's "Difference") is the first less the second: below zero when more was spent than came in. `uncategorisedInCents` is the money in
  * that had no Category: it is in `spendingCents` (as money back), not in `incomeCents`. `counted` is how many Transactions were counted in the month (Transfers and
- * Loans left out): zero for a month with no income or spending of any kind, and not zero for a month whose figures net out to nothing, such as $40 spent and refunded. `state` says whether the dates counted in the month are over: 'ended' when every one of them is past, 'not-begun' when none has begun, and
- * 'under-way' when the dates counted run to today or beyond.
+ * Loans left out): zero for a month with no income or spending of any kind, and not zero for a month whose figures net out to nothing, such as $40 spent and refunded.
+ * `state` says whether the dates counted in the month are over: 'ended' when every one of them is past, 'not-begun' when none has begun,
+ * and 'under-way' when the dates counted run to today or beyond.
  */
 export type MonthFigures = { month: string; state: MonthState; incomeCents: number; spendingCents: number; differenceCents: number; uncategorisedInCents: number; counted: number }
 
@@ -67,7 +68,13 @@ export function incomeVsSpending(range: SpendingRange, rows: MonthlyRow[], today
   for (let month = range.from.slice(0, 7); month <= range.to.slice(0, 7); month = nextMonth(month)) {
     const found = read.get(month)
     let state = monthState(month, thisMonth)
-    if (state === 'under-way' && (range.to < monthEnd(month) ? range.to : monthEnd(month)) < today) state = 'ended'
+    if (state === 'under-way') {
+      // The dates counted in the month run from the later of the range's start and the month's first day, to the earlier of its end and the month's last day.
+      const first = range.from > monthStart(month) ? range.from : monthStart(month)
+      const last = range.to < monthEnd(month) ? range.to : monthEnd(month)
+      if (last < today) state = 'ended'
+      else if (first > today) state = 'not-begun'
+    }
     filled.push({ month, state, ...figures(found?.incomeCents ?? 0, found?.spendingCents ?? 0, found?.uncategorisedInCents ?? 0, found?.counted ?? 0) })
   }
   return { ...range, months: filled, totals: figures(totals.incomeCents, totals.spendingCents, totals.uncategorisedInCents, totals.counted) }
