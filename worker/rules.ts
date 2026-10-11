@@ -101,7 +101,8 @@ export const rules = new Hono<AppEnv>()
 
     const byId = new Map(current.map((rule) => [rule.id, rule]))
     // Only if the Rules in use are still the ones that were read, in the order they were read in: another request can add, remove or move one between the read and the write,
-    // and a Rule left out of the list would be given no place. The check is on the whole order at once, and the UPDATE is the last statement, which `onlyIfChanged` looks at.
+    // and a Rule left out of the list would be given no place. The check is on the whole order at once (?2, the ids as read, against the Rules in use numbered in order by a window
+    // function, which is exact where the order of a group_concat is only what SQLite happens to do), and the UPDATE is the last statement, which `onlyIfChanged` looks at.
     const [, moved] = await recordChange(
       db,
       [
@@ -109,9 +110,14 @@ export const rules = new Hono<AppEnv>()
         db
           .prepare(
             `UPDATE rules SET position = (SELECT j.key + 1 FROM json_each(?1) j WHERE j.value = rules.id)
-             WHERE removed_at IS NULL AND (SELECT group_concat(id) FROM (SELECT id FROM rules WHERE removed_at IS NULL ORDER BY position, id)) IS ?2`,
+             WHERE removed_at IS NULL
+               AND (SELECT COUNT(*) FROM rules WHERE removed_at IS NULL) = json_array_length(?2)
+               AND NOT EXISTS (
+                 SELECT 1 FROM (SELECT id, row_number() OVER (ORDER BY position, id) AS n FROM rules WHERE removed_at IS NULL) r
+                 WHERE r.id IS NOT (SELECT e.value FROM json_each(?2) e WHERE e.key = r.n - 1)
+               )`,
           )
-          .bind(JSON.stringify(ids), current.map((rule) => rule.id).join(',')),
+          .bind(JSON.stringify(ids), JSON.stringify(current.map((rule) => rule.id))),
       ],
       {
         actor: c.var.member,

@@ -1,5 +1,7 @@
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { REPLACE_SLICE } from './import-rows'
+import { FIRST_ROW_LEFT } from './imports'
 import { callWhileInterrupted } from './test-support'
 import { CHANGED_MEANWHILE } from './validate'
 
@@ -442,6 +444,17 @@ describe('POST /api/imports/clear-history', () => {
     expect(rest).toEqual([])
     expect(entry).toMatchObject({ actor: 'admin@example.com', summary: `Removed 5000 imported rows from ${savings} to replace its imported history (201 left)` })
     expect(JSON.parse(entry!.after as string)).toEqual({ removed: 5000, remaining: 201 })
+  })
+
+  it('finds the first row a step leaves by walking the table in ID order, so the guard reads about a slice and not the whole history', async () => {
+    await sendChunk([row('OLD1', '2026-09-01')])
+    const id = await accountId()
+    await seedImportRows(id, 20_000)
+
+    const found = await env.DB.prepare(FIRST_ROW_LEFT).bind(id, REPLACE_SLICE).all<{ id: number }>()
+
+    expect(found.results).toEqual([{ id: await rowId('SEED5000', id) }]) // OLD1 and SEED1 to SEED4999 are the 5,000 it removes
+    expect(found.meta.rows_read).toBeLessThanOrEqual(REPLACE_SLICE + 100) // left to sort the Account's 20,001 rows it would be four times that
   })
 
   // Another request can land between the handler's count and its batch. A step does something only while the slice it counted is still the oldest Import-sourced rows of the

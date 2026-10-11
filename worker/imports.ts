@@ -147,8 +147,10 @@ export const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (${IMPORTED
 // that was counted: another step or an Import can land between the count and the batch, and a step that finds the Account changed must neither remove rows the entry does not
 // describe, nor remove any when the history now fits in one replace (which is what the route refuses). The slice is the oldest REPLACE_SLICE Import-sourced rows, so it has
 // not moved while the first row left over (the one after it, `FIRST_ROW_LEFT`) is the same row; if rows before it went or there are no longer more than a slice, it is another or none.
-// (Counting the rows instead would read every one of them in each of the four statements.)
-const FIRST_ROW_LEFT = "SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT 1 OFFSET ?2"
+// What it costs, measured (ADR 0004): `NOT INDEXED` walks the table in ID order and stops at that row, so each of the five times it runs (once to read the boundary, once in each
+// statement) reads about a slice, 5,001 rows, whatever the history holds: 20,000 more reads a step. Left to choose, SQLite searches the Account's index and sorts every one of its
+// rows to put them in ID order, which is a read of the whole history each time (+48% a step at 5,201 rows and +73% at 20,000, where this is +23% and +9%). Counting the rows would be the same.
+export const FIRST_ROW_LEFT = "SELECT id FROM transactions NOT INDEXED WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT 1 OFFSET ?2"
 const STILL_THE_SAME = `(${FIRST_ROW_LEFT}) IS ?3`
 const SLICE_IF_SAME = IMPORTED_SLICE.replace('LIMIT ?2', `LIMIT CASE WHEN ${STILL_THE_SAME} THEN ?2 ELSE 0 END`)
 /** `sql`, with the rows it selects by IMPORTED_SLICE (?1 the Account, ?2 how many) selected only while the boundary (?3) is unchanged. */
@@ -255,7 +257,8 @@ export const imports = new Hono<AppEnv>()
     // pairing, whose count of rows changed is two for each pair made.
     const markAt = planned.length + 2
     const pairAt = planned.length + 1 + give.length
-    // Every chunk is its own Change Log entry, written in the same batch as its rows.
+    // Every chunk is its own Change Log entry, written in the same batch as its rows. Its counts are the ones worked out before the batch ran (`counts` above): two identical
+    // chunks landing together could each say they added rows that only one did, and the response below, from the batch, has what was done.
     const outcome = { accountName: name, replace: replace === true, removed: toRemove, added, dropped, index: chunk.index, count: chunk.count, carry }
     const results = await recordChange(db, statements, {
       actor: c.var.member,

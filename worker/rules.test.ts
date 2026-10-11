@@ -317,6 +317,19 @@ describe('when another request lands between this one\'s reads and its write', (
       expect(await entries()).toEqual(['Added a Rule: text contains "c", marked as a Transfer'])
     })
 
+    it('answers 409, and writes nothing, when the last Rule was removed meanwhile, because the list names a Rule that is gone', async () => {
+      const [a, b] = await twoRules()
+      const c = await addRule({ textContains: 'c', categoryId: await categoryId('Tax') })
+      await settle()
+
+      const res = await callWhileInterrupted('/api/rules/order', 'PUT', { ids: [c, b, a] }, () => call(`/api/rules/${c}`, { method: 'DELETE', body: {} }))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect((await rules()).map((r) => r.id)).toEqual([a, b])
+      expect(await entries()).toEqual(['Removed a Rule: text contains "c", category Tax'])
+    })
+
     it('does not put an order over one made meanwhile, and writes no entry', async () => {
       const [a, b] = await twoRules()
       const c = await addRule({ textContains: 'c', categoryId: await categoryId('Tax') })
