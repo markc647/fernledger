@@ -203,19 +203,32 @@ export const transactions = new Hono<AppEnv>()
         : await db.prepare('SELECT id, name FROM categories WHERE id = ? AND removed_at IS NULL').bind(transaction.overrideCategory).first<{ id: number; name: string }>()
     if ((was?.id ?? null) === (category?.id ?? null)) return c.json({ id, categoryId: category?.id ?? null })
 
-    // The Category could be removed between the check above and this write, so the UPDATE only stores one that is in use.
+    // Another request can land between the reads above and this write. The UPDATE stores a Category only while it is in use (it could be removed in that instant) and
+    // only over the Override that was read (`IS` is `=` that also matches NULL), so a request whose reads went stale changes nothing, and with `onlyIfChanged` writes
+    // no entry: the Change Log never says an Override changed from what it was not, or changed when it did not.
     const set = db
-      .prepare('UPDATE transactions SET override_category = ?1 WHERE id = ?2 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM categories WHERE id = ?1 AND removed_at IS NULL))')
-      .bind(category?.id ?? null, id)
+      .prepare('UPDATE transactions SET override_category = ?1 WHERE id = ?2 AND override_category IS ?3 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM categories WHERE id = ?1 AND removed_at IS NULL))')
+      .bind(category?.id ?? null, id, transaction.overrideCategory)
     const [update] = await recordChange(db, set, {
       actor: c.var.member,
       type: 'transaction',
       summary: category ? `Set Override on ${describe(transaction)} to ${category.name}` : `Cleared Override on ${describe(transaction)}`,
       before: { override: was?.name ?? null },
       after: { override: category?.name ?? null },
+      onlyIfChanged: true,
     })
-    // Only if the Category was removed in that instant: the Change Log entry above then records an attempt that changed nothing.
-    if (update!.meta.changes === 0) return c.json({ error: 'Invalid request', field: 'categoryId' }, 400)
+    if (update!.meta.changes === 0) {
+      // Nothing was written. Either the Category was removed in that instant, or another request moved the Override on: then it is already what was asked for, or this
+      // request is the stale one.
+      const now = await db
+        .prepare('SELECT override_category AS overrideCategory, EXISTS (SELECT 1 FROM categories WHERE id = ?1 AND removed_at IS NULL) AS inUse FROM transactions WHERE id = ?2')
+        .bind(category?.id ?? null, id)
+        .first<{ overrideCategory: number | null; inUse: number }>()
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      if (category && now.inUse === 0) return c.json({ error: 'Invalid request', field: 'categoryId' }, 400)
+      if (now.overrideCategory === (category?.id ?? null)) return c.json({ id, categoryId: category?.id ?? null })
+      return c.json({ error: 'This Transaction has changed. Reload the page and try again' }, 409)
+    }
     return c.json({ id, categoryId: category?.id ?? null })
   })
   .put('/:id/note', validate('json', noteBody), async (c) => {

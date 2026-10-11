@@ -1,5 +1,7 @@
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import worker from './index'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -11,6 +13,25 @@ async function call(path: string, opts: { who?: Who; method?: string; body?: unk
   const headers: Record<string, string> = { Cookie: `fernledger_dev_as=${opts.who ?? 'admin'}` }
   if (opts.body !== undefined) Object.assign(headers, { Origin: origin, 'Content-Type': 'application/json' })
   return exports.default.fetch(new Request(`${origin}${path}`, { method: opts.method ?? 'GET', headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) }))
+}
+
+/**
+ * The same as `call` as the Admin, through a database that runs `before` just ahead of the request's batch, to stand for another request landing between the
+ * handler's reads and its write. Calls `worker.fetch` directly because the test changes the Worker's env.
+ */
+async function callWhileInterrupted(path: string, method: string, body: unknown, before: () => Promise<unknown>) {
+  const db = new Proxy(env.DB, {
+    get(target, key) {
+      if (key === 'batch') return async (statements: D1PreparedStatement[]) => (await before(), target.batch(statements))
+      const value = Reflect.get(target, key, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  const ctx = createExecutionContext()
+  const request = new Request(`${origin}${path}`, { method, headers: { Cookie: 'fernledger_dev_as=admin', Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const res = await worker.fetch!(request as never, { ...env, DB: db }, ctx)
+  await waitOnExecutionContext(ctx)
+  return res
 }
 
 type Category = { id: number; name: string; kind: string }
@@ -385,6 +406,64 @@ describe('an Override', () => {
     const t = await transaction(1)
     expect((await call(`/api/transactions/${t}/override`, { method: 'PUT', body: { categoryId: null } })).status).toBe(200)
     expect(await changeLog()).toEqual([])
+  })
+
+  // Another request can land between the handler's reads and its write. The write only changes the Override it read, and the entry is written only when it changed
+  // something (`onlyIfChanged`), so the Change Log never records a change that did not happen.
+  describe('when another request lands between this one\'s reads and its write', () => {
+    const overrideOf = async (t: number) => (await env.DB.prepare('SELECT override_category AS overrideCategory FROM transactions WHERE id = ?').bind(t).first<{ overrideCategory: number | null }>())!.overrideCategory
+    const setTo = (t: number, categoryId: number | null) => () => call(`/api/transactions/${t}/override`, { method: 'PUT', body: { categoryId } })
+
+    it('writes no second entry for the same Override, and says it is so', async () => {
+      const t = await transaction(1)
+      const groceries = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/override`, 'PUT', { categoryId: groceries }, setTo(t, groceries))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id: t, categoryId: groceries })
+      expect(await overrideOf(t)).toBe(groceries)
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Set Override on Transaction ${t} (2026-10-01, EXAMPLE SHOP 1) to Groceries`, before: '{"override":null}', after: '{"override":"Groceries"}' })])
+    })
+
+    it('does not overwrite an Override that was set meanwhile, writes no entry, and asks for the page to be reloaded', async () => {
+      const t = await transaction(1)
+      const [groceries, fuel] = [await idOf('Groceries'), await idOf('Fuel')]
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/override`, 'PUT', { categoryId: fuel }, setTo(t, groceries))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'This Transaction has changed. Reload the page and try again' })
+      expect(await overrideOf(t)).toBe(groceries)
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Set Override on Transaction ${t} (2026-10-01, EXAMPLE SHOP 1) to Groceries` })])
+    })
+
+    it('writes no entry for taking off an Override that was taken off meanwhile', async () => {
+      const t = await transaction(1)
+      const groceries = await idOf('Groceries')
+      await call(`/api/transactions/${t}/override`, { method: 'PUT', body: { categoryId: groceries } })
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/override`, 'PUT', { categoryId: null }, setTo(t, null))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id: t, categoryId: null })
+      expect(await overrideOf(t)).toBeNull()
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Cleared Override on Transaction ${t} (2026-10-01, EXAMPLE SHOP 1)`, before: '{"override":"Groceries"}' })])
+    })
+
+    it('writes no entry when the Category was removed in that instant, and names the field', async () => {
+      const t = await transaction(1)
+      const gone = await add('Test Gone')
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/override`, 'PUT', { categoryId: gone }, () => call(`/api/categories/${gone}`, { method: 'DELETE', body: {} }))
+
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'Invalid request', field: 'categoryId' })
+      expect(await overrideOf(t)).toBeNull()
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Removed Category Test Gone' })])
+    })
   })
 
   it('is refused for a Category that is removed or not there, naming only the field', async () => {
