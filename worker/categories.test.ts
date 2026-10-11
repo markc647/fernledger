@@ -1,5 +1,7 @@
 import { env, exports } from 'cloudflare:workers'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { callWhileInterrupted } from './test-support'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -124,6 +126,54 @@ describe('renaming a Category', () => {
     expect(await changeLog()).toEqual([])
   })
 
+  // Another request can land between the handler's read and its write. The UPDATE renames only the Category that still has the name that was read and is still in use,
+  // and with `onlyIfChanged` a request that changes nothing writes no entry.
+  describe('when another request lands between this one\'s read and its write', () => {
+    const rename = (id: number, name: string) => () => call(`/api/categories/${id}`, { method: 'PATCH', body: { name } })
+
+    it('writes no second entry for the same name, and says it is so', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}`, 'PATCH', { name: 'Food shopping' }, rename(id, 'Food shopping'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id, name: 'Food shopping', kind: 'spending' })
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Renamed Category Groceries to Food shopping', before: '{"name":"Groceries"}' })])
+    })
+
+    it('does not overwrite a name given meanwhile, writes no entry, and says to try again', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}`, 'PATCH', { name: 'Shopping' }, rename(id, 'Food shopping'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect((await categories()).find((c) => c.id === id)?.name).toBe('Food shopping')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Renamed Category Groceries to Food shopping' })])
+    })
+
+    it('does not rename a Category removed meanwhile, writes no entry for it, and answers 404', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}`, 'PATCH', { name: 'Food shopping' }, () => call(`/api/categories/${id}`, { method: 'DELETE', body: {} }))
+
+      expect(res.status).toBe(404)
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Removed Category Groceries' })])
+      expect((await env.DB.prepare('SELECT name FROM categories WHERE id = ?').bind(id).first<{ name: string }>())!.name).toBe('Groceries')
+    })
+
+    it('still answers that the name is taken, and not that the Category changed, for a name another Category took meanwhile', async () => {
+      const [id, fuel] = [await idOf('Groceries'), await idOf('Fuel')]
+
+      const res = await callWhileInterrupted(`/api/categories/${id}`, 'PATCH', { name: 'Fuel station' }, rename(fuel, 'Fuel station'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'A Category with that name already exists' })
+      expect((await categories()).find((c) => c.id === id)?.name).toBe('Groceries')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Renamed Category Fuel to Fuel station' })])
+    })
+  })
+
   it('refuses a name another Category has', async () => {
     const id = await idOf('Groceries')
     const res = await call(`/api/categories/${id}`, { method: 'PATCH', body: { name: 'fuel' } })
@@ -203,6 +253,42 @@ describe('the kind of a Category', () => {
 
     expect(res.status).toBe(200)
     expect(await changeLog()).toEqual([])
+  })
+
+  // Another request can land between the handler's read and its write: the UPDATE changes only a Category in use that still has the kind that was read.
+  describe('when another request lands between this one\'s read and its write', () => {
+    const setTo = (id: number, kind: string) => () => setKind(id, { kind })
+
+    it('writes no second entry for the same kind, and says it is so', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}/kind`, 'PUT', { kind: 'income' }, setTo(id, 'income'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id, name: 'Groceries', kind: 'income' })
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Changed the kind of Category Groceries from Spending to Income', before: '{"name":"Groceries","kind":"Spending"}' })])
+    })
+
+    it('does not overwrite a kind set meanwhile, writes no entry, and says to try again', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}/kind`, 'PUT', { kind: 'loans' }, setTo(id, 'income'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await kindOf('Groceries')).toBe('income')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Changed the kind of Category Groceries from Spending to Income' })])
+    })
+
+    it('does not change a Category removed meanwhile, writes no entry for it, and answers 404', async () => {
+      const id = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/categories/${id}/kind`, 'PUT', { kind: 'income' }, () => call(`/api/categories/${id}`, { method: 'DELETE', body: {} }))
+
+      expect(res.status).toBe(404)
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Removed Category Groceries' })])
+      expect((await env.DB.prepare('SELECT kind FROM categories WHERE id = ?').bind(id).first<{ kind: string }>())!.kind).toBe('spending')
+    })
   })
 
   it.each([
@@ -387,6 +473,64 @@ describe('an Override', () => {
     expect(await changeLog()).toEqual([])
   })
 
+  // Another request can land between the handler's reads and its write. The write only changes the Override it read, and the entry is written only when it changed
+  // something (`onlyIfChanged`), so the Change Log never records a change that did not happen.
+  describe('when another request lands between this one\'s reads and its write', () => {
+    const overrideOf = async (t: number) => (await env.DB.prepare('SELECT override_category AS overrideCategory FROM transactions WHERE id = ?').bind(t).first<{ overrideCategory: number | null }>())!.overrideCategory
+    const setTo = (t: number, categoryId: number | null) => () => call(`/api/transactions/${t}/override`, { method: 'PUT', body: { categoryId } })
+
+    it('writes no second entry for the same Override, and says it is so', async () => {
+      const t = await transaction(1)
+      const groceries = await idOf('Groceries')
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/override`, 'PUT', { categoryId: groceries }, setTo(t, groceries))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id: t, categoryId: groceries })
+      expect(await overrideOf(t)).toBe(groceries)
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Set Override on Transaction ${t} (2026-10-01, EXAMPLE SHOP 1) to Groceries`, before: '{"override":null}', after: '{"override":"Groceries"}' })])
+    })
+
+    it('does not overwrite an Override that was set meanwhile, writes no entry, and asks for the page to be reloaded', async () => {
+      const t = await transaction(1)
+      const [groceries, fuel] = [await idOf('Groceries'), await idOf('Fuel')]
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/override`, 'PUT', { categoryId: fuel }, setTo(t, groceries))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await overrideOf(t)).toBe(groceries)
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Set Override on Transaction ${t} (2026-10-01, EXAMPLE SHOP 1) to Groceries` })])
+    })
+
+    it('writes no entry for taking off an Override that was taken off meanwhile', async () => {
+      const t = await transaction(1)
+      const groceries = await idOf('Groceries')
+      await call(`/api/transactions/${t}/override`, { method: 'PUT', body: { categoryId: groceries } })
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/override`, 'PUT', { categoryId: null }, setTo(t, null))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id: t, categoryId: null })
+      expect(await overrideOf(t)).toBeNull()
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Cleared Override on Transaction ${t} (2026-10-01, EXAMPLE SHOP 1)`, before: '{"override":"Groceries"}' })])
+    })
+
+    it('writes no entry when the Category was removed in that instant, and names the field', async () => {
+      const t = await transaction(1)
+      const gone = await add('Test Gone')
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/override`, 'PUT', { categoryId: gone }, () => call(`/api/categories/${gone}`, { method: 'DELETE', body: {} }))
+
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'Invalid request', field: 'categoryId' })
+      expect(await overrideOf(t)).toBeNull()
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Removed Category Test Gone' })])
+    })
+  })
+
   it('is refused for a Category that is removed or not there, naming only the field', async () => {
     const t = await transaction(1)
     const gone = await add('Test Gone')
@@ -465,6 +609,57 @@ describe('a Note', () => {
     const t = await transaction(1)
     expect((await call(`/api/transactions/${t}/note`, { method: 'PUT', body: { note: '' } })).status).toBe(200)
     expect(await changeLog()).toEqual([])
+  })
+
+  // The same as an Override's: the UPDATE changes only the Note that was read, and with `onlyIfChanged` a request whose reads went stale writes no entry.
+  describe('when another request lands between this one\'s reads and its write', () => {
+    const noteOf = async (t: number) => (await env.DB.prepare('SELECT note FROM transactions WHERE id = ?').bind(t).first<{ note: string | null }>())!.note
+    const setTo = (t: number, note: string) => () => call(`/api/transactions/${t}/note`, { method: 'PUT', body: { note } })
+    const describing = (t: number) => `Transaction ${t} (2026-10-01, EXAMPLE SHOP 1)`
+
+    it('writes no second entry for the same Note, and says it is so', async () => {
+      const t = await transaction(1)
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/note`, 'PUT', { note: 'First' }, setTo(t, 'First'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id: t, note: 'First' })
+      expect(await noteOf(t)).toBe('First')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Added a Note to ${describing(t)}`, before: '{"note":null}', after: '{"note":"First"}' })])
+    })
+
+    it('does not overwrite a Note that was set meanwhile, writes no entry, and says to try again', async () => {
+      const t = await transaction(1)
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/note`, 'PUT', { note: 'Second' }, setTo(t, 'First'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await noteOf(t)).toBe('First')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Added a Note to ${describing(t)}`, before: '{"note":null}', after: '{"note":"First"}' })])
+    })
+
+    it('writes no entry for taking off a Note that was taken off meanwhile', async () => {
+      const t = await transaction(1)
+      await call(`/api/transactions/${t}/note`, { method: 'PUT', body: { note: 'First' } })
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/note`, 'PUT', { note: '' }, setTo(t, ''))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id: t, note: null })
+      expect(await noteOf(t)).toBeNull()
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Removed the Note from ${describing(t)}`, before: '{"note":"First"}' })])
+    })
+
+    it('answers 404 and writes no entry when the Transaction went meanwhile', async () => {
+      const t = await transaction(1)
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/note`, 'PUT', { note: 'First' }, () => env.DB.prepare('DELETE FROM transactions WHERE id = ?').bind(t).run())
+
+      expect(res.status).toBe(404)
+      expect(await changeLog()).toEqual([])
+    })
   })
 
   it.each([

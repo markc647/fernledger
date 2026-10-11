@@ -1,7 +1,9 @@
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { serialiseRows, WRITES_PER_ROW } from './import-rows'
-import { INSERT_ROWS } from './imports'
+import { REPLACE_SLICE, serialiseRows, WRITES_PER_ROW } from './import-rows'
+import { DELETE_IMPORTED, INSERT_ROWS } from './imports'
+import { callWhileInterrupted } from './test-support'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -307,6 +309,47 @@ describe('PATCH /api/accounts/:id', () => {
     ])
   })
 
+  it('logs nothing when the Account already has that name', async () => {
+    await sendChunk([row(1)])
+    await env.DB.prepare('DELETE FROM change_log').run()
+
+    const res = await rename(await firstAccountId(), `  ${savings} `)
+
+    expect(res.status).toBe(200)
+    expect(await changeLog()).toEqual([])
+  })
+
+  // Another request can land between the handler's read and its write. The UPDATE renames only the Account that still has the name that was read, and with
+  // `onlyIfChanged` a request that changes nothing writes no entry, so the Change Log never says an Account was renamed from a name it no longer had.
+  describe('when another request lands between this one\'s read and its write', () => {
+    const nameOf = async (id: number) => (await accounts()).find((a) => a.id === id)!.name
+
+    it('writes no second entry for the same name, and says it is so', async () => {
+      await sendChunk([row(1)])
+      const id = await firstAccountId()
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/accounts/${id}`, 'PATCH', { name: 'Mum savings' }, () => rename(id, 'Mum savings'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id, name: 'Mum savings' })
+      expect(await changeLog()).toMatchObject([{ summary: `Renamed Account ${savings} to Mum savings`, before: `{"name":"${savings}"}`, after: '{"name":"Mum savings"}' }])
+    })
+
+    it('does not overwrite a name given meanwhile, writes no entry, and says to try again', async () => {
+      await sendChunk([row(1)])
+      const id = await firstAccountId()
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/accounts/${id}`, 'PATCH', { name: 'Dad savings' }, () => rename(id, 'Mum savings'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await nameOf(id)).toBe('Mum savings')
+      expect(await changeLog()).toMatchObject([{ summary: `Renamed Account ${savings} to Mum savings` }])
+    })
+  })
+
   it('shows the new name on the Account’s Transactions', async () => {
     await sendChunk([row(1)])
     await rename(await firstAccountId(), 'Mum savings')
@@ -370,6 +413,27 @@ describe('what importing a row writes', () => {
     expect(whole.map((index) => index.name)).toEqual(['transactions_account_date', 'transactions_date'])
     expect(one.rows_written).toBe(WRITES_PER_ROW + 1)
     expect(many.rows_written).toBe(WRITES_PER_ROW * 100 + 1)
+  })
+
+  // Removing a row takes its entry out of every index it is in, so it is taken to cost what putting it in did (WRITES_PER_ROW). The local database reports a deleted row as 1,
+  // whatever indexes it is in, so what a test can pin is the model: how many places a plain row is in, which is what must change if an index every row is in is added, and
+  // that a delete reports no more than the model says.
+  it('is taken to be WRITES_PER_ROW for each row removed too, the row and its entry in each index every row is in', async () => {
+    const accountId = (await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES (?, 'Example savings') RETURNING id").bind(savings).first<{ id: number }>())!.id
+    await env.DB.prepare(INSERT_ROWS).bind(savings, serialiseRows(rowsFrom(1, 100)), null).run()
+
+    // A plain imported row is in the indexes with no condition and in the bank unique ID's (which only a row with no bank ID is out of). The other indexes are partial on a column
+    // a plain Import leaves empty (a Category, a Transfer, a mark), so a new row is in none of them: the same three that it was written to.
+    const indexes = (await env.DB.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'transactions' ORDER BY name").all<{ name: string; sql: string }>()).results
+    const holdingARow = indexes.filter((index) => !index.sql.includes(' WHERE ') || index.sql.endsWith('WHERE bank_unique_id IS NOT NULL'))
+    expect(holdingARow.map((index) => index.name)).toEqual(['transactions_account_bank_unique_id', 'transactions_account_date', 'transactions_date'])
+    expect(1 + holdingARow.length).toBe(WRITES_PER_ROW)
+    expect(indexes).toHaveLength(holdingARow.length + 4) // and the four partial ones: an Override, a Rule's Category, a Transfer and a Not a Transfer mark
+
+    const removed = (await env.DB.prepare(DELETE_IMPORTED).bind(accountId, REPLACE_SLICE).run()).meta
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions').first<{ n: number }>())!.n).toBe(0)
+    expect(removed.rows_written).toBeGreaterThanOrEqual(100)
+    expect(removed.rows_written).toBeLessThanOrEqual(WRITES_PER_ROW * 100)
   })
 })
 

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
 import { KIND_HINTS, KIND_LABELS, KINDS, type CategoryKind } from '@/lib/category-kinds'
-import { HttpError, meQuery } from '@/lib/me'
+import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { budgetsQuery, categoriesQuery } from '@/lib/queries'
 
 export const Route = createFileRoute('/categories')({
@@ -19,6 +19,8 @@ type Category = { id: number; name: string; kind: CategoryKind }
 type Editing = { action: 'rename' | 'set-kind' | 'remove'; id: number } | null
 
 const NAME_TAKEN = 'A Category with that name already exists.'
+/** The Worker's 409 with reason "changed": something else changed this Category between the Worker reading it and writing. Trying again reads it as it is now. */
+const CHANGED = 'This Category was changed just now. Try again.'
 const NAME_HINT = 'Names are 1 to 40 characters, and each Category needs a different one.'
 
 /**
@@ -29,7 +31,13 @@ const asciiFold = (name: string) => name.replace(/[A-Z]/g, (letter) => letter.to
 
 /** Why a save failed, in words for the reader. */
 const whyNot = (error: unknown) =>
-  error instanceof HttpError && error.status === 409 ? NAME_TAKEN : error instanceof HttpError && error.status === 400 ? NAME_HINT : 'That did not work. Try again.'
+  error instanceof HttpError && error.status === 409
+    ? error.reason === 'changed'
+      ? CHANGED
+      : NAME_TAKEN
+    : error instanceof HttpError && error.status === 400
+      ? NAME_HINT
+      : 'That did not work. Try again.'
 
 function Categories() {
   const { data: me } = useQuery(meQuery)
@@ -180,7 +188,7 @@ function RenameForm({ category, taken, onDone, onCancel }: { category: Category;
   const rename = useMutation({
     mutationFn: async () => {
       const res = await api.categories[':id'].$patch({ param: { id: String(category.id) }, json: { name } })
-      if (!res.ok) throw new HttpError(res.status)
+      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined) // 409: a name in use, or the Category changed under the Admin
     },
     onSuccess: async () => {
       // The Transactions list shows Category names too.
@@ -221,7 +229,7 @@ function KindForm({ category, budgetChanges, onDone, onCancel }: { category: Cat
   const save = useMutation({
     mutationFn: async () => {
       const res = await api.categories[':id'].kind.$put({ param: { id: String(category.id) }, json: { kind } })
-      if (!res.ok) throw new HttpError(res.status)
+      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined)
     },
     onSuccess: async () => {
       // Budget vs actual and the Budgets page list Spending Categories only.

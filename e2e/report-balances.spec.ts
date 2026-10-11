@@ -1,5 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test'
-import { expect, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 import {
   blackOnWhite,
@@ -17,7 +17,6 @@ import {
   GENERATED,
   importRows,
   money,
-  noAxeViolations,
   NOW,
   restoreAppTitleAfterEach,
   setTitle,

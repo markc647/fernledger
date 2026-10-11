@@ -4,6 +4,13 @@ import * as z from 'zod/mini'
 /** The body of a change with nothing to say: the guard (app.ts) wants a JSON body, so the browser sends `{}`, and anything more is refused. */
 export const nothing = z.strictObject({})
 
+/**
+ * The answer (409) to a change whose reads went stale: another request changed the same thing between this one's reads and its write. The write only changes what was
+ * read, so it changed nothing and wrote no Change Log entry. Each request reads afresh, so asking again is all the person has to do. `reason` is for the pages, which cannot
+ * otherwise tell this 409 from one that means something else (a Category name already in use).
+ */
+export const CHANGED_MEANWHILE = { error: 'This changed while your request was being handled. Try again.', reason: 'changed' } as const
+
 /** An ID in a path or a query string: digits only, no sign, exponent or leading zero. At most 15 digits, so Number() reads it exactly (16 digits can pass 2^53). */
 export const ID = /^[1-9]\d{0,14}$/
 

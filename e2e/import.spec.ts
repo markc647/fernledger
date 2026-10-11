@@ -1,7 +1,6 @@
-import { AxeBuilder } from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
-import { expect, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 const fixture = (name: string) => readFileSync(new URL(`../test/fixtures/asb/${name}`, import.meta.url), 'utf8')
 
@@ -31,11 +30,6 @@ function bigFile(count: number, suffix: string) {
     '',
     ...rows,
   ].join('\n')
-}
-
-const noAxeViolations = async (page: Page) => {
-  const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
-  expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
 }
 
 test.describe.configure({ mode: 'serial' })

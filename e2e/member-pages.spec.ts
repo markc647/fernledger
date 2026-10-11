@@ -1,12 +1,9 @@
-import { AxeBuilder } from '@axe-core/playwright'
 import type { APIRequestContext, Page } from '@playwright/test'
-import { expect, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 // Ticket 30: the pages every Member can open (About your data, How to sign in) and the Home Screen app. Axe runs on both
 // pages in both themes (the project is the theme), for a Member and for the Admin; the zoom test in display.spec.ts
 // covers both pages too.
-
-const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
 
 // The Settings are shared by every test and both themes, so each test leaves the defaults behind (as settings.spec.ts does).
 test.afterEach(async ({ request, baseURL }) => {
@@ -167,8 +164,7 @@ test.describe('About your data', () => {
         await expect(page.getByRole('heading', { level: 1, name: 'About your data' })).toBeVisible()
         await expect(section(page, 'Who to ask')).toContainText(filled ? 'Sam' : role === 'admin' ? 'Setup needed' : 'Ask the person who invited you')
         await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
-        const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
-        expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
+        await noAxeViolations(page)
       }
     })
   }
@@ -311,8 +307,7 @@ test.describe('How to sign in', () => {
       await page.goto('/how-to-sign-in')
       await expect(page.getByRole('heading', { level: 1, name: 'How to sign in' })).toBeVisible()
       await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
-      const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
-      expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
+      await noAxeViolations(page)
     })
   }
 })

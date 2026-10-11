@@ -79,14 +79,14 @@ export const ESTIMATED_STEP_READS = STEP_READS + 5_000
 export const ESTIMATED_WRITES_PER_ROW = 3
 
 /**
- * Chunks one cron run does. The queries of a run are 1 to find the job, 4 for each chunk (the end of the chunk, the batch of 2, the
- * day's tally) and 3 more to end the job, which is `CRON_QUERIES` at most. The backup's continuation spends up to 20 of the same 50
- * (backup.ts), and Sync shares the daily crons, so a cron run that is also carrying a backup on does one chunk (`BACKUP_CHUNKS`).
- * Not done on the weekly cron: the backup starts there and spends 40.
+ * Chunks one cron run does. The queries of a run are 1 to find the job, 5 for each chunk at most (the end of the chunk, the batch of 2, the
+ * day's tally, and for a chunk another request took, the job read again) and 3 more to end the job, which is `cronQueries` at most. The
+ * backup's continuation spends up to 20 of the same 50 (backup.ts), and Sync shares the daily crons, so a cron run that is also carrying a
+ * backup on does one chunk (`BACKUP_CHUNKS`). Not done on the weekly cron: the backup starts there and spends 40.
  */
 export const CRON_CHUNKS = 3
 export const BACKUP_CHUNKS = 1
-export const QUERIES_PER_CHUNK = 4
+export const QUERIES_PER_CHUNK = 5
 export const QUERIES_TO_FINISH = 3
 export const cronQueries = (chunks: number) => 1 + chunks * QUERIES_PER_CHUNK + QUERIES_TO_FINISH
 
@@ -347,8 +347,11 @@ async function finish(db: D1Database, job: JobRow): Promise<JobRow> {
 }
 
 /**
- * One chunk of a running job, then the job as it is. At most 8 queries: the end of the chunk, the batch of 2, the day's tally,
- * and when it ends the Change Log batch of 2 and a read. A job that is paused is returned as it is, having cost nothing.
+ * One chunk of a running job, then the job as it is. Its queries, not counting the one that found the job (stepRerun, continueRerun):
+ * - 4 for a chunk it wins: the end of the chunk, the batch of 2, the day's tally;
+ * - 7 for a win that finishes the job, which adds the Change Log batch of 2 and a read;
+ * - 5 for a step that lost its chunk to another request, a Stop or a change to the Rules: the same 4, and the job read again for what it is now.
+ * A job that is paused is returned as it is, having cost nothing.
  */
 async function advance(db: D1Database, job: JobRow): Promise<JobRow> {
   const now = new Date()
@@ -357,14 +360,18 @@ async function advance(db: D1Database, job: JobRow): Promise<JobRow> {
   const { n, last, size } = edge.results[0]!
   if (last === null) return finish(db, job) // nothing is left, whether the walk reached the end or the rest was removed
   const [walk, moved] = await db.batch([db.prepare(WALK).bind(job.cursor, last, job.id), db.prepare(ADVANCE).bind(job.id, job.cursor, last, n)])
+  // What D1 says the step cost, counted whether or not it won the chunk: a step that lost still read the end of the chunk, and D1 bills it.
+  // The tally is a query after the batch because its figures are the batch's own `meta`. If it fails, or the invocation is killed between the two,
+  // the chunk is done and its place saved and the tally is behind by that one step (about 1% of the job's share of the day); the next step counts
+  // its own, and the job still pauses before a chunk that would pass its share.
+  const read = edge.meta.rows_read + walk!.meta.rows_read + moved!.meta.rows_read
+  const written = walk!.meta.rows_written + moved!.meta.rows_written
+  const next = (await db.prepare(TALLY).bind(job.id, utcDay(now), read, written).first<JobRow>())!
   const advanced = moved!.results[0] as JobRow | undefined
   // Someone else took this chunk, or the Rules changed and the job went back to the start, or it was stopped: it is whatever it is
   // now, and this request did no work (WALK checks the same thing).
   if (!advanced) return (await latestJob(db))!
   logEvent('rerun.step', { id: job.id, count: n })
-  const read = edge.meta.rows_read + walk!.meta.rows_read + moved!.meta.rows_read
-  const written = walk!.meta.rows_written + moved!.meta.rows_written
-  const next = (await db.prepare(TALLY).bind(job.id, utcDay(now), read, written).first<JobRow>())!
   // A short chunk, or one that reached the end, is the last. (If the job restarted with a different end meanwhile, only its own end counts.)
   const lastChunk = next.cursor >= next.end_id || (n < size && next.end_id === job.end_id)
   return lastChunk ? finish(db, next) : next

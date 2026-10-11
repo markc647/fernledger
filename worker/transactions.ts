@@ -7,7 +7,7 @@ import { effectiveCategory, type CategorySource, type TransferSource } from './e
 import { exportQuery, exportResponse } from './transaction-export'
 import { buildSearch, categoryProbe, isFewInCategory, needsCategoryProbe, searchQuery, toFilters, toSearch, type Statement } from './transaction-search'
 import { clearHeldNotTransferStatement, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, PARTNER_JOIN } from './transfers'
-import { nothing, pathId, validate } from './validate'
+import { CHANGED_MEANWHILE, nothing, pathId, validate } from './validate'
 
 /** The Admin's Override: a Category in use, or null to take it off. */
 const overrideBody = z.object({ categoryId: z.nullable(z.int().check(z.positive())) })
@@ -203,19 +203,32 @@ export const transactions = new Hono<AppEnv>()
         : await db.prepare('SELECT id, name FROM categories WHERE id = ? AND removed_at IS NULL').bind(transaction.overrideCategory).first<{ id: number; name: string }>()
     if ((was?.id ?? null) === (category?.id ?? null)) return c.json({ id, categoryId: category?.id ?? null })
 
-    // The Category could be removed between the check above and this write, so the UPDATE only stores one that is in use.
+    // Another request can land between the reads above and this write. The UPDATE stores a Category only while it is in use (it could be removed in that instant) and
+    // only over the Override that was read (`IS` is `=` that also matches NULL), so a request whose reads went stale changes nothing, and with `onlyIfChanged` writes
+    // no entry: the Change Log never says an Override changed from what it was not, or changed when it did not.
     const set = db
-      .prepare('UPDATE transactions SET override_category = ?1 WHERE id = ?2 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM categories WHERE id = ?1 AND removed_at IS NULL))')
-      .bind(category?.id ?? null, id)
+      .prepare('UPDATE transactions SET override_category = ?1 WHERE id = ?2 AND override_category IS ?3 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM categories WHERE id = ?1 AND removed_at IS NULL))')
+      .bind(category?.id ?? null, id, transaction.overrideCategory)
     const [update] = await recordChange(db, set, {
       actor: c.var.member,
       type: 'transaction',
       summary: category ? `Set Override on ${describe(transaction)} to ${category.name}` : `Cleared Override on ${describe(transaction)}`,
       before: { override: was?.name ?? null },
       after: { override: category?.name ?? null },
+      onlyIfChanged: true,
     })
-    // Only if the Category was removed in that instant: the Change Log entry above then records an attempt that changed nothing.
-    if (update!.meta.changes === 0) return c.json({ error: 'Invalid request', field: 'categoryId' }, 400)
+    if (update!.meta.changes === 0) {
+      // Nothing was written. Either the Category was removed in that instant, or another request moved the Override on: then it is already what was asked for, or this
+      // request is the stale one.
+      const now = await db
+        .prepare('SELECT override_category AS overrideCategory, EXISTS (SELECT 1 FROM categories WHERE id = ?1 AND removed_at IS NULL) AS inUse FROM transactions WHERE id = ?2')
+        .bind(category?.id ?? null, id)
+        .first<{ overrideCategory: number | null; inUse: number }>()
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      if (category && now.inUse === 0) return c.json({ error: 'Invalid request', field: 'categoryId' }, 400)
+      if (now.overrideCategory === (category?.id ?? null)) return c.json({ id, categoryId: category?.id ?? null })
+      return c.json(CHANGED_MEANWHILE, 409)
+    }
     return c.json({ id, categoryId: category?.id ?? null })
   })
   .put('/:id/note', validate('json', noteBody), async (c) => {
@@ -228,13 +241,22 @@ export const transactions = new Hono<AppEnv>()
     const was = transaction.note || null
     if (was === note) return c.json({ id, note })
 
-    await recordChange(db, db.prepare('UPDATE transactions SET note = ? WHERE id = ?').bind(note, id), {
+    // As the Override's write is: only over the Note that was read (the stored one, which may be empty text), and an entry only if it changed something.
+    const [update] = await recordChange(db, db.prepare('UPDATE transactions SET note = ?1 WHERE id = ?2 AND note IS ?3').bind(note, id, transaction.note), {
       actor: c.var.member,
       type: 'transaction',
       summary: `${was === null ? 'Added a Note to' : note === null ? 'Removed the Note from' : 'Changed the Note on'} ${describe(transaction)}`,
       before: { note: was },
       after: { note },
+      onlyIfChanged: true,
     })
+    if (update!.meta.changes === 0) {
+      // Nothing was written: the Transaction went, or another request moved the Note on, to what was asked for or to something else.
+      const now = await db.prepare('SELECT note FROM transactions WHERE id = ?').bind(id).first<{ note: string | null }>()
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      if ((now.note || null) === note) return c.json({ id, note })
+      return c.json(CHANGED_MEANWHILE, 409)
+    }
     return c.json({ id, note })
   })
   // "Not a Transfer": a pairing is wrong, or a Rule made a Transfer of something that is not one. Both halves are marked, and so stop being paired, in one batch
@@ -262,7 +284,7 @@ export const transactions = new Hono<AppEnv>()
       onlyIfChanged: true,
     })
     // Only if an Import moved the pairing on between the read and the write, and then no entry was written.
-    if (update!.meta.changes === 0) return c.json({ error: 'This Transaction has changed. Reload the page and try again' }, 409)
+    if (update!.meta.changes === 0) return c.json(CHANGED_MEANWHILE, 409)
     return c.json({ id, notTransfer: true })
   })
   .delete('/:id/not-transfer', validate('json', nothing), async (c) => {

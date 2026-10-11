@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 import { AxeBuilder } from '@axe-core/playwright'
-import { expect, signInAs, test } from './fixtures'
+import { expect, signInAs, test, WCAG } from './fixtures'
 
 const fontSize = (page: Page, selector: string) =>
   page.locator(selector).first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
@@ -1065,6 +1065,6 @@ test.describe('header', () => {
 test('the examples page has no WCAG 2.2 AA violations at the largest text size', async ({ page }) => {
   await page.goto('/styleguide')
   await sizeButton(page, 'A++').click()
-  const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
+  const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
   expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
 })

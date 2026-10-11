@@ -1,11 +1,11 @@
-import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { APPLY_HELD, HOLD_REMOVED, MARK_APPLIED } from './carry-over'
-import worker from './index'
 import { WRITES_PER_CARRIED, WRITES_PER_MARK_REMOVED, WRITES_PER_OVERRIDE_REMOVED } from './import-rows'
 import { buildSpending, rollUp, type SpendingRow } from './spending'
+import { callWhileInterrupted } from './test-support'
 import { PAIR_ONE, clearHeldNotTransferStatement, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, pairTransfersStatement } from './transfers'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only). All the data is made up (bank 99).
@@ -19,25 +19,6 @@ async function call(path: string, opts: { who?: Who; method?: string; body?: unk
   const headers: Record<string, string> = { Cookie: `fernledger_dev_as=${opts.who ?? 'admin'}` }
   if (opts.body !== undefined) Object.assign(headers, { Origin: origin, 'Content-Type': 'application/json' })
   return exports.default.fetch(new Request(`${origin}${path}`, { method: opts.method ?? 'GET', headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) }))
-}
-
-/**
- * The same as `call` as the Admin, through a database that runs `before` just before the request's batch, to stand for another request
- * landing between the handler's read and its write. Calls `worker.fetch` directly because the test changes the Worker's env.
- */
-async function callWhileInterrupted(path: string, method: string, before: () => Promise<unknown>) {
-  const db = new Proxy(env.DB, {
-    get(target, key) {
-      if (key === 'batch') return async (statements: D1PreparedStatement[]) => (await before(), target.batch(statements))
-      const value = Reflect.get(target, key, target)
-      return typeof value === 'function' ? value.bind(target) : value
-    },
-  })
-  const ctx = createExecutionContext()
-  const request = new Request(`${origin}${path}`, { method, headers: { Cookie: 'fernledger_dev_as=admin', Origin: origin, 'Content-Type': 'application/json' }, body: '{}' })
-  const res = await worker.fetch!(request as never, { ...env, DB: db }, ctx)
-  await waitOnExecutionContext(ctx)
-  return res
 }
 
 const EVERYDAY = { number: '99-9999-9999999-01', name: 'Everyday' }
@@ -311,10 +292,10 @@ describe('marking a pairing as Not a Transfer', () => {
     await wrongPair()
 
     // An Import replaced the matching Transaction's Account in that instant, which lets go of the pairing.
-    const res = await callWhileInterrupted(`/api/transactions/${await idOf('OUT')}/not-transfer`, 'POST', () => env.DB.prepare('UPDATE transactions SET transfer_of = NULL').run())
+    const res = await callWhileInterrupted(`/api/transactions/${await idOf('OUT')}/not-transfer`, 'POST', {}, () => env.DB.prepare('UPDATE transactions SET transfer_of = NULL').run())
 
     expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({ error: 'This Transaction has changed. Reload the page and try again' })
+    expect(await res.json()).toEqual(CHANGED_MEANWHILE)
     expect(await marker('OUT')).toBeNull()
     expect(await transferLog()).toEqual([])
   })
@@ -590,7 +571,7 @@ describe('treating a marked pairing as a Transfer again', () => {
     await notTransfer('OUT')
 
     // A second window treats it as a Transfer again in the instant between this request reading the marks and writing.
-    const res = await callWhileInterrupted(`/api/transactions/${await idOf('OUT')}/not-transfer`, 'DELETE', () => treatAsTransferAgain('IN'))
+    const res = await callWhileInterrupted(`/api/transactions/${await idOf('OUT')}/not-transfer`, 'DELETE', {}, () => treatAsTransferAgain('IN'))
 
     // The other window paired them, so that is what this one reports.
     expect(res.status).toBe(200)
@@ -606,7 +587,7 @@ describe('treating a marked pairing as a Transfer again', () => {
     await importInto(EVERYDAY, [row(DAY, -50, 'ROUND UP TO SAVINGS', 'ROUND')])
     await notTransfer('ROUND')
 
-    const res = await callWhileInterrupted(`/api/transactions/${await idOf('ROUND')}/not-transfer`, 'DELETE', () => treatAsTransferAgain('ROUND'))
+    const res = await callWhileInterrupted(`/api/transactions/${await idOf('ROUND')}/not-transfer`, 'DELETE', {}, () => treatAsTransferAgain('ROUND'))
 
     expect(await res.json()).toEqual({ id: await idOf('ROUND'), notTransfer: false, paired: false })
   })

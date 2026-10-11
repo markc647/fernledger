@@ -2,6 +2,8 @@ import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ChangeLogRow } from './changelog'
 import { DEFAULT_SETTINGS, readSettings, rejectedFields } from './settings'
+import { callWhileInterrupted } from './test-support'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Signed in through the localhost dev identity (the cookie picks the role), so these tests exercise the real guard and handlers.
 const origin = 'http://localhost:5173'
@@ -70,6 +72,46 @@ describe('PATCH /api/settings', () => {
     const same = await send('/api/settings', { as: 'admin', method: 'PATCH', body: { app_title: 'Nan', about_contact: '' } })
     expect(same.status).toBe(200)
     expect(await changeLog()).toHaveLength(1)
+  })
+
+  // Another request can land between the handler's read and its write. The write sets the Settings only if each still holds what was read, all of them or none, and
+  // with `onlyIfChanged` a request that changes nothing writes no entry: the Change Log never says a Setting changed from a value it no longer had.
+  describe('when another request lands between this one\'s read and its write', () => {
+    const patch = (body: object) => () => send('/api/settings', { as: 'admin', method: 'PATCH', body })
+    const interrupted = (body: object, before: () => Promise<unknown>) => callWhileInterrupted('/api/settings', 'PATCH', body, before)
+
+    it('writes no second entry for the same value, and says it is so', async () => {
+      const res = await interrupted({ app_title: 'Nan' }, patch({ app_title: 'Nan' }))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ ...DEFAULT_SETTINGS, app_title: 'Nan' })
+      expect(await changeLog()).toMatchObject([{ summary: 'Changed settings: app title', before: '{"app_title":"Fernledger"}', after: '{"app_title":"Nan"}' }])
+    })
+
+    it('does not overwrite a value set meanwhile, writes no entry, and says to try again', async () => {
+      const res = await interrupted({ app_title: 'Dad' }, patch({ app_title: 'Nan' }))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect((await readSettings(env.DB)).app_title).toBe('Nan')
+      expect(await changeLog()).toMatchObject([{ summary: 'Changed settings: app title', after: '{"app_title":"Nan"}' }])
+    })
+
+    it('writes none of its Settings when one of them went stale, and logs only the other request', async () => {
+      const res = await interrupted({ app_title: 'Dad', about_contact: 'Sam' }, patch({ about_contact: 'Alex' }))
+
+      expect(res.status).toBe(409)
+      expect(await readSettings(env.DB)).toEqual({ ...DEFAULT_SETTINGS, about_contact: 'Alex' })
+      expect(await changeLog()).toMatchObject([{ summary: 'Changed settings: contact', before: '{"about_contact":""}', after: '{"about_contact":"Alex"}' }])
+    })
+
+    it('writes all of its Settings, in one entry, when none went stale', async () => {
+      const res = await interrupted({ app_title: 'Dad', about_contact: 'Sam' }, patch({ about_retention: 'Kept' }))
+
+      expect(res.status).toBe(200)
+      expect(await readSettings(env.DB)).toEqual({ app_title: 'Dad', about_contact: 'Sam', about_retention: 'Kept' })
+      expect(await changeLog()).toMatchObject([{ summary: 'Changed settings: retention' }, { summary: 'Changed settings: app title, contact', before: '{"app_title":"Fernledger","about_contact":""}' }])
+    })
   })
 
   describe('refuses', () => {

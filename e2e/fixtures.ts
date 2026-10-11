@@ -1,4 +1,5 @@
-import { expect, test as base, type BrowserContext } from '@playwright/test'
+import { AxeBuilder } from '@axe-core/playwright'
+import { expect, test as base, type BrowserContext, type Page } from '@playwright/test'
 import type { Role } from '../src/generated/api/auth'
 
 // A spec that creates Accounts uses numbers of its own (99-9999-9999999-NN), one set for each project, because the light and dark projects and every spec share one
@@ -37,5 +38,28 @@ export const test = base.extend<{ expectedStatuses: number[] }>({
     expect(problems).toEqual([])
   },
 })
+
+/** The WCAG 2.2 AA rule tags axe is asked for. A spec that scans in a way `noAxeViolations` can't uses these, so there is one list. */
+export const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
+
+/**
+ * Axe on the page as it is, against WCAG 2.2 AA: the one check every spec calls. A button that has just been enabled is still fading in, and axe reads the colour it has at
+ * that moment, which is not its colour: a transition runs in real time (a page's fake clock does not move it), and waiting for the running ones misses one React has yet to
+ * start. So it emulates reduced motion (src/index.css makes every transition and animation near-instant under it), waits for what is running, and puts the setting back. The
+ * emulation is for this check only: reduced motion left on broke the focus-outline and text-size tests, which look at a transition on its way. (It is put back to what the page
+ * had, not to `null`, which Playwright accepts and does not apply to this media feature: the page stays reduced.)
+ */
+export async function noAxeViolations(page: Page) {
+  const wasReduced = await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  try {
+    await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
+    // Which element, not only how many, because a CI run keeps no trace to look at afterwards.
+    expect(violations.map((v) => `${v.id}: ${v.nodes.map((node) => node.target.join(' ')).join(', ')}`)).toEqual([])
+  } finally {
+    await page.emulateMedia({ reducedMotion: wasReduced ? 'reduce' : 'no-preference' })
+  }
+}
 
 export { expect }

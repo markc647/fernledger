@@ -1,6 +1,5 @@
-import { AxeBuilder } from '@axe-core/playwright'
 import type { BrowserContext, Page } from '@playwright/test'
-import { expect, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 // The light and dark projects run side by side against one local database, so each uses its own made-up Account.
 const suffix = (testInfo: { project: { name: string } }) => (testInfo.project.name === 'dark' ? '92' : '93')
@@ -34,11 +33,6 @@ async function setNote(context: BrowserContext, baseURL: string, account: string
   expect(found, `${description} in ${account}`).toBeDefined()
   const res = await context.request.put(`/api/transactions/${found!.id}/note`, { headers: { Origin: baseURL }, data: { note } })
   expect(res.ok()).toBe(true)
-}
-
-const noAxeViolations = async (page: Page) => {
-  const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
-  expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
 }
 
 test.describe.configure({ mode: 'serial' })

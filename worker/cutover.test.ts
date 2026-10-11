@@ -1,5 +1,7 @@
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { callWhileInterrupted } from './test-support'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member.
 const origin = 'http://localhost:5173'
@@ -98,6 +100,62 @@ describe('PUT /api/accounts/:id/cutover-date', () => {
     expect(await changeLog()).toMatchObject([
       { summary: `Cleared the Cutover Date for ${savings}`, before: '{"cutoverDate":"2026-10-02"}', after: '{"cutoverDate":null}' },
     ])
+  })
+
+  it('logs nothing when the Account already has that date, or none', async () => {
+    await sendChunk([row('A1', '2026-09-01')])
+    const id = await accountId()
+    await putCutover(id, '2026-10-02')
+    await env.DB.prepare('DELETE FROM change_log').run()
+
+    expect((await putCutover(id, '2026-10-02')).status).toBe(200)
+    await putCutover(id, null)
+    await env.DB.prepare('DELETE FROM change_log').run()
+    expect((await putCutover(id, null)).status).toBe(200)
+
+    expect(await changeLog()).toEqual([])
+  })
+
+  // Another request can land between the handler's read and its write. The UPDATE changes only the date that was read, and with `onlyIfChanged` a request that
+  // changes nothing writes no entry, so the Change Log never records a date as set from one the Account no longer had.
+  describe('when another request lands between this one\'s read and its write', () => {
+    it('writes no second entry for the same date, and says it is so', async () => {
+      await sendChunk([row('A1', '2026-09-01')])
+      const id = await accountId()
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/accounts/${id}/cutover-date`, 'PUT', { cutoverDate: '2026-10-02' }, () => putCutover(id, '2026-10-02'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id, cutoverDate: '2026-10-02' })
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Set the Cutover Date for ${savings} to 2026-10-02`, before: '{"cutoverDate":null}' })])
+    })
+
+    it('does not overwrite a date set meanwhile, writes no entry, and says to try again', async () => {
+      await sendChunk([row('A1', '2026-09-01')])
+      const id = await accountId()
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/accounts/${id}/cutover-date`, 'PUT', { cutoverDate: '2026-10-05' }, () => putCutover(id, '2026-10-02'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect((await accounts())[0]!.cutoverDate).toBe('2026-10-02')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Set the Cutover Date for ${savings} to 2026-10-02` })])
+    })
+
+    it('writes no entry for clearing a date that was cleared meanwhile', async () => {
+      await sendChunk([row('A1', '2026-09-01')])
+      const id = await accountId()
+      await putCutover(id, '2026-10-02')
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/accounts/${id}/cutover-date`, 'PUT', { cutoverDate: null }, () => putCutover(id, null))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id, cutoverDate: null })
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Cleared the Cutover Date for ${savings}`, before: '{"cutoverDate":"2026-10-02"}' })])
+    })
   })
 
   it('refuses a Member, and changes nothing', async () => {

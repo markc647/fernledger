@@ -1,11 +1,5 @@
-import { AxeBuilder } from '@axe-core/playwright'
 import type { BrowserContext, Page } from '@playwright/test'
-import { expect, signInAs, test } from './fixtures'
-
-const noAxeViolations = async (page: Page) => {
-  const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
-  expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
-}
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 /** The light and dark projects share one local database, so each test imports a Transaction of its own, dated to sort first. */
 async function seedTransaction(context: BrowserContext, baseURL: string, projectName: string) {
@@ -126,6 +120,37 @@ test('the Admin adds, renames and removes a Category', async ({ page, context },
   await page.getByRole('button', { name: `Yes, remove ${renamed}` }).click()
   await expect(page.getByRole('status').filter({ hasText: `Removed ${renamed}.` })).toBeVisible()
   await expect(page.getByRole('cell', { name: renamed, exact: true })).toHaveCount(0)
+})
+
+// The Worker's answers are stubbed (worker/categories.test.ts holds the real ones), so nothing about Groceries changes. Each refusal is a 409, which Chrome logs.
+test.describe('a refused rename or kind', () => {
+  test.use({ expectedStatuses: [409] })
+
+  test('says the Category changed under it, and still says a name in use is taken', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    const changed = { error: 'This changed while your request was being handled. Try again.', reason: 'changed' }
+    let renameRefusal: object = changed
+    await page.route(/\/api\/categories\/\d+$/, (route) => (route.request().method() === 'PATCH' ? route.fulfill({ status: 409, json: renameRefusal }) : route.fallback()))
+    await page.route(/\/api\/categories\/\d+\/kind$/, (route) => (route.request().method() === 'PUT' ? route.fulfill({ status: 409, json: changed }) : route.fallback()))
+    await page.goto('/categories')
+    await expect(page.getByRole('cell', { name: 'Groceries', exact: true })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Rename Groceries' }).click()
+    await page.getByLabel('Category name').fill('Food shopping')
+    await page.getByRole('button', { name: 'Save name' }).click()
+    await expect(page.getByRole('alert')).toHaveText('This Category was changed just now. Try again.')
+    renameRefusal = { error: 'A Category with that name already exists' }
+    await page.getByRole('button', { name: 'Save name' }).click()
+    await expect(page.getByRole('alert')).toHaveText('A Category with that name already exists.')
+    await noAxeViolations(page)
+    await page.getByRole('button', { name: 'Cancel' }).click()
+
+    await page.getByRole('button', { name: 'Select kind of Groceries' }).click()
+    await page.locator('select[id^="kind-"]').selectOption('income')
+    await page.getByRole('button', { name: 'Save kind' }).click()
+    await expect(page.getByRole('alert')).toHaveText('This Category was changed just now. Try again.')
+    await expect(page.getByRole('row', { name: 'Groceries' })).toContainText('Spending')
+  })
 })
 
 test('the Admin sets the kind of a Category, Members see it, and only a Spending Category has a Budget', async ({ page, context, baseURL }, testInfo) => {
