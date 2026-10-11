@@ -12,5 +12,8 @@ export const reportRange = {
   to: z.string().check(z.refine(isQueryDate)),
 }
 
+/** For a Report that can cover every Account in one request (spending by Category): the same fields with the Account left out for all of them. */
+export const reportRangeOfAll = { ...reportRange, accountId: z.optional(reportRange.accountId) }
+
 /** The last check of a Report's query: `from` is not after `to`. A refusal names `to`. */
 export const datesInOrder = z.refine<{ from: string; to: string }>((q) => q.from <= q.to, { path: ['to'] })

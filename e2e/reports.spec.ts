@@ -1,18 +1,29 @@
-import { AxeBuilder } from '@axe-core/playwright'
-import type { APIRequestContext, BrowserContext, Page } from '@playwright/test'
+import type { BrowserContext, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
+import {
+  expectBareMargins,
+  expectBlackOnWhite,
+  expectIdentityOnEveryPage,
+  expectIdentityRow,
+  expectJustTheReport,
+  expectNoTextUnder12pt,
+  expectNoTypeUnder12pt,
+  expectOwnPage,
+  expectPageNumbers,
+  expectTitleBlock,
+  GENERATED,
+  noAxeViolations,
+  NOW,
+  restoreAppTitleAfterEach,
+  setTitle,
+  TITLE,
+} from './report-helpers'
 
 // Ticket 18: the Report frame and the Transaction listing Report (spec stories 97 to 99). A Report opens in a new window, is
 // laid out for paper, and says on its face what it is, which Account and dates it covers, and who generated it and when.
 // The print layout is checked three ways: the page under print media (what the browser lays out), and the PDF it makes
 // (page count, the text on each page, the page margins and the size of the type).
-
-const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
-const MEMBER_EMAIL = 'dev.member@example.com'
-const TITLE = `Mum's "family" finances \\ Report` // quote, apostrophe and backslash: the Admin can type any of them
-const NOW = new Date('2026-10-08T02:42:00.000Z') // 3:42 pm in NZ
-const GENERATED = `Generated Thu 8 Oct 2026 at 3:42 pm by ${MEMBER_EMAIL}`
 
 test.describe.configure({ mode: 'serial' })
 
@@ -84,20 +95,10 @@ async function seed(context: BrowserContext, baseURL: string, project: string): 
   return result
 }
 
-// The Settings are shared by every test and both themes, so each test leaves the defaults behind (as settings.spec.ts does).
-test.afterEach(async ({ request, baseURL }) => {
-  const reset = await request.patch('/api/settings', { headers: { Origin: baseURL! }, data: { app_title: 'Fernledger' } })
-  expect(reset.ok()).toBe(true)
-})
-const setTitle = async (request: APIRequestContext, baseURL: string | undefined, app_title: string) =>
-  expect((await request.patch('/api/settings', { headers: { Origin: baseURL! }, data: { app_title } })).ok()).toBe(true)
+restoreAppTitleAfterEach() // the Settings are shared by every test and both themes (as settings.spec.ts does)
 
 const reportAddress = (id: number, year: number, extra = '') => `/reports/transactions?account=${id}&from=${year}-01-01&to=${year}-12-31${extra}`
 const article = (page: Page) => page.getByRole('article', { name: 'Transaction listing' })
-const noAxeViolations = async (page: Page) => {
-  const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
-  expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Opening a Report
@@ -371,32 +372,17 @@ test.describe('printed', () => {
   })
 
   test('is just the Report: no app header, navigation or buttons', async ({ page }) => {
-    await expect(page.getByRole('banner')).toBeHidden()
-    await expect(page.getByRole('navigation', { name: 'Main' })).toBeHidden()
-    await expect(page.getByRole('button')).toHaveCount(0) // hidden elements are not in the accessibility tree
-    await expect(page.getByRole('link')).toHaveCount(0)
-    await expect(page.getByText('In the print window')).toBeHidden()
+    await expectJustTheReport(page)
   })
 
   test('writes its own title block: the app title, the Report, the Account, the dates, and who generated it and when', async ({ page }, testInfo) => {
     const { first, last, savings } = dataFor(testInfo.project.name)
-    const header = article(page).locator('header')
-    await expect(header).toBeVisible()
-    await expect(header.getByText(TITLE, { exact: true })).toBeVisible() // the Admin's words, as typed
-    await expect(header.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible()
-    await expect(header).toContainText(`Account: ${savings.name} (${savings.number})`)
-    await expect(header).toContainText(`Dates: ${first} to ${last}`)
-    await expect(header.getByText(GENERATED, { exact: true })).toBeVisible()
+    await expectTitleBlock(article(page), { name: 'Transaction listing', account: `${savings.name} (${savings.number})`, dates: `${first} to ${last}` })
   })
 
   test('puts the same identifying lines in the table heading, which a browser repeats on every page', async ({ page }, testInfo) => {
     const { first, last, savings } = dataFor(testInfo.project.name)
-    const identity = page.locator('thead tr').first()
-    await expect(identity).toBeVisible() // on screen it is not
-    await expect(identity).toContainText(`${TITLE} – Transaction listing – ${savings.name} (${savings.number}) – ${first} to ${last}`)
-    await expect(identity).toContainText(GENERATED)
-    // It is one of the table's heading rows, with the column headings: that is what makes a browser repeat it.
-    expect(await page.locator('thead').evaluate((el) => [getComputedStyle(el).display, el.querySelectorAll('tr').length])).toEqual(['table-header-group', 2])
+    await expectIdentityRow(page, `${TITLE} – Transaction listing – ${savings.name} (${savings.number}) – ${first} to ${last}`)
   })
 
   test('names the page for Save as PDF: the app, the Report, the Account and the dates', async ({ page }, testInfo) => {
@@ -407,57 +393,15 @@ test.describe('printed', () => {
   test('is black text on white paper, even from the dark theme', async ({ page }, testInfo) => {
     // In the dark project the page is the dark theme on screen, and must still print like this.
     await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
-    const { unreadable, paper, texts } = await page.evaluate(() => {
-      const rgb = (css: string) => {
-        const ctx = document.createElement('canvas').getContext('2d')!
-        ctx.fillStyle = '#fff'
-        ctx.fillStyle = css
-        ctx.fillRect(0, 0, 1, 1)
-        return Array.from(ctx.getImageData(0, 0, 1, 1).data.slice(0, 3))
-      }
-      const root = document.querySelector('.report-frame')!
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-      const unreadable: string[] = []
-      let texts = 0
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.trim()) continue
-        texts += 1
-        const [r, g, b] = rgb(getComputedStyle(node.parentElement!).color)
-        if (Math.max(r!, g!, b!) > 40) unreadable.push(`${node.textContent.trim().slice(0, 30)}: rgb(${r}, ${g}, ${b})`)
-      }
-      return { unreadable, paper: rgb(getComputedStyle(document.body).backgroundColor), texts }
-    })
-    expect(texts).toBeGreaterThan(100)
-    expect(unreadable).toEqual([]) // every word, including the muted ones and the money, is black
-    expect(Math.min(...paper)).toBeGreaterThan(240)
+    await expectBlackOnWhite(page, 100) // every word, including the muted ones and the money, is black
   })
 
   test('has no text under 12pt', async ({ page }) => {
-    const small = await page.evaluate(() => {
-      const walker = document.createTreeWalker(document.querySelector('.report-frame')!, NodeFilter.SHOW_TEXT)
-      const found: string[] = []
-      let texts = 0
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.trim()) continue
-        texts += 1
-        const size = parseFloat(getComputedStyle(node.parentElement!).fontSize)
-        if (size < 16) found.push(`${size}px: ${node.textContent.trim().slice(0, 30)}`)
-      }
-      return { found, texts }
-    })
-    expect(small.texts).toBeGreaterThan(100)
-    expect(small.found).toEqual([]) // 12pt is 16px
-    // The table's own text is set to 12pt, not left to the 15px it has on screen.
-    const cell = await article(page).locator('tbody td').first().evaluate((el) => getComputedStyle(el).fontSize)
-    expect(parseFloat(cell)).toBeGreaterThanOrEqual(16)
+    await expectNoTextUnder12pt(page, article(page), 100)
   })
 
   test('is its own page with its own margins, repeats table headings and keeps a row whole', async ({ page }) => {
-    const styles = await page.evaluate(() => {
-      const style = (selector: string) => getComputedStyle(document.querySelector(selector)!)
-      return { page: style('.report-frame').page, thead: style('thead').display, row: style('tbody tr').breakInside, main: style('main').paddingLeft }
-    })
-    expect(styles).toEqual({ page: 'report', thead: 'table-header-group', row: 'avoid', main: '0px' })
+    await expectOwnPage(page)
   })
 
   test('is several A4 pages with the table headings on every one, no Transaction lost, repeated or cut across pages', async ({ page }) => {
@@ -479,43 +423,22 @@ test.describe('printed', () => {
   })
 
   test('numbers every page "Page 2 of 5" in the bottom margin', async ({ page }) => {
-    const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    const margin = (20 / 25.4) * 72 // the bottom margin, 20mm, in points
-    pages.forEach((p, index) => {
-      const numbered = p.text.filter((t) => t.str === `Page ${index + 1} of ${pages.length}`)
-      expect(numbered, `page ${index + 1}`).toHaveLength(1)
-      expect(numbered[0]!.y).toBeLessThan(margin)
-    })
+    expectPageNumbers(await readPdf(await page.pdf({ format: 'A4' })))
   })
 
   test('says what the Report is, which Account and dates, and who generated it and when, at the top of every page the table runs onto', async ({ page }, testInfo) => {
     const { first, last, savings } = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    const withRows = pages.filter((p) => textOf(p).includes('EXAMPLE SHOP'))
-    expect(withRows.length).toBeGreaterThanOrEqual(3)
-    // In each page's own body, not its margins, so every browser prints it. The Admin's title comes through as typed, quote and backslash too.
-    // (The line may wrap, even inside the Account's number at a hyphen, so the comparison ignores where it broke.)
-    const squash = (text: string) => text.replace(/\s+/g, '')
-    for (const p of withRows) {
-      const text = squash(textOf(p))
-      expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(`${TITLE} – Transaction listing – ${savings.name} (${savings.number}) – ${first} to ${last}`))
-      expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(GENERATED))
-    }
+    // The Admin's title comes through as typed, quote and backslash too.
+    expectIdentityOnEveryPage(pages, 'EXAMPLE SHOP', `${TITLE} – Transaction listing – ${savings.name} (${savings.number}) – ${first} to ${last}`, 3)
   })
 
   test('has nothing in the top margin and only the page number in the bottom one', async ({ page }) => {
-    const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    for (const [index, p] of pages.entries()) {
-      expect(p.text.filter((t) => t.y > p.height - (18 / 25.4) * 72), `top margin of page ${index + 1}`).toEqual([])
-      expect(p.text.filter((t) => t.y < (20 / 25.4) * 72).map((t) => t.str), `bottom margin of page ${index + 1}`).toEqual([`Page ${index + 1} of ${pages.length}`])
-    }
+    expectBareMargins(await readPdf(await page.pdf({ format: 'A4' })))
   })
 
   test('sets every word of it, the page numbers included, in at least 12pt type', async ({ page }) => {
-    const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    const sizes = pages.flatMap((p, index) => p.text.filter((t) => t.size < 11.95).map((t) => `page ${index + 1}: ${t.size}pt "${t.str}"`))
-    expect(sizes).toEqual([])
-    expect(pages.flatMap((p) => p.text).length).toBeGreaterThan(300)
+    expectNoTypeUnder12pt(await readPdf(await page.pdf({ format: 'A4' })), 300)
   })
 
   test('prints the same from a phone-width window: still a table', async ({ page }) => {

@@ -125,6 +125,7 @@ const EXERCISES: Exercise[] = [
   { route: 'GET /api/reports/transactions', path: (id) => `/api/reports/transactions?accountId=${id}&from=2026-10-01&to=2026-10-31` },
   { route: 'GET /api/reports/balances', path: (id) => `/api/reports/balances?accountId=${id}&from=2026-10-01&to=2026-10-31` },
   { route: 'GET /api/reports/budget-vs-actual', path: () => '/api/reports/budget-vs-actual?from=2026-09-15&to=2026-10-31' },
+  { route: 'GET /api/reports/spending', path: (id) => `/api/reports/spending?accountId=${id}&from=2026-10-01&to=2026-10-31` },
   { route: 'PATCH /api/settings', path: () => '/api/settings', opts: { method: 'PATCH', body: { app_title: 'Example family' } } },
   { route: 'PATCH /api/accounts/:id', path: (id) => `/api/accounts/${id}`, opts: { method: 'PATCH', body: { name: 'Example savings' } } },
 ]

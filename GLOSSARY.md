@@ -81,7 +81,7 @@ What a Category is for, which the Admin sets: Spending, Income or Loans. It deci
 _Avoid_: Type (that is Change type), group
 
 **Spending**:
-What the Spending Categories took out of the Accounts in a month, less what came back, such as a refund; Uncategorised counts as Spending. Transfers, Pending Transactions and Loans are not Spending. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+What the Spending Categories took out of the Accounts in a month or a range of dates, less what came back, such as a refund; Uncategorised counts as Spending. Transfers, Pending Transactions and Loans are not Spending. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
 _Avoid_: Expenses, outgoings
 
 **Income**:
@@ -135,7 +135,7 @@ What a Change Log entry changed, such as Settings, Import, Account, Category, Ru
 _Avoid_: Type on its own
 
 **Report**:
-A print-formatted view of Transactions, of each Account's balances, or of Budget vs actual, over a date range, which any Member can print or save as PDF.
+A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, or of Budget vs actual, over a date range, which any Member can print or save as PDF.
 _Avoid_: Statement, export
 
 **CSV export**:
