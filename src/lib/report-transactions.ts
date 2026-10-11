@@ -91,8 +91,9 @@ export const statusAt = (index: number, stoppedAt: number, listed: number): List
  * ADR 0004: reads each section in turn, a page at a time, until every Transaction is in or `cap` Transactions are. With no room left it asks for one more Transaction only to
  * learn whether any are being left out, so a range of exactly the cap's size isn't called capped, and goes on to the next section if this one has none. The section where that
  * one more is found is where it stopped (`stoppedAt`, its index; -1 if it never was), and no section after it is asked about, so a Report never says a section has nothing in
- * its range when it simply stopped before reading it (`statusAt`). `take` adds a page's rows to its section, and is not called for the one-row probe. A failed page fails the
- * whole Report: an incomplete listing must never look complete.
+ * its range when it simply stopped before reading it (`statusAt`). `take` adds a page's rows to its section, and is not called for the one-row probe that finds a row (that row is
+ * left out), but is for a probe that finds none, since that page is the whole of the section and adds nothing to the count: a section with no rows still has what its first page says
+ * about it. A failed page fails the whole Report: an incomplete listing must never look complete.
  */
 export async function readUpToCap<Section, Page extends { transactions: unknown[]; next: string | null }>({
   sections,
@@ -116,8 +117,12 @@ export async function readUpToCap<Section, Page extends { transactions: unknown[
       const room = cap - rowCount
       const page = await fetchPage(section, after, room === 0 ? 1 : Math.min(pageSize, room))
       if (room === 0) {
-        // The probe: anything it finds is left out. If it finds nothing this section is done, and the next one is probed in turn.
-        if (page.transactions.length === 0) break
+        // The probe: anything it finds is left out. If it finds nothing this section is done, and the next one is probed in turn. What it did find out about the section
+        // (a loan's opening balance, which its first page carries) is kept, so a section with nothing in the dates is not taken for one with nothing at all.
+        if (page.transactions.length === 0) {
+          take(section, page)
+          break
+        }
         stoppedAt = index
         break find
       }

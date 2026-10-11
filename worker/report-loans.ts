@@ -1,12 +1,11 @@
 import * as z from 'zod/mini'
 import { findCategory } from './categories'
 import { isLoansKind } from './category-kinds'
-import { categoryColumns, effectiveCategory } from './effective-category'
-import { reportDates } from './report-query'
+import { categoryCandidates, effectiveCategory } from './effective-category'
+import { reportDates, reportId } from './report-query'
 import { pageOf, pagingFields, toPaging } from './report-transactions'
 import { isLoan } from './spending'
 import type { Statement } from './transaction-search'
-import { ID } from './validate'
 
 // The data of the Loans Report (GET /api/reports/loans): the Transactions of one Loans Category, oldest first, from the first Transaction or a start date up
 // to a date, a page at a time. The Report page asks for each Loans Category in turn (src/lib/report-loans.ts), so "all of them" is one request a page for each.
@@ -24,13 +23,11 @@ import { ID } from './validate'
 /** The most Transactions in a page of the Loans Report, and the size of one when the request doesn't say. Larger than the Transaction listing's 200, because each page re-reads the loan. The Report page keeps its own copy (src/lib/report-loans.ts). */
 export const LOANS_PAGE_SIZE = 1000
 
-const categoryId = z.string().check(z.regex(ID))
-
 /** The last check of the Loans Report's query: `from`, when there is one, is not after `to`. A refusal names `to`. (`datesInOrder` is for the Reports that must have both.) */
 const startIsNotAfterEnd = z.refine<{ from?: string; to: string }>((q) => q.from === undefined || q.from <= q.to, { path: ['to'] })
 
 /** The query string: a Loans Category, the dates (the start is optional: without it the Report begins at the first Transaction), and the page. A refusal names the field. */
-export const loansQuery = z.object({ categoryId, from: z.optional(reportDates.from), to: reportDates.to, ...pagingFields }).check(startIsNotAfterEnd)
+export const loansQuery = z.object({ categoryId: reportId, from: z.optional(reportDates.from), to: reportDates.to, ...pagingFields }).check(startIsNotAfterEnd)
 
 export type LoansQuery = {
   categoryId: number
@@ -68,10 +65,9 @@ export type LoanPage = {
  */
 function loansOf(id: number) {
   const category = effectiveCategory()
-  const columns = categoryColumns()
-  const candidates = columns.map((column) => `SELECT id FROM transactions WHERE ${column} = ?`).join(' UNION ')
-  const binds: (string | number)[] = [...columns.map(() => id), id]
-  return { category, sql: `t.id IN (${candidates}) AND ${category.shown.id} = ? AND ${isLoan(category)}`, binds }
+  const candidates = categoryCandidates(id)
+  const binds: (string | number)[] = [...candidates.binds, id]
+  return { category, sql: `${candidates.sql} AND ${category.shown.id} = ? AND ${isLoan(category)}`, binds }
 }
 
 /** The statement for one page of a loan: the Category's Transactions in the dates, oldest first, and one more than the page holds, to tell whether there is another (`pageOf`). */

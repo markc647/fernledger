@@ -1,6 +1,6 @@
 import * as z from 'zod/mini'
 import { isQueryDate } from './dates'
-import { CATEGORY_SLOTS, categoryColumns, effectiveCategory, type CategorySlot, type EffectiveCategory } from './effective-category'
+import { CATEGORY_SLOTS, categoryCandidates, categoryColumns, effectiveCategory, type CategorySlot, type EffectiveCategory } from './effective-category'
 import { PARTNER_JOIN } from './transfers'
 import { ID } from './validate'
 
@@ -250,8 +250,7 @@ export function buildSearch(search: Search, slots: readonly CategorySlot[] = CAT
   const category = effectiveCategory(slots)
   const filter = buildFilter(search, category)
   // The Category's candidates: the Transactions its indexes list. The exact check in the filter stays with them.
-  const columns = categoryColumns(slots)
-  const candidates = search.categoryId === undefined ? null : { sql: `t.id IN (${columns.map((column) => `SELECT id FROM transactions WHERE ${column} = ?`).join(' UNION ')})`, binds: columns.map(() => search.categoryId!) }
+  const candidates = search.categoryId === undefined ? null : categoryCandidates(search.categoryId, slots)
   const whereOf = (withCandidates: boolean): Statement => {
     const through = withCandidates && candidates !== null
     const conditions = through ? [candidates.sql, ...filter.conditions] : filter.conditions

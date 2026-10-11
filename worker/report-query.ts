@@ -11,9 +11,12 @@ export const reportDates = {
   to: z.string().check(z.refine(isQueryDate)),
 }
 
-/** The fields of a Report's query string: an Account's ID (a whole number from 1, at most fifteen digits) and the dates. */
+/** An ID in a Report's query string, an Account's or (for the Loans Report) a Category's: a whole number from 1, at most fifteen digits. */
+export const reportId = z.string().check(z.regex(ID))
+
+/** The fields of a Report's query string: an Account's ID and the dates. */
 export const reportRange = {
-  accountId: z.string().check(z.regex(ID)),
+  accountId: reportId,
   ...reportDates,
 }
 

@@ -220,12 +220,35 @@ describe('loadLoans', () => {
       expect(requests.filter((r) => r.categoryId === 3)).toEqual([])
     })
 
-    it('is not capped when the loans hold exactly the cap, and asks one more only to find that out', async () => {
+    it.each([
+      ['no start date', undefined],
+      ['a start date', '2026-08-01'],
+    ])('is not capped when the loans hold exactly the cap, with %s, and asks one more only to find that out', async (_what, from) => {
       const { fetchPage, requests } = data([3, 2, 0])
-      const { sections, capped } = await loadLoans({ loans, from: undefined, to: '2026-10-31', fetchPage, cap: 5 })
+      const { sections, capped } = await loadLoans({ loans, from, to: '2026-10-31', fetchPage, cap: 5 })
       expect(capped).toBe(false)
       expect(sections.map((s) => s.status)).toEqual(['complete', 'complete', 'complete'])
       expect(requests.some((r) => r.limit === 1)).toBe(true)
+    })
+
+    it('keeps what a probe that finds nothing says of a loan: one owed from before the start date, with nothing in the dates, is not "never used" because the cap was just filled', async () => {
+      // The first loan fills the cap exactly. The second has nothing in the dates but is owed $400.00 from before them, which its probe, one Transaction at most, carries.
+      const { fetchPage, requests } = api([alice([row(0, -100), row(1, -100), row(2, -100)]), { id: 2, name: 'Loan – Ben', rows: [], openingCents: -40_000, openingCount: 1 }])
+
+      const { sections, rowCount, capped } = await loadLoans({ loans: [{ id: 1, name: 'Loan – Alice' }, { id: 2, name: 'Loan – Ben' }], from: '2026-08-01', to: '2026-10-31', fetchPage, cap: 3 })
+
+      expect(capped).toBe(false)
+      expect(rowCount).toBe(3) // the probe added nothing to the count
+      expect(sections[1]).toMatchObject({ status: 'complete', lines: [], openingOwedCents: 40_000, openingCount: 1, owedCents: 40_000 })
+      expect(isUnused(sections[1]!)).toBe(false)
+      expect(requests.filter((r) => r.categoryId === 2)).toEqual([{ categoryId: 2, from: '2026-08-01', to: '2026-10-31', after: undefined, limit: 1 }]) // one request, the probe: nothing is asked twice
+    })
+
+    it('still calls a loan that is never used unused when its probe is all that was asked of it', async () => {
+      const { fetchPage } = api([alice([row(0, -100), row(1, -100), row(2, -100)]), { id: 2, name: 'Loan – Ben', rows: [] }])
+      const { sections } = await loadLoans({ loans: [{ id: 1, name: 'Loan – Alice' }, { id: 2, name: 'Loan – Ben' }], from: '2026-08-01', to: '2026-10-31', fetchPage, cap: 3 })
+      expect(sections[1]).toMatchObject({ status: 'complete', openingOwedCents: 0, openingCount: 0, owedCents: 0 })
+      expect(isUnused(sections[1]!)).toBe(true)
     })
 
     it('calls a loan that starts where the cap fell not listed, not empty, and the loans after it too', async () => {

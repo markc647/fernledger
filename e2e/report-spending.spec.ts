@@ -37,7 +37,8 @@ import {
 test.describe.configure({ mode: 'serial' })
 
 // The light and dark projects share one local database, so each has Accounts, Categories and a year of its own (2002 and 2003), and a Report of that
-// year lists only that project's Transactions even for every Account. No other spec uses these years, and they are older than every other spec's
+// year lists only that project's Transactions even for every Account. One other spec has Transactions in them, in October to December, and they are loans, Income and a
+// Transfer, which this Report leaves out (e2e/report-loans.spec.ts keeps to those months and those kinds, and says why). These years are older than every other spec's
 // Transactions on purpose (as the Dashboard's 2004 is): the Summary's newest five and the first page of the Transactions list belong to the specs that
 // look for theirs there. Payees avoid "EXAMPLE", which other specs' Rules look for.
 const dataFor = (project: string) => {

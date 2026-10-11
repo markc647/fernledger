@@ -61,6 +61,7 @@ const dataFor = (project: string) => {
     aliceLoan: `Loan – ${alice}`,
     benLoan: `Loan – ${ben}`,
     wages: `Lending spec wages ${project}`,
+    unused: `Lending spec unused ${project}`, // a Loans Category nothing is ever put in
   }
 }
 
@@ -93,6 +94,7 @@ async function seed(context: BrowserContext, baseURL: string, project: string): 
     [d.aliceLoan]: await ensureCategory(context, baseURL, d.aliceLoan, 'loans'),
     [d.benLoan]: await ensureCategory(context, baseURL, d.benLoan, 'loans'),
     [d.wages]: await ensureCategory(context, baseURL, d.wages, 'income'),
+    [d.unused]: await ensureCategory(context, baseURL, d.unused, 'loans'),
   }
   const say = (what: string) => `LOANRPT ${project} ${what}`
   const parentRows: SeedRow[] = [
@@ -326,11 +328,11 @@ test.describe('on screen', () => {
     await page.goto(address(null, null, `${d.year}-12-31`))
     const report = article(page)
     await expect(sectionOf(page, d.aliceLoan)).toBeVisible()
-    // The starter Loans Category has no Transaction in or before these dates (the Dashboard's is in 2004), so it is no empty section.
-    await expect(sectionOf(page, 'Loans')).toHaveCount(0)
+    // This spec's own Loans Category, which nothing has ever been put in, is no empty section: it is named in the one line instead.
+    await expect(sectionOf(page, d.unused)).toHaveCount(0)
     const note = report.getByText(/^Nothing has been lent or repaid up to .* on .*, so (it is|they are) not shown\.$/)
     await expect(note).toContainText(dateText(`${d.year}-12-31`))
-    await expect(note).toContainText(/\bLoans\b/)
+    await expect(note).toContainText(d.unused)
   })
 
   test('lists a loan\'s lending and repayments oldest first, from either Account, with the Account, the Note and what is owed after each', async ({ page, context, baseURL }, testInfo) => {

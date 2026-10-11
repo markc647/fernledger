@@ -4,9 +4,7 @@ import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { formatDate } from '@/lib/format'
 import { accountLabel } from '@/lib/report-frame'
 import { detailsOf, REPORT_ROW_CAP, type AccountListing, type Listing, type ReportRow } from '@/lib/report-transactions'
-
-/** Tighter cells on paper, where a page is 680px wide and a Report is many pages long. */
-const PAPER = 'print:px-2 print:py-2'
+import { PAPER } from '@/lib/utils'
 
 // A page's width is shared out by what each column holds. Dates, Categories and amounts keep their words whole (the page's
 // `overflow-wrap: anywhere` would let them shrink to a character wide and split "Uncategorised"), so the Description and Note,

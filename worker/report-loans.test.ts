@@ -5,7 +5,7 @@ import { isLoansKind as browserIsLoansKind, LOANS as BROWSER_LOANS } from '../sr
 import { LOANS_PAGE_SIZE as PAGE_LOANS_PAGE_SIZE } from '../src/lib/report-loans'
 import worker from './index'
 import { CATEGORY_KINDS, isLoansKind, LOANS } from './category-kinds'
-import { LOANS_PAGE_SIZE, type LoanPage, type LoanRow } from './report-loans'
+import { buildLoanOpening, LOANS_PAGE_SIZE, type LoanPage, type LoanRow } from './report-loans'
 import { buildSpending, rollUp, type SpendingRow } from './spending'
 import type { SpendingByCategory } from './spending-by-category'
 
@@ -531,6 +531,7 @@ describe('what a request costs (ADR 0004)', () => {
   const LOAN = 300 // Transactions in Alice's Category: a long loan, with an Override on each and a Rule's Category on a third of them
   const PER_TRANSACTION = 7 // 6.3 measured (docs/adr/0004); a page reads the whole loan whatever its size, because the loan's Transactions are put in date order after they are found
   const SLACK = 30
+  const OPENING_PER_TRANSACTION = 13 / 3 // 4.33 at the most for the opening balance (3, and 1.33 more for each Transaction before the start date), measured below and in docs/adr/0004
 
   beforeEach(async () => {
     // 4,000 Transactions of the household's other history, none in Alice's Category: they must cost nothing.
@@ -640,11 +641,32 @@ describe('what a request costs (ADR 0004)', () => {
     expect(totals.rowsRead).toBeGreaterThan(totals.pages * size * 4)
   })
 
-  it('reads the Transactions before a start date, once, for the opening balance, and not the history around them', async () => {
+  // The opening balance is its own statement (buildLoanOpening), metered here on its own. It finds the loan's Transactions as the page does (the two indexes' entries, then the
+  // row: 3 reads for each of the loan's 300, every one of them, whatever the start date) and only for those before the start date reads the Override's Category and, on a third of
+  // them, the Rule's: 1.3 more. So it is 3 reads for each Transaction of the loan, up to 4.3 for a start date after all of them, and there is no sort and no Account.
+  it.each([
+    ['no Transaction before the start date', '2000-01-01', 0, LOAN * 3],
+    ['99 of them before the start date', '2022-04-11', 99, LOAN * 3 + 99 * (1 + 1 / 3)],
+    ['all of them before the start date', '2100-01-01', LOAN, LOAN * OPENING_PER_TRANSACTION],
+  ])('reads the whole loan again for the opening balance, whatever the start date, and none of the 4,000 around it: %s', async (_what, from, before, expected) => {
+    const { sql, binds } = buildLoanOpening(ids[ALICE]!, from)
+    const result = await env.DB.prepare(sql).bind(...binds).run<{ cents: number; count: number }>()
+    expect(result.results).toEqual([{ cents: 0 - before * 100, count: before }])
+    const reads = (result.meta as { rows_read: number }).rows_read
+    expect(reads).toBeGreaterThanOrEqual(expected - 10)
+    expect(reads).toBeLessThanOrEqual(expected + 10)
+  })
+
+  it('asks the first page of a loan with a start date for the opening balance as well, three queries, and a probe of one Transaction is that same page', async () => {
     const { db, usage } = metered()
-    const res = await requestWith(db, { from: '2022-04-11', limit: '1' }) // the loan's Transactions are dated 2022-01-01 plus 1 to 300 days: 99 of them are before this
-    expect(((await res.json()) as LoanPage).opening).toEqual({ cents: -99 * 100, count: 99 })
-    // The opening balance and the page each find the loan's Transactions; the 4,000 are not read.
-    expect(usage.rowsRead).toBeLessThanOrEqual(2 * LOAN * PER_TRANSACTION + SLACK)
+    const res = await requestWith(db, { from: '2022-04-11', limit: '1' }) // a probe, as the Report asks for one when the cap has been reached
+    const p = (await res.json()) as LoanPage
+    expect(p.transactions).toHaveLength(1)
+    expect(p.opening).toEqual({ cents: -99 * 100, count: 99 })
+    expect(usage.queries).toBe(3)
+    // The opening balance and the page each find the whole loan (a page of two rows sorts them without every row's Account, so it reads a little less than a full page does);
+    // the 4,000 are not read.
+    expect(usage.rowsRead).toBeLessThanOrEqual(LOAN * (OPENING_PER_TRANSACTION + PER_TRANSACTION) + SLACK)
+    expect(usage.rowsRead).toBeGreaterThan(LOAN * 2 * 3)
   })
 })

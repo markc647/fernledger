@@ -4,10 +4,7 @@ import { useReportIdentity } from '@/components/report-frame'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { formatBalance, formatDate } from '@/lib/format'
 import { isUnused, LOANS_ROW_CAP, loanPerson, owedSentence, owedWords, totalLoans, type LoanLine, type LoanSection, type Loans } from '@/lib/report-loans'
-import { MONEY_TEXT } from '@/lib/utils'
-
-/** Tighter cells on paper, where a page is 680px wide and a Report is many pages long. */
-const PAPER = 'print:px-2 print:py-2'
+import { MONEY_TEXT, PAPER } from '@/lib/utils'
 
 /** What is owed, as an amount with who owes whom in words under it ("$300.00", "Alice owes"). The amount has no sign: the words say which way it is. */
 function Owed({ cents, person }: { cents: number; person: string | null }) {
