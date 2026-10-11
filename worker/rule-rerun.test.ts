@@ -405,7 +405,7 @@ describe('a big history', () => {
       await continueRerun(db)
 
       expect((await latest())!.doneRows).toBe(CRON_CHUNKS * RERUN_CHUNK)
-      expect(usage.queries).toBeLessThanOrEqual(cronQueries(CRON_CHUNKS)) // 16 of the 50 the plan allows; the backup (20) and Sync share the cron
+      expect(usage.queries).toBeLessThanOrEqual(cronQueries(CRON_CHUNKS)) // 19 of the 50 the plan allows, if every chunk lost its place; the backup (20) and Sync share the cron
       expect(cronQueries(CRON_CHUNKS) + 20).toBeLessThan(50)
     })
 
@@ -456,7 +456,7 @@ describe('a big history', () => {
       expect(await stored()).toEqual(before) // neither moved a Transaction (the other only moved the place)
       // The end of the chunk was read (1,000 rows) and the walk and the move found nothing to do. Walking the chunk would add about 9,000.
       expect(usage.rowsRead).toBeLessThanOrEqual(RERUN_CHUNK + 100)
-      expect(usage.rowsWritten).toBe(0)
+      expect(usage.rowsWritten).toBe(1) // only the job's tally of what the step read, which D1 bills though it did nothing
     })
 
     it('a step that was stopped meanwhile does no work either', LONG, async () => {
@@ -769,6 +769,54 @@ describe('a small history', () => {
       expect((await tally()).day_rows_read).toBeGreaterThan(counted.day_rows_read) // added to, not started again
     })
 
+    // D1 bills what a step reads whether or not it won the chunk, so a step that lost its place to another (or to a Stop) is counted too.
+    it.each([
+      ['another step took its chunk', () => env.DB.prepare("UPDATE data_migration_progress SET cursor = 1000, done_rows = 1000 WHERE status = 'running'").run().then(() => undefined)],
+      ['the job was stopped', async () => void (await stop())],
+    ])('counts the rows a step read when %s', async (_why, interruption) => {
+      await saveRules()
+      await startOk()
+      const { db, usage } = metered(env.DB, { beforeBatch: interruption })
+
+      await stepRerun(db)
+
+      const counted = await tally()
+      expect(counted.usage_day).toBe(today())
+      expect(usage.rowsRead).toBeGreaterThan(RERUN_CHUNK) // the end of the chunk was read, and nothing else was done
+      expect(counted.day_rows_read).toBeGreaterThan(usage.rowsRead * 0.9)
+      expect(counted.day_rows_read).toBeLessThanOrEqual(usage.rowsRead)
+    })
+
+    // The place and the chunk's results are one batch and the tally is the query after it, so a step whose tally could not be written (D1 failing, the invocation killed)
+    // has still done its chunk and moved the place on, and is the one step the tally is behind by. The next step does not repeat it, and counts only its own.
+    it('is behind by at most the one step whose tally was not written', async () => {
+      await saveRules()
+      await startOk()
+      const failingTally = new Proxy(env.DB, {
+        get(target, key) {
+          if (key === 'prepare') {
+            return (sql: string) => {
+              if (sql.includes('SET day_rows_read')) throw new Error('D1 is unavailable')
+              return target.prepare(sql)
+            }
+          }
+          const value = Reflect.get(target, key, target)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
+
+      await expect(stepRerun(failingTally)).rejects.toThrow('D1 is unavailable')
+
+      expect(await latest()).toMatchObject({ doneRows: RERUN_CHUNK })
+      expect(await tally()).toEqual({ usage_day: null, day_rows_read: 0, day_rows_written: 0 })
+
+      const second = metered()
+      expect(await stepRerun(second.db)).toMatchObject({ doneRows: 2 * RERUN_CHUNK })
+      const counted = await tally()
+      expect(counted.day_rows_read).toBeGreaterThan(second.usage.rowsRead * 0.9) // the second step's own, and not a guess at the first
+      expect(counted.day_rows_read).toBeLessThanOrEqual(second.usage.rowsRead)
+    })
+
     it.each([
       ['reads', DAILY_READ_BUDGET - 1, 0],
       ['writes', 0, DAILY_WRITE_BUDGET - 1],
@@ -884,6 +932,29 @@ describe('a small history', () => {
         const second = await tally()
         expect(second.day_rows_read).toBeGreaterThan(first.day_rows_read)
         expect(second.day_rows_read).toBeLessThan(first.day_rows_read * 3)
+      })
+
+      // `ORDER BY id DESC` in INSERT: the newest job that counted today, not the first, and not the one that spent most. Three jobs whose tallies differ both ways, then one more.
+      it('is taken up from the newest job that counted today: not the first, not the biggest, and not a job that counted another day', async () => {
+        await saveRules()
+        for (const [reads, writes] of [
+          [100, 10],
+          [300, 30], // the biggest
+          [200, 20], // the newest
+        ] as const) {
+          await startOk() // takes up the last one's tally, which the next line replaces with the job's own
+          await setTally(today(), reads, writes)
+          await stop()
+        }
+
+        await startOk()
+        expect(await tally()).toEqual({ usage_day: today(), day_rows_read: 200, day_rows_written: 20 })
+
+        // A newer job that counted on another day is passed over for the newest that counted today.
+        await setTally('2020-01-01', 999, 99)
+        await stop()
+        await startOk()
+        expect(await tally()).toEqual({ usage_day: today(), day_rows_read: 200, day_rows_written: 20 })
       })
 
       it('is not carried over from another day, and a new job with nothing spent starts at nothing', async () => {
