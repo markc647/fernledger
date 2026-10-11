@@ -1,7 +1,7 @@
-import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import worker from './index'
+import { callWhileInterrupted } from './test-support'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -13,25 +13,6 @@ async function call(path: string, opts: { who?: Who; method?: string; body?: unk
   const headers: Record<string, string> = { Cookie: `fernledger_dev_as=${opts.who ?? 'admin'}` }
   if (opts.body !== undefined) Object.assign(headers, { Origin: origin, 'Content-Type': 'application/json' })
   return exports.default.fetch(new Request(`${origin}${path}`, { method: opts.method ?? 'GET', headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) }))
-}
-
-/**
- * The same as `call` as the Admin, through a database that runs `before` just ahead of the request's batch, to stand for another request landing between the
- * handler's reads and its write. Calls `worker.fetch` directly because the test changes the Worker's env.
- */
-async function callWhileInterrupted(path: string, method: string, body: unknown, before: () => Promise<unknown>) {
-  const db = new Proxy(env.DB, {
-    get(target, key) {
-      if (key === 'batch') return async (statements: D1PreparedStatement[]) => (await before(), target.batch(statements))
-      const value = Reflect.get(target, key, target)
-      return typeof value === 'function' ? value.bind(target) : value
-    },
-  })
-  const ctx = createExecutionContext()
-  const request = new Request(`${origin}${path}`, { method, headers: { Cookie: 'fernledger_dev_as=admin', Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  const res = await worker.fetch!(request as never, { ...env, DB: db }, ctx)
-  await waitOnExecutionContext(ctx)
-  return res
 }
 
 type Category = { id: number; name: string; kind: string }
@@ -433,7 +414,7 @@ describe('an Override', () => {
       const res = await callWhileInterrupted(`/api/transactions/${t}/override`, 'PUT', { categoryId: fuel }, setTo(t, groceries))
 
       expect(res.status).toBe(409)
-      expect(await res.json()).toEqual({ error: 'This Transaction has changed. Reload the page and try again' })
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
       expect(await overrideOf(t)).toBe(groceries)
       expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Set Override on Transaction ${t} (2026-10-01, EXAMPLE SHOP 1) to Groceries` })])
     })

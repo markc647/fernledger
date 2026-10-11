@@ -5,9 +5,9 @@ import { api } from '@/lib/api'
 import { HttpError } from '@/lib/me'
 import { notTransferQuestion, type TransferFields } from '@/lib/transfers'
 
-/** What went wrong, in words: a 409 means the Transaction changed under the Admin (an Import moved its pairing on), so the page is out of date. */
+/** What went wrong, in words: a 409 means the Transaction changed under the Admin (an Import moved its pairing on), and trying again reads it as it is now. */
 const failure = (error: unknown) =>
-  error instanceof HttpError && error.status === 409 ? 'This Transaction has changed. Reload the page and try again.' : 'The change could not be saved. Try again.'
+  error instanceof HttpError && error.status === 409 ? 'This Transaction has changed. Try again.' : 'The change could not be saved. Try again.'
 
 /**
  * Not a Transfer, for the Admin: a pairing or a Rule made a Transfer of something that is not one. The button asks first, naming the matching

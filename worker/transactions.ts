@@ -7,7 +7,7 @@ import { effectiveCategory, type CategorySource, type TransferSource } from './e
 import { exportQuery, exportResponse } from './transaction-export'
 import { buildSearch, categoryProbe, isFewInCategory, needsCategoryProbe, searchQuery, toFilters, toSearch, type Statement } from './transaction-search'
 import { clearHeldNotTransferStatement, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, PARTNER_JOIN } from './transfers'
-import { nothing, pathId, validate } from './validate'
+import { CHANGED_MEANWHILE, nothing, pathId, validate } from './validate'
 
 /** The Admin's Override: a Category in use, or null to take it off. */
 const overrideBody = z.object({ categoryId: z.nullable(z.int().check(z.positive())) })
@@ -227,7 +227,7 @@ export const transactions = new Hono<AppEnv>()
       if (!now) return c.json({ error: 'Not found' }, 404)
       if (category && now.inUse === 0) return c.json({ error: 'Invalid request', field: 'categoryId' }, 400)
       if (now.overrideCategory === (category?.id ?? null)) return c.json({ id, categoryId: category?.id ?? null })
-      return c.json({ error: 'This Transaction has changed. Reload the page and try again' }, 409)
+      return c.json(CHANGED_MEANWHILE, 409)
     }
     return c.json({ id, categoryId: category?.id ?? null })
   })
@@ -275,7 +275,7 @@ export const transactions = new Hono<AppEnv>()
       onlyIfChanged: true,
     })
     // Only if an Import moved the pairing on between the read and the write, and then no entry was written.
-    if (update!.meta.changes === 0) return c.json({ error: 'This Transaction has changed. Reload the page and try again' }, 409)
+    if (update!.meta.changes === 0) return c.json(CHANGED_MEANWHILE, 409)
     return c.json({ id, notTransfer: true })
   })
   .delete('/:id/not-transfer', validate('json', nothing), async (c) => {
