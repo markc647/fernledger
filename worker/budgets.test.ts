@@ -1,7 +1,9 @@
 import { env, exports } from 'cloudflare:workers'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { IN_EFFECT, MAX_BUDGET_CHANGES } from './budget-rules'
 import { nzMonth } from './months'
+import { callWhileInterrupted } from './test-support'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member (the dev
 // identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts). All the data is made up (bank 99).
@@ -335,6 +337,85 @@ describe('setting a Budget', () => {
       expect(replaced.status).toBe(200)
       expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM budgets').first<{ n: number }>())!.n).toBe(MAX_BUDGET_CHANGES)
     })
+  })
+})
+
+// Another request can land between the handler's reads and its write. The write sets a Budget only if the Category is still a Spending Category in use, the Budget in
+// effect in the month is still the one that was read, and there is still room, and with `onlyIfChanged` a request that changes nothing writes no entry: the Change Log
+// never says a Budget was set from one it no longer was, and no row is left for a Category that went.
+describe('when another request lands between this one\'s reads and its write', () => {
+  afterEach(async () => {
+    await env.DB.prepare("UPDATE categories SET kind = 'spending' WHERE name IN ('Groceries', 'Fuel')").run()
+  })
+  const setTo = (name: string, effectiveFrom: string, amountCents: number | null) => () => set(name, effectiveFrom, amountCents)
+  const interrupted = (name: string, body: { effectiveFrom: string; amountCents: number | null }, before: () => Promise<unknown>) =>
+    callWhileInterrupted(`/api/budgets/${ids[name]}`, 'PUT', body, before)
+
+  it('writes no second entry for the same Budget, and says it is so', async () => {
+    const res = await interrupted('Groceries', { effectiveFrom: '2026-10', amountCents: 80_000 }, setTo('Groceries', '2026-10', 80_000))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ categoryId: ids['Groceries'], effectiveFrom: '2026-10', amountCents: 80_000, changed: false })
+    expect(await budgetRows()).toEqual([{ category_id: ids['Groceries'], effective_from_month: '2026-10', amount_cents: 80_000 }])
+    expect(await changeLog()).toMatchObject([{ summary: 'Set the Budget for Groceries to $800.00 a month from October 2026' }])
+  })
+
+  it('does not overwrite a Budget set meanwhile, writes no entry, and says to try again', async () => {
+    const res = await interrupted('Groceries', { effectiveFrom: '2026-10', amountCents: 90_000 }, setTo('Groceries', '2026-10', 80_000))
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+    expect(await budgetRows()).toEqual([{ category_id: ids['Groceries'], effective_from_month: '2026-10', amount_cents: 80_000 }])
+    expect(await changeLog()).toMatchObject([{ summary: 'Set the Budget for Groceries to $800.00 a month from October 2026' }])
+  })
+
+  it('does not set a Budget from "none" when an earlier month got one meanwhile, because what it replaces is not what was read', async () => {
+    const res = await interrupted('Groceries', { effectiveFrom: '2026-10', amountCents: 90_000 }, setTo('Groceries', '2026-08', 70_000))
+
+    expect(res.status).toBe(409)
+    expect(await budgetRows()).toEqual([{ category_id: ids['Groceries'], effective_from_month: '2026-08', amount_cents: 70_000 }])
+    expect(await changeLog()).toHaveLength(1)
+  })
+
+  it('leaves a Budget for a later month alone: it is a different row, and the Budget in effect that month is as it was', async () => {
+    const res = await interrupted('Groceries', { effectiveFrom: '2026-08', amountCents: 70_000 }, setTo('Groceries', '2026-10', 90_000))
+
+    expect(res.status).toBe(200)
+    expect(await budgetRows()).toHaveLength(2)
+    expect(await changeLog()).toHaveLength(2)
+  })
+
+  it('writes no row and no entry for a Category removed meanwhile, and answers 404', async () => {
+    const res = await interrupted('Groceries', { effectiveFrom: '2026-10', amountCents: 80_000 }, () => call(`/api/categories/${ids['Groceries']}`, { method: 'DELETE', body: {} }))
+
+    expect(res.status).toBe(404)
+    expect(await budgetRows()).toEqual([])
+    expect(await changeLog()).toMatchObject([{ summary: 'Removed Category Groceries' }])
+  })
+
+  it('writes no row and no entry for a Category that stopped being Spending meanwhile, and names the field', async () => {
+    const res = await interrupted('Groceries', { effectiveFrom: '2026-10', amountCents: 80_000 }, () => call(`/api/categories/${ids['Groceries']}/kind`, { method: 'PUT', body: { kind: 'income' } }))
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid request', field: 'categoryId' })
+    expect(await budgetRows()).toEqual([])
+    expect(await changeLog()).toMatchObject([{ summary: 'Changed the kind of Category Groceries from Spending to Income' }])
+  })
+
+  it('does not add the one change too many when another request took the last place meanwhile (409)', async () => {
+    // Every Category x 28 months from 2030, cut to one fewer than the limit.
+    await env.DB.prepare(
+      `WITH RECURSIVE s(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM s WHERE n < 27)
+       INSERT INTO budgets (category_id, effective_from_month, amount_cents)
+       SELECT c.id, printf('%04d-%02d', 2030 + s.n / 12, s.n % 12 + 1), 100 FROM categories c, s WHERE c.removed_at IS NULL LIMIT ${MAX_BUDGET_CHANGES - 1}`,
+    ).run()
+
+    const res = await interrupted('Groceries', { effectiveFrom: '2026-10', amountCents: 80_000 }, setTo('Fuel', '2026-10', 9_000))
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: `Fernledger keeps at most ${MAX_BUDGET_CHANGES} Budget changes and cannot remove one, so there is no room to add another` })
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM budgets').first<{ n: number }>())!.n).toBe(MAX_BUDGET_CHANGES)
+    expect(await changeLog()).toMatchObject([{ summary: 'Set the Budget for Fuel to $90.00 a month from October 2026' }])
   })
 })
 

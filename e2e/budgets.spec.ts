@@ -142,6 +142,29 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await expect(page.getByLabel('Type').locator('option', { hasText: 'Budget' })).toHaveCount(1)
 })
 
+// The Worker's answers are stubbed (worker/budgets.test.ts holds the real ones). Each refusal is a 409, which Chrome logs.
+test.describe('a refused Budget', () => {
+  test.use({ expectedStatuses: [409] })
+
+  test('says the Budget changed under it, and still says there is no room for another change', async ({ page, context, baseURL }, testInfo) => {
+    const { name } = await seed(context, baseURL!, testInfo.project.name)
+    let refusal: object = { error: 'This changed while your request was being handled. Try again.', reason: 'changed' }
+    await page.route(/\/api\/budgets\/\d+$/, (route) => (route.request().method() === 'PUT' ? route.fulfill({ status: 409, json: refusal }) : route.fallback()))
+    await page.goto('/budgets')
+
+    await page.getByRole('button', { name: `Edit Budget for ${name}` }).click()
+    await page.getByLabel('Monthly Budget in dollars').fill('$100')
+    await page.getByRole('button', { name: 'Save Budget' }).click()
+    await expect(page.getByRole('alert')).toHaveText('This Budget was changed just now. Try again.')
+
+    refusal = { error: 'Fernledger keeps at most 600 Budget changes and cannot remove one, so there is no room to add another' }
+    await page.getByRole('button', { name: 'Save Budget' }).click()
+    await expect(page.getByRole('alert')).toContainText('there is no room to add another')
+    await noAxeViolations(page)
+    await expect(rowFor(page, name)).toContainText('No Budget')
+  })
+})
+
 test('a Member sees the Budgets and how spending compares, and cannot change them', async ({ page, context, baseURL }, testInfo) => {
   const { name } = await seed(context, baseURL!, testInfo.project.name)
   const headers = { Origin: baseURL! }

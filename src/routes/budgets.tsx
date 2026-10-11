@@ -8,7 +8,7 @@ import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
 import { capNotice, changeLine, laterChanges, monthChoices, savedMessage } from '@/lib/budgets'
 import { formatBalance, formatMonth } from '@/lib/format'
-import { HttpError, meQuery } from '@/lib/me'
+import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { budgetsQuery } from '@/lib/queries'
 import { dollarsForInput, readDollars } from '@/lib/rules'
 
@@ -42,7 +42,9 @@ const whyNot = (error: unknown) =>
   error instanceof Refused
     ? (REFUSED[error.field] ?? 'Fernledger did not accept that. Reload the page, then try again.')
     : error instanceof HttpError && error.status === 409
-      ? 'Fernledger keeps a limited number of Budget changes, and they cannot be removed, so there is no room to add another. Choose a month that already has a change, and replace it.'
+      ? error.reason === 'changed'
+        ? 'This Budget was changed just now. Try again.'
+        : 'Fernledger keeps a limited number of Budget changes, and they cannot be removed, so there is no room to add another. Choose a month that already has a change, and replace it.'
       : 'That did not work. Try again.'
 
 function Budgets() {
@@ -183,7 +185,7 @@ function BudgetPanel({
     mutationFn: async (amountCents: number | null) => {
       const res = await api.budgets[':categoryId'].$put({ param: { categoryId: String(row.categoryId) }, json: { effectiveFrom: from, amountCents } })
       if (res.status === 400) throw new Refused(((await res.json().catch(() => ({}))) as { field?: string }).field ?? '')
-      if (!res.ok) throw new HttpError(res.status)
+      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined) // 409: no room, or the Budget changed under the Admin
       return res.json()
     },
     onSuccess: async (result) => {
