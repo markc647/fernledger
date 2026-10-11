@@ -4,6 +4,7 @@ import { IncomeVsSpendingReport } from '@/components/income-vs-spending-report'
 import { IncomeVsSpendingForm } from '@/components/report-form'
 import { ReportFrame } from '@/components/report-frame'
 import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
+import { tooManyIncomeMonths } from '@/lib/income-vs-spending'
 import { reportIncomeVsSpendingQuery } from '@/lib/queries'
 import { parseReportSearch } from '@/lib/report-transactions'
 
@@ -19,7 +20,13 @@ const NAME = 'Income vs spending by month'
 function IncomeVsSpendingPage() {
   const search = Route.useSearch()
   return (
-    <ReportGate name={NAME} search={search} form={<IncomeVsSpendingForm defaults={search} />} noAccounts="There are no Accounts yet, so there is no income or spending.">
+    <ReportGate
+      name={NAME}
+      search={search}
+      form={<IncomeVsSpendingForm defaults={search} />}
+      noAccounts="There are no Accounts yet, so there is no income or spending."
+      rangeProblem={tooManyIncomeMonths}
+    >
       {(scope) => <IncomeVsSpending scope={scope} account={search.account} />}
     </ReportGate>
   )

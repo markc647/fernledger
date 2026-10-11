@@ -93,7 +93,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/income-vs-spending']
+  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/income-vs-spending']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -685,9 +685,63 @@ test.describe('zoom', () => {
     }
   }
 
-  // The income-vs-spending-by-month Report with its longest content: a long app title and Account name, the largest amounts, Spending back, Income and a difference
-  // below zero, and months the dates cover only part of (each with its sentence about the dates), on screen (cards on a narrow window). The data is stubbed, so the
-  // test needs nothing in the database.
+  // The Budget vs actual Report with its longest content: a long app title, Account and Category name, the largest amounts, a notice that the dates were part of a
+  // month, a Budget that changed, a month that is not over and the months together, on screen (cards on a narrow window). The data is stubbed, so the test needs
+  // nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/reports/budget-vs-actual with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        const long = 'Category with a long name'.padEnd(60, 'z')
+        const month = (m: string, state: string, budgetCents: number, spentCents: number, changed: boolean) => ({
+          month: m,
+          state,
+          rows: [{ categoryId: 1, categoryName: long, budgetCents, spentCents, effectiveFrom: m, changed }],
+          otherCents: 123456789,
+          uncategorisedCents: -123456789,
+          budgetCents,
+          budgetedSpentCents: spentCents,
+          spentCents,
+        })
+        await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
+        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
+        await page.route('**/api/reports/budget-vs-actual?**', (route) =>
+          route.fulfill({
+            json: {
+              from: '2026-08-15',
+              to: '2026-10-31',
+              covers: { from: '2026-08-01', to: '2026-10-31' },
+              months: [month('2026-08', 'ended', 123456789, 123456790, false), month('2026-09', 'ended', 123456789, -123456789, true), month('2026-10', 'under-way', 123456789, 5, false)],
+              together: { first: '2026-08', last: '2026-09', months: 2 },
+              total: { budgetCents: 246913578, budgetedSpentCents: 1, spentCents: 1, otherCents: 246913578, uncategorisedCents: -246913578, budgetMonths: 2, overMonths: 1 },
+              categories: [{ categoryId: 1, categoryName: long, months: 2, overMonths: 1, budgetCents: 246913578, spentCents: 1 }],
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/reports/budget-vs-actual?from=2026-08-15&to=2026-10-31')
+        await sizeButton(page, size).click()
+        const report = page.getByRole('article', { name: 'Budget vs actual' })
+        await expect(report).toContainText('$1,234,567.89')
+        await expect(report).toContainText('You chose')
+        await expect(report).toContainText('$1,234,567.89 back')
+        await expect(report).toContainText('Budget changed from September 2026')
+        await expect(report).toContainText('August 2026 to September 2026, the 2 months that have ended')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The income-vs-spending-by-month Report with its longest content: a long app title and Account name, the largest amounts, Spending back, Income and a Difference
+  // below zero, the notice about money in with no Category with a large amount in it, and months with sentences under their names (the dates cover only part of the
+  // first, the second is not over, the third has not begun), on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
     for (const size of ['A', 'A++'] as const) {
       test(`/reports/income-vs-spending with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
@@ -700,11 +754,11 @@ test.describe('zoom', () => {
               from: '2026-09-15',
               to: '2026-11-10',
               months: [
-                { month: '2026-09', incomeCents: 123456789012, spendingCents: -123456789, differenceCents: 123580245801 },
-                { month: '2026-10', incomeCents: -123456789012, spendingCents: 123456789012, differenceCents: -246913578024 },
-                { month: '2026-11', incomeCents: 0, spendingCents: 0, differenceCents: 0 },
+                { month: '2026-09', state: 'ended', incomeCents: 123456789012, spendingCents: -123456789, differenceCents: 123580245801, uncategorisedInCents: 123456789012 },
+                { month: '2026-10', state: 'under-way', incomeCents: -123456789012, spendingCents: 123456789012, differenceCents: -246913578024, uncategorisedInCents: 0 },
+                { month: '2026-11', state: 'not-begun', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 },
               ],
-              totals: { incomeCents: 0, spendingCents: 123333332223, differenceCents: -123333332223 },
+              totals: { incomeCents: 0, spendingCents: 123333332223, differenceCents: -123333332223, uncategorisedInCents: 123456789012 },
             },
           }),
         )
@@ -716,7 +770,11 @@ test.describe('zoom', () => {
         await expect(report).toContainText('−$1,234,567,890.12')
         await expect(report).toContainText('$1,234,567.89 back')
         await expect(report).toContainText('−$2,469,135,780.24')
-        await expect(report).toContainText('Only Tue 15 Sept 2026 to Wed 30 Sept 2026') // the longest sentence about a part month
+        await expect(report).toContainText('Difference (income less spending)') // the longest label
+        await expect(report).toContainText('$1,234,567,890.12 of money in has no Category')
+        await expect(report).toContainText('Counts only Tue 15 Sept 2026 to Wed 30 Sept 2026') // the longest sentence about a part month
+        await expect(report).toContainText('This month is not over yet, so these are the figures so far.')
+        await expect(report).toContainText('This month has not begun, so there is nothing to show yet.')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))

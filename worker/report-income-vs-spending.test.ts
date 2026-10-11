@@ -2,7 +2,10 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import worker from './index'
-import { incomeVsSpending, type IncomeVsSpending } from './report-income-vs-spending'
+import { MAX_INCOME_MONTHS as PAGE_MAX_INCOME_MONTHS } from '../src/lib/income-vs-spending'
+import { nzMonth } from './months'
+import type { BudgetReport } from './report-budget'
+import { incomeVsSpending, MAX_INCOME_MONTHS, type IncomeVsSpending } from './report-income-vs-spending'
 import { buildSpending, rollUp, type SpendingRow } from './spending'
 import type { SpendingByCategory } from './spending-by-category'
 
@@ -85,7 +88,7 @@ describe('what the Report totals', () => {
       ['2026-10', 311_200, 11_550, 299_650],
       ['2026-11', 0, 1500, -1500],
     ])
-    expect(r.totals).toEqual({ incomeCents: 611_200, spendingCents: 47_050, differenceCents: 564_150 })
+    expect(r.totals).toMatchObject({ incomeCents: 611_200, spendingCents: 47_050, differenceCents: 564_150 })
     expect(r).toMatchObject({ from: '2026-09-01', to: '2026-11-30' })
     expect(r).not.toHaveProperty('accountId') // every Account
   })
@@ -104,7 +107,7 @@ describe('what the Report totals', () => {
       ['2026-10', -700, 3000, -3700],
       ['2026-11', 0, -2500, 2500],
     ])
-    expect(r.totals).toEqual({ incomeCents: -700, spendingCents: 500, differenceCents: -1200 })
+    expect(r.totals).toMatchObject({ incomeCents: -700, spendingCents: 500, differenceCents: -1200 })
   })
 
   it('counts money in that has no Category as Spending that comes off it, and money out with none as Spending', async () => {
@@ -144,21 +147,20 @@ describe('what the Report totals', () => {
       ['2026-10', 0, 0, 0],
       ['2026-11', 5000, 0, 5000],
     ])
-    expect(r.totals).toEqual({ incomeCents: 5000, spendingCents: 4000, differenceCents: 1000 })
+    expect(r.totals).toMatchObject({ incomeCents: 5000, spendingCents: 4000, differenceCents: 1000 })
   })
 
   it('is a row of zeros for each month, and zero totals, for dates with no Transactions', async () => {
     await add(accountA, '2026-09-30', -4000, { override: 'Groceries' })
 
-    expect(await report({ from: '2026-10-01', to: '2026-11-30' })).toEqual({
-      from: '2026-10-01',
-      to: '2026-11-30',
-      months: [
-        { month: '2026-10', incomeCents: 0, spendingCents: 0, differenceCents: 0 },
-        { month: '2026-11', incomeCents: 0, spendingCents: 0, differenceCents: 0 },
-      ],
-      totals: { incomeCents: 0, spendingCents: 0, differenceCents: 0 },
-    })
+    const r = await report({ from: '2026-10-01', to: '2026-11-30' })
+
+    // Whether a month is over depends on the day the test runs (the calendar describe below fixes it), so the months are not compared whole.
+    expect(r).toMatchObject({ from: '2026-10-01', to: '2026-11-30', totals: { incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 } })
+    expect(r.months.map(({ state: _state, ...figures }) => figures)).toEqual([
+      { month: '2026-10', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 },
+      { month: '2026-11', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 },
+    ])
   })
 
   it('counts only the dates asked for in a month it covers in part, both ends included, and a single day is a range', async () => {
@@ -188,15 +190,89 @@ describe('what the Report totals', () => {
     ])
   })
 
-  it('has a row for every month the dates touch, however many, from the first accepted to the last', async () => {
-    const r = await report({ from: '2000-01-01', to: '2100-12-31' })
+  it('has a row for every month the dates touch, up to the most a Report covers, oldest first and none twice', async () => {
+    const r = await report({ from: '2000-01-01', to: '2009-12-31' })
 
-    expect(r.months).toHaveLength(101 * 12)
+    expect(r.months).toHaveLength(MAX_INCOME_MONTHS)
     expect(r.months[0]!.month).toBe('2000-01')
-    expect(r.months.at(-1)!.month).toBe('2100-12')
+    expect(r.months.at(-1)!.month).toBe('2009-12')
     const names = r.months.map((m) => m.month)
-    expect(names).toEqual([...names].sort()) // oldest first
-    expect(new Set(names).size).toBe(names.length) // none twice
+    expect(names).toEqual([...names].sort())
+    expect(new Set(names).size).toBe(names.length)
+  })
+
+  it('covers 120 months, 10 years, and the page and the Worker say so alike', () => {
+    expect(MAX_INCOME_MONTHS).toBe(120)
+    expect(PAGE_MAX_INCOME_MONTHS).toBe(MAX_INCOME_MONTHS)
+  })
+})
+
+describe('money in that has no Category', () => {
+  it('is added up for each month and for all the dates, and is in Spending as money back, not in Income', async () => {
+    await add(accountA, '2026-09-04', -900) // money out with no Category: Spending, and not money in
+    await add(accountA, '2026-09-05', 1500) // money in with no Category
+    await add(accountA, '2026-09-20', 500)
+    await add(accountA, '2026-10-06', 300)
+    await add(accountA, '2026-10-02', 250_000, { override: 'Wages and salary' }) // money in with a Category is not counted here
+    await add(accountA, '2026-10-03', 1000, { override: 'Groceries' }) // nor is a refund into a Spending Category
+
+    const r = await report({ from: '2026-09-01', to: '2026-10-31' })
+
+    expect(r.months.map((m) => [m.month, m.uncategorisedInCents])).toEqual([['2026-09', 2000], ['2026-10', 300]])
+    expect(r.totals.uncategorisedInCents).toBe(2300)
+    expect(lines(r)).toEqual([
+      ['2026-09', 0, -1100, 1100], // $9.00 out, less $20.00 in
+      ['2026-10', 250_000, -1300, 251_300], // the $3.00, and the $10.00 refund, both come off Spending
+    ])
+  })
+
+  it('does not change the Difference whichever Category the money in is given', async () => {
+    await add(accountA, '2026-10-06', 4000)
+    const before = (await report()).totals
+    expect(before.uncategorisedInCents).toBe(4000)
+
+    await env.DB.prepare('UPDATE transactions SET override_category = ?').bind(ids['Interest']).run()
+    const after = (await report()).totals
+
+    expect(after.uncategorisedInCents).toBe(0)
+    expect(after.incomeCents - before.incomeCents).toBe(4000) // now it is Income
+    expect(after.spendingCents - before.spendingCents).toBe(4000) // and Spending is no longer reduced by it
+    expect(after.differenceCents).toBe(before.differenceCents)
+  })
+
+  it("is none when nothing came in with no Category, and counts a removed Category's money in", async () => {
+    await add(accountA, '2026-10-02', -4000, { override: 'Groceries' })
+    expect((await report()).totals.uncategorisedInCents).toBe(0)
+
+    await add(accountA, '2026-10-03', 700, { override: 'Fuel' })
+    await env.DB.prepare("UPDATE categories SET removed_at = '2026-10-09T00:00:00.000Z' WHERE name = 'Fuel'").run()
+    expect((await report()).totals.uncategorisedInCents).toBe(700) // a removed Category has fallen through to Uncategorised
+  })
+
+  it('leaves out money in that is a Transfer, a loan, outside the dates or in another Account than the one asked about', async () => {
+    await pair('2026-10-05', 5000)
+    await add(accountA, '2026-10-06', 300, { ruleTransfer: true })
+    await add(accountA, '2026-10-07', 800, { override: 'Loans' })
+    await add(accountA, '2026-11-01', 1200)
+    await add(accountB, '2026-10-09', 60)
+
+    expect((await report()).totals.uncategorisedInCents).toBe(60)
+    expect((await report({ accountId: String(accountA) })).totals.uncategorisedInCents).toBe(0)
+    expect((await report({ accountId: String(accountB) })).totals.uncategorisedInCents).toBe(60)
+  })
+})
+
+describe('which months are over', () => {
+  it('says each month is over, is the one it is now, or has not begun, by the NZ month it is now', async () => {
+    const now = nzMonth(new Date())
+    const far = await report({ from: '2000-01-01', to: '2000-03-31' })
+    expect(far.months.map((m) => m.state)).toEqual(['ended', 'ended', 'ended'])
+
+    const future = await report({ from: '2100-01-01', to: '2100-02-28' })
+    expect(future.months.map((m) => m.state)).toEqual(['not-begun', 'not-begun'])
+
+    const current = await report({ from: `${now}-01`, to: `${now}-28` })
+    expect(current.months.map((m) => [m.month, m.state])).toEqual([[now, 'under-way']])
   })
 })
 
@@ -218,7 +294,7 @@ describe('what is not Spending or Income', () => {
     await env.DB.prepare('UPDATE transactions SET rule_category = ? WHERE id = ?').bind(ids['Groceries'], out).run()
     await env.DB.prepare('UPDATE transactions SET rule_category = ? WHERE id = ?').bind(ids['Wages and salary'], into).run()
 
-    expect((await report()).totals).toEqual({ incomeCents: 0, spendingCents: 0, differenceCents: 0 })
+    expect((await report()).totals).toMatchObject({ incomeCents: 0, spendingCents: 0, differenceCents: 0 })
   })
 
   it('counts the half of a Transfer the Admin gave a Category under that Category\'s kind, which is not always Spending, and still leaves out the other half', async () => {
@@ -233,7 +309,7 @@ describe('what is not Spending or Income', () => {
   it('counts both halves of a pair the Admin says is Not a Transfer under their own Categories, Uncategorised when they have none', async () => {
     const { out, into } = await pair('2026-10-05', 5000)
     await env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(ids['Wages and salary'], into).run()
-    expect((await report()).totals).toEqual({ incomeCents: 5000, spendingCents: 0, differenceCents: 5000 }) // only the half with a Category, while the pair stands
+    expect((await report()).totals).toMatchObject({ incomeCents: 5000, spendingCents: 0, differenceCents: 5000 }) // only the half with a Category, while the pair stands
 
     const marked = await exports.default.fetch(
       new Request(`${origin}/api/transactions/${out}/not-transfer`, { method: 'POST', headers: { Cookie: 'fernledger_dev_as=admin', Origin: origin, 'Content-Type': 'application/json' }, body: '{}' }),
@@ -254,7 +330,7 @@ describe('what is not Spending or Income', () => {
     const r = await report()
 
     expect(lines(r)).toEqual([['2026-10', 300_000, 300, 299_700]])
-    expect(r.totals).toEqual({ incomeCents: 300_000, spendingCents: 300, differenceCents: 299_700 })
+    expect(r.totals).toMatchObject({ incomeCents: 300_000, spendingCents: 300, differenceCents: 299_700 })
   })
 
   it('follows a change of a Category\'s kind at once, for every month, since the kind is not stored on the Transaction', async () => {
@@ -413,6 +489,17 @@ describe('the same figures as everywhere else that totals Spending and Income (A
     expect(r.months).toHaveLength(1)
     expect(r.months[0]!.spendingCents).toBe(vsActual.rows.reduce((sum, row) => sum + row.spentCents, 0) + vsActual.otherCents + vsActual.uncategorisedCents)
   })
+
+  it('gives, for whole months, the Spending /api/reports/budget-vs-actual gives for each of them', async () => {
+    await history()
+    const range = { from: '2026-09-01', to: '2026-11-30' }
+
+    const r = await report(range)
+    const budget = (await (await call(`/api/reports/budget-vs-actual?from=${range.from}&to=${range.to}`)).json()) as BudgetReport
+
+    expect(budget.months.map((m) => [m.month, m.spentCents])).toEqual(r.months.map((m) => [m.month, m.spendingCents]))
+    expect(r.months.every((m) => m.spendingCents !== 0)).toBe(true) // each month has something to compare
+  })
 })
 
 describe('the calendar, with no database (incomeVsSpending)', () => {
@@ -422,26 +509,39 @@ describe('the calendar, with no database (incomeVsSpending)', () => {
     const range = { from: '2026-01-15', to: '2026-04-02' }
     const rows = [row('2026-01', 'spending', 500, 100), row('2026-03', 'income', 20, 1000), row('2026-03', 'loans', 9999, 0)]
 
-    expect(incomeVsSpending(range, rows)).toEqual({
+    expect(incomeVsSpending(range, rows, '2026-03')).toEqual({
       ...range,
       months: [
-        { month: '2026-01', incomeCents: 0, spendingCents: 400, differenceCents: -400 },
-        { month: '2026-02', incomeCents: 0, spendingCents: 0, differenceCents: 0 },
-        { month: '2026-03', incomeCents: 980, spendingCents: 0, differenceCents: 980 },
-        { month: '2026-04', incomeCents: 0, spendingCents: 0, differenceCents: 0 },
+        { month: '2026-01', state: 'ended', incomeCents: 0, spendingCents: 400, differenceCents: -400, uncategorisedInCents: 0 },
+        { month: '2026-02', state: 'ended', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 },
+        { month: '2026-03', state: 'under-way', incomeCents: 980, spendingCents: 0, differenceCents: 980, uncategorisedInCents: 0 },
+        { month: '2026-04', state: 'not-begun', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0 },
       ],
-      totals: { incomeCents: 980, spendingCents: 400, differenceCents: 580 },
+      totals: { incomeCents: 980, spendingCents: 400, differenceCents: 580, uncategorisedInCents: 0 },
     })
   })
 
   it('is one month for dates in one month, and carries its Account', () => {
     const range = { from: '2026-10-05', to: '2026-10-05', accountId: 7 }
-    expect(incomeVsSpending(range, []).months.map((m) => m.month)).toEqual(['2026-10'])
-    expect(incomeVsSpending(range, [])).toMatchObject({ accountId: 7 })
+    expect(incomeVsSpending(range, [], '2026-10').months.map((m) => m.month)).toEqual(['2026-10'])
+    expect(incomeVsSpending(range, [], '2026-10')).toMatchObject({ accountId: 7 })
   })
 
   it('crosses the end of a year', () => {
-    expect(incomeVsSpending({ from: '2025-11-30', to: '2026-02-01' }, []).months.map((m) => m.month)).toEqual(['2025-11', '2025-12', '2026-01', '2026-02'])
+    expect(incomeVsSpending({ from: '2025-11-30', to: '2026-02-01' }, [], '2026-01').months.map((m) => [m.month, m.state])).toEqual([
+      ['2025-11', 'ended'],
+      ['2025-12', 'ended'],
+      ['2026-01', 'under-way'],
+      ['2026-02', 'not-begun'],
+    ])
+  })
+
+  it('adds the money in that has no Category from the rows with no Category ID, month by month', () => {
+    const none = (month: string, outCents: number, inCents: number): SpendingRow => ({ month, categoryId: null, categoryName: null, kind: 'spending', outCents, inCents })
+    const r = incomeVsSpending({ from: '2026-01-01', to: '2026-03-31' }, [none('2026-01', 100, 40), row('2026-01', 'spending', 0, 999), none('2026-03', 0, 15), none('2026-03', 5, 10)], '2026-06')
+
+    expect(r.months.map((m) => m.uncategorisedInCents)).toEqual([40, 0, 25])
+    expect(r.totals.uncategorisedInCents).toBe(65)
   })
 })
 
@@ -466,6 +566,7 @@ describe('who can read it, and what a request refuses', () => {
     ['a To date outside the years accepted', { to: '2101-01-01' }, 'to'],
     ['a From date before the years accepted', { from: '1999-12-31' }, 'from'],
     ['a range that ends before it starts', { from: '2026-11-01', to: '2026-10-01' }, 'to'],
+    ['dates that touch more than 120 months', { from: '2000-01-31', to: '2010-01-01' }, 'to'],
     ['an Account that is not a number', { accountId: 'x' }, 'accountId'],
     ['an Account with a sign', { accountId: '-1' }, 'accountId'],
     ['an Account of zero', { accountId: '0' }, 'accountId'],
@@ -556,7 +657,7 @@ describe('what a request costs (ADR 0004)', () => {
     expect(one.usage.queries).toBe(2)
 
     const long = metered()
-    expect((await requestWith(long.db, { from: '2000-01-01', to: '2100-12-31' })).status).toBe(200) // 1,212 months are still one query
+    expect((await requestWith(long.db, { from: '2000-01-01', to: '2009-12-31' })).status).toBe(200) // the most months a Report covers are still one query
     expect(long.usage.queries).toBe(1)
   })
 
@@ -566,7 +667,7 @@ describe('what a request costs (ADR 0004)', () => {
     const res = await requestWith(db, { from: '2026-01-01', to: '2026-12-31' })
 
     const r = (await res.json()) as IncomeVsSpending
-    expect(r.totals).toEqual({ incomeCents: 0, spendingCents: 48_000, differenceCents: -48_000 })
+    expect(r.totals).toMatchObject({ incomeCents: 0, spendingCents: 48_000, differenceCents: -48_000 })
     expect(r.months).toHaveLength(12)
     // The date index entry, the row, the Override's Category and the Rule's Category for each Transaction.
     expect(usage.rowsRead).toBeLessThanOrEqual(480 * 4 + SLACK)

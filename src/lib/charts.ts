@@ -2,7 +2,7 @@ import type { SpendingPeriod } from '@/generated/api/chart-spending'
 import type { CountedAccount, NetWorthRange, UncountedAccount } from '@/generated/api/net-worth'
 import type { SpendingCategory } from '@/generated/api/spending-by-category'
 import { noBalanceHint, noBalanceReason } from './balance-check'
-import { isSearchDate } from './date-range'
+import { isSearchDate, lastDay } from './date-range'
 import { formatBalance, formatDate, formatMonth } from './format'
 
 // The words and choices of the charts (the Dashboard and the Charts page). The numbers come from the Worker (worker/net-worth.ts,
@@ -47,9 +47,6 @@ export function shorten(name: string, maxChars: number) {
   if (chars.length <= maxChars) return name
   return `${chars.slice(0, Math.max(1, maxChars - 1)).join('').trimEnd()}…`
 }
-
-/** The last day of an NZ calendar month ("2026-10"), as two digits: "31". */
-export const lastDay = (month: string) => String(new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate()).padStart(2, '0')
 
 /** The dates a figure is for, in words: a whole month by its name ("October 2026"), one day by its date, else both dates. */
 export function describeDates(from: string, to: string) {

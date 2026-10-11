@@ -6,12 +6,12 @@ import { Spent } from '@/components/spent'
 import { NOT_COUNTED_AS_SPENDING_OR_INCOME } from '@/lib/budgets'
 import { describeDates } from '@/lib/charts'
 import { formatMonth } from '@/lib/format'
-import { partOfMonth } from '@/lib/income-vs-spending'
+import { DIFFERENCE, DIFFERENCE_SENTENCE, monthNote, partOfMonth, uncategorisedNotice } from '@/lib/income-vs-spending'
 
 /** Tighter cells on paper, where a page is 680px wide and a Report is many pages long. */
 const PAPER = 'print:px-2 print:py-2'
 
-// The amounts keep their digits together and give way last; the month's name, which can carry a sentence about the dates, is the column that wraps. Spending and
+// The amounts keep their digits together and give way last; the month's name, which can carry sentences about the dates, is the column that wraps. Spending and
 // Income are written as the Dashboard and the Spending by Category Report write them (`Spent`, "$15.00 back"; an Income below zero has its minus sign), in one weight.
 const columns = (from: string, to: string): Column<MonthFigures>[] => [
   {
@@ -20,13 +20,20 @@ const columns = (from: string, to: string): Column<MonthFigures>[] => [
     className: `${PAPER} [overflow-wrap:break-word]`,
     cell: (row) => {
       const part = partOfMonth(row.month, from, to)
+      const state = monthNote(row.state)
       return (
         <>
           {formatMonth(row.month)}
           {part && (
             <>
               {' '}
-              <span className="block">Only {part}</span>
+              <span className="block">Counts only {part}</span>
+            </>
+          )}
+          {state && (
+            <>
+              {' '}
+              <span className="block">{state}</span>
             </>
           )}
         </>
@@ -45,10 +52,10 @@ const columns = (from: string, to: string): Column<MonthFigures>[] => [
       </span>
     ),
   },
-  { key: 'difference', header: 'Difference', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.differenceCents} /> },
+  { key: 'difference', header: DIFFERENCE, align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.differenceCents} /> },
 ]
 
-/** What a reader needs before the figures: what Income and Spending are, and what is not counted. */
+/** What a reader needs before the figures: what Income and Spending are, how the dates are counted, and what is not counted. */
 function AboutIncomeVsSpending() {
   return (
     <section aria-labelledby="about-income-vs-spending" className="mt-6 print:mt-4">
@@ -57,8 +64,9 @@ function AboutIncomeVsSpending() {
       </h2>
       <p className="mt-1">Income is what the Income Categories brought in each month, less what went out of them. A negative amount means more went out than came in.</p>
       <p className="mt-1">Spending is what the Spending Categories took out, less money back, such as a refund. A “back” amount is taken off the total.</p>
-      <p className="mt-1">Uncategorised counts as spending, so money in that has no Category yet comes off it.</p>
+      <p className="mt-1">Uncategorised counts as spending, so money in that has no Category yet comes off Spending and is not counted as income.</p>
       <p className="mt-1">The difference is income less spending, so it is below zero when more was spent than came in.</p>
+      <p className="mt-1">Your dates are counted exactly. A month they begin or end part way through counts only those dates, and its row says which.</p>
       <p className="mt-1">{NOT_COUNTED_AS_SPENDING_OR_INCOME}</p>
     </section>
   )
@@ -67,12 +75,16 @@ function AboutIncomeVsSpending() {
 /**
  * What came in as Income and what was spent as Spending in each month of the dates, with the totals before the table (so they never end up alone on a last page, and a
  * reader sees the sum before the detail). Every figure is the Worker's (worker/report-income-vs-spending.ts, ADR 0012); nothing is added up here. A month with
- * nothing in it has a row of zeros, so a quiet month is not mistaken for missing data, and a first or last month the dates cover only part of says so. `accounts` is
- * what the table's heading on paper says about the Accounts: a browser repeats that heading, and with it what is not counted, at the top of every page the table runs onto.
+ * nothing in it has a row of zeros, so a quiet month is not mistaken for missing data, a month that is not over or has not begun says so, and a first or last month the
+ * dates cover only part of says which dates it counts. When some of the money in has no Category, a notice says how much, above the totals and in the table's heading
+ * on paper: it is not Income, and a reader must not take the Income total for all that came in. `accounts` is what that heading says about the Accounts: a browser
+ * repeats it, with what is not counted, at the top of every page the table runs onto.
  */
 export function IncomeVsSpendingReport({ report, accounts }: { report: IncomeVsSpending; accounts: string }) {
-  const printHeading = useReportIdentity()(accounts, NOT_COUNTED_AS_SPENDING_OR_INCOME)
   const { totals } = report
+  const notice = uncategorisedNotice(totals.uncategorisedInCents)
+  // The sentences every printed page repeats under the lines that say what it is: what the Difference is, what is not counted, and the money in with no Category.
+  const printHeading = useReportIdentity()(accounts, [DIFFERENCE_SENTENCE, NOT_COUNTED_AS_SPENDING_OR_INCOME, notice].filter(Boolean).join(' '))
   // A Report of dates with nothing in them says so rather than show a table of zeros.
   const nothing = report.months.every((month) => month.incomeCents === 0 && month.spendingCents === 0)
   return (
@@ -82,6 +94,7 @@ export function IncomeVsSpendingReport({ report, accounts }: { report: IncomeVsS
         <h2 id="income-vs-spending-heading" className="text-xl font-semibold print:text-[15pt]">
           Income and spending by month
         </h2>
+        {notice && <p className="mt-3 border-2 border-foreground p-3 font-semibold break-inside-avoid">{notice}</p>}
         {nothing ? (
           <p className="mt-2">There was no income or spending in {describeDates(report.from, report.to)}.</p>
         ) : (
@@ -95,7 +108,7 @@ export function IncomeVsSpendingReport({ report, accounts }: { report: IncomeVsS
               <dd className="text-end font-medium">
                 <Spent cents={totals.spendingCents} />
               </dd>
-              <dt className="border-t pt-1 font-semibold">Difference</dt>
+              <dt className="border-t pt-1 font-semibold">{DIFFERENCE}</dt>
               <dd className="border-t pt-1 text-end">
                 <Amount cents={totals.differenceCents} />
               </dd>
