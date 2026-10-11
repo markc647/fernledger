@@ -1,5 +1,5 @@
 import { AxeBuilder } from '@axe-core/playwright'
-import { expect, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 const pages = [
   { role: 'admin', path: '/', heading: 'Dashboard' },
@@ -25,6 +25,26 @@ for (const { role, path, heading } of pages) {
     expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
   })
 }
+
+test('the shared axe check emulates reduced motion for itself and leaves motion as it found it', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  await page.goto('/')
+  await expect(page.getByRole('heading', { level: 1, name: 'Summary' })).toBeVisible()
+  const reducedMotion = () => page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
+  expect(await reducedMotion()).toBe(false)
+
+  // Global reduced motion broke the focus-outline and text-size tests, which look at a transition on its way, so it must not outlast the check.
+  const seen: boolean[] = []
+  await page.exposeFunction('sawMotion', (reduced: boolean) => seen.push(reduced))
+  await page.evaluate(() => {
+    const query = matchMedia('(prefers-reduced-motion: reduce)')
+    query.addEventListener('change', () => (window as unknown as { sawMotion: (reduced: boolean) => void }).sawMotion(query.matches))
+  })
+  await noAxeViolations(page)
+
+  expect(await reducedMotion()).toBe(false)
+  await expect.poll(() => seen).toEqual([true, false]) // on for the check, then off again
+})
 
 test('pages and the API carry the security headers, and the built app is not the dev server', async ({ page, request }) => {
   const asset = await page.goto('/')

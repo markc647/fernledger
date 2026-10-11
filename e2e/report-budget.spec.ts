@@ -1,5 +1,5 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
-import { expect, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 import {
   dateText,
@@ -16,7 +16,6 @@ import {
   GENERATED,
   importRows,
   money,
-  noAxeViolations,
   NOT_COUNTED,
   NOW,
   overrideCategories,

@@ -1,4 +1,3 @@
-import { AxeBuilder } from '@axe-core/playwright'
 import type { APIRequestContext, BrowserContext, Locator, Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { textOf, type PdfPage } from './pdf-text'
@@ -7,7 +6,6 @@ import { textOf, type PdfPage } from './pdf-text'
 // frame, which a Report must keep (README: Reports). A spec checks what is its own (the figures, its Accounts, its dates) and calls these for the rest, so a change to
 // the frame is one change here and a new Report adds no fourth copy.
 
-export const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
 export const MEMBER_EMAIL = 'dev.member@example.com'
 /** An app title with a quote, an apostrophe and a backslash in it: the Admin can type any of them. */
 export const TITLE = `Mum's "family" finances \\ Report`
@@ -40,11 +38,6 @@ export const NOT_COUNTED_AS_SPENDING_OR_INCOME = "Transfers between your own Acc
 
 /** A line of a PDF's text with every space taken out, for "contains" checks that must not care where a long line wrapped (even inside an Account's number at a hyphen). */
 export const squash = (text: string) => text.replace(/\s+/g, '')
-
-export const noAxeViolations = async (page: Page) => {
-  const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
-  expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
-}
 
 /** The Settings are shared by every test and both themes, so a spec that changes the app title calls this once, at the top of the file, to leave the default behind. */
 export function restoreAppTitleAfterEach() {

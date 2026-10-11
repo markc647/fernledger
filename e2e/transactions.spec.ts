@@ -1,12 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { AxeBuilder } from '@axe-core/playwright'
 import type { BrowserContext, Page } from '@playwright/test'
-import { expect, signInAs, test } from './fixtures'
-
-const noAxeViolations = async (page: Page) => {
-  const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
-  expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
-}
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 // The light and dark projects share one local database, so each project has Accounts of its own, and each test finds its
 // own Transactions by a stamp in their descriptions. Dated in 2012, older than any other spec's, so they never push those off the first page of the list.
