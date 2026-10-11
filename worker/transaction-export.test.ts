@@ -60,16 +60,17 @@ function watchedDb(onPrepare: (callNumber: number) => void = () => {}) {
  * the only way a statement is run that it needs.
  */
 function meteredDb() {
-  const usage = { queries: 0, rowsRead: 0 }
-  const meter = (statement: D1PreparedStatement): D1PreparedStatement =>
+  const usage = { queries: 0, rowsRead: 0, sqls: [] as string[] }
+  const meter = (statement: D1PreparedStatement, sql: string): D1PreparedStatement =>
     new Proxy(statement, {
       get(target, property) {
-        if (property === 'bind') return (...values: unknown[]) => meter(target.bind(...values))
+        if (property === 'bind') return (...values: unknown[]) => meter(target.bind(...values), sql)
         if (property === 'first') {
           return async () => {
             const result = await target.all()
             usage.queries += 1
             usage.rowsRead += result.meta.rows_read
+            usage.sqls.push(sql)
             return result.results[0] ?? null
           }
         }
@@ -79,7 +80,7 @@ function meteredDb() {
     })
   const db = new Proxy(env.DB, {
     get(target, property) {
-      if (property === 'prepare') return (sql: string) => meter(target.prepare(sql))
+      if (property === 'prepare') return (sql: string) => meter(target.prepare(sql), sql)
       const value = Reflect.get(target, property)
       return typeof value === 'function' ? value.bind(target) : value
     },
@@ -122,8 +123,8 @@ function parseCsv(text: string): string[][] {
 
 type Exported = { status: number; headers: Headers; bytes: Uint8Array; text: string; records: string[][]; header: string[]; rows: string[][]; totals: string[][] }
 /** The file split into its parts: the heading, one record per Transaction, and what follows the blank line. */
-async function download(query = '', who: Who = 'member'): Promise<Exported> {
-  const res = await request(query, who)
+async function download(query = '', who: Who = 'member', through?: D1Database): Promise<Exported> {
+  const res = through ? await requestWith(through, query) : await request(query, who)
   const bytes = new Uint8Array(await res.arrayBuffer())
   const bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
   const text = new TextDecoder().decode(bytes.subarray(bom ? 3 : 0))
@@ -692,11 +693,18 @@ describe('a Category filter', () => {
     expect(expected.rows.length).toBeGreaterThan(EXPORT_CHUNK_ROWS) // so more than one chunk
     expect(expected.rows.length).toBeLessThan(candidates) // and the indexes list some that are not in it
 
-    const file = await download(`?categoryId=${bulk}`)
+    const { db, usage } = meteredDb()
+    const file = await download(`?categoryId=${bulk}`, 'member', db)
 
     expect(file.rows).toEqual(expected.rows)
     expect(file.totals).toEqual(expected.totals)
     expect(noteOf(file)).toBeUndefined()
+    // Which way in each chunk took, which the file does not show: a Category with few goes through the indexes in every chunk (`categoryCandidates`), and one with many in
+    // none, because every chunk would read all its candidates again. One probe tells them apart.
+    const chunks = usage.sqls.filter((sql) => sql.includes('group_concat'))
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.filter((sql) => sql.includes('t.id IN (SELECT id FROM transactions WHERE override_category = ?'))).toHaveLength(few ? chunks.length : 0)
+    expect(usage.sqls.filter((sql) => sql.includes('LIMIT 1001'))).toHaveLength(1) // the probe, once
   })
 })
 
