@@ -2,6 +2,8 @@ import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { REPLACE_SLICE, serialiseRows, WRITES_PER_ROW } from './import-rows'
 import { DELETE_IMPORTED, INSERT_ROWS } from './imports'
+import { callWhileInterrupted } from './test-support'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
 // (the dev identity cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
@@ -305,6 +307,47 @@ describe('PATCH /api/accounts/:id', () => {
     expect(await changeLog()).toMatchObject([
       { actor: 'admin@example.com', type: 'account', summary: `Renamed Account ${savings} to Mum savings`, before: `{"name":"${savings}"}`, after: '{"name":"Mum savings"}' },
     ])
+  })
+
+  it('logs nothing when the Account already has that name', async () => {
+    await sendChunk([row(1)])
+    await env.DB.prepare('DELETE FROM change_log').run()
+
+    const res = await rename(await firstAccountId(), `  ${savings} `)
+
+    expect(res.status).toBe(200)
+    expect(await changeLog()).toEqual([])
+  })
+
+  // Another request can land between the handler's read and its write. The UPDATE renames only the Account that still has the name that was read, and with
+  // `onlyIfChanged` a request that changes nothing writes no entry, so the Change Log never says an Account was renamed from a name it no longer had.
+  describe('when another request lands between this one\'s read and its write', () => {
+    const nameOf = async (id: number) => (await accounts()).find((a) => a.id === id)!.name
+
+    it('writes no second entry for the same name, and says it is so', async () => {
+      await sendChunk([row(1)])
+      const id = await firstAccountId()
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/accounts/${id}`, 'PATCH', { name: 'Mum savings' }, () => rename(id, 'Mum savings'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id, name: 'Mum savings' })
+      expect(await changeLog()).toMatchObject([{ summary: `Renamed Account ${savings} to Mum savings`, before: `{"name":"${savings}"}`, after: '{"name":"Mum savings"}' }])
+    })
+
+    it('does not overwrite a name given meanwhile, writes no entry, and says to try again', async () => {
+      await sendChunk([row(1)])
+      const id = await firstAccountId()
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/accounts/${id}`, 'PATCH', { name: 'Dad savings' }, () => rename(id, 'Mum savings'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await nameOf(id)).toBe('Mum savings')
+      expect(await changeLog()).toMatchObject([{ summary: `Renamed Account ${savings} to Mum savings` }])
+    })
   })
 
   it('shows the new name on the Account’s Transactions', async () => {

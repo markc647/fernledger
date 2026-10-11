@@ -3,7 +3,7 @@ import * as z from 'zod/mini'
 import { accountName, isoDate } from './account-fields'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
-import { pathId, validate } from './validate'
+import { CHANGED_MEANWHILE, pathId, validate } from './validate'
 
 type AccountRow = { id: number; name: string; accountNumber: string; cutoverDate: string | null }
 
@@ -22,14 +22,23 @@ export const accounts = new Hono<AppEnv>()
     const db = c.env.DB
     const account = await db.prepare('SELECT name FROM accounts WHERE id = ?').bind(id).first<{ name: string }>()
     if (!account) return c.json({ error: 'Not found' }, 404)
+    if (account.name === name) return c.json({ id, name })
 
-    await recordChange(db, db.prepare('UPDATE accounts SET name = ? WHERE id = ?').bind(name, id), {
+    // Only over the name that was read, and an entry only if it changed something (`onlyIfChanged`): another request can land between the read and the write, and the
+    // Change Log must not say the Account was renamed from a name it no longer had.
+    const [update] = await recordChange(db, db.prepare('UPDATE accounts SET name = ?1 WHERE id = ?2 AND name = ?3').bind(name, id, account.name), {
       actor: c.var.member,
       type: 'account',
       summary: `Renamed Account ${account.name} to ${name}`,
       before: { name: account.name },
       after: { name },
+      onlyIfChanged: true,
     })
+    if (update!.meta.changes === 0) {
+      const now = await db.prepare('SELECT name FROM accounts WHERE id = ?').bind(id).first<{ name: string }>()
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      return now.name === name ? c.json({ id, name }) : c.json(CHANGED_MEANWHILE, 409)
+    }
     return c.json({ id, name })
   })
   // The Cutover Date (ADR 0003): Import drops rows dated on or after it. Setting it deletes nothing already saved.
@@ -40,13 +49,21 @@ export const accounts = new Hono<AppEnv>()
     const db = c.env.DB
     const account = await db.prepare('SELECT name, cutover_date FROM accounts WHERE id = ?').bind(id).first<{ name: string; cutover_date: string | null }>()
     if (!account) return c.json({ error: 'Not found' }, 404)
+    if (account.cutover_date === cutoverDate) return c.json({ id, cutoverDate })
 
-    await recordChange(db, db.prepare('UPDATE accounts SET cutover_date = ? WHERE id = ?').bind(cutoverDate, id), {
+    // As the rename is: only over the date that was read (`IS` is `=` that also matches NULL), and an entry only if it changed something.
+    const [update] = await recordChange(db, db.prepare('UPDATE accounts SET cutover_date = ?1 WHERE id = ?2 AND cutover_date IS ?3').bind(cutoverDate, id, account.cutover_date), {
       actor: c.var.member,
       type: 'account',
       summary: cutoverDate === null ? `Cleared the Cutover Date for ${account.name}` : `Set the Cutover Date for ${account.name} to ${cutoverDate}`,
       before: { cutoverDate: account.cutover_date },
       after: { cutoverDate },
+      onlyIfChanged: true,
     })
+    if (update!.meta.changes === 0) {
+      const now = await db.prepare('SELECT cutover_date FROM accounts WHERE id = ?').bind(id).first<{ cutover_date: string | null }>()
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      return now.cutover_date === cutoverDate ? c.json({ id, cutoverDate }) : c.json(CHANGED_MEANWHILE, 409)
+    }
     return c.json({ id, cutoverDate })
   })
