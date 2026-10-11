@@ -571,6 +571,7 @@ describe('the calendar, with no database (incomeVsSpending)', () => {
     expect(state('2026-10-01', '2026-10-20', '2026-10-20')).toEqual([['2026-10', 'under-way']]) // up to and including today
     expect(state('2026-10-01', '2026-10-19', '2026-10-20')).toEqual([['2026-10', 'ended']])
     expect(state('2026-10-01', '2026-10-31', '2026-10-20')).toEqual([['2026-10', 'under-way']])
+    expect(state('2026-10-21', '2026-10-31', '2026-10-20')).toEqual([['2026-10', 'not-begun']]) // opened on the 20th for the 21st to the 31st: not begun
     expect(state('2026-09-10', '2026-10-15', '2026-10-20')).toEqual([['2026-09', 'ended'], ['2026-10', 'ended']])
     expect(state('2026-10-01', '2026-11-15', '2026-10-20')).toEqual([['2026-10', 'under-way'], ['2026-11', 'not-begun']])
     expect(state('2026-10-31', '2026-10-31', '2026-10-31')).toEqual([['2026-10', 'under-way']]) // the last day
