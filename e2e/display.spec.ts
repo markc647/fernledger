@@ -93,7 +93,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual']
+  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/loans']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -673,6 +673,50 @@ test.describe('zoom', () => {
         await expect(report).toContainText('$1,234,567,890.12')
         await expect(report).toContainText('$1,234,567.89 back')
         await expect(report).toContainText('Uncategorised (includes money in not yet given a Category)') // the longest row name
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The Loans Report with its longest content: a long app title, Account, description, Note and Loans Category name (a person's name with no spaces), the largest amounts,
+  // an opening balance, and a loan owed to the person as well as one owed by them, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in
+  // the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/reports/loans with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        const person = 'Alexandra'.padEnd(100, 'x')
+        const long = 'EXAMPLE'.padEnd(80, 'x')
+        await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
+        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
+        await page.route('**/api/categories', (route) => route.fulfill({ json: [{ id: 1, name: `Loan – ${person}`, kind: 'loans' }, { id: 2, name: 'Loan – Ben', kind: 'loans' }] }))
+        await page.route('**/api/reports/loans?**', (route) => {
+          const category = Number(new URL(route.request().url()).searchParams.get('categoryId'))
+          return route.fulfill({
+            json: {
+              category: { id: category, name: category === 1 ? `Loan – ${person}` : 'Loan – Ben' },
+              opening: { cents: category === 1 ? -123456789 : 123456789, count: 1 },
+              transactions: [
+                { id: category, date: '2026-10-08', description: `${long} payment with a long enough name to wrap on a narrow screen`, amountCents: category === 1 ? -123456789 : 123456789, accountName: 'Example account with a long name'.padEnd(60, 'y'), note: `${long} note that goes on and on` },
+              ],
+              next: null,
+            },
+          })
+        })
+        await page.setViewportSize({ width, height })
+        await page.goto('/reports/loans?from=2026-09-01&to=2026-10-31')
+        await sizeButton(page, size).click()
+        const report = page.getByRole('article', { name: 'Loans', exact: true })
+        await expect(report).toContainText('$2,469,135.78') // the opening balance and the loan together, the largest amount owed
+        await expect(report).toContainText(`${person} owes`)
+        await expect(report).toContainText('Ben is owed')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))

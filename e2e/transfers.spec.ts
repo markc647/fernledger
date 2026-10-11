@@ -374,7 +374,7 @@ test('the Report names a Transfer instead of a Category, and the CSV link carrie
   await expect(page.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', /transfers=exclude/)
 })
 
-test('lending to a tracked Account: a Loans Category on both halves counts as a loan, not as spending, and the pages say so', async ({ page, context, baseURL }, testInfo) => {
+test('lending to a tracked Account: a Loans Category on a half counts as a loan, not as spending, even when both halves carry it, and the pages say so', async ({ page, context, baseURL }, testInfo) => {
   const { everyday, savings } = accountsFor(testInfo.project.name)
   const stamp = `${testInfo.project.name}${Date.now()}`
   const out = `LOAN TO CHILD ${stamp}`

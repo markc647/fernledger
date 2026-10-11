@@ -37,6 +37,17 @@ export const CATEGORY_SLOTS: readonly CategorySlot[] = [
 export const categoryColumns = (slots: readonly CategorySlot[] = CATEGORY_SLOTS): string[] =>
   slots.flatMap((slot) => (slot.column === null ? [] : [slot.column.replace(/^t\./, '')]))
 
+/**
+ * The Transactions a Category's indexes list, for a query to find a Category's Transactions through them instead of reading every Transaction: SQL that is true for a
+ * Transaction (aliased `t`) whose ID is in any of the Category's columns (`categoryColumns`), and the values to bind to it. They are a superset of the Transactions whose
+ * effective Category it is (a Rule's Category can be outranked by an Override, and a Transfer has none), so a query ANDs the exact check (`effectiveCategory().id = ?`) after it.
+ * The Transactions list's Category filter and the Loans Report both find a Category this way.
+ */
+export function categoryCandidates(categoryId: number, slots: readonly CategorySlot[] = CATEGORY_SLOTS): { sql: string; binds: number[] } {
+  const columns = categoryColumns(slots)
+  return { sql: `t.id IN (${columns.map((column) => `SELECT id FROM transactions WHERE ${column} = ?`).join(' UNION ')})`, binds: columns.map(() => categoryId) }
+}
+
 export type EffectiveCategory = {
   /** LEFT JOINs to put after the `transactions` table (aliased `t`), one per slot that has a column. */
   joins: string

@@ -70,6 +70,14 @@ export function formatAxisDollars(cents: number) {
   return formatBalance(Math.round(cents / 100) * 100).replace(/\.00$/, '')
 }
 
+const nzCalendarDay = new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit' })
+
+/** The NZ calendar date of a moment, written as dates are stored ("2026-10-08"): today's date, whatever the device's time zone, for a form that starts at today. */
+export function nzDate(instant: Date | number = Date.now()) {
+  const parts = Object.fromEntries(nzCalendarDay.formatToParts(new Date(instant)).map((part) => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
 /** A moment in time (such as when a Sync last ran) shown as its New Zealand day: "Thu 8 Oct 2026". */
 export function formatInstantDate(instant: Date | number) {
   const date = new Date(instant)

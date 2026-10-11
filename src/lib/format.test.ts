@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAmount, formatAxisDollars, formatBalance, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, formatMonthShort, moneyLabel } from './format'
+import { formatAmount, formatAxisDollars, formatBalance, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, formatMonthShort, moneyLabel, nzDate } from './format'
 
 describe('formatDateAtTime (when a Report was generated)', () => {
   it.each([
@@ -106,6 +106,23 @@ describe('formatDate (an NZ calendar date such as a Transaction date)', () => {
       expect(() => formatDate(bad)).toThrow(RangeError)
       expect(() => formatDate(bad)).toThrow(/^[^\d]*$/)
     }
+  })
+})
+
+describe('nzDate (a moment, as the NZ date it falls on)', () => {
+  it.each([
+    [new Date('2026-10-07T11:30:00Z'), '2026-10-08'], // already the next day in NZ
+    [new Date('2026-10-07T10:59:59Z'), '2026-10-07'],
+    [new Date('2026-06-14T11:59:59Z'), '2026-06-14'], // winter time, UTC+12
+    [new Date('2026-06-14T12:00:00Z'), '2026-06-15'],
+    [Date.UTC(2026, 11, 31, 11, 0), '2027-01-01'], // across a year, summer time
+  ])('writes %s as %s', (instant, date) => {
+    expect(nzDate(instant)).toBe(date)
+  })
+
+  it('is today when no moment is given', () => {
+    expect(nzDate()).toBe(nzDate(new Date()))
+    expect(nzDate()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 })
 

@@ -16,9 +16,7 @@ import {
   type AccountBalances,
   type MonthBalance,
 } from '@/lib/report-balances'
-
-/** Tighter cells on paper, where a page is 680px wide and a Report is many pages long. */
-const PAPER = 'print:px-2 print:py-2'
+import { PAPER } from '@/lib/utils'
 
 // One row for each month. The date and the two amounts keep their words whole; the Source, which can be a sentence, is the column
 // that gives way.

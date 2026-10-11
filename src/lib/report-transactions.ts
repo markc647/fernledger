@@ -78,12 +78,66 @@ export type Listing = {
 }
 
 /**
- * Reads the range for each Account in turn, a page at a time, until every Transaction is in or the cap is reached. With
- * no room left it asks for one more Transaction only to learn whether any are being left out (`capped`), so a range of
- * exactly the cap's size isn't called capped. The Account where that one more is found is 'partial' if some of it was listed
- * and 'not-listed' if none was; every Account after it is 'not-listed' and is not asked about, so the Report never says an
- * Account has nothing in the range when it simply stopped before reading it. A failed page fails the whole Report: an
- * incomplete listing must never look complete.
+ * How much of section `index` was listed, given where `readUpToCap` stopped (`stoppedAt`, -1 when it did not) and how many of its rows it took: sections before the stop
+ * are 'complete', the one it stopped in is 'partial' if some of it was listed and 'not-listed' if none was, and every section after it is 'not-listed'. A cut-off section with
+ * no rows listed is 'not-listed', not 'partial' (intended): the cap fell at the end of the section before it, so none of this one was read, and the Report says so rather than
+ * "No Transactions in these dates".
+ */
+export const statusAt = (index: number, stoppedAt: number, listed: number): ListingStatus =>
+  stoppedAt < 0 || index < stoppedAt ? 'complete' : index === stoppedAt && listed > 0 ? 'partial' : 'not-listed'
+
+/**
+ * What every Report that lists Transactions section by section (the Transaction listing's Accounts, the Loans Report's Loans Categories) does to stay within the cap and
+ * ADR 0004: reads each section in turn, a page at a time, until every Transaction is in or `cap` Transactions are. With no room left it asks for one more Transaction only to
+ * learn whether any are being left out, so a range of exactly the cap's size isn't called capped, and goes on to the next section if this one has none. The section where that
+ * one more is found is where it stopped (`stoppedAt`, its index; -1 if it never was), and no section after it is asked about, so a Report never says a section has nothing in
+ * its range when it simply stopped before reading it (`statusAt`). `take` adds a page's rows to its section, and is not called for the one-row probe that finds a row (that row is
+ * left out), but is for a probe that finds none, since that page is the whole of the section and adds nothing to the count: a section with no rows still has what its first page says
+ * about it. A failed page fails the whole Report: an incomplete listing must never look complete.
+ */
+export async function readUpToCap<Section, Page extends { transactions: unknown[]; next: string | null }>({
+  sections,
+  cap,
+  pageSize,
+  fetchPage,
+  take,
+}: {
+  sections: Section[]
+  cap: number
+  /** The most rows to ask for at once. */
+  pageSize: number
+  fetchPage: (section: Section, after: string | undefined, limit: number) => Promise<Page>
+  take: (section: Section, page: Page) => void
+}): Promise<{ rowCount: number; stoppedAt: number }> {
+  let rowCount = 0
+  let stoppedAt = -1
+  find: for (const [index, section] of sections.entries()) {
+    let after: string | undefined
+    for (;;) {
+      const room = cap - rowCount
+      const page = await fetchPage(section, after, room === 0 ? 1 : Math.min(pageSize, room))
+      if (room === 0) {
+        // The probe: anything it finds is left out. If it finds nothing this section is done, and the next one is probed in turn. What it did find out about the section
+        // (a loan's opening balance, which its first page carries) is kept, so a section with nothing in the dates is not taken for one with nothing at all.
+        if (page.transactions.length === 0) {
+          take(section, page)
+          break
+        }
+        stoppedAt = index
+        break find
+      }
+      take(section, page)
+      rowCount += page.transactions.length
+      if (page.next === null) break
+      after = page.next
+    }
+  }
+  return { rowCount, stoppedAt }
+}
+
+/**
+ * Reads the range for each Account in turn, a page at a time, until every Transaction is in or the cap is reached (`readUpToCap`, which says how it stops). The Account where
+ * the cap falls is 'partial' if some of it was listed and 'not-listed' if none was; every Account after it is 'not-listed'.
  */
 export async function loadListing({
   accounts,
@@ -108,34 +162,22 @@ export async function loadListing({
     moneyOutCents: 0,
     netCents: 0,
   }))
-  let rowCount = 0
-  let stoppedAt = -1 // the index of the Account where the Report found Transactions it had no room for
-  find: for (const [index, section] of sections.entries()) {
-    let after: string | undefined
-    for (;;) {
-      const room = cap - rowCount
-      const page = await fetchPage({ accountId: section.accountId, from, to, after, limit: room === 0 ? 1 : Math.min(REPORT_PAGE_SIZE, room) })
-      if (room === 0) {
-        // The probe: anything it finds is left out. If it finds nothing this Account is done, and the next one is probed in turn.
-        if (page.transactions.length === 0) break
-        stoppedAt = index
-        break find
-      }
+  const { rowCount, stoppedAt } = await readUpToCap({
+    sections,
+    cap,
+    pageSize: REPORT_PAGE_SIZE,
+    fetchPage: (section, after, limit) => fetchPage({ accountId: section.accountId, from, to, after, limit }),
+    take: (section, page) => {
       for (const row of page.transactions) {
         section.rows.push(row)
         if (row.amountCents > 0) section.moneyInCents += row.amountCents
         else section.moneyOutCents += row.amountCents
       }
-      rowCount += page.transactions.length
-      if (page.next === null) break
-      after = page.next
-    }
-  }
+    },
+  })
   for (const [index, section] of sections.entries()) {
     section.netCents = section.moneyInCents + section.moneyOutCents
-    // A cut-off Account with no rows listed is 'not-listed', not 'partial' (intended): the cap fell at the end of the Account
-    // before it, so none of this one was read, and the Report says so rather than "No Transactions in these dates".
-    if (stoppedAt >= 0 && index >= stoppedAt) section.status = index === stoppedAt && section.rows.length > 0 ? 'partial' : 'not-listed'
+    section.status = statusAt(index, stoppedAt, section.rows.length)
   }
   return { sections, rowCount, capped: stoppedAt >= 0 }
 }
@@ -143,15 +185,17 @@ export async function loadListing({
 /** What a Report's address holds: the Account (all of them when left out) and the dates, both ends included. */
 export type ReportSearch = { account?: number; from?: string; to?: string }
 
-const accountId = (value: unknown) => {
+/** An ID in an address (an Account's, or the Loans Report's Category): a whole number from 1 to 999,999,999, or nothing. */
+export const searchId = (value: unknown) => {
   const number = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,9}$/.test(value) ? Number(value) : NaN
   return Number.isSafeInteger(number) && number >= 1 && number <= 999_999_999 ? number : undefined
 }
 
-const searchDate = (value: unknown) => (typeof value === 'string' && isSearchDate(value) ? value : undefined)
+/** A date in an address: a real date within the years the API accepts, or nothing. */
+export const searchDate = (value: unknown) => (typeof value === 'string' && isSearchDate(value) ? value : undefined)
 
 /** Reads the address's search parameters (already parsed by the router) into a ReportSearch. Anything that isn't valid is left out rather than refused. */
 export function parseReportSearch(raw: Record<string, unknown>): ReportSearch {
-  const search = { account: accountId(raw.account), from: searchDate(raw.from), to: searchDate(raw.to) }
+  const search = { account: searchId(raw.account), from: searchDate(raw.from), to: searchDate(raw.to) }
   return Object.fromEntries(Object.entries(search).filter(([, value]) => value !== undefined))
 }

@@ -139,7 +139,7 @@ test.describe('opening the Report', () => {
   test('the Reports page has no WCAG 2.2 AA violations with all its forms on it', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/reports')
-    await expect(page.getByRole('form')).toHaveCount(4)
+    await expect(page.getByRole('form')).toHaveCount(5)
     await noAxeViolations(page)
   })
 

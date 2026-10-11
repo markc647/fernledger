@@ -77,7 +77,7 @@ A label grouping Transactions by purpose, such as Groceries or Care Fees.
 _Avoid_: Tag, type, bucket
 
 **Category kind**:
-What a Category is for, which the Admin sets: Spending, Income or Loans. It decides how the Category's Transactions are totalled; the rules are in [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+What a Category is for, which the Admin sets: Spending, Income or Loans. It decides how the Category's Transactions are totalled, and a Loans Category is what the Loans Report lists; the rules are in [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
 _Avoid_: Type (that is Change type), group
 
 **Spending**:
@@ -89,7 +89,7 @@ What the Income Categories brought into the Accounts in a month, less what went 
 _Avoid_: Earnings
 
 **Loans**:
-The Category kind for money lent or borrowed, such as a loan between family: neither Spending nor Income, and left out of Budgets. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+The Category kind for money lent or borrowed, such as a loan between family: neither Spending nor Income, and left out of Budgets. The Loans Report adds each one up. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
 _Avoid_: Debt
 
 **Uncategorised**:
@@ -135,8 +135,12 @@ What a Change Log entry changed, such as Settings, Import, Account, Category, Ru
 _Avoid_: Type on its own
 
 **Report**:
-A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, or of Budget vs actual, over a date range, which any Member can print or save as PDF.
+A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, of Budget vs actual, or of what is owed on a loan, over a date range, which any Member can print or save as PDF.
 _Avoid_: Statement, export
+
+**Loans Report**:
+The Report of one Loans Category, or of each of them with a section each, from the first Transaction or a start date up to a date. A section lists the Category's Transactions with what is owed after each and on the last date: "Alice owes $300.00 to the Accounts" when more money went out than came in, "Alice is owed $300.00" when more came in. The person is named by the Category ("Loan – Alice"), and "the Accounts" are the household's side. It never says "we owe", because in Fernledger "we" is Fernledger itself ("the last Transaction we hold"). A start date begins it with what was owed before that date.
+_Avoid_: Loan statement, debt report
 
 **CSV export**:
 A spreadsheet file of the Transactions that match the Transactions page's filters.
