@@ -241,13 +241,22 @@ export const transactions = new Hono<AppEnv>()
     const was = transaction.note || null
     if (was === note) return c.json({ id, note })
 
-    await recordChange(db, db.prepare('UPDATE transactions SET note = ? WHERE id = ?').bind(note, id), {
+    // As the Override's write is: only over the Note that was read (the stored one, which may be empty text), and an entry only if it changed something.
+    const [update] = await recordChange(db, db.prepare('UPDATE transactions SET note = ?1 WHERE id = ?2 AND note IS ?3').bind(note, id, transaction.note), {
       actor: c.var.member,
       type: 'transaction',
       summary: `${was === null ? 'Added a Note to' : note === null ? 'Removed the Note from' : 'Changed the Note on'} ${describe(transaction)}`,
       before: { note: was },
       after: { note },
+      onlyIfChanged: true,
     })
+    if (update!.meta.changes === 0) {
+      // Nothing was written: the Transaction went, or another request moved the Note on, to what was asked for or to something else.
+      const now = await db.prepare('SELECT note FROM transactions WHERE id = ?').bind(id).first<{ note: string | null }>()
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      if ((now.note || null) === note) return c.json({ id, note })
+      return c.json(CHANGED_MEANWHILE, 409)
+    }
     return c.json({ id, note })
   })
   // "Not a Transfer": a pairing is wrong, or a Rule made a Transfer of something that is not one. Both halves are marked, and so stop being paired, in one batch

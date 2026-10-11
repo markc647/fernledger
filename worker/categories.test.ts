@@ -527,6 +527,57 @@ describe('a Note', () => {
     expect(await changeLog()).toEqual([])
   })
 
+  // The same as an Override's: the UPDATE changes only the Note that was read, and with `onlyIfChanged` a request whose reads went stale writes no entry.
+  describe('when another request lands between this one\'s reads and its write', () => {
+    const noteOf = async (t: number) => (await env.DB.prepare('SELECT note FROM transactions WHERE id = ?').bind(t).first<{ note: string | null }>())!.note
+    const setTo = (t: number, note: string) => () => call(`/api/transactions/${t}/note`, { method: 'PUT', body: { note } })
+    const describing = (t: number) => `Transaction ${t} (2026-10-01, EXAMPLE SHOP 1)`
+
+    it('writes no second entry for the same Note, and says it is so', async () => {
+      const t = await transaction(1)
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/note`, 'PUT', { note: 'First' }, setTo(t, 'First'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id: t, note: 'First' })
+      expect(await noteOf(t)).toBe('First')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Added a Note to ${describing(t)}`, before: '{"note":null}', after: '{"note":"First"}' })])
+    })
+
+    it('does not overwrite a Note that was set meanwhile, writes no entry, and says to try again', async () => {
+      const t = await transaction(1)
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/note`, 'PUT', { note: 'Second' }, setTo(t, 'First'))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await noteOf(t)).toBe('First')
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Added a Note to ${describing(t)}`, before: '{"note":null}', after: '{"note":"First"}' })])
+    })
+
+    it('writes no entry for taking off a Note that was taken off meanwhile', async () => {
+      const t = await transaction(1)
+      await call(`/api/transactions/${t}/note`, { method: 'PUT', body: { note: 'First' } })
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/note`, 'PUT', { note: '' }, setTo(t, ''))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ id: t, note: null })
+      expect(await noteOf(t)).toBeNull()
+      expect(await changeLog()).toEqual([expect.objectContaining({ summary: `Removed the Note from ${describing(t)}`, before: '{"note":"First"}' })])
+    })
+
+    it('answers 404 and writes no entry when the Transaction went meanwhile', async () => {
+      const t = await transaction(1)
+
+      const res = await callWhileInterrupted(`/api/transactions/${t}/note`, 'PUT', { note: 'First' }, () => env.DB.prepare('DELETE FROM transactions WHERE id = ?').bind(t).run())
+
+      expect(res.status).toBe(404)
+      expect(await changeLog()).toEqual([])
+    })
+  })
+
   it.each([
     ['over 500 characters', 'x'.repeat(501)],
     ['not text', 5],
