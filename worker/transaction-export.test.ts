@@ -14,6 +14,7 @@ import {
   exportChunk,
   exportFilename,
 } from './transaction-export'
+import { categoryProbe, isFewInCategory } from './transaction-search'
 
 // Seam 1: the CSV export of the Transactions (ticket 19), through the Worker's exported handler as the local-development
 // Admin or a read-only Member (the dev identity cookie is honoured on localhost only). Everything below is made up.
@@ -52,6 +53,38 @@ function watchedDb(onPrepare: (callNumber: number) => void = () => {}) {
     },
   })
   return { db, watched }
+}
+
+/**
+ * D1 that totals the queries run on it and the rows D1 says it read for them (what the free plan bills: ADR 0004). The export reads one row from each query, so `first` is
+ * the only way a statement is run that it needs.
+ */
+function meteredDb() {
+  const usage = { queries: 0, rowsRead: 0 }
+  const meter = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get(target, property) {
+        if (property === 'bind') return (...values: unknown[]) => meter(target.bind(...values))
+        if (property === 'first') {
+          return async () => {
+            const result = await target.all()
+            usage.queries += 1
+            usage.rowsRead += result.meta.rows_read
+            return result.results[0] ?? null
+          }
+        }
+        const value = Reflect.get(target, property)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  const db = new Proxy(env.DB, {
+    get(target, property) {
+      if (property === 'prepare') return (sql: string) => meter(target.prepare(sql))
+      const value = Reflect.get(target, property)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  return { db, usage }
 }
 
 /** RFC 4180: records of cells, where a quoted cell may hold commas, doubled quotes and line breaks. */
@@ -554,6 +587,119 @@ describe('the filters are the list\'s', () => {
   })
 })
 
+// A Category filter is found through the Category's Override and Rule indexes, as the list's is (`categoryCandidates`, effective-category.ts), when the Category has few
+// Transactions; a Category with many is walked off the date index, which stops sooner. Either way the file is the same as it was when the filter was checked against every
+// Transaction, byte for byte.
+describe('a Category filter', () => {
+  const TEXT_DECODER = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true }) // keeps the byte order mark, so the first line is compared as it was written
+
+  /** The file as a string with its byte order mark, so a test can say exactly what it contains. */
+  const fileText = async (query: string) => TEXT_DECODER.decode((await download(query)).bytes)
+
+  /**
+   * A mixed history: every way a Transaction can end up in, or out of, Fuel. Fuel is `fuel`; its Transactions are found through the two indexes, and the exact check then
+   * leaves out the ones another source outranks and the Transfers.
+   */
+  async function mixedHistory() {
+    const [fuel, groceries, removed] = [await addCategory('Fuel'), await addCategory('Groceries'), await addCategory('Old category')]
+    await env.DB.prepare("UPDATE categories SET removed_at = '2026-10-02T00:00:00.000Z' WHERE id = ?").bind(removed).run()
+    await add({ date: '2026-10-01', description: 'EXAMPLE FUEL OVERRIDE', amountCents: -4550, overrideCategory: fuel, note: 'Trip, to the "lake"' })
+    await add({ date: '2026-10-02', description: 'EXAMPLE FUEL RULE', amountCents: -5000, ruleCategory: fuel, accountId: cheque })
+    await add({ date: '2026-10-03', description: 'EXAMPLE FUEL OVERRIDE AND RULE', amountCents: -6000, overrideCategory: fuel, ruleCategory: fuel })
+    await add({ date: '2026-10-04', description: 'EXAMPLE RULE OUTRANKED BY AN OVERRIDE', amountCents: -7000, ruleCategory: fuel, overrideCategory: groceries })
+    await add({ date: '2026-10-05', description: 'EXAMPLE OVERRIDE OUTRANKS A RULE', amountCents: -8000, overrideCategory: fuel, ruleCategory: groceries })
+    await add({ date: '2026-10-06', description: 'EXAMPLE REMOVED OVERRIDE FALLS TO THE RULE', amountCents: -9000, overrideCategory: removed, ruleCategory: fuel })
+    await add({ date: '2026-10-07', description: '=EXAMPLE FUEL FORMULA', amountCents: 2500, overrideCategory: fuel })
+    await add({ date: '2026-10-08', description: 'EXAMPLE GROCERIES', amountCents: -1000, overrideCategory: groceries })
+    await add({ date: '2026-10-09', description: 'EXAMPLE NO CATEGORY', amountCents: -1100 })
+    // A Rule's Category does not make a Transfer spending: marked by a Rule, it is a Transfer and so in no Category.
+    const marked = await add({ date: '2026-10-10', description: 'EXAMPLE FUEL RULE MARKS A TRANSFER', amountCents: -12000, ruleCategory: fuel })
+    // Paired with a Transaction in the other Account: a Transfer, with no Category, whatever a Rule gave it.
+    const out = await add({ date: '2026-10-11', description: 'EXAMPLE FUEL PAIRED OUT', amountCents: -13000, ruleCategory: fuel })
+    const into = await add({ date: '2026-10-11', description: 'EXAMPLE FUEL PAIRED IN', amountCents: 13000, accountId: cheque })
+    // The Admin said Not a Transfer, so the Rule's mark no longer makes it one and it counts under its Category.
+    const notATransfer = await add({ date: '2026-10-12', description: 'EXAMPLE NOT A TRANSFER', amountCents: -14000, ruleCategory: fuel })
+    await env.DB.batch([
+      env.DB.prepare('UPDATE transactions SET rule_transfer = 1 WHERE id IN (?, ?)').bind(marked, notATransfer),
+      env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(into, out),
+      env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(out, into),
+      env.DB.prepare('UPDATE transactions SET not_transfer_with = ? WHERE id = ?').bind(notATransfer, notATransfer),
+    ])
+    return { fuel, groceries }
+  }
+
+  const FUEL_FILE = [
+    '﻿Date,Account,Description,Category,Note,Amount,Bank type,Bank memo,Bank reference,Bank counterparty account,Bank particulars,Bank payment code,Bank card suffix',
+    '2026-10-01,Example savings,EXAMPLE FUEL OVERRIDE,Fuel,"Trip, to the ""lake""",-45.50,EFTPOS,,,,,,',
+    '2026-10-02,Example cheque,EXAMPLE FUEL RULE,Fuel,,-50.00,EFTPOS,,,,,,',
+    '2026-10-03,Example savings,EXAMPLE FUEL OVERRIDE AND RULE,Fuel,,-60.00,EFTPOS,,,,,,',
+    '2026-10-05,Example savings,EXAMPLE OVERRIDE OUTRANKS A RULE,Fuel,,-80.00,EFTPOS,,,,,,',
+    '2026-10-06,Example savings,EXAMPLE REMOVED OVERRIDE FALLS TO THE RULE,Fuel,,-90.00,EFTPOS,,,,,,',
+    "2026-10-07,Example savings,'=EXAMPLE FUEL FORMULA,Fuel,,25.00,EFTPOS,,,,,,",
+    '2026-10-12,Example savings,EXAMPLE NOT A TRANSFER,Fuel,,-140.00,EFTPOS,,,,,,',
+    '',
+    'Totals',
+    'Money in,25.00',
+    'Money out,-465.50',
+    'Net,-440.50',
+    'Transactions,7',
+    '',
+  ].join('\r\n')
+
+  it('writes the Transactions whose Category it is and nothing else: not a Rule an Override outranks, not a Transfer, not another Category, byte for byte', async () => {
+    const { fuel } = await mixedHistory()
+
+    expect(await fileText(`?categoryId=${fuel}`)).toBe(FUEL_FILE)
+  })
+
+  it('keeps the other filters too: an Account, dates and text', async () => {
+    const { fuel } = await mixedHistory()
+
+    expect(descriptions(await download(`?categoryId=${fuel}&accountId=${cheque}`))).toEqual(['EXAMPLE FUEL RULE'])
+    expect(descriptions(await download(`?categoryId=${fuel}&from=2026-10-05&to=2026-10-07`))).toEqual(['EXAMPLE OVERRIDE OUTRANKS A RULE', 'EXAMPLE REMOVED OVERRIDE FALLS TO THE RULE', "'=EXAMPLE FUEL FORMULA"])
+    expect(descriptions(await download(`?categoryId=${fuel}&text=not%20a%20transfer`))).toEqual(['EXAMPLE NOT A TRANSFER'])
+  })
+
+  /** The unfiltered file's rows that say `category`, as the file writes them, and the totals those rows come to. */
+  async function rowsOf(category: string) {
+    const rows = (await download()).rows.filter((r) => r[column('Category')] === category)
+    const cents = rows.map((r) => Math.round(Number(r[column('Amount')]) * 100))
+    const sum = (values: number[]) => values.reduce((total, value) => total + value, 0)
+    const [moneyIn, moneyOut] = [sum(cents.filter((c) => c > 0)), sum(cents.filter((c) => c < 0))]
+    return { rows, totals: [['Totals'], ['Money in', centsToDecimal(moneyIn)], ['Money out', centsToDecimal(moneyOut)], ['Net', centsToDecimal(moneyIn + moneyOut)], ['Transactions', String(rows.length)]] }
+  }
+
+  // Of every three Transactions, one has an Override to Bulk, one a Rule's Bulk, and one a Rule's Bulk under an Override to another Category (for every second of those),
+  // so the indexes list more than the Category holds. Five a day, so a chunk of 500 ends part-way through a day.
+  it.each([
+    ['few', 800, true],
+    ['many', 1300, false],
+  ])('with %s Transactions in it is the same file as the unfiltered file holds for it, across chunks', async (_name, count, few) => {
+    const [bulk, other] = [await addCategory('Bulk'), await addCategory('Other')]
+    await env.DB.prepare(
+      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ?4)
+       INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category, rule_category)
+       SELECT CASE WHEN i % 2 = 0 THEN ?1 ELSE ?2 END, date('2026-01-01', '+' || (i / 5) || ' days'), CASE WHEN i % 7 = 0 THEN 250 ELSE -(100 + i) END, 'EXAMPLE ROW ' || i, 'import',
+              CASE i % 3 WHEN 0 THEN ?3 WHEN 2 THEN CASE WHEN i % 2 = 0 THEN ?5 END END, CASE WHEN i % 3 <> 0 THEN ?3 END
+       FROM seq`,
+    )
+      .bind(savings, cheque, bulk, count, other)
+      .run()
+    const probe = categoryProbe(bulk)
+    const { candidates } = (await env.DB.prepare(probe.sql).bind(...probe.binds).first<{ candidates: number }>())!
+    expect(isFewInCategory(candidates), `${candidates} listed by the indexes`).toBe(few)
+    const expected = await rowsOf('Bulk')
+    expect(expected.rows.length).toBeGreaterThan(EXPORT_CHUNK_ROWS) // so more than one chunk
+    expect(expected.rows.length).toBeLessThan(candidates) // and the indexes list some that are not in it
+
+    const file = await download(`?categoryId=${bulk}`)
+
+    expect(file.rows).toEqual(expected.rows)
+    expect(file.totals).toEqual(expected.totals)
+    expect(noteOf(file)).toBeUndefined()
+  })
+})
+
 describe('a request it refuses', () => {
   it.each([
     ['?accountId=abc', 'accountId'],
@@ -797,5 +943,34 @@ describe('what a request reads from D1', () => {
       expect(rows).toBeGreaterThan(0)
       expect(rowsRead).toBeLessThanOrEqual(rows * 7 + 100)
     }
+  })
+
+  // The list finds a Category through its Override and Rule indexes (categoryCandidates, effective-category.ts), and so does the file. A Category with few Transactions
+  // costs a few reads for each, whatever else the history holds; reading every Transaction to find them would cost 6,000 and more.
+  describe('a Category with few Transactions', () => {
+    let gifts = 0
+    /** Sets a column on the rows of the history numbered `rows` (by their descriptions: their IDs depend on what other tests added). */
+    const setOn = (column: 'override_category' | 'rule_category', categoryId: number, rows: number[]) =>
+      env.DB.prepare(`UPDATE transactions SET ${column} = ? WHERE description IN (${rows.map(() => '?').join(', ')})`).bind(categoryId, ...rows.map((i) => `EXAMPLE ROW ${i}`))
+    beforeEach(async () => {
+      gifts = await addCategory('Gifts')
+      await env.DB.batch([
+        setOn('override_category', gifts, [1000, 2000, 3000, 4000, 5000, 6000]), // in place of Fuel's
+        setOn('rule_category', gifts, [3, 1003, 2003]), // 3 more, which no Override outranks
+        setOn('rule_category', gifts, [4]), // and one that an Override to Fuel outranks: listed by the index, and not in the Category
+      ])
+    })
+
+    it('is read through the indexes: its own Transactions, a few reads each, and none of the 6,000 others', async () => {
+      const { db, usage } = meteredDb()
+
+      const res = await requestWith(db, `?categoryId=${gifts}`)
+
+      const records = parseCsv(await res.text())
+      const written = records.slice(1, records.findIndex((r) => r.length === 1 && r[0] === '')).map((r) => r[column('Description')])
+      expect(written).toEqual([3, 1000, 1003, 2000, 2003, 3000, 4000, 5000, 6000].map((i) => `EXAMPLE ROW ${i}`)) // oldest first; not row 4, which an Override to Fuel outranks
+      expect(usage.rowsRead).toBeLessThanOrEqual(10 * 12 + 50) // 10 candidates: an index entry, the Transaction, its Account and Categories, and the sort of them
+      expect(usage.queries).toBe(2) // how many the indexes list, then the one chunk
+    })
   })
 })

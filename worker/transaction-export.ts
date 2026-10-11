@@ -1,6 +1,6 @@
 import * as z from 'zod/mini'
-import { effectiveCategory } from './effective-category'
-import { buildFilter, filterChecks, filterFields, type Filters, type Statement } from './transaction-search'
+import { categoryCandidates, effectiveCategory } from './effective-category'
+import { buildFilter, categoryProbe, filterChecks, filterFields, isFewInCategory, type Filters, type Statement } from './transaction-search'
 
 // The CSV export (GET /api/transactions/export.csv): every Transaction the list's filters keep, oldest first, as a file for a
 // spreadsheet. It takes the list's filters and nothing else (no sort, no paging), and builds its SQL from the list's `buildFilter`,
@@ -20,6 +20,10 @@ import { buildFilter, filterChecks, filterFields, type Filters, type Statement }
 // Response as a Blob) took 4 to 6 ms, 6 to 14 ms when joined into one string first and read back. That leaves too little of
 // 10 ms once sign-in and D1's own overhead are added, so a file holds half as much: 5,000 rows is an estimated 2 to 3 ms.
 // If requests start to fail with CPU errors (1102), lower EXPORT_MAX_ROWS and EXPORT_MAX_BYTES.
+// A Category filter is found the way the list's is (transaction-search.ts `buildSearch`): through the Category's Override and Rule indexes (`categoryCandidates`), so a
+// Category with few Transactions costs a few reads for each and not a read of every Transaction, with the exact check after them. One small probe (`categoryProbe`) tells a
+// Category with few from one with many, which the date index walks sooner: every chunk reads the Category's candidates again, so a Category with many would read them all
+// once for each chunk. The file is the same either way.
 // It is built whole before any of it is sent, so a failure is an error and not a file that stops short and looks complete.
 //
 // The file, for a spreadsheet:
@@ -104,13 +108,19 @@ export type After = { date: string; id: number }
  * out); `body`, their lines separated by CRLF; `bytes`, the length of those lines with their line ends; their Money in and Money
  * out in cents; and `lastKey`, the date and ID of the last (see `chunkEnd`), which is `after` for the next chunk.
  *
+ * With `throughCandidates` a Category filter starts from the Transactions the Category's indexes list (`categoryCandidates`), a superset the filter's exact check then
+ * narrows; without it, or without a Category filter, the chunk walks the date index. Both give the same chunk.
+ *
  * The lines are joined with `group_concat` over rows read in (date, id) order, which SQLite does not promise (the order of a
  * `group_concat` is "arbitrary" in its documentation). It follows the rows' order in every version we run on, as the backup's
  * does, and a test inserts out of order to catch the day it doesn't.
  */
-export function exportChunk(filters: Filters, after: After, limit: number, maxBytes = EXPORT_CHUNK_BYTES): Statement {
+export function exportChunk(filters: Filters, after: After, limit: number, maxBytes = EXPORT_CHUNK_BYTES, throughCandidates = false): Statement {
   const category = effectiveCategory()
-  const { conditions, binds } = buildFilter(filters, category)
+  const filter = buildFilter(filters, category)
+  const candidates = throughCandidates && filters.categoryId !== undefined ? categoryCandidates(filters.categoryId) : null
+  const conditions = candidates ? [candidates.sql, ...filter.conditions] : filter.conditions
+  const binds = candidates ? [...candidates.binds, ...filter.binds] : filter.binds
   const where = [...conditions, '(t.date, t.id) > (?, ?)'].join(' AND ')
   // Whether a row fits the byte limit, which is the last value bound: the filters', the cursor's two, the row limit, then this.
   // (Named by number because it is used in several places; the others are anonymous and come first.)
@@ -166,8 +176,8 @@ export type Chunk = { body: string | null; n: number; fetched: number; bytes: nu
  */
 export const chunkEnd = (chunk: Pick<Chunk, 'lastKey'>): After => ({ date: chunk.lastKey!.slice(0, 10), id: Number(chunk.lastKey!.slice(11)) })
 
-async function readChunk(db: D1Database, filters: Filters, after: After, limit: number): Promise<Chunk> {
-  const { sql, binds } = exportChunk(filters, after, limit)
+async function readChunk(db: D1Database, filters: Filters, after: After, limit: number, throughCandidates: boolean): Promise<Chunk> {
+  const { sql, binds } = exportChunk(filters, after, limit, EXPORT_CHUNK_BYTES, throughCandidates)
   const chunk = await db.prepare(sql).bind(...binds).first<Chunk>()
   if (!chunk) throw new Error('A read returned no row') // an aggregate always returns one
   return chunk
@@ -176,9 +186,18 @@ async function readChunk(db: D1Database, filters: Filters, after: After, limit: 
 const BYTE_ORDER_MARK = String.fromCharCode(0xfeff)
 const EOL = '\r\n'
 
+/** Whether the Category the filters name has few enough Transactions in its indexes to be found through them (see the top of this file). One query, and none without a Category filter. */
+async function foundThroughIndexes(db: D1Database, { categoryId }: Filters): Promise<boolean> {
+  if (categoryId === undefined) return false
+  const probe = categoryProbe(categoryId)
+  const found = await db.prepare(probe.sql).bind(...probe.binds).first<{ candidates: number }>()
+  return isFewInCategory(found?.candidates ?? 0)
+}
+
 /** The whole file, as the pieces of its text in order. */
 async function writeCsv(db: D1Database, filters: Filters): Promise<string[]> {
   const parts = [BYTE_ORDER_MARK, EXPORT_HEADER.join(','), EOL]
+  const throughCandidates = await foundThroughIndexes(db, filters)
   let after: After = { date: '', id: 0 }
   let rows = 0
   let bytes = 0
@@ -187,7 +206,7 @@ async function writeCsv(db: D1Database, filters: Filters): Promise<string[]> {
   let capped = false
   for (;;) {
     const limit = Math.min(EXPORT_CHUNK_ROWS, EXPORT_MAX_ROWS - rows)
-    const chunk = await readChunk(db, filters, after, limit)
+    const chunk = await readChunk(db, filters, after, limit, throughCandidates)
     if (chunk.n > 0) {
       parts.push(chunk.body!, EOL)
       rows += chunk.n
@@ -199,7 +218,7 @@ async function writeCsv(db: D1Database, filters: Filters): Promise<string[]> {
     // Fewer found than asked for, and all of them written, is the end of what matched.
     if (chunk.fetched < limit && chunk.n === chunk.fetched) break
     if (rows >= EXPORT_MAX_ROWS || bytes >= EXPORT_MAX_BYTES) {
-      capped = (await readChunk(db, filters, after, 1)).fetched > 0
+      capped = (await readChunk(db, filters, after, 1, throughCandidates)).fetched > 0
       break
     }
   }
