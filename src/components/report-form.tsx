@@ -105,6 +105,18 @@ export function TransactionListingForm({ defaults }: { defaults?: ReportSearch }
   return <ReportForm name="Transaction listing" action="/reports/transactions" defaults={defaults} note={`A Report lists up to ${REPORT_ROW_CAP.toLocaleString('en-NZ')} Transactions.`} />
 }
 
+/** The spending-by-Category Report's form (spec story 93). */
+export function SpendingForm({ defaults }: { defaults?: ReportSearch }) {
+  return (
+    <ReportForm
+      name="Spending by Category"
+      action="/reports/spending"
+      defaults={defaults}
+      note="A Report has one row for each Category with spending in your dates, the most spent first, and one for Uncategorised when there is any."
+    />
+  )
+}
+
 /** The balances-over-time Report's form (spec story 96). */
 export function BalancesForm({ defaults }: { defaults?: ReportSearch }) {
   return <ReportForm name="Balances over time" action="/reports/balances" defaults={defaults} note="A Report has one balance for the end of each month, with the balance when your dates begin and when they end." />
