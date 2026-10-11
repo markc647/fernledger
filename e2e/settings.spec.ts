@@ -1,7 +1,6 @@
-import { AxeBuilder } from '@axe-core/playwright'
 import type { BrowserContext } from '@playwright/test'
 import type { Role } from '../src/generated/api/auth'
-import { expect, test } from './fixtures'
+import { expect, noAxeViolations, test } from './fixtures'
 
 // Cookies are not scoped by port, so the dev identity needs no copy of the port from playwright.config.ts.
 const signInAs = (context: BrowserContext, role: Role) =>
@@ -101,20 +100,16 @@ test('a Member cannot reach the screen, and the API refuses their write', async 
 test('the Settings screen has no WCAG 2.2 AA violations when saved, and when showing an error', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.goto('/settings')
-  const scan = async () => {
-    const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
-    expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
-  }
 
   await page.getByLabel('App title').fill('Nan')
   await page.getByRole('button', { name: 'Save settings' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Settings saved' })).toBeVisible()
-  await scan()
+  await noAxeViolations(page) // straight after Save, while the button may still be changing colour
 
   await page.getByLabel('App title').fill('')
   await page.getByRole('button', { name: 'Save settings' }).click()
   await expect(page.getByRole('alert')).toBeVisible()
-  await scan()
+  await noAxeViolations(page)
 })
 
 test('fields and the save button are at least 44px tall', async ({ page, context }) => {

@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test'
+import { drawn, LINE, NET_WORTH, netWorth, SPENT, spending, stubNetWorth, stubSpending } from './chart-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 
@@ -76,17 +77,6 @@ const dollars = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents)
 const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
 const sizeButton = (page: Page, name: 'A' | 'A+' | 'A++') => page.getByRole('group', { name: 'Text size' }).getByRole('button', { name, exact: true })
 
-const netWorth = (page: Page) => page.getByRole('region', { name: 'Net worth over time' })
-const spending = (page: Page) => page.getByRole('region', { name: 'Spending by Category' })
-const LINE = /^Line chart of net worth by month/
-/** The region has drawn its chart: a figure named for a screen reader holding the chart's own picture. */
-const drawn = async (region: ReturnType<typeof netWorth>, name: RegExp) => {
-  const figure = region.getByRole('img', { name })
-  await expect(figure).toBeVisible()
-  await expect(figure.locator('svg.recharts-surface')).toBeVisible()
-  return figure
-}
-
 /**
  * A section's live region: the one status element it has, on the page before anything happens and empty, so that what it comes to say is a change a screen reader
  * announces. Returns it with its element, to check afterwards that it is still the same element and still on the page.
@@ -126,21 +116,6 @@ async function chooseDates(page: Page, from: string, to: string) {
   await spending(page).getByLabel('To', { exact: true }).fill(to)
 }
 
-// What the Worker answers when the charts ask: a made-up net worth of three months, and made-up spending. Whatever range the page asks for gets the same answer.
-const NET_WORTH = {
-  range: '24-months',
-  counted: [{ accountId: 1, accountName: 'Example everyday', lastDate: '2026-10-07' }],
-  notCounted: [],
-  points: [
-    { date: '2026-08-31', cents: 1_000_000 },
-    { date: '2026-09-30', cents: 1_050_000 },
-    { date: '2026-10-07', cents: 1_080_000 },
-  ],
-  tooManyAccounts: null,
-}
-const stubNetWorth = (page: Page, answer: object = NET_WORTH) => page.route(/\/api\/charts\/net-worth/, (route) => route.fulfill({ json: answer }))
-const stubSpending = (page: Page, categories: object[], totalCents: number) =>
-  page.route(/\/api\/charts\/spending\?/, (route) => route.fulfill({ json: { from: '2026-10-01', to: '2026-10-31', totalCents, categories } }))
 /**
  * Answers the requests the page makes for `pattern` only when the test lets each one go (`release`), oldest first. A test of what a section shows while it waits for its
  * answer must not race a timer in the stub: an answer that comes by itself after 400 or 700 ms is gone when a slow run reaches the assertion about the wait (a full run
@@ -163,12 +138,6 @@ async function holdAnswers(page: Page, pattern: RegExp, answer: (url: URL) => ob
     },
   }
 }
-const SPENT = [
-  { categoryId: 1, name: 'Fuel', cents: 9000 },
-  { categoryId: 2, name: 'Groceries', cents: 4550 },
-  { categoryId: null, name: 'Uncategorised', cents: 2500 },
-]
-
 // The same API as the pages, so the tests can say what the pages should show.
 const balancesNow = async (context: BrowserContext) => {
   const { accounts } = (await (await context.request.get('/api/balances')).json()) as { accounts: { balanceCents: number | null }[] }
@@ -516,7 +485,6 @@ test('the charts have no WCAG 2.2 AA violations in this theme, with their data, 
     await expect(spending(page).locator('.recharts-bar-rectangle')).toHaveCount(3) // the bars are in, as well as the figure
     await netWorth(page).getByText('Show the figures').click() // the table is part of what is scanned
     await expect(netWorth(page).getByRole('table').or(netWorth(page).getByRole('list', { name: /Net worth at the end of each month/ }))).toBeVisible()
-    await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
     await noAxeViolations(page)
   }
 })

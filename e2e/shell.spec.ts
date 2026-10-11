@@ -1,5 +1,6 @@
 import { AxeBuilder } from '@axe-core/playwright'
-import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { drawn, LINE, netWorth, SPENT, spending, stubNetWorth, stubSpending } from './chart-helpers'
+import { expect, noAxeViolations, signInAs, test, WCAG } from './fixtures'
 
 const pages = [
   { role: 'admin', path: '/', heading: 'Dashboard' },
@@ -14,14 +15,22 @@ const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
 for (const { role, path, heading } of pages) {
   test(`${heading} page as ${role} has no WCAG 2.2 AA violations`, async ({ page, context }, testInfo) => {
     await signInAs(context, role)
+    // The Charts page draws net worth at once, and the Worker refuses to add up more than 49 Accounts, which the specs that share this database can reach. So the
+    // charts are stubbed and drawn before the scan, and it scans the pictures and not the refusal that a long run of specs would put in their place.
+    if (path === '/charts') {
+      await stubNetWorth(page)
+      await stubSpending(page, SPENT, 16_050)
+    }
     await page.goto(path)
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+    if (path === '/charts') {
+      await drawn(netWorth(page), LINE)
+      await drawn(spending(page), /^Bar chart of the 3 Categories/)
+    }
     // The project's theme must really be showing, or the scan would not be testing it.
     await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
 
-    const { violations } = await new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
-      .analyze()
+    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
     expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
   })
 }
