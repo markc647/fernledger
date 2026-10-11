@@ -1,10 +1,12 @@
 import { queryOptions } from '@tanstack/react-query'
 import type { PreviewRow } from '@/generated/api/import-rows'
 import { api } from './api'
+import { isLoansKind } from './category-kinds'
 import type { NetWorthRange, SpendingPeriod } from './charts'
 import type { CarryPreview } from './import-carry'
 import { HttpError } from './me'
 import { loadBalances } from './report-balances'
+import { loadLoans } from './report-loans'
 import { loadListing } from './report-transactions'
 import { apiQuery, filterQuery, filtersOf, type TransactionSearch } from './transaction-search'
 
@@ -180,6 +182,35 @@ export const categoriesQuery = queryOptions({
     return res.json()
   },
 })
+
+/**
+ * The Loans Report's data: the Transactions of the Loans Category chosen or, with none chosen, of each Loans Category in use, a page at a time (loadLoans), up to the
+ * cap. It reads the Categories itself, once, so the Report is one snapshot of both the loans it lists and what is in them: a Category made or changed while it is open
+ * does not change it. `available` is how many Loans Categories there are, so a Report with none to list can say why. Read once and kept, as the other Reports are.
+ */
+export const reportLoansQuery = (category: number | undefined, from: string | undefined, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'loans', category ?? null, from ?? null, to],
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const categories = await api.categories.$get()
+      if (!categories.ok) throw new HttpError(categories.status)
+      const loans = (await categories.json()).filter((c) => isLoansKind(c.kind))
+      const chosen = category === undefined ? loans : loans.filter((c) => c.id === category)
+      const listing = await loadLoans({
+        loans: chosen,
+        from,
+        to,
+        fetchPage: async ({ categoryId, after, limit, ...range }) => {
+          const res = await api.reports.loans.$get({ query: { categoryId: String(categoryId), to: range.to, ...(range.from === undefined ? {} : { from: range.from }), limit: String(limit), ...(after === undefined ? {} : { after }) } })
+          if (!res.ok) throw new HttpError(res.status)
+          return res.json()
+        },
+      })
+      return { available: loans.length, listing }
+    },
+  })
 
 /**
  * Every Category in use with the Budget it has this NZ month (the Worker decides which month that is) and all of its Budget changes.

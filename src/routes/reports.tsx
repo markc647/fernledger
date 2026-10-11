@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { BalancesForm, BudgetVsActualForm, IncomeVsSpendingForm, SpendingForm, TransactionListingForm } from '@/components/report-form'
+import { BalancesForm, BudgetVsActualForm, IncomeVsSpendingForm, LoansForm, SpendingForm, TransactionListingForm } from '@/components/report-form'
 import { NOT_COUNTED_AS_SPENDING_OR_INCOME } from '@/lib/budgets'
 
 export const Route = createFileRoute('/reports')({
@@ -32,6 +32,15 @@ function Reports() {
         <p className="mt-2">What came in and what was spent in each month of the dates you choose, with the difference and the totals. {NOT_COUNTED_AS_SPENDING_OR_INCOME}</p>
         <div className="mt-4">
           <IncomeVsSpendingForm />
+        </div>
+      </section>
+      <section aria-labelledby="loans" className="mt-8">
+        <h2 id="loans" className="text-xl font-semibold">
+          Loans
+        </h2>
+        <p className="mt-2">How much each person owes, or is owed, on a loan, with the lending and the repayments listed, in the dates you choose. Loans aren't counted as spending or income.</p>
+        <div className="mt-4">
+          <LoansForm />
         </div>
       </section>
       <section aria-labelledby="transaction-listing" className="mt-8">

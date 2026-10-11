@@ -6,12 +6,12 @@ import { MAX_INCOME_MONTHS as PAGE_MAX_INCOME_MONTHS } from '../src/lib/income-v
 import { monthEnd, nzMonth } from './months'
 import type { BudgetReport } from './report-budget'
 import { incomeVsSpending, MAX_INCOME_MONTHS, type IncomeVsSpending } from './report-income-vs-spending'
-import { buildSpending, rollUp, type SpendingRow } from './spending'
+import { buildSpending, rollUp, type MonthlyRow, type SpendingRow } from './spending'
 import type { SpendingByCategory } from './spending-by-category'
 
 // Seam 1: the income-vs-spending-by-month Report's data (GET /api/reports/income-vs-spending), through the Worker's exported handler as the local-development
 // Admin or a read-only Member (the dev identity cookie is honoured on localhost only). The Report decides nothing about what is Spending or Income: it is
-// `rollUp`'s months and totals for `buildSpending`'s rows (spending.ts, ADR 0012), with a row of zeros for a month that has nothing in it. So the tests here are about
+// `rollUpMonthly`'s months and totals for `buildMonthlySpending`'s rows (spending.ts, ADR 0012: `buildSpending`'s statement grouped by month and kind), with a row of zeros for a month that has nothing in it. So the tests here are about
 // what the Report asks of it (the Account, the dates, the Account that does not exist), that its figures are those of `rollUp` and of every other place that
 // totals Spending, and that nothing which is not Spending or Income gets in. All the data is made up (bank 99).
 const origin = 'http://localhost:5173'
@@ -217,11 +217,11 @@ describe('what was counted, apart from what the figures come to', () => {
     const r = await report({ from: '2026-09-01', to: '2026-10-31' })
 
     expect(lines(r)).toEqual([['2026-09', 0, 0, 0], ['2026-10', 0, 0, 0]]) // both come to nothing
-    expect(r.months.map((m) => m.counted)).toEqual([1, 0]) // but one has Transactions that count and the other has none
-    expect(r.totals.counted).toBe(1)
+    expect(r.months.map((m) => m.counted)).toEqual([2, 0]) // but one has Transactions that count (the spending and its refund) and the other has none
+    expect(r.totals.counted).toBe(2)
   })
 
-  it('counts each Category with something in the month, Uncategorised as one, and adds them up for all the dates', async () => {
+  it('counts the Transactions in each month, Uncategorised ones too, and adds them up for all the dates', async () => {
     await add(accountA, '2026-10-02', -100, { override: 'Groceries' })
     await add(accountA, '2026-10-03', -100, { override: 'Fuel' })
     await add(accountA, '2026-10-04', 5000, { override: 'Wages and salary' })
@@ -531,9 +531,9 @@ describe('the same figures as everywhere else that totals Spending and Income (A
 })
 
 describe('the calendar, with no database (incomeVsSpending)', () => {
-  const row = (month: string, kind: SpendingRow['kind'], outCents: number, inCents: number): SpendingRow => ({ month, categoryId: 1, categoryName: 'A', kind, outCents, inCents })
+  const row = (month: string, kind: MonthlyRow['kind'], outCents: number, inCents: number, counted = 1): MonthlyRow => ({ month, uncategorised: 0, kind, outCents, inCents, counted })
 
-  it('puts a month rollUpMonths has no row for among the others in order, with zeros, and takes the rest from it', () => {
+  it('puts a month rollUpMonthly has no row for among the others in order, with zeros, and takes the rest from it', () => {
     const range = { from: '2026-01-15', to: '2026-04-02' }
     const rows = [row('2026-01', 'spending', 500, 100), row('2026-03', 'income', 20, 1000), row('2026-03', 'loans', 9999, 0)]
 
@@ -578,12 +578,12 @@ describe('the calendar, with no database (incomeVsSpending)', () => {
 
   it('counts a month whose figures net out to nothing, apart from a month with nothing counted', () => {
     const range = { from: '2026-01-01', to: '2026-03-31' }
-    const rows = [row('2026-01', 'spending', 4000, 4000), row('2026-03', 'loans', 500, 0)] // $40 spent and fully refunded; a loan
+    const rows = [row('2026-01', 'spending', 4000, 4000, 2), row('2026-03', 'loans', 500, 0)] // $40 spent and fully refunded, which is two Transactions; a loan
 
     const r = incomeVsSpending(range, rows, '2026-06-01')
 
-    expect(r.months.map((m) => [m.month, m.spendingCents, m.counted])).toEqual([['2026-01', 0, 1], ['2026-02', 0, 0], ['2026-03', 0, 0]])
-    expect(r.totals).toMatchObject({ spendingCents: 0, incomeCents: 0, counted: 1 }) // something was counted, so the Report has a row for January and not "nothing"
+    expect(r.months.map((m) => [m.month, m.spendingCents, m.counted])).toEqual([['2026-01', 0, 2], ['2026-02', 0, 0], ['2026-03', 0, 0]])
+    expect(r.totals).toMatchObject({ spendingCents: 0, incomeCents: 0, counted: 2 }) // something was counted, so the Report has a row for January and not "nothing"
   })
 })
 
@@ -629,7 +629,7 @@ describe('who can read it, and what a request refuses', () => {
 describe('what a request costs (ADR 0004)', () => {
   /** D1 that counts the statements prepared on it and the rows its queries read, to see what one request asks of the free plan. */
   function metered() {
-    const usage = { queries: 0, rowsRead: 0 }
+    const usage = { queries: 0, rowsRead: 0, rowsReturned: 0 }
     const wrap = (statement: D1PreparedStatement): D1PreparedStatement =>
       new Proxy(statement, {
         get(target, property) {
@@ -638,6 +638,7 @@ describe('what a request costs (ADR 0004)', () => {
             return async () => {
               const result = await target.all()
               usage.rowsRead += (result.meta as { rows_read: number }).rows_read
+              usage.rowsReturned += result.results.length
               return result
             }
           }
@@ -714,6 +715,32 @@ describe('what a request costs (ADR 0004)', () => {
     // The date index entry, the row, the Override's Category and the Rule's Category for each Transaction.
     expect(usage.rowsRead).toBeLessThanOrEqual(480 * 4 + SLACK)
     expect(usage.rowsRead).toBeGreaterThan(480 * 3) // the Rule's Category is read too, so the allowance above is not slack for a cheaper plan
+    expect(usage.rowsReturned).toBe(12) // a row for each month, whatever the 480 Transactions are in
+  })
+
+  it('hands the Worker at most four rows a month, however many Categories there are: 480 at the 120 months a Report covers', async () => {
+    // Every month of 2000 to 2009 has Spending in a Category, Uncategorised Spending, Income and a loan, each its own Transaction: one for each of the four rows.
+    for (const [kind, override] of [['spending', ids['Fuel']], ['income', ids['Wages and salary']], ['loans', ids['Loans']], ['none', null]] as const) {
+      await env.DB.prepare(
+        `WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i < 119)
+         INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category)
+         SELECT ?, date('2000-01-15', '+' || i || ' months'), -100, ?, 'import', ? FROM seq`,
+      )
+        .bind(accountA, `EXAMPLE ${kind}`, override)
+        .run()
+    }
+    const { db, usage } = metered()
+
+    const res = await requestWith(db, { from: '2000-01-01', to: '2009-12-31' })
+
+    const r = (await res.json()) as IncomeVsSpending
+    expect(r.months).toHaveLength(MAX_INCOME_MONTHS)
+    expect(r.totals.counted).toBe(360) // the loan is not counted
+    expect(usage.queries).toBe(1)
+    expect(usage.rowsReturned).toBe(480) // the three kinds and Uncategorised in each of 120 months, and not a row for each of the Categories a household has
+    // The date index entry and the row of each, and the Override's Category for the 360 that have one.
+    expect(usage.rowsRead).toBeLessThanOrEqual(480 * 2 + 360 + SLACK)
+    expect(usage.rowsRead).toBeGreaterThan(480 * 2)
   })
 
   it('reads nothing of the Transactions outside the dates: a month costs a month', async () => {

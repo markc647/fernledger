@@ -204,7 +204,7 @@ describe('what is not Spending', () => {
     expect(r.totalCents).toBe(0)
   })
 
-  it('leaves out an Income Category and a Loans Category, and the Transfer of a loan between tracked Accounts that has a Loans Category on both halves', async () => {
+  it('leaves out an Income Category and a Loans Category, and the Transfer of a loan between tracked Accounts, even when both halves carry the Loans Category', async () => {
     await add(accountA, '2026-10-01', 300_000, { override: 'Wages and salary' })
     await add(accountA, '2026-10-03', -50_000, { override: 'Loans' })
     await add(accountA, '2026-10-04', 10_000, { rule: 'Loans' })

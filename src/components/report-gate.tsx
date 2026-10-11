@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
+import { MIN_DATE } from '@/lib/date-range'
 import { accountsQuery } from '@/lib/queries'
 import { accountLabel } from '@/lib/report-frame'
 import type { ReportSearch } from '@/lib/report-transactions'
@@ -21,7 +22,7 @@ export type ReportScope = {
 }
 
 /** Not a Report yet: the heading, what is missing, and the form that opens the Report once it is filled in. */
-function Needs({ name, form, message, alert = false }: { name: string; form: ReactNode; message: string; alert?: boolean }) {
+export function Needs({ name, form, message, alert = false }: { name: string; form: ReactNode; message: string; alert?: boolean }) {
   return (
     <>
       <h1 className="text-2xl font-semibold">{name}</h1>
@@ -44,6 +45,7 @@ export function ReportGate({
   search,
   form,
   noAccounts,
+  fromOptional = false,
   rangeProblem,
   children,
 }: {
@@ -54,15 +56,18 @@ export function ReportGate({
   form: ReactNode
   /** What to say when no Account has been imported yet, such as "There are no Accounts yet, so there is nothing to list." */
   noAccounts: string
+  /** The Report may begin at the first Transaction (Loans): a missing `from` is allowed, and the scope's `from` is then the earliest date a Report accepts (`MIN_DATE`). */
+  fromOptional?: boolean
   /** What is wrong with dates that are in order, for this Report alone (such as "too many months"), said with the form like the dates being the wrong way round; null when nothing is. */
   rangeProblem?: (from: string, to: string) => string | null
   children: (scope: ReportScope) => ReactNode
 }) {
   const accounts = useQuery(accountsQuery)
   if (accounts.error) return <p role="alert">Fernledger couldn't load the Accounts. Reload the page to try again.</p>
-  if (!search.from || !search.to) return <Needs name={name} form={form} message="Choose the first and last dates this Report covers." />
-  if (search.from > search.to) return <Needs name={name} form={form} alert message="The “To” date is before the “From” date. Change one of them to open the Report." />
-  const problem = rangeProblem?.(search.from, search.to)
+  const from = search.from ?? (fromOptional ? MIN_DATE : undefined)
+  if (!from || !search.to) return <Needs name={name} form={form} message={fromOptional ? 'Choose the last date this Report covers.' : 'Choose the first and last dates this Report covers.'} />
+  if (from > search.to) return <Needs name={name} form={form} alert message="The “To” date is before the “From” date. Change one of them to open the Report." />
+  const problem = rangeProblem?.(from, search.to)
   if (problem) return <Needs name={name} form={form} alert message={problem} />
   if (!accounts.data) return <p role="status">Loading…</p>
   const selected = search.account === undefined ? accounts.data : accounts.data.filter((a) => a.id === search.account)
@@ -81,7 +86,7 @@ export function ReportGate({
   const labels = selected.map(accountLabel).join('; ')
   return children({
     accounts: selected,
-    from: search.from,
+    from,
     to: search.to,
     accountsText: search.account === undefined ? `All Accounts: ${labels}` : labels,
     accountsInTitle: search.account === undefined ? 'All Accounts' : selected[0]!.name,

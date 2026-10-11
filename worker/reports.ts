@@ -3,6 +3,7 @@ import type { AppEnv } from './app-env'
 import { balancesReportQuery, readBalancesReport } from './report-balances'
 import { budgetReportQuery, readBudgetReport } from './report-budget'
 import { incomeVsSpendingQuery, readIncomeVsSpending } from './report-income-vs-spending'
+import { loansQuery, readLoanPage, toLoansQuery } from './report-loans'
 import { readSpendingReport, spendingReportQuery } from './report-spending'
 import { buildReportPage, pageOf, reportQuery, toReportQuery, type ReportRow } from './report-transactions'
 import { validate } from './validate'
@@ -25,12 +26,17 @@ export const reports = new Hono<AppEnv>()
     const report = await readSpendingReport(c.env.DB, { from, to, ...(accountId === undefined ? {} : { accountId: Number(accountId) }) })
     return report ? c.json(report) : c.json({ error: 'Not found' }, 404)
   })
-  // Income and Spending in each month of the dates, for every Account or the one named (spending.ts's `rollUp`, as the Spending by Category Report). One request
+  // Income and Spending in each month of the dates, for every Account or the one named (spending.ts's SQL, as the Spending by Category Report). One request
   // however many Accounts there are, and at most MAX_INCOME_MONTHS months.
   .get('/income-vs-spending', validate('query', incomeVsSpendingQuery), async (c) => {
     const { accountId, from, to } = c.req.valid('query')
     const report = await readIncomeVsSpending(c.env.DB, { from, to, ...(accountId === undefined ? {} : { accountId: Number(accountId) }) })
     return report ? c.json(report) : c.json({ error: 'Not found' }, 404)
+  })
+  // The Transactions of one Loans Category, a page at a time (report-loans.ts). One request is one Category, so a Report of all the Loans Categories is several.
+  .get('/loans', validate('query', loansQuery), async (c) => {
+    const page = await readLoanPage(c.env.DB, toLoansQuery(c.req.valid('query')))
+    return page ? c.json(page) : c.json({ error: 'Not found' }, 404)
   })
   // Balances over time for one Account: its balance history (worker/balances.ts) at the end of each month. One request is one
   // Account, so a Report of several Accounts is several small requests.

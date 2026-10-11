@@ -520,14 +520,14 @@ test.describe('on screen', () => {
     test('says so on the row of a month that is under way or has not begun, so a row of zeros is not read as a quiet month', async ({ page, context }) => {
       await signInAs(context, 'member')
       await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account', accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
-      const month = (m: string, state: string, incomeCents: number, spendingCents: number) => ({ month: m, state, incomeCents, spendingCents, differenceCents: incomeCents - spendingCents, uncategorisedInCents: 0 })
+      const month = (m: string, state: string, incomeCents: number, spendingCents: number) => ({ month: m, state, incomeCents, spendingCents, differenceCents: incomeCents - spendingCents, uncategorisedInCents: 0, counted: Number(incomeCents !== 0 || spendingCents !== 0) })
       await page.route('**/api/reports/income-vs-spending?**', (route) =>
         route.fulfill({
           json: {
             from: '2026-09-01',
             to: '2026-11-30',
             months: [month('2026-09', 'ended', 100_000, 40_000), month('2026-10', 'under-way', 0, 2500), month('2026-11', 'not-begun', 0, 0)],
-            totals: { incomeCents: 100_000, spendingCents: 42_500, differenceCents: 57_500, uncategorisedInCents: 0 },
+            totals: { incomeCents: 100_000, spendingCents: 42_500, differenceCents: 57_500, uncategorisedInCents: 0, counted: 2 },
           },
         }),
       )
@@ -714,6 +714,7 @@ test.describe('printed over several pages', () => {
       spendingCents: spendingOf(i),
       differenceCents: incomeOf(i) - spendingOf(i),
       uncategorisedInCents: i === 0 ? NO_CATEGORY_STUB : 0,
+      counted: 3,
     }))
     const sum = (pick: (m: (typeof months)[number]) => number) => months.reduce((total, m) => total + pick(m), 0)
     await page.route('**/api/reports/income-vs-spending?**', (route) =>
@@ -722,7 +723,7 @@ test.describe('printed over several pages', () => {
           from: `${FROM_YEAR}-01-01`,
           to: `${FROM_YEAR + YEARS - 1}-12-31`,
           months,
-          totals: { incomeCents: sum((m) => m.incomeCents), spendingCents: sum((m) => m.spendingCents), differenceCents: sum((m) => m.differenceCents), uncategorisedInCents: NO_CATEGORY_STUB },
+          totals: { incomeCents: sum((m) => m.incomeCents), spendingCents: sum((m) => m.spendingCents), differenceCents: sum((m) => m.differenceCents), uncategorisedInCents: NO_CATEGORY_STUB, counted: sum((m) => m.counted) },
         },
       }),
     )

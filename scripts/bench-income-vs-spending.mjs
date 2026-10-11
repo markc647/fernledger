@@ -5,11 +5,12 @@
 // It is not part of `npm run check`. Each size and each function is timed in a FRESH process, because the first call in a process pays for compiling and for growing the heap
 // and is what a Worker that has just started pays, and a warm figure alone hides it. For each, it prints the first call and the median of 30 calls after it, as the lowest and highest of
 // `repeats` fresh processes (default 5). The functions:
-//   rollUp            what the Report called before: `rollUp`, which also builds an object for every row for Categories the Report never reads
-//   rollUpMonths      what it calls now: the same Spending and Income by month, without them (worker/spending.ts)
-//   incomeVsSpending  the Report's whole function: `rollUpMonths` and the calendar (worker/report-income-vs-spending.ts), then the JSON of its answer
-// It is NOT a measurement of the free plan's 10 ms (workerd's CPU can't be seen from a test), and it leaves out what it costs D1 to hand the rows to the Worker. The machine and
-// the Node it ran on are printed, because the figures belong to them.
+//   rollUp            what the Report called at first: `rollUp` over the rows of `buildSpending`, a row for every Category in every month, which also builds an object for each
+//   rollUpMonthly     what it calls now: the same Spending and Income by month over the rows of `buildMonthlySpending`, a few rows a month, which D1 groups (worker/spending.ts)
+//   incomeVsSpending  the Report's whole function over those rows (`rollUpMonthly` and the calendar, worker/report-income-vs-spending.ts), then the JSON of its answer
+// The rows `buildMonthlySpending` gives are made here from the per-Category rows, by month, kind and whether there is a Category, before the clock starts: that is D1's work, which does not
+// count against the Worker's CPU. The script is NOT a measurement of the free plan's 10 ms (workerd's CPU can't be seen from a test), and it leaves out what it costs D1 to hand the rows to
+// the Worker (about 72,000 at 600 Categories for `rollUp`, about 480 for the rest). The machine and the Node it ran on are printed, because the figures belong to them.
 import { buildSync } from 'esbuild'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
@@ -20,7 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const MONTHS = 120
 const SIZES = [30, 100, 600]
-const FUNCTIONS = ['rollUp', 'rollUpMonths', 'incomeVsSpending']
+const FUNCTIONS = ['rollUp', 'rollUpMonthly', 'incomeVsSpending']
 const WARM_CALLS = 30
 const RANGE = { from: '2016-01-01', to: '2025-12-31' }
 
@@ -39,15 +40,31 @@ function rowsFor(categories) {
   return rows
 }
 
+/** What D1 gives for `buildMonthlySpending`: the per-Category rows added up by month, kind and whether there is a Category (at most four a month). */
+function monthlyRowsOf(rows) {
+  const groups = new Map()
+  for (const row of rows) {
+    const uncategorised = row.categoryId === null ? 1 : 0
+    const key = `${row.month}|${uncategorised}|${row.kind}`
+    const group = groups.get(key) ?? { month: row.month, uncategorised, kind: row.kind, outCents: 0, inCents: 0, counted: 0 }
+    group.outCents += row.outCents
+    group.inCents += row.inCents
+    group.counted += 3 // each row stands for a few Transactions
+    groups.set(key, group)
+  }
+  return [...groups.values()]
+}
+
 if (process.argv[2] === '--child') {
   const [, , , bundle, size, name] = process.argv
-  const { rollUp, rollUpMonths, incomeVsSpending } = await import(pathToFileURL(bundle).href)
+  const { rollUp, rollUpMonthly, incomeVsSpending } = await import(pathToFileURL(bundle).href)
   const run = {
     rollUp: (rows) => rollUp(rows),
-    rollUpMonths: (rows) => rollUpMonths(rows),
+    rollUpMonthly: (rows) => rollUpMonthly(rows),
     incomeVsSpending: (rows) => JSON.stringify(incomeVsSpending(RANGE, rows, '2026-10-20')),
   }[name]
-  const rows = rowsFor(Number(size)) // made before the clock starts: D1's rows arrive however they are used
+  const perCategory = rowsFor(Number(size))
+  const rows = name === 'rollUp' ? perCategory : monthlyRowsOf(perCategory) // made before the clock starts: D1's rows arrive however they are used
   const first = performance.now()
   run(rows)
   const firstMs = performance.now() - first
@@ -66,7 +83,7 @@ if (process.argv[2] === '--child') {
   const bundle = join(dir, 'bundle.mjs')
   const worker = (file) => JSON.stringify(join(root, 'worker', file).replaceAll('\\', '/'))
   buildSync({
-    stdin: { contents: `export { rollUp, rollUpMonths } from ${worker('spending.ts')}\nexport { incomeVsSpending } from ${worker('report-income-vs-spending.ts')}`, resolveDir: root, loader: 'ts' },
+    stdin: { contents: `export { rollUp, rollUpMonthly } from ${worker('spending.ts')}\nexport { incomeVsSpending } from ${worker('report-income-vs-spending.ts')}`, resolveDir: root, loader: 'ts' },
     bundle: true,
     platform: 'node',
     format: 'esm',

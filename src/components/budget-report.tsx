@@ -7,10 +7,7 @@ import { Status } from '@/components/status'
 import { budgetRows, budgetStatus, NOT_COUNTED } from '@/lib/budgets'
 import { formatBalance, formatMonth } from '@/lib/format'
 import { hasNoBudgets, monthNote, overMonthsText, periodRows, togetherCovers, wholeMonthsNotice, type BudgetReport, type PeriodRow, type ReportMonth } from '@/lib/report-budget'
-import { MONEY_TEXT } from '@/lib/utils'
-
-/** Tighter cells on paper, where a page is 680px wide and a Report is many pages long. */
-const PAPER = 'print:px-2 print:py-2'
+import { MONEY_TEXT, PAPER } from '@/lib/utils'
 
 const monthColumns = budgetColumns(PAPER)
 // The months together have no Status for a Category: a month over Budget and a month under it would cancel out, so the last column counts the months it was over.

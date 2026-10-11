@@ -18,14 +18,23 @@ const digits = z.string().check(z.regex(/^\d{1,9}$/))
 /** Where the next page starts: the date and ID of the last Transaction of this one, `2026-10-02:123`. */
 const CURSOR = /^(\d{4}-\d{2}-\d{2}):([1-9]\d{0,14})$/
 
+/** What a Report that is read a page at a time adds to its query string: where the page starts (the cursor `pageOf` gave) and how many rows it may hold. The Loans Report takes the same. */
+export const pagingFields = {
+  after: z.optional(z.string().check(z.regex(CURSOR), z.refine((cursor) => isRealDate(cursor.slice(0, 10))))),
+  limit: z.optional(digits),
+}
+
+/** The validated `after` and `limit` as a page asks for them: the cursor read into a date and ID, and the size defaulted and kept between one and `pageSize` (a Report's own largest page; `REPORT_PAGE_SIZE` unless it says). */
+export function toPaging(q: { after?: string; limit?: string }, pageSize = REPORT_PAGE_SIZE): { after?: { date: string; id: number }; limit: number } {
+  const cursor = q.after === undefined ? null : CURSOR.exec(q.after)
+  return {
+    after: cursor ? { date: cursor[1]!, id: Number(cursor[2]) } : undefined,
+    limit: Math.min(Math.max(Number(q.limit ?? pageSize), 1), pageSize),
+  }
+}
+
 /** The query string of a Report page, validated before anything runs. A refusal names the field. */
-export const reportQuery = z
-  .object({
-    ...reportRange,
-    after: z.optional(z.string().check(z.regex(CURSOR), z.refine((cursor) => isRealDate(cursor.slice(0, 10))))),
-    limit: z.optional(digits),
-  })
-  .check(datesInOrder)
+export const reportQuery = z.object({ ...reportRange, ...pagingFields }).check(datesInOrder)
 
 export type ReportQueryParams = z.output<typeof reportQuery>
 
@@ -41,14 +50,7 @@ export type ReportQuery = {
 
 /** The validated query as a ReportQuery: the page size defaulted and kept between one and `REPORT_PAGE_SIZE`. */
 export function toReportQuery(q: ReportQueryParams): ReportQuery {
-  const cursor = q.after === undefined ? null : CURSOR.exec(q.after)
-  return {
-    accountId: Number(q.accountId),
-    from: q.from,
-    to: q.to,
-    after: cursor ? { date: cursor[1]!, id: Number(cursor[2]) } : undefined,
-    limit: Math.min(Math.max(Number(q.limit ?? REPORT_PAGE_SIZE), 1), REPORT_PAGE_SIZE),
-  }
+  return { accountId: Number(q.accountId), from: q.from, to: q.to, ...toPaging(q) }
 }
 
 /**
@@ -100,8 +102,8 @@ export type ReportRow = {
   bankPaymentCode: string | null
 }
 
-/** The rows `buildReportPage` read as a page: the first `limit` of them, and where the next page starts if there were more. */
-export function pageOf(rows: ReportRow[], limit: number): { transactions: ReportRow[]; next: string | null } {
+/** The rows a Report's page statement read, as a page: the first `limit` of them, and where the next page starts if there were more. */
+export function pageOf<Row extends { id: number; date: string }>(rows: Row[], limit: number): { transactions: Row[]; next: string | null } {
   const transactions = rows.slice(0, limit)
   const last = transactions.at(-1)
   return { transactions, next: rows.length > limit && last ? `${last.date}:${last.id}` : null }

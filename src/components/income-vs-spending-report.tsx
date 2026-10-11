@@ -7,9 +7,7 @@ import { NOT_COUNTED_AS_SPENDING_OR_INCOME } from '@/lib/budgets'
 import { describeDates } from '@/lib/charts'
 import { formatMonth } from '@/lib/format'
 import { DIFFERENCE, DIFFERENCE_SENTENCE, monthNote, partOfMonth, uncategorisedNotice } from '@/lib/income-vs-spending'
-
-/** Tighter cells on paper, where a page is 680px wide and a Report is many pages long. */
-const PAPER = 'print:px-2 print:py-2'
+import { PAPER } from '@/lib/utils'
 
 // The amounts keep their digits together and give way last; the month's name, which can carry sentences about the dates, is the column that wraps. Spending and
 // Income are written as the Dashboard and the Spending by Category Report write them (`Spent`, "$15.00 back"; an Income below zero has its minus sign), in one weight.

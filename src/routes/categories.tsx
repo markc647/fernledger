@@ -92,7 +92,7 @@ function Categories() {
     <>
       <h1 className="text-2xl font-semibold">Categories</h1>
       <p className="mt-2">
-        A Category groups Transactions by purpose. Its kind says how its Transactions are added up: Spending, Income or Loans (money lent or borrowed).{' '}
+        A Category groups Transactions by purpose. Its kind says how its Transactions are added up: Spending, Income or Loans (money lent or borrowed, which the Loans Report adds up).{' '}
         {isAdmin ? "Add, rename or remove them to suit you, and set each one's kind." : 'Only the Admin can change them.'}
       </p>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
