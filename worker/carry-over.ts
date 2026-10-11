@@ -96,6 +96,15 @@ export const MARK_APPLIED = `
 /** The last chunk of a completed replace empties the Account's held rows: what it has not given to a Transaction is lost, and was counted. */
 export const CLEAR_HELD = 'DELETE FROM carry_over WHERE account_id = ?'
 
+/**
+ * The Admin's discard (imports.ts): CLEAR_HELD, but only while the Account is still waiting on as many as WAITING_LIST counted (?2), the count the Change Log entry
+ * says. Another request can land between the count and the delete: an Import that gives some out, or a discard. The check is a subquery that does not depend on the
+ * rows being deleted, which SQLite works out once, before the first. Its row count is what `onlyIfChanged` looks at.
+ */
+export const CLEAR_HELD_IF_WAITING = `
+  DELETE FROM carry_over WHERE account_id = ?1
+    AND (SELECT COUNT(*) FROM carry_over WHERE account_id = ?1 AND applied = 0 AND ${annotated('carry_over')}) = ?2`
+
 // The last chunk of any other Import drops only what is finished with: rows already given out, and rows with nothing left
 // to give (the Admin removed the Category and there is no Note or mark). What still waits stays, for a replace to finish or the
 // Admin to discard.

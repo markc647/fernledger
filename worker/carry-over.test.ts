@@ -3,6 +3,8 @@ import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { APPLY_HELD, HOLD_REMOVED, MARK_APPLIED } from './carry-over'
 import { COUNT_NEW_ROWS } from './imports'
+import { callWhileInterrupted } from './test-support'
+import { CHANGED_MEANWHILE } from './validate'
 import worker from './index'
 
 // Seam 1: replacing imported history carries the Admin's Overrides and Notes over to the re-imported Transactions
@@ -890,6 +892,42 @@ describe('POST /api/imports/discard-held', () => {
       ],
     })
     expect((await changeLog()).map((e) => e.type)).toEqual(['import'])
+  })
+
+  // Another request can land between the handler's count and its delete. It discards only while the Account is still waiting on as many as were counted, and with
+  // `onlyIfChanged` writes no entry for a discard that discarded nothing, so the entry never names Transactions that were not discarded by it.
+  describe('when another request lands between this one\'s count and its delete', () => {
+    const heldTwo = async () => {
+      await importOk([row('A1'), row('A2'), row('A3')])
+      await annotate('A1', { note: 'One' })
+      await annotate('A2', { category: 'Fuel' })
+      await annotate('A3', { note: 'Three', category: 'Groceries' })
+      await importOk([row('A1')], { replace: true, count: 2 })
+      await env.DB.prepare('DELETE FROM change_log').run()
+      return accountId()
+    }
+
+    it('writes one entry when two requests discard, and tells the second nothing is waiting', async () => {
+      const id = await heldTwo()
+
+      const res = await callWhileInterrupted('/api/imports/discard-held', 'POST', { accountId: id }, () => discard(id))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'Nothing is waiting to be carried over', waiting: 0 })
+      expect(await changeLog()).toHaveLength(1)
+    })
+
+    it('discards nothing, and says to try again, when an Import gave some out meanwhile, because the entry would name Transactions that are not lost', async () => {
+      const id = await heldTwo()
+
+      const res = await callWhileInterrupted('/api/imports/discard-held', 'POST', { accountId: id }, () => importOk([row('A2')]))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await waiting()).toHaveLength(1)
+      expect((await changeLog()).map((e) => e.type)).toEqual(['import']) // the Import's own entry, and no discard
+      expect((await lastEntry()).summary).not.toContain('Discarded')
+    })
   })
 
   it('leaves another Account’s held rows alone', async () => {

@@ -442,6 +442,42 @@ describe('POST /api/imports/clear-history', () => {
     expect(JSON.parse(entry!.after as string)).toEqual({ removed: 5000, remaining: 201 })
   })
 
+  // Another request can land between the handler's count and its batch. A step does something only while the slice it counted is still the oldest Import-sourced rows of the
+  // Account, with more than a slice behind it: the entry says what it removed, and a history that fits in one replace is never cleared.
+  describe('when another request lands between this one\'s count and its batch', () => {
+    it('removes nothing more once another step has taken the history down to what one replace removes, and says so', async () => {
+      await sendChunk([row('OLD1', '2026-09-01')])
+      const id = await accountId()
+      await seedImportRows(id, 5200)
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted('/api/imports/clear-history', 'POST', { accountId: id }, () => clear(id))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'The imported history is small enough to replace in one go', remaining: 201 })
+      expect(await storedIds()).toHaveLength(201)
+      expect(await changeLog()).toMatchObject([{ summary: `Removed 5000 imported rows from ${savings} to replace its imported history (201 left)` }])
+    })
+
+    it('keeps the balances and holds nothing when rows before the slice went meanwhile, because it is another slice now (409)', async () => {
+      await sendChunk([row('OLD1', '2026-09-01')])
+      const id = await accountId()
+      await seedImportRows(id, 5200)
+      await env.DB.prepare("UPDATE transactions SET note = 'Keep me' WHERE bank_unique_id = 'SEED1'").run()
+      const balances = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM balance_checks WHERE account_id = ? AND source = ?').bind(id, 'import').first<{ n: number }>())!.n
+      const before = await balances()
+      expect(before).toBeGreaterThan(0)
+
+      const dropOne = () => env.DB.prepare("DELETE FROM transactions WHERE bank_unique_id = 'SEED2'").run()
+
+      const res = await callWhileInterrupted('/api/imports/clear-history', 'POST', { accountId: id }, dropOne)
+
+      expect(res.status).toBe(409)
+      expect(await balances()).toBe(before)
+      expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM carry_over WHERE account_id = ?').bind(id).first<{ n: number }>())!.n).toBe(0)
+    })
+  })
+
   it('never removes Sync-sourced rows', async () => {
     await sendChunk([row('OLD1', '2026-09-01')])
     const id = await accountId()
