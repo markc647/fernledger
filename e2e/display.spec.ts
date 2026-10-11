@@ -93,7 +93,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending']
+  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/income-vs-spending']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -673,6 +673,50 @@ test.describe('zoom', () => {
         await expect(report).toContainText('$1,234,567,890.12')
         await expect(report).toContainText('$1,234,567.89 back')
         await expect(report).toContainText('Uncategorised (includes money in not yet given a Category)') // the longest row name
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
+  // The income-vs-spending-by-month Report with its longest content: a long app title and Account name, the largest amounts, Spending back, Income and a difference
+  // below zero, and months the dates cover only part of (each with its sentence about the dates), on screen (cards on a narrow window). The data is stubbed, so the
+  // test needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/reports/income-vs-spending with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
+        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
+        await page.route('**/api/reports/income-vs-spending?**', (route) =>
+          route.fulfill({
+            json: {
+              from: '2026-09-15',
+              to: '2026-11-10',
+              months: [
+                { month: '2026-09', incomeCents: 123456789012, spendingCents: -123456789, differenceCents: 123580245801 },
+                { month: '2026-10', incomeCents: -123456789012, spendingCents: 123456789012, differenceCents: -246913578024 },
+                { month: '2026-11', incomeCents: 0, spendingCents: 0, differenceCents: 0 },
+              ],
+              totals: { incomeCents: 0, spendingCents: 123333332223, differenceCents: -123333332223 },
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/reports/income-vs-spending?from=2026-09-15&to=2026-11-10')
+        await sizeButton(page, size).click()
+        const report = page.getByRole('article', { name: 'Income vs spending by month' })
+        await expect(report).toContainText('$1,234,567,890.12')
+        await expect(report).toContainText('−$1,234,567,890.12')
+        await expect(report).toContainText('$1,234,567.89 back')
+        await expect(report).toContainText('−$2,469,135,780.24')
+        await expect(report).toContainText('Only Tue 15 Sept 2026 to Wed 30 Sept 2026') // the longest sentence about a part month
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))

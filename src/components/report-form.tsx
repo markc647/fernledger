@@ -117,6 +117,18 @@ export function SpendingForm({ defaults }: { defaults?: ReportSearch }) {
   )
 }
 
+/** The income-vs-spending-by-month Report's form (spec story 95). */
+export function IncomeVsSpendingForm({ defaults }: { defaults?: ReportSearch }) {
+  return (
+    <ReportForm
+      name="Income vs spending by month"
+      action="/reports/income-vs-spending"
+      defaults={defaults}
+      note="A Report has one row for each month in your dates, with the income, the spending and the difference between them, and the totals above."
+    />
+  )
+}
+
 /** The balances-over-time Report's form (spec story 96). */
 export function BalancesForm({ defaults }: { defaults?: ReportSearch }) {
   return <ReportForm name="Balances over time" action="/reports/balances" defaults={defaults} note="A Report has one balance for the end of each month, with the balance when your dates begin and when they end." />

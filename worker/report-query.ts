@@ -17,3 +17,11 @@ export const reportRangeOfAll = { ...reportRange, accountId: z.optional(reportRa
 
 /** The last check of a Report's query: `from` is not after `to`. A refusal names `to`. */
 export const datesInOrder = z.refine<{ from: string; to: string }>((q) => q.from <= q.to, { path: ['to'] })
+
+const ACCOUNT_EXISTS = 'SELECT id FROM accounts WHERE id = ?'
+
+/**
+ * Whether a Report that was asked about one Account (`accountId` set) must be a 404: that Account does not exist, so the Report is not mistaken for an Account that
+ * had nothing in the dates. One D1 query, and none when the Report is for every Account.
+ */
+export const accountMissing = async (db: D1Database, { accountId }: { accountId?: number }) => accountId !== undefined && !(await db.prepare(ACCOUNT_EXISTS).bind(accountId).first())

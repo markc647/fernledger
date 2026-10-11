@@ -25,6 +25,12 @@ export function budgetStatus(budgetCents: number, spentCents: number): BudgetSta
 /** What Uncategorised is called where it is a row of Spending, so a reader knows money in with no Category yet is in it. */
 export const UNCATEGORISED_SPENDING = 'Uncategorised (includes money in not yet given a Category)'
 
+/** What is left out of Spending, in the Dashboard's words. The Reports of Spending say it before their figures and again in the heading of each table, so every printed page says it. */
+export const NOT_COUNTED = "Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted."
+
+/** What a Report of Spending and Income together leaves out: the same, except that Income is what it is about. */
+export const NOT_COUNTED_AS_SPENDING_OR_INCOME = "Transfers between your own Accounts, Pending Transactions and Loans aren't counted."
+
 /** What a Category spent in two parts, so the amount can be kept in one piece and "back" left free to wrap: "$55.50", or "$15.00" with `back` when more came back than went out (a refund). Never a minus sign for spending. */
 export const spentParts = (spentCents: number) => ({ amount: formatBalance(Math.abs(spentCents)), back: spentCents < 0 })
 

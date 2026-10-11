@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { AppEnv } from './app-env'
 import { balancesReportQuery, readBalancesReport } from './report-balances'
+import { incomeVsSpendingQuery, readIncomeVsSpending } from './report-income-vs-spending'
 import { readSpendingReport, spendingReportQuery } from './report-spending'
 import { buildReportPage, pageOf, reportQuery, toReportQuery, type ReportRow } from './report-transactions'
 import { validate } from './validate'
@@ -21,6 +22,13 @@ export const reports = new Hono<AppEnv>()
   .get('/spending', validate('query', spendingReportQuery), async (c) => {
     const { accountId, from, to } = c.req.valid('query')
     const report = await readSpendingReport(c.env.DB, { from, to, ...(accountId === undefined ? {} : { accountId: Number(accountId) }) })
+    return report ? c.json(report) : c.json({ error: 'Not found' }, 404)
+  })
+  // Income and Spending in each month of the dates, for every Account or the one named (spending.ts's `rollUp`, as the Spending by Category Report). One request
+  // however many Accounts there are.
+  .get('/income-vs-spending', validate('query', incomeVsSpendingQuery), async (c) => {
+    const { accountId, from, to } = c.req.valid('query')
+    const report = await readIncomeVsSpending(c.env.DB, { from, to, ...(accountId === undefined ? {} : { accountId: Number(accountId) }) })
     return report ? c.json(report) : c.json({ error: 'Not found' }, 404)
   })
   // Balances over time for one Account: its balance history (worker/balances.ts) at the end of each month. One request is one
