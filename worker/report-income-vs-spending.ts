@@ -19,7 +19,7 @@ export const incomeVsSpendingQuery = z.object(reportRangeOfAll).check(datesInOrd
 /**
  * What came in and what was spent in one NZ month ("2026-10"), in integer cents. `incomeCents` is Income (money in less money out, of the Income Categories) and
  * `spendingCents` is Spending (money out less money in, of the Spending Categories and Uncategorised); either is below zero when the other way round.
- * `differenceCents` is the first less the second: below zero when more was spent than came in.
+ * `differenceCents` (the Report's "Difference") is the first less the second: below zero when more was spent than came in.
  */
 export type MonthFigures = { month: string; incomeCents: number; spendingCents: number; differenceCents: number }
 

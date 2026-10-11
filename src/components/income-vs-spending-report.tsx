@@ -45,7 +45,7 @@ const columns = (from: string, to: string): Column<MonthFigures>[] => [
       </span>
     ),
   },
-  { key: 'difference', header: 'Income less spending', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.differenceCents} /> },
+  { key: 'difference', header: 'Difference', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.differenceCents} /> },
 ]
 
 /** What a reader needs before the figures: what Income and Spending are, and what is not counted. */
@@ -58,6 +58,7 @@ function AboutIncomeVsSpending() {
       <p className="mt-1">Income is what the Income Categories brought in each month, less what went out of them. A negative amount means more went out than came in.</p>
       <p className="mt-1">Spending is what the Spending Categories took out, less money back, such as a refund. A “back” amount is taken off the total.</p>
       <p className="mt-1">Uncategorised counts as spending, so money in that has no Category yet comes off it.</p>
+      <p className="mt-1">The difference is income less spending, so it is below zero when more was spent than came in.</p>
       <p className="mt-1">{NOT_COUNTED_AS_SPENDING_OR_INCOME}</p>
     </section>
   )
@@ -94,7 +95,7 @@ export function IncomeVsSpendingReport({ report, accounts }: { report: IncomeVsS
               <dd className="text-end font-medium">
                 <Spent cents={totals.spendingCents} />
               </dd>
-              <dt className="border-t pt-1 font-semibold">Income less spending</dt>
+              <dt className="border-t pt-1 font-semibold">Difference</dt>
               <dd className="border-t pt-1 text-end">
                 <Amount cents={totals.differenceCents} />
               </dd>

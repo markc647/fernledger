@@ -150,10 +150,11 @@ export function ResponsiveTable<Row>({
           {rows.map((row) => (
             <li key={getRowKey(row)} className="rounded-xl border bg-card p-4 text-card-foreground">
               <dl className="grid grid-cols-1 gap-2">
+                {/* A label and a value that don't fit side by side (a large amount that keeps its digits together, beside a long label, at the largest text size on a phone) stack, the label first, rather than push the page wider. */}
                 {columns.map((column) => (
-                  <div key={column.key} className="flex items-start justify-between gap-4">
+                  <div key={column.key} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                     <dt className="shrink-0 text-muted-foreground">{column.header}</dt>
-                    <dd className="min-w-0 text-end break-words">{column.cell(row)}</dd>
+                    <dd className="ml-auto min-w-0 text-end break-words">{column.cell(row)}</dd>
                   </div>
                 ))}
               </dl>

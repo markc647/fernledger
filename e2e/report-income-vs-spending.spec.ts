@@ -243,7 +243,7 @@ test.describe('on screen', () => {
   }
   const expectedTotals = (figures: Figures) => {
     const [income, spending] = totalOf(figures)
-    return ['Total income', money(income), 'Total spending', spent(spending), 'Income less spending', signedMoney(income - spending)]
+    return ['Total income', money(income), 'Total spending', spent(spending), 'Difference', signedMoney(income - spending)]
   }
 
   test('has the title block, what is counted, the totals, and a row for each month of the year, with nothing that is not Spending or Income in it', async ({ page, context, request, baseURL }, testInfo) => {
@@ -268,11 +268,12 @@ test.describe('on screen', () => {
     await expect(about).toContainText('Income is what the Income Categories brought in each month, less what went out of them.')
     await expect(about).toContainText('Spending is what the Spending Categories took out, less money back, such as a refund. A “back” amount is taken off the total.')
     await expect(about).toContainText('Uncategorised counts as spending, so money in that has no Category yet comes off it.')
+    await expect(about).toContainText('The difference is income less spending, so it is below zero when more was spent than came in.')
     await expect(about).toContainText(NOT_COUNTED_AS_SPENDING_OR_INCOME)
 
     expect(await totalsOf(page)).toEqual(expectedTotals(ALL))
-    expect(await totalsOf(page)).toEqual(['Total income', '$8,999.50', 'Total spending', '$144.50', 'Income less spending', '+$8,855.00']) // the same, written out
-    await expect(tableOf(page).getByRole('columnheader')).toHaveText(['Month', 'Income', 'Spending', 'Income less spending'])
+    expect(await totalsOf(page)).toEqual(['Total income', '$8,999.50', 'Total spending', '$144.50', 'Difference', '+$8,855.00']) // the same, written out
+    await expect(tableOf(page).getByRole('columnheader')).toHaveText(['Month', 'Income', 'Spending', 'Difference'])
     // A row for every month in the dates, oldest first, quiet ones too: a month with only a Transfer or a loan is a row of zeros, not a gap.
     expect(await rowsOf(page)).toEqual(ALL.map((figures, i) => cells(d.year, i, figures)))
     expect((await rowsOf(page))[0]).toEqual([`January ${d.year}`, '$3,000.00', '$150.00', '+$2,850.00'])
@@ -300,7 +301,7 @@ test.describe('on screen', () => {
     await page.goto(address(savingsId, `${d.year}-01-01`, `${d.year}-12-31`))
     await expect(article(page).locator('header')).toContainText(`Account: ${d.savings.name} (${d.savings.number})`)
     expect(await rowsOf(page)).toEqual(SAVINGS.map((figures, i) => cells(d.year, i, figures))) // the $200.00 that came in is a Transfer: March is zeros
-    expect(await totalsOf(page)).toEqual(['Total income', '$1.50', 'Total spending', '$20.00', 'Income less spending', '−$18.50'])
+    expect(await totalsOf(page)).toEqual(['Total income', '$1.50', 'Total spending', '$20.00', 'Difference', '−$18.50'])
   })
 
   test('adds up only the dates asked for, both ends included, and says which part of a month at each end it counted', async ({ page, context, baseURL }, testInfo) => {
@@ -316,7 +317,7 @@ test.describe('on screen', () => {
     expect(rows[1]).toEqual(cells(d.year, 1, ALL[1]!)) // a whole month, with no note
     expect(rows[2]).toEqual(cells(d.year, 2, ALL[2]!))
     expect(rows[3]).toEqual([`April ${d.year} Only ${dateText(`${d.year}-04-01`)} to ${dateText(`${d.year}-04-20`)}`, '$3,000.00', '$4.00', '+$2,996.00'])
-    expect(await totalsOf(page)).toEqual(['Total income', '$6,000.00', 'Total spending', '$169.50', 'Income less spending', '+$5,830.50'])
+    expect(await totalsOf(page)).toEqual(['Total income', '$6,000.00', 'Total spending', '$169.50', 'Difference', '+$5,830.50'])
 
     // One day: its month, counting only that day.
     await page.goto(address(null, `${d.year}-01-20`, `${d.year}-01-20`))
@@ -334,7 +335,7 @@ test.describe('on screen', () => {
       [`July ${d.year}`, '$0.00', '$0.00', '$0.00'],
       [`August ${d.year}`, '$0.00', '$25.00 back', '+$25.00'],
     ])
-    expect(await totalsOf(page)).toEqual(['Total income', '−$2.00', 'Total spending', '$25.00 back', 'Income less spending', '+$23.00'])
+    expect(await totalsOf(page)).toEqual(['Total income', '−$2.00', 'Total spending', '$25.00 back', 'Difference', '+$23.00'])
   })
 
   test('says there was no income or spending, and shows no table or totals, for dates with none', async ({ page, context, baseURL }, testInfo) => {
@@ -387,7 +388,7 @@ test.describe('on screen', () => {
     const cards = article(page).getByRole('list', { name: 'Income and spending by month' }).getByRole('listitem')
     await expect(cards).toHaveCount(12)
     await expect(cards.first()).toContainText(`January ${d.year}`)
-    for (const [label, value] of [['Income', '$3,000.00'], ['Spending', '$130.00'], ['Income less spending', '+$2,870.00']]) {
+    for (const [label, value] of [['Income', '$3,000.00'], ['Spending', '$130.00'], ['Difference', '+$2,870.00']]) {
       await expect(cards.first()).toContainText(label!)
       await expect(cards.first()).toContainText(value!)
     }
@@ -495,12 +496,12 @@ test.describe('printed', () => {
     const [income, spending] = totalOf(EVERYDAY)
     expect(all).toContain(`Total income ${money(income)}`)
     expect(all).toContain(`Total spending ${spent(spending)}`)
-    expect(all).toContain(`Income less spending ${signedMoney(income - spending)}`)
+    expect(all).toContain(`Difference ${signedMoney(income - spending)}`)
     expectPageNumbers(pages)
     expectBareMargins(pages)
     expectNoTypeUnder12pt(pages, 50)
     // The table's heading, with what the Report is, who generated it and what is not counted, is on every page that has the table.
-    const withTable = expectIdentityOnEveryPage(pages, 'Income less spending', `${TITLE} – ${NAME} – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`, 1)
+    const withTable = expectIdentityOnEveryPage(pages, 'Difference', `${TITLE} – ${NAME} – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`, 1)
     for (const p of withTable) expect(squash(textOf(p))).toContain(squash(NOT_COUNTED_AS_SPENDING_OR_INCOME))
   })
 
@@ -550,7 +551,7 @@ test.describe('printed over several pages', () => {
     const withRows = pages.filter((p) => /(January|February|March|April|May|June|July|August|September|October|November|December) 20\d\d /.test(textOf(p)))
     expect(withRows.length).toBeGreaterThanOrEqual(3)
     // Headings come back on every page the table runs onto, not only the first.
-    for (const p of withRows) for (const heading of ['Month', 'Income', 'Spending', 'Income less spending']) expect(p.text.map((t) => t.str), `${heading} on page ${pages.indexOf(p) + 1}`).toContain(heading)
+    for (const p of withRows) for (const heading of ['Month', 'Income', 'Spending', 'Difference']) expect(p.text.map((t) => t.str), `${heading} on page ${pages.indexOf(p) + 1}`).toContain(heading)
 
     // Every month is on exactly one page, as one row: its name and its three figures.
     const all = textOf({ width: 0, height: 0, text: pages.flatMap((p) => p.text) })
@@ -560,7 +561,7 @@ test.describe('printed over several pages', () => {
   test('says what the Report is, which Accounts and dates, who generated it and when, and what is not counted, at the top of every page the table runs onto', async ({ page }) => {
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     // The Admin's title comes through as typed, quote and backslash too; the heading says "All Accounts", not each of them on every page.
-    const withRows = expectIdentityOnEveryPage(pages, 'Income less spending', `${TITLE} – ${NAME} – All Accounts – ${dateText(`${FROM_YEAR}-01-01`)} to ${dateText(`${FROM_YEAR + YEARS - 1}-12-31`)}`, 3)
+    const withRows = expectIdentityOnEveryPage(pages, 'Difference', `${TITLE} – ${NAME} – All Accounts – ${dateText(`${FROM_YEAR}-01-01`)} to ${dateText(`${FROM_YEAR + YEARS - 1}-12-31`)}`, 3)
     for (const p of withRows) expect(squash(textOf(p)), `page ${pages.indexOf(p) + 1}`).toContain(squash(NOT_COUNTED_AS_SPENDING_OR_INCOME))
   })
 
