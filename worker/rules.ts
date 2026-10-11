@@ -144,6 +144,7 @@ export const rules = new Hono<AppEnv>()
 
     // Only over the Rule that was read, still in use and with the criteria it was read with (`IS` is `=` that also matches NULL): another request can remove or change it
     // between the read and the write, and the entry must not say it changed from what it no longer was. The UPDATE is the last statement, which `onlyIfChanged` looks at.
+    // Whether it marks a Transfer is not compared: a Rule has a Category or marks a Transfer and never both (migrations/1301_rules.sql), so the Category says it.
     const [, changed] = await recordChange(
       db,
       [
@@ -151,7 +152,7 @@ export const rules = new Hono<AppEnv>()
         db
           .prepare(
             `UPDATE rules SET text_contains = ?1, bank_type = ?2, direction = ?3, min_cents = ?4, max_cents = ?5, category_id = ?6, is_transfer = ?7
-             WHERE id = ?8 AND removed_at IS NULL AND text_contains IS ?9 AND bank_type IS ?10 AND direction IS ?11 AND min_cents IS ?12 AND max_cents IS ?13 AND category_id IS ?14 AND is_transfer IS ?15`,
+             WHERE id = ?8 AND removed_at IS NULL AND text_contains IS ?9 AND bank_type IS ?10 AND direction IS ?11 AND min_cents IS ?12 AND max_cents IS ?13 AND category_id IS ?14`,
           )
           .bind(
             criteria.textContains,
@@ -168,7 +169,6 @@ export const rules = new Hono<AppEnv>()
             rule.minCents,
             rule.maxCents,
             rule.categoryId,
-            rule.transfer ? 1 : 0,
           ),
       ],
       { actor: c.var.member, type: 'rule', summary: `Changed a Rule: ${describe(next)}`, before: record(rule), after: record(next), onlyIfChanged: true },

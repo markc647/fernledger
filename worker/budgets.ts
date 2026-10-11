@@ -83,9 +83,9 @@ export const budgets = new Hono<AppEnv>()
   })
 
 /**
- * The statement that sets a Budget, only if what the handler read still holds: the Category is a Spending Category in use, the latest row on or before the month is
- * the one that was read (its month and its amount; null for none), and, when the month has no row of its own yet, there is room for one (the count is of every
- * row, and a row is never removed). Another request can land between the reads and the write. When it holds nothing is written and, with `onlyIfChanged`, nothing
+ * The statement that sets a Budget, only if what the handler read still holds: the Category is a Spending Category in use, the Budget in effect in the month is still the
+ * amount that was read (null for none, whether it never had one or it ended), and, when the month had no row of its own when it was read, there is room for one (the count is
+ * of every row, and a row is never removed). The same amount in another month's row is the same Budget in effect, and a true "before". Another request can land between the reads and the write. When it holds nothing is written and, with `onlyIfChanged`, nothing
  * is logged. It is the last statement of its batch, which is what `onlyIfChanged` looks at.
  */
 const putBudget = (db: D1Database, { categoryId, effectiveFrom, amountCents, previous }: { categoryId: number; effectiveFrom: string; amountCents: number | null; previous: Previous | null }) =>
@@ -94,7 +94,6 @@ const putBudget = (db: D1Database, { categoryId, effectiveFrom, amountCents, pre
       `INSERT INTO budgets (category_id, effective_from_month, amount_cents)
        SELECT ?1, ?2, ?3
        WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?1 AND removed_at IS NULL AND kind = 'spending')
-         AND (SELECT effective_from_month FROM budgets WHERE category_id = ?1 AND effective_from_month = ${latestMonth('?1', '?2')}) IS ?4
          AND (SELECT amount_cents FROM budgets WHERE category_id = ?1 AND effective_from_month = ${latestMonth('?1', '?2')}) IS ?5
          AND (?4 IS ?2 OR (SELECT COUNT(*) FROM budgets) < ?6)
        ON CONFLICT (category_id, effective_from_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
@@ -118,6 +117,7 @@ async function whyUnwritten(
     .bind(categoryId, effectiveFrom)
     .first<Previous>()
   if ((now?.amountCents ?? null) === amountCents) return 'already'
-  const asRead = (now?.effectiveFrom ?? null) === (previous?.effectiveFrom ?? null) && (now?.amountCents ?? null) === (previous?.amountCents ?? null)
+  // The amount as it was read and no row of its own in the month to replace (one may have been added meanwhile, which a retry would replace): it was the last place.
+  const asRead = (now?.amountCents ?? null) === (previous?.amountCents ?? null) && now?.effectiveFrom !== effectiveFrom
   return asRead ? 'full' : 'changed'
 }

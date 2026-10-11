@@ -377,6 +377,32 @@ describe('when another request lands between this one\'s reads and its write', (
     expect(await changeLog()).toHaveLength(1)
   })
 
+  it('does not set a Budget over an amount changed meanwhile in the same month, because its "before" would be the old amount', async () => {
+    await mustSet('Groceries', '2026-10', 80_000)
+
+    const res = await interrupted('Groceries', { effectiveFrom: '2026-10', amountCents: 90_000 }, setTo('Groceries', '2026-10', 85_000))
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+    expect(await budgetRows()).toEqual([{ category_id: ids['Groceries'], effective_from_month: '2026-10', amount_cents: 85_000 }])
+    expect((await changeLog()).map((e) => e.summary)).toEqual(['Set the Budget for Groceries to $800.00 a month from October 2026', 'Changed the Budget for Groceries from $800.00 to $850.00 a month from October 2026'])
+  })
+
+  it('sets a Budget when the Budget in effect came from another month meanwhile but is the same amount, because its "before" is still true', async () => {
+    await mustSet('Groceries', '2026-08', 80_000)
+    // Read as $800 from August; by the write it is $800 from October, after a dip in September.
+    const dipAndBack = async () => {
+      await set('Groceries', '2026-09', 70_000)
+      await set('Groceries', '2026-10', 80_000)
+    }
+
+    const res = await interrupted('Groceries', { effectiveFrom: '2026-10', amountCents: 90_000 }, dipAndBack)
+
+    expect(res.status).toBe(200)
+    expect(await budgetRows()).toHaveLength(3)
+    expect((await changeLog()).at(-1)).toMatchObject({ summary: 'Changed the Budget for Groceries from $800.00 to $900.00 a month from October 2026' })
+  })
+
   it('leaves a Budget for a later month alone: it is a different row, and the Budget in effect that month is as it was', async () => {
     const res = await interrupted('Groceries', { effectiveFrom: '2026-08', amountCents: 70_000 }, setTo('Groceries', '2026-10', 90_000))
 

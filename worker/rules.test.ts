@@ -225,6 +225,43 @@ describe('when another request lands between this one\'s reads and its write', (
       expect(await entries()).toEqual(['Changed a Rule: text contains "woolworths", category Groceries'])
     })
 
+    // The UPDATE names every criterion it read, so a change to any one of them is caught. Each is changed alone, straight in the table, so nothing else moves with it.
+    it.each([
+      ['the text it looks for', 'text_contains', "'woolworths'"],
+      ['the bank type', 'bank_type', "'DIRECT DEBIT'"],
+      ['the direction', 'direction', "'in'"],
+      ['the smallest amount', 'min_cents', '2000'],
+      ['the largest amount', 'max_cents', '30000'],
+      ['the Category', 'category_id', "(SELECT id FROM categories WHERE name = 'Fuel')"],
+    ])('is not written over %s changed meanwhile, and writes no entry', async (_what, column, value) => {
+      const groceries = await categoryId('Groceries')
+      const id = await addRule({ textContains: 'wool', bankType: 'EFTPOS', direction: 'out', minCents: 1000, maxCents: 20_000, categoryId: groceries })
+      await settle()
+
+      const res = await callWhileInterrupted(`/api/rules/${id}`, 'PUT', { textContains: 'countdown', bankType: 'EFTPOS', direction: 'out', minCents: 1000, maxCents: 20_000, categoryId: groceries }, () =>
+        env.DB.prepare(`UPDATE rules SET ${column} = ${value} WHERE id = ?`).bind(id).run(),
+      )
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect((await env.DB.prepare('SELECT text_contains FROM rules WHERE id = ?').bind(id).first<{ text_contains: string }>())!.text_contains).toBe(column === 'text_contains' ? 'woolworths' : 'wool')
+      expect(await entries()).toEqual([])
+    })
+
+    // A Rule has a Category or marks a Transfer, never both (a CHECK on the table), so changing which is one change to the Category column as well.
+    it('is not written over a Rule that was a Transfer and got a Category meanwhile, and writes no entry', async () => {
+      const id = await addRule({ textContains: 'wool', transfer: true })
+      await settle()
+
+      const res = await callWhileInterrupted(`/api/rules/${id}`, 'PUT', { textContains: 'countdown', transfer: true }, () =>
+        env.DB.prepare("UPDATE rules SET category_id = (SELECT id FROM categories WHERE name = 'Fuel'), is_transfer = 0 WHERE id = ?").bind(id).run(),
+      )
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await entries()).toEqual([])
+    })
+
     it('does not overwrite a Rule changed meanwhile, writes no entry, and says to try again', async () => {
       const groceries = await categoryId('Groceries')
       const id = await addRule({ textContains: 'wool', categoryId: groceries })

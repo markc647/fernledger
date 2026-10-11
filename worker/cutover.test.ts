@@ -46,6 +46,8 @@ const stored = async (number = savings) =>
       .all<{ date: string; id: string; source: string }>()
   ).results
 const storedIds = async (number = savings) => (await stored(number)).map((t) => t.id)
+/** The ID of the Account's Transaction with this bank unique ID. */
+const rowId = async (uniqueId: string, accountId: number) => (await env.DB.prepare('SELECT id FROM transactions WHERE account_id = ? AND bank_unique_id = ?').bind(accountId, uniqueId).first<{ id: number }>())!.id
 
 /** Puts `count` Import-sourced rows straight into an Account (bypassing the API), to reach the limits. */
 const seedImportRows = (id: number, count: number) =>
@@ -459,11 +461,17 @@ describe('POST /api/imports/clear-history', () => {
       expect(await changeLog()).toMatchObject([{ summary: `Removed 5000 imported rows from ${savings} to replace its imported history (201 left)` }])
     })
 
-    it('keeps the balances and holds nothing when rows before the slice went meanwhile, because it is another slice now (409)', async () => {
+    // Each of the four statements checks the slice, so each has to be shown to: here a row before the slice goes (SEED2), which moves the slice on by one, to include the first
+    // row it was to leave (SEED5000), and every effect of a step that took the slice it counted would show: balances gone, a Note held, a partner let go, rows removed.
+    it('keeps the balances, holds nothing, lets go of no partner and removes nothing when rows before the slice went meanwhile, because it is another slice now (409)', async () => {
       await sendChunk([row('OLD1', '2026-09-01')])
+      await sendChunk([row('OTHER1', '2026-09-01')], { number: current })
       const id = await accountId()
       await seedImportRows(id, 5200)
       await env.DB.prepare("UPDATE transactions SET note = 'Keep me' WHERE bank_unique_id = 'SEED1'").run()
+      // SEED5000 is the 5,001st Import-sourced row by ID: the first one the step leaves. OTHER1, in another Account, is paired with it.
+      const [edge, partner] = [await rowId('SEED5000', id), await rowId('OTHER1', await accountId(current))]
+      await env.DB.batch([env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(partner, edge), env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(edge, partner)])
       const balances = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM balance_checks WHERE account_id = ? AND source = ?').bind(id, 'import').first<{ n: number }>())!.n
       const before = await balances()
       expect(before).toBeGreaterThan(0)
@@ -473,8 +481,11 @@ describe('POST /api/imports/clear-history', () => {
       const res = await callWhileInterrupted('/api/imports/clear-history', 'POST', { accountId: id }, dropOne)
 
       expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
       expect(await balances()).toBe(before)
       expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM carry_over WHERE account_id = ?').bind(id).first<{ n: number }>())!.n).toBe(0)
+      expect((await env.DB.prepare('SELECT transfer_of AS partnerOf FROM transactions WHERE id = ?').bind(partner).first<{ partnerOf: number | null }>())!.partnerOf).toBe(edge)
+      expect(await storedIds()).toHaveLength(5200) // OLD1 and SEED1 to SEED5200, less SEED2
     })
   })
 

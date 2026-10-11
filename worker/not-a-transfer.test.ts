@@ -288,6 +288,28 @@ describe('marking a pairing as Not a Transfer', () => {
     expect(await transferLog()).toEqual([])
   })
 
+  it('writes no entry, and marks nothing, when the Transaction was paired with another one in that instant, because the entry would name the wrong matching Transaction', async () => {
+    await wrongPair()
+    await importInto(BILLS, [row(DAY, 5000, 'EXAMPLE OTHER', 'IN2')])
+    const [out, was, now] = [await idOf('OUT'), await idOf('IN'), await idOf('IN2')]
+    // An Import paired OUT with IN2 instead, which lets go of IN.
+    const repair = () =>
+      env.DB.batch([
+        env.DB.prepare('UPDATE transactions SET transfer_of = NULL WHERE id = ?').bind(was),
+        env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(now, out),
+        env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(out, now),
+      ])
+
+    const res = await callWhileInterrupted(`/api/transactions/${out}/not-transfer`, 'POST', {}, repair)
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+    expect(await marker('OUT')).toBeNull()
+    expect(await marker('IN2')).toBeNull()
+    expect(await pairs()).toEqual([['OUT', 'IN2']])
+    expect(await transferLog()).toEqual([])
+  })
+
   it('writes no Change Log entry when the pairing moved on between reading it and writing, and says so', async () => {
     await wrongPair()
 

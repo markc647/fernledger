@@ -48,6 +48,8 @@ export async function callWhileInterrupted(path: string, method: string, body: u
   const request = new Request(`${origin}${path}`, { method, headers: { Cookie: 'fernledger_dev_as=admin', Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   const res = await worker.fetch!(request as never, { ...env, DB: db }, ctx)
   await waitOnExecutionContext(ctx)
+  // A test that interrupts nothing proves nothing: if the handler's write stopped ending with the Change Log insert, say so rather than pass.
+  if (!interrupted) throw new Error('callWhileInterrupted: the request never ran a batch ending in the Change Log insert, so nothing was interrupted')
   return res
 }
 
