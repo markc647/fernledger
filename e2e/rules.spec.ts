@@ -146,6 +146,7 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
     await expect(page.getByLabel('Amount from ($)')).toHaveValue('10.00')
     await page.getByLabel('What the Rule does').selectOption({ label: 'Mark as a Transfer' })
     await expect(page.getByText('is a Transfer even if no matching Transaction is found in another Account')).toBeVisible()
+    await expect(page.getByText("An Override outranks this Rule too: a Transaction with an Override counts under the Override's Category and is not a Transfer.")).toBeVisible() // as Not a Transfer does
     await expect(page.getByRole('button', { name: 'Save Rule' })).toBeEnabled()
     await noAxeViolations(page)
     await page.getByRole('button', { name: 'Save Rule' }).click()
