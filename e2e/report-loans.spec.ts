@@ -43,6 +43,8 @@ test.describe.configure({ mode: 'serial' })
 //   and 2015 to 2020, Transfers 2011, the Transactions page 2012, the Change Log 2017, Import 2018 and 2019), and a Transaction this old is last in an unfiltered list, never on
 //   its first page.
 // - Its Accounts have their own numbers, and a bank balance of nothing on 31 December, so their balances are nothing before and after the three months.
+// - Its names are ones no other spec looks for by a part: Categories.spec finds the starter Category by /^Loans/, so nothing here begins with "Loans" (the Accounts and the wages
+//   are "Lending ...", the loans "Loan – Name", which has no "s"), and Groceries and Wages and salary are not part of any name.
 // In the other direction, a Report of all the Loans Categories lists what other specs made too, so a test of it looks for this spec's loans by name, and one that needs exact
 // totals stubs the answer. Payees avoid "EXAMPLE", which other specs' Rules look for.
 const dataFor = (project: string) => {
@@ -52,13 +54,13 @@ const dataFor = (project: string) => {
   return {
     project,
     year: light ? 2002 : 2003,
-    parent: { number: light ? '99-9999-9999999-48' : '99-9999-9999999-68', name: `Loans parent ${project}` },
-    child: { number: light ? '99-9999-9999999-49' : '99-9999-9999999-69', name: `Loans child ${project}` },
+    parent: { number: light ? '99-9999-9999999-48' : '99-9999-9999999-68', name: `Lending parent ${project}` },
+    child: { number: light ? '99-9999-9999999-49' : '99-9999-9999999-69', name: `Lending child ${project}` },
     alice,
     ben,
     aliceLoan: `Loan – ${alice}`,
     benLoan: `Loan – ${ben}`,
-    wages: `Loans spec wages ${project}`,
+    wages: `Lending spec wages ${project}`,
   }
 }
 
