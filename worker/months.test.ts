@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isMonth, monthEnd, monthLabel, monthsBefore, monthStart, nextMonth, nzMonth } from './months'
+import { isMonth, monthCount, monthEnd, monthLabel, monthsBefore, monthStart, nextMonth, nzMonth } from './months'
 
 describe('isMonth', () => {
   it.each(['2026-10', '2000-01', '2100-12', '2026-02'])('accepts %s', (value) => {
@@ -55,6 +55,19 @@ describe('monthsBefore', () => {
     ['2026-03', 25, '2024-02'],
   ])('is the month %s less %i: %s', (month, count, before) => {
     expect(monthsBefore(month, count)).toBe(before)
+  })
+})
+
+describe('monthCount', () => {
+  it.each([
+    ['2026-10', '2026-10', 1],
+    ['2026-10', '2026-12', 3],
+    ['2026-11', '2027-02', 4], // across a year end
+    ['2026-01', '2026-12', 12],
+    ['2024-01', '2025-12', 24],
+    ['2000-01', '2100-12', 1212],
+  ])('is the months %s to %s, both included: %i', (first, last, count) => {
+    expect(monthCount(first, last)).toBe(count)
   })
 })
 

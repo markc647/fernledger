@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { AppEnv } from './app-env'
 import { balancesReportQuery, readBalancesReport } from './report-balances'
+import { budgetReportQuery, readBudgetReport } from './report-budget'
 import { readSpendingReport, spendingReportQuery } from './report-spending'
 import { buildReportPage, pageOf, reportQuery, toReportQuery, type ReportRow } from './report-transactions'
 import { validate } from './validate'
@@ -30,3 +31,6 @@ export const reports = new Hono<AppEnv>()
     const report = await readBalancesReport(c.env.DB, { accountId: Number(accountId), from, to })
     return report ? c.json(report) : c.json({ error: 'Not found' }, 404)
   })
+  // Each Spending Category's Budget against what it spent, for every NZ month the dates touch (worker/report-budget.ts). A Budget is for all Accounts
+  // together, so this takes no Account. One request whatever the months, at most MAX_REPORT_MONTHS of them.
+  .get('/budget-vs-actual', validate('query', budgetReportQuery), async (c) => c.json(await readBudgetReport(c.env.DB, c.req.valid('query'))))

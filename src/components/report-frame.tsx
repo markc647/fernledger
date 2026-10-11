@@ -13,15 +13,16 @@ const Identity = createContext<ReportIdentity | null>(null)
  * The heading to give each printed table (`ResponsiveTable`'s `printHeading`), for the Account it lists: two lines, "<app> –
  * <Report> – <Account> – <dates>" and "Generated … by …". A browser repeats a table's heading at the top of every page the
  * table runs onto, so every printed page says what it is and who made it, in every browser, with no help from page margins.
- * Null outside a Report.
+ * `also` is a third line for what a reader of a loose page must know about the figures, such as what is not counted. Null outside a Report.
  */
 export function useReportIdentity() {
   const identity = useContext(Identity)
-  return (accounts: string) =>
+  return (accounts: string, also?: string) =>
     identity && (
       <>
         <span className="block font-semibold">{reportHeading({ ...identity, accounts })}</span>
         <span className="block">{identity.generated}</span>
+        {also && <span className="block">{also}</span>}
       </>
     )
 }

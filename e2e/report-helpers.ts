@@ -1,5 +1,5 @@
 import { AxeBuilder } from '@axe-core/playwright'
-import type { APIRequestContext, Locator, Page } from '@playwright/test'
+import type { APIRequestContext, BrowserContext, Locator, Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { textOf, type PdfPage } from './pdf-text'
 
@@ -24,6 +24,16 @@ export const dateText = (iso: string) => {
   return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`
 }
 
+/** An amount of money as the app writes it: "$1,234.56", or "−$12.00" below zero. */
+export const money = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2 })}`
+/** What a Spent cell says: no sign, and "back" after an amount that is less than nothing. */
+export const spent = (cents: number) => `${money(Math.abs(cents))}${cents < 0 ? ' back' : ''}`
+
+/** What the Dashboard calls Uncategorised in a table, which is what a row of a Report of Spending says too. */
+export const UNCATEGORISED = 'Uncategorised (includes money in not yet given a Category)'
+/** What a Report of Spending says is not counted, in the Dashboard's words; the table's heading repeats it on every printed page. */
+export const NOT_COUNTED = "Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted."
+
 /** A line of a PDF's text with every space taken out, for "contains" checks that must not care where a long line wrapped (even inside an Account's number at a hyphen). */
 export const squash = (text: string) => text.replace(/\s+/g, '')
 
@@ -41,6 +51,67 @@ export function restoreAppTitleAfterEach() {
 }
 export const setTitle = async (request: APIRequestContext, baseURL: string | undefined, app_title: string) =>
   expect((await request.patch('/api/settings', { headers: { Origin: baseURL! }, data: { app_title } })).ok()).toBe(true)
+
+// ---------------------------------------------------------------------------------------------------------------
+// Seeding: Categories, Imports and Overrides through the API, as the Admin makes them. The caller has signed in as the Admin (`signInAs(context, 'admin')`).
+// Every one is safe to repeat, so a run against a database an earlier run left behind finds what it made.
+
+/** A Category of the spec's own: the one already there with that name, else a new one of that kind. Its ID. */
+export async function ensureCategory(context: BrowserContext, baseURL: string, name: string, kind: 'spending' | 'income' | 'loans'): Promise<number> {
+  const existing = (await (await context.request.get('/api/categories')).json()) as { id: number; name: string }[]
+  const found = existing.find((c) => c.name === name)
+  if (found) return found.id
+  const res = await context.request.post('/api/categories', { headers: { Origin: baseURL }, data: { name, kind } })
+  expect(res.ok()).toBe(true)
+  return ((await res.json()) as { id: number }).id
+}
+
+/**
+ * A Transaction to import: its date, what the bank calls it (unique among a spec's rows, so it can be found again), its amount in cents (money out is negative), the name
+ * of the Category to Override it into, its own unique ID (else `importRows` makes one) and the cheque number an Import has for it.
+ */
+export type SeedRow = { date: string; payee: string; amountCents: number; category?: string; uniqueId?: string; chequeNumber?: string }
+
+/**
+ * Imports `rows` into `account` as one file: the whole of `year` unless `from` and `to` say otherwise (a spec that gives both needs no `year`), with a bank balance of
+ * nothing on the last day unless `ledger` says otherwise. A row has the unique ID it gives, else `${idPrefix}${index}`. An Import recognises rows it already holds.
+ */
+export async function importRows(
+  context: BrowserContext,
+  baseURL: string,
+  {
+    account,
+    rows,
+    idPrefix = '',
+    year,
+    from = `${year}-01-01`,
+    to = `${year}-12-31`,
+    ledger = { date: to, cents: 0 },
+  }: { account: { number: string; name: string }; rows: SeedRow[]; idPrefix?: string; year?: number; from?: string; to?: string; ledger?: { date: string; cents: number } },
+) {
+  const res = await context.request.post('/api/imports/chunks', {
+    headers: { Origin: baseURL },
+    data: {
+      account,
+      chunk: { index: 0, count: 1 },
+      file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from, to, ledgerBalance: { cents: ledger.cents, date: ledger.date } },
+      rows: rows.map((r, i) => ({ date: r.date, uniqueId: r.uniqueId ?? `${idPrefix}${i}`, tranType: 'EFTPOS', chequeNumber: r.chequeNumber ?? null, payee: r.payee, bankMemo: 'EFTPOS', amountCents: r.amountCents })),
+    },
+  })
+  expect(res.ok()).toBe(true)
+}
+
+/** Overrides each of `rows` that names a Category into it (`categories` gives the IDs by name), finding its Transaction in the Account by its payee. */
+export async function overrideCategories(context: BrowserContext, baseURL: string, { accountId, year, rows, categories }: { accountId: number; year: number; rows: SeedRow[]; categories: Record<string, number> }) {
+  const { transactions } = (await (await context.request.get(`/api/transactions?accountId=${accountId}&from=${year}-01-01&to=${year}-12-31&limit=200&count=false`)).json()) as { transactions: { id: number; description: string }[] }
+  expect(transactions).toHaveLength(rows.length)
+  for (const row of rows) {
+    if (!row.category) continue
+    const found = transactions.find((t) => t.description === row.payee)
+    expect(found, row.payee).toBeDefined()
+    expect((await context.request.put(`/api/transactions/${found!.id}/override`, { headers: { Origin: baseURL }, data: { categoryId: categories[row.category] } })).ok()).toBe(true)
+  }
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // The page under print media
@@ -165,8 +236,8 @@ export function expectNoTypeUnder12pt(pages: PdfPage[], atLeast: number) {
  * The lines that say what a Report is, which Account and dates, and who generated it and when, are at the top of every page that has some of its table (the pages
  * with `marker` in them, at least `atLeast` of them). They are in each page's own body, not its margins, so every browser prints them.
  */
-export function expectIdentityOnEveryPage(pages: PdfPage[], marker: string, identity: string, atLeast: number) {
-  const withRows = pages.filter((p) => textOf(p).includes(marker))
+export function expectIdentityOnEveryPage(pages: PdfPage[], marker: string | RegExp, identity: string, atLeast: number) {
+  const withRows = pages.filter((p) => (typeof marker === 'string' ? textOf(p).includes(marker) : marker.test(textOf(p))))
   expect(withRows.length).toBeGreaterThanOrEqual(atLeast)
   for (const p of withRows) {
     const text = squash(textOf(p))

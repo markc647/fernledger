@@ -30,6 +30,10 @@ export function nextMonth(month: string): string {
   return number === 12 ? `${String(year + 1).padStart(4, '0')}-01` : `${month.slice(0, 5)}${String(number + 1).padStart(2, '0')}`
 }
 
+/** How many months `first` to `last` take, both included (`2026-11` to `2027-02` is 4; one month is 1). */
+export const monthCount = (first: string, last: string) =>
+  (Number(last.slice(0, 4)) - Number(first.slice(0, 4))) * 12 + (Number(last.slice(5, 7)) - Number(first.slice(5, 7))) + 1
+
 /** The month `count` months before `month`, across the start of a year (`2026-02` less 3 is `2025-11`). */
 export function monthsBefore(month: string, count: number): string {
   const index = Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7)) - 1 - count

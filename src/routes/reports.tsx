@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { BalancesForm, SpendingForm, TransactionListingForm } from '@/components/report-form'
+import { BalancesForm, BudgetVsActualForm, SpendingForm, TransactionListingForm } from '@/components/report-form'
 
 export const Route = createFileRoute('/reports')({
   component: Reports,
@@ -40,6 +40,15 @@ function Reports() {
         <p className="mt-2">Each Account's balance at the end of every month in the dates you choose, with the balance when they begin and when they end, and any Balance Check differences.</p>
         <div className="mt-4">
           <BalancesForm />
+        </div>
+      </section>
+      <section aria-labelledby="budget-vs-actual" className="mt-8">
+        <h2 id="budget-vs-actual" className="text-xl font-semibold">
+          Budget vs actual
+        </h2>
+        <p className="mt-2">Each Category's Budget against what it spent, month by month, for the months your dates touch, with the months that have ended added together.</p>
+        <div className="mt-4">
+          <BudgetVsActualForm />
         </div>
       </section>
     </>

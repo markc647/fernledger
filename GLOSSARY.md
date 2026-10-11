@@ -120,6 +120,10 @@ _Avoid_: Migrate, restore, reapply
 A planned monthly Spending amount for a Spending Category, effective from a given month onward; unspent amounts do not carry over. Budget vs actual compares it each month with what the Category spent.
 _Avoid_: Limit, allowance, envelope
 
+**Budget vs actual**:
+A month's Budgets set against what the Spending Categories spent in it: each Category with a Budget that month, with its Budget, what it spent and where it stands (Under Budget, On Budget or Over Budget), then **Spending outside Budgets** (the Spending Categories with no Budget that month) and Uncategorised. The Summary shows this month's; the Budget vs actual Report shows every month of a range, for all Accounts together, and adds together only the months that have ended, because the month it is now has had part of its spending set against the whole of its Budget.
+_Avoid_: Variance, forecast
+
 ## Accountability
 
 **Change Log**:
@@ -131,7 +135,7 @@ What a Change Log entry changed, such as Settings, Import, Account, Category, Ru
 _Avoid_: Type on its own
 
 **Report**:
-A print-formatted view of Transactions, of each Account's balances, or of what each Spending Category spent, over a date range, which any Member can print or save as PDF.
+A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, or of Budget vs actual, over a date range, which any Member can print or save as PDF.
 _Avoid_: Statement, export
 
 **CSV export**:

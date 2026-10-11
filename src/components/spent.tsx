@@ -1,6 +1,5 @@
 import { spentParts } from '@/lib/budgets'
-
-const money = 'whitespace-nowrap tabular-nums [font-kerning:none]'
+import { MONEY_TEXT } from '@/lib/utils'
 
 /**
  * What a Category spent, from `Spending` as the Worker works it out (money out less money back): "$55.50", or "$15.00 back" when more came back than went out (a
@@ -11,7 +10,7 @@ export function Spent({ cents }: { cents: number }) {
   const { amount, back } = spentParts(cents)
   return (
     <>
-      <span className={money}>{amount}</span>
+      <span className={MONEY_TEXT}>{amount}</span>
       {back && ' back'}
     </>
   )

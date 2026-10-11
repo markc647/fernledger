@@ -44,6 +44,7 @@ export function ReportGate({
   search,
   form,
   noAccounts,
+  rangeProblem,
   children,
 }: {
   /** The Report's name, as its heading says it. */
@@ -53,12 +54,16 @@ export function ReportGate({
   form: ReactNode
   /** What to say when no Account has been imported yet, such as "There are no Accounts yet, so there is nothing to list." */
   noAccounts: string
+  /** What is wrong with dates that are in order, for this Report alone (such as "too many months"), said with the form like the dates being the wrong way round; null when nothing is. */
+  rangeProblem?: (from: string, to: string) => string | null
   children: (scope: ReportScope) => ReactNode
 }) {
   const accounts = useQuery(accountsQuery)
   if (accounts.error) return <p role="alert">Fernledger couldn't load the Accounts. Reload the page to try again.</p>
   if (!search.from || !search.to) return <Needs name={name} form={form} message="Choose the first and last dates this Report covers." />
   if (search.from > search.to) return <Needs name={name} form={form} alert message="The “To” date is before the “From” date. Change one of them to open the Report." />
+  const problem = rangeProblem?.(search.from, search.to)
+  if (problem) return <Needs name={name} form={form} alert message={problem} />
   if (!accounts.data) return <p role="status">Loading…</p>
   const selected = search.account === undefined ? accounts.data : accounts.data.filter((a) => a.id === search.account)
   if (selected.length === 0) {
