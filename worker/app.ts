@@ -20,6 +20,7 @@ import { rules } from './rules'
 import { SECURITY_HEADERS } from './security-headers'
 import { readSettings, rejectedFields, settingsPatch, updateSettings } from './settings'
 import { transactions } from './transactions'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Routes are chained (not `app.get(...)` on separate lines) so `AppType` carries them to the typed browser client.
 export const app = new Hono<AppEnv>()
@@ -56,7 +57,10 @@ export const app = new Hono<AppEnv>()
       if (parsed.success) return parsed.data
       return c.json({ error: 'Invalid settings', fields: rejectedFields(parsed.error.issues) }, 400)
     }),
-    async (c) => c.json(await updateSettings(c.env.DB, c.var.member, c.req.valid('json'))),
+    async (c) => {
+      const settings = await updateSettings(c.env.DB, c.var.member, c.req.valid('json'))
+      return settings ? c.json(settings) : c.json(CHANGED_MEANWHILE, 409)
+    },
   )
   .route('/api/accounts', accounts)
   .route('/api/balance-checks', balanceChecks)
