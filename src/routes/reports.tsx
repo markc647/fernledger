@@ -19,7 +19,7 @@ function Reports() {
         <h2 id="spending-by-category" className="text-xl font-semibold">
           Spending by Category
         </h2>
-        <p className="mt-2">What each Spending Category spent in the dates you choose, largest first, with Uncategorised on its own and the total. Transfers between your own Accounts, Loans and Income are left out.</p>
+        <p className="mt-2">What each Category spent in the dates you choose, the most spent first, with the total. Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted.</p>
         <div className="mt-4">
           <SpendingForm />
         </div>

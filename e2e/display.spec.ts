@@ -655,15 +655,14 @@ test.describe('zoom', () => {
         await page.route('**/api/reports/spending?**', (route) =>
           route.fulfill({
             json: {
-              accountId: null,
               from: '2026-09-01',
               to: '2026-10-31',
-              categories: [
-                { categoryId: 1, categoryName: 'Health and medical costs for the household and the long-term care fees'.padEnd(120, 'z'), cents: 123456789012 },
-                { categoryId: 2, categoryName: 'Groceries', cents: -123456789 },
-              ],
-              uncategorisedCents: -123456789012,
               totalCents: -123456789,
+              categories: [
+                { categoryId: 1, name: 'Health and medical costs for the household and the long-term care fees'.padEnd(120, 'z'), cents: 123456789012 },
+                { categoryId: 2, name: 'Groceries', cents: -123456789 },
+                { categoryId: null, name: 'Uncategorised', cents: -123456789012 },
+              ],
             },
           }),
         )
@@ -673,7 +672,7 @@ test.describe('zoom', () => {
         const report = page.getByRole('article', { name: 'Spending by Category' })
         await expect(report).toContainText('$1,234,567,890.12')
         await expect(report).toContainText('$1,234,567.89 back')
-        await expect(report).toContainText('Uncategorised')
+        await expect(report).toContainText('Uncategorised (includes money in not yet given a Category)') // the longest row name
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))

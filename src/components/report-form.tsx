@@ -112,7 +112,7 @@ export function SpendingForm({ defaults }: { defaults?: ReportSearch }) {
       name="Spending by Category"
       action="/reports/spending"
       defaults={defaults}
-      note="A Report has one row for each Category with Spending in your dates, largest first, and one for Uncategorised."
+      note="A Report has one row for each Category with spending in your dates, the most spent first, and one for Uncategorised when there is any."
     />
   )
 }

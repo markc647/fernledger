@@ -124,8 +124,8 @@ export const reportBalancesQuery = (accounts: { id: number; name: string; accoun
   })
 
 /**
- * The spending-by-Category Report's data: what each Spending Category spent over the range, for the one Account or, with none, all of
- * them. One request either way (worker/report-spending.ts). Read once and kept, as the other Reports are: a Report is a snapshot.
+ * The spending-by-Category Report's data: what each Category spent over the range, for the one Account or, with none, all of them, as the
+ * Dashboard's chart is told it (worker/report-spending.ts). One request either way. Read once and kept, as the other Reports are: a Report is a snapshot.
  */
 export const reportSpendingQuery = (accountId: number | undefined, from: string, to: string) =>
   queryOptions({

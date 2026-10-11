@@ -1,28 +1,43 @@
-import { AxeBuilder } from '@axe-core/playwright'
-import type { APIRequestContext, BrowserContext, Page } from '@playwright/test'
+import type { BrowserContext, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
+import {
+  dateText,
+  expectBareMargins,
+  expectBlackOnWhite,
+  expectIdentityOnEveryPage,
+  expectIdentityRow,
+  expectJustTheReport,
+  expectNoTextUnder12pt,
+  expectNoTypeUnder12pt,
+  expectOwnPage,
+  expectPageNumbers,
+  expectTitleBlock,
+  GENERATED,
+  noAxeViolations,
+  NOW,
+  restoreAppTitleAfterEach,
+  setTitle,
+  squash,
+  TITLE,
+} from './report-helpers'
 
 // Ticket 20: the spending-by-Category Report (spec story 93). It uses the Report frame of ticket 18, so it opens in a new window, says on its face
 // what it is, and prints with its table heading on every page. The Report's numbers are held to the Worker's spending totals in
 // worker/report-spending.test.ts; this file checks what a reader sees and what comes out of the printer: the page under print media, and the PDF it
 // makes (page count, the text on each page, the margins and the size of the type).
 
-const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
-const MEMBER_EMAIL = 'dev.member@example.com'
-const TITLE = `Mum's "family" finances \\ Report` // quote, apostrophe and backslash: the Admin can type any of them
-const NOW = new Date('2026-10-08T02:42:00.000Z') // 3:42 pm in NZ
-const GENERATED = `Generated Thu 8 Oct 2026 at 3:42 pm by ${MEMBER_EMAIL}`
-
 test.describe.configure({ mode: 'serial' })
 
-// The light and dark projects share one local database, so each has Accounts, Categories and a year of its own (2021 and 2022), and a Report of that
-// year lists only that project's Transactions even for every Account. No other spec uses these years.
+// The light and dark projects share one local database, so each has Accounts, Categories and a year of its own (2002 and 2003), and a Report of that
+// year lists only that project's Transactions even for every Account. No other spec uses these years, and they are older than every other spec's
+// Transactions on purpose (as the Dashboard's 2004 is): the Summary's newest five and the first page of the Transactions list belong to the specs that
+// look for theirs there. Payees avoid "EXAMPLE", which other specs' Rules look for.
 const dataFor = (project: string) => {
   const light = project !== 'dark'
   return {
     project,
-    year: light ? 2021 : 2022,
+    year: light ? 2002 : 2003,
     everyday: { number: light ? '99-9999-9999999-74' : '99-9999-9999999-76', name: `Spending everyday ${project}` },
     savings: { number: light ? '99-9999-9999999-75' : '99-9999-9999999-77', name: `Spending savings ${project}` },
     income: { number: light ? '99-9999-9999999-78' : '99-9999-9999999-79', name: `Spending income only ${project}` },
@@ -35,20 +50,18 @@ const dataFor = (project: string) => {
   }
 }
 
-// Dates and money, written the way the app writes them.
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
-const dateText = (iso: string) => {
-  const d = new Date(`${iso}T00:00:00Z`)
-  return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`
-}
+/** What the Dashboard calls Uncategorised in a table, which is what a row of the Report says too. */
+const UNCATEGORISED = 'Uncategorised (includes money in not yet given a Category)'
+/** What the Report says is not counted, in the Dashboard's words; the table's heading repeats it on every printed page. */
+const NOT_COUNTED = "Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted."
 /** What a Spent cell says: no sign, and "back" after an amount that is less than nothing. */
 const spent = (cents: number) => `$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2 })}${cents < 0 ? ' back' : ''}`
 
-// What the year holds, by Account, in cents (money out is negative). The Transfer, the wages (Income) and the loan are not Spending.
-const EVERYDAY = { rates: 30_000, fuel: 9000, food: 5550, back: -2500, uncategorised: 400 }
+// What the year holds, by Account, in cents (money out is negative). The Transfer, the wages (Income) and the loan are not Spending. The Report puts the
+// most spent first, so Uncategorised ($4.00) is above the Category that took money back, and a Category that took back more than it paid out is last.
+const EVERYDAY = { rates: 30_000, fuel: 9000, food: 5550, uncategorised: 400, back: -2500 }
 const SAVINGS = { food: 2000 }
-const ALL = { rates: EVERYDAY.rates, fuel: EVERYDAY.fuel, food: EVERYDAY.food + SAVINGS.food, back: EVERYDAY.back, uncategorised: EVERYDAY.uncategorised }
+const ALL = { rates: EVERYDAY.rates, fuel: EVERYDAY.fuel, food: EVERYDAY.food + SAVINGS.food, uncategorised: EVERYDAY.uncategorised, back: EVERYDAY.back }
 const total = (figures: Record<string, number>) => Object.values(figures).reduce((sum, cents) => sum + cents, 0)
 
 type Seeded = { everydayId: number; savingsId: number; incomeId: number }
@@ -135,23 +148,13 @@ async function seed(context: BrowserContext, baseURL: string, project: string): 
   return result
 }
 
-// The Settings are shared by every test and both themes, so each test leaves the defaults behind (as reports.spec.ts does).
-test.afterEach(async ({ request, baseURL }) => {
-  const reset = await request.patch('/api/settings', { headers: { Origin: baseURL! }, data: { app_title: 'Fernledger' } })
-  expect(reset.ok()).toBe(true)
-})
-const setTitle = async (request: APIRequestContext, baseURL: string | undefined, app_title: string) =>
-  expect((await request.patch('/api/settings', { headers: { Origin: baseURL! }, data: { app_title } })).ok()).toBe(true)
+restoreAppTitleAfterEach() // the Settings are shared by every test and both themes (as reports.spec.ts does)
 
 /** The Report's address: `account` is left out for every Account. */
 const address = (account: number | null, from: string, to: string) => `/reports/spending?${account === null ? '' : `account=${account}&`}from=${from}&to=${to}`
 const wholeYear = (year: number) => ({ from: `${year}-01-01`, to: `${year}-12-31` })
 const article = (page: Page) => page.getByRole('article', { name: 'Spending by Category' })
 const tableOf = (page: Page) => article(page).getByRole('table', { name: 'Spending in each Category' })
-const noAxeViolations = async (page: Page) => {
-  const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
-  expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Opening a Report
@@ -166,6 +169,7 @@ test.describe('opening the Report', () => {
     await expect(page.getByRole('heading', { level: 2, name: 'Spending by Category' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Spending by Category' })
+    await expect(form).toContainText('the most spent first, and one for Uncategorised when there is any.')
     await expect(form.getByLabel('Account')).toHaveValue('') // every Account unless one is chosen
     await form.getByLabel('From').fill(`${d.year}-01-01`)
     await form.getByLabel('To').fill(`${d.year}-12-31`)
@@ -253,7 +257,7 @@ test.describe('on screen', () => {
     }
   }
 
-  test('has the title block, what is counted, the total, and a row for each Category, largest first, with Uncategorised on its own', async ({ page, context, request, baseURL }, testInfo) => {
+  test('has the title block, what is counted, the total, and a row for each Category, the most spent first, with Uncategorised as its own row', async ({ page, context, request, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, "Mum's finances")
@@ -270,23 +274,24 @@ test.describe('on screen', () => {
     await expect(header).toContainText(`Dates: ${dateText(`${d.year}-01-01`)} to ${dateText(`${d.year}-12-31`)}`)
     await expect(header).toContainText(GENERATED)
 
-    // Said before the figures: what Spending is, that Uncategorised counts, and what is left out.
+    // Said before the figures, in the Dashboard's words: what is spending, that a "back" amount comes off, that Uncategorised counts, and what is left out.
     const about = report.getByRole('region', { name: 'About these figures' })
-    await expect(about).toContainText('less any money that came back, such as a refund')
-    await expect(about).toContainText('Transactions that have no Category yet count as Spending too')
-    await expect(about).toContainText('Transfers between your own Accounts, Pending Transactions, Loans and Income are not Spending')
+    await expect(about).toContainText('money out less money back, such as a refund. A “back” amount is taken off the total.')
+    await expect(about).toContainText('Uncategorised counts as spending, so money in that has no Category yet comes off it.')
+    await expect(about).toContainText(NOT_COUNTED)
 
     const section = report.getByRole('region', { name: 'Spending in each Category' })
     await expect(section.locator('dl')).toContainText('Total spending')
     await expect(section.locator('dl')).toContainText(spent(total(ALL)))
     const table = tableOf(page)
     await expect(table.getByRole('columnheader')).toHaveText(['Category', 'Spent'])
-    // Largest first; what came back is below the rest; Uncategorised is last and its own row.
+    // The most spent first, as the Dashboard has them. Uncategorised is a row of its own, where its amount puts it, named as the Summary names it, and what
+    // came back is below the rest.
     expect(await rowsOf(page)).toEqual({
-      names: [d.rates, d.fuel, d.food, d.back, 'Uncategorised'],
-      spent: [spent(ALL.rates), spent(ALL.fuel), spent(ALL.food), spent(ALL.back), spent(ALL.uncategorised)],
+      names: [d.rates, d.fuel, d.food, UNCATEGORISED, d.back],
+      spent: [spent(ALL.rates), spent(ALL.fuel), spent(ALL.food), spent(ALL.uncategorised), spent(ALL.back)],
     })
-    await expect(table.locator('tbody tr').nth(3)).toContainText('$25.00 back')
+    await expect(table.locator('tbody tr').nth(4)).toContainText('$25.00 back')
     // The wages (Income), the loan and the Transfer are not Spending, and so are not here.
     await expect(report).not.toContainText(d.pay)
     await expect(report).not.toContainText(d.loan)
@@ -306,8 +311,8 @@ test.describe('on screen', () => {
     await page.goto(address(everydayId, `${d.year}-01-01`, `${d.year}-12-31`))
     await expect(article(page).locator('header')).toContainText(`Account: ${d.everyday.name} (${d.everyday.number})`)
     expect(await rowsOf(page)).toEqual({
-      names: [d.rates, d.fuel, d.food, d.back, 'Uncategorised'],
-      spent: [spent(EVERYDAY.rates), spent(EVERYDAY.fuel), spent(EVERYDAY.food), spent(EVERYDAY.back), spent(EVERYDAY.uncategorised)],
+      names: [d.rates, d.fuel, d.food, UNCATEGORISED, d.back],
+      spent: [spent(EVERYDAY.rates), spent(EVERYDAY.fuel), spent(EVERYDAY.food), spent(EVERYDAY.uncategorised), spent(EVERYDAY.back)],
     })
     await expect(article(page).getByRole('region', { name: 'Spending in each Category' }).locator('dl')).toContainText(spent(total(EVERYDAY)))
 
@@ -322,7 +327,7 @@ test.describe('on screen', () => {
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
 
-    // January to March: everything but April's two Categories-less payments and its money back.
+    // 10 January to 15 March: everything but April's two payments with no Category and its money back.
     await page.goto(address(null, `${d.year}-01-10`, `${d.year}-03-15`))
     expect(await rowsOf(page)).toEqual({ names: [d.rates, d.fuel, d.food], spent: [spent(ALL.rates), spent(ALL.fuel), spent(ALL.food)] })
     await expect(article(page).getByRole('region', { name: 'Spending in each Category' }).locator('dl')).toContainText(spent(ALL.rates + ALL.fuel + ALL.food))
@@ -337,30 +342,30 @@ test.describe('on screen', () => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
-    await page.goto(address(null, `${d.year}-04-01`, `${d.year}-04-30`)) // $25.00 back and $4.00 Uncategorised
-    expect(await rowsOf(page)).toEqual({ names: [d.back, 'Uncategorised'], spent: ['$25.00 back', '$4.00'] })
+    await page.goto(address(null, `${d.year}-04-01`, `${d.year}-04-30`)) // $4.00 Uncategorised and $25.00 back
+    expect(await rowsOf(page)).toEqual({ names: [UNCATEGORISED, d.back], spent: ['$4.00', '$25.00 back'] })
     await expect(article(page).getByRole('region', { name: 'Spending in each Category' }).locator('dl')).toContainText('$21.00 back')
   })
 
-  test('says there is no Spending, and shows no table or total, for dates with none', async ({ page, context, baseURL }, testInfo) => {
+  test('says nothing was spent, and shows no table or total, for dates with no spending', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await page.goto(address(null, `${d.year}-06-01`, `${d.year}-06-30`))
     const section = article(page).getByRole('region', { name: 'Spending in each Category' })
-    await expect(section).toContainText('No Spending in these dates.')
+    await expect(section).toContainText(`Nothing was spent in June ${d.year}.`) // a whole month by its name, as on the Dashboard
     await expect(section.getByRole('table')).toHaveCount(0)
     await expect(section.locator('dl')).toHaveCount(0)
     await expect(article(page).getByRole('region', { name: 'About these figures' })).toBeVisible()
   })
 
-  test('says there is no Spending for an Account whose only Transaction is Income, and does not count its wages', async ({ page, context, baseURL }, testInfo) => {
+  test('says nothing was spent for an Account whose only Transaction is Income, and does not count its wages', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { incomeId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await page.goto(address(incomeId, `${d.year}-01-01`, `${d.year}-12-31`))
     await expect(article(page).locator('header')).toContainText(`Account: ${d.income.name} (${d.income.number})`)
-    await expect(article(page).getByRole('region', { name: 'Spending in each Category' })).toContainText('No Spending in these dates.')
+    await expect(article(page).getByRole('region', { name: 'Spending in each Category' })).toContainText(`Nothing was spent in ${dateText(`${d.year}-01-01`)} to ${dateText(`${d.year}-12-31`)}.`)
     await expect(article(page).getByRole('table')).toHaveCount(0)
     await expect(article(page)).not.toContainText('$1,000.00')
   })
@@ -385,7 +390,7 @@ test.describe('on screen', () => {
       await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
       await expect(tableOf(page)).toBeVisible()
       await expect(tableOf(page)).toContainText('$25.00 back')
-      await expect(tableOf(page)).toContainText('Uncategorised')
+      await expect(tableOf(page)).toContainText(UNCATEGORISED)
       await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
@@ -402,7 +407,9 @@ test.describe('on screen', () => {
     await expect(cards.first()).toContainText(d.rates)
     await expect(cards.first()).toContainText(spent(EVERYDAY.rates))
     await expect(cards.first()).toContainText('Spent')
-    await expect(cards.last()).toContainText('Uncategorised')
+    await expect(cards.nth(3)).toContainText(UNCATEGORISED)
+    await expect(cards.last()).toContainText(`${d.back}`)
+    await expect(cards.last()).toContainText('$25.00 back')
   })
 
   test('shows every Member the same Report as the Admin', async ({ page, context, baseURL }, testInfo) => {
@@ -429,7 +436,7 @@ test.describe('on screen', () => {
       await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
       await expect(page.getByRole('alert')).toContainText("couldn't load this Report", { timeout: 20_000 })
       await expect(page.getByRole('table')).toHaveCount(0)
-      await expect(page.getByText('No Spending in these dates.')).toHaveCount(0)
+      await expect(page.getByText('Nothing was spent in')).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Print or save as PDF' })).toHaveCount(0)
     })
   })
@@ -453,32 +460,27 @@ test.describe('printed', () => {
   const range = (year: number) => `${dateText(`${year}-01-01`)} to ${dateText(`${year}-12-31`)}`
 
   test('is just the Report: no app header, navigation or buttons', async ({ page }) => {
-    await expect(page.getByRole('banner')).toBeHidden()
-    await expect(page.getByRole('navigation', { name: 'Main' })).toBeHidden()
-    await expect(page.getByRole('button')).toHaveCount(0) // hidden elements are not in the accessibility tree
-    await expect(page.getByRole('link')).toHaveCount(0)
-    await expect(page.getByText('In the print window')).toBeHidden()
+    await expectJustTheReport(page)
   })
 
   test('writes its own title block: the app title, the Report, the Account, the dates, and who generated it and when', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
-    const header = article(page).locator('header')
-    await expect(header).toBeVisible()
-    await expect(header.getByText(TITLE, { exact: true })).toBeVisible() // the Admin's words, as typed
-    await expect(header.getByRole('heading', { level: 1, name: 'Spending by Category' })).toBeVisible()
-    await expect(header).toContainText(`Account: ${d.everyday.name} (${d.everyday.number})`)
-    await expect(header).toContainText(`Dates: ${range(d.year)}`)
-    await expect(header.getByText(GENERATED, { exact: true })).toBeVisible()
+    await expectTitleBlock(article(page), { name: 'Spending by Category', account: `${d.everyday.name} (${d.everyday.number})`, dates: range(d.year) })
   })
 
-  test('puts the same identifying lines in the table heading, which a browser repeats on every page', async ({ page }, testInfo) => {
+  test('puts the same identifying lines in the table heading, which a browser repeats on every page, and says what is not counted', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
-    const identity = page.locator('thead tr').first()
-    await expect(identity).toBeVisible() // on screen it is not
-    await expect(identity).toContainText(`${TITLE} – Spending by Category – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`)
-    await expect(identity).toContainText(GENERATED)
-    // It is one of the table's heading rows, with the column headings: that is what makes a browser repeat it.
-    expect(await page.locator('thead').evaluate((el) => [getComputedStyle(el).display, el.querySelectorAll('tr').length])).toEqual(['table-header-group', 2])
+    await expectIdentityRow(page, `${TITLE} – Spending by Category – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`)
+    await expect(page.locator('thead tr').first()).toContainText(NOT_COUNTED) // so a loose page does not have to be read with the first
+  })
+
+  test('says "All Accounts" in the table heading when no Account was chosen, and leaves the title block to list them', async ({ page }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
+    await expect(tableOf(page)).toBeVisible()
+    await expectIdentityRow(page, `${TITLE} – Spending by Category – All Accounts – ${range(d.year)}`)
+    await expect(article(page).locator('header')).toContainText(`${d.everyday.name} (${d.everyday.number})`)
+    await expect(page.locator('thead tr').first()).not.toContainText(d.everyday.name) // not once for every Account on every page
   })
 
   test('names the page for Save as PDF: the app, the Report, the Account and the dates', async ({ page }, testInfo) => {
@@ -486,63 +488,18 @@ test.describe('printed', () => {
     await expect(page).toHaveTitle(`${TITLE} – Spending by Category – ${d.everyday.name} – ${range(d.year)}`)
   })
 
-  /** Every word of the Report is black, including the muted ones and the money, and the paper is white. */
-  const blackOnWhite = (page: Page) =>
-    page.evaluate(() => {
-      const rgb = (css: string) => {
-        const ctx = document.createElement('canvas').getContext('2d')!
-        ctx.fillStyle = '#fff'
-        ctx.fillStyle = css
-        ctx.fillRect(0, 0, 1, 1)
-        return Array.from(ctx.getImageData(0, 0, 1, 1).data.slice(0, 3))
-      }
-      const walker = document.createTreeWalker(document.querySelector('.report-frame')!, NodeFilter.SHOW_TEXT)
-      const unreadable: string[] = []
-      let texts = 0
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.trim()) continue
-        texts += 1
-        const [r, g, b] = rgb(getComputedStyle(node.parentElement!).color)
-        if (Math.max(r!, g!, b!) > 40) unreadable.push(`${node.textContent.trim().slice(0, 30)}: rgb(${r}, ${g}, ${b})`)
-      }
-      return { unreadable, paper: rgb(getComputedStyle(document.body).backgroundColor), texts }
-    })
-
   test('is black text on white paper, even from the dark theme', async ({ page }, testInfo) => {
     // In the dark project the page is the dark theme on screen, and must still print like this.
     await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
-    const found = await blackOnWhite(page)
-    expect(found.texts).toBeGreaterThan(20)
-    expect(found.unreadable).toEqual([]) // every word, including the money and "back", is black
-    expect(Math.min(...found.paper)).toBeGreaterThan(240)
+    await expectBlackOnWhite(page, 20) // every word, including the money and "back", is black
   })
 
   test('has no text under 12pt', async ({ page }) => {
-    const small = await page.evaluate(() => {
-      const walker = document.createTreeWalker(document.querySelector('.report-frame')!, NodeFilter.SHOW_TEXT)
-      const found: string[] = []
-      let texts = 0
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.trim()) continue
-        texts += 1
-        const size = parseFloat(getComputedStyle(node.parentElement!).fontSize)
-        if (size < 16) found.push(`${size}px: ${node.textContent.trim().slice(0, 30)}`)
-      }
-      return { found, texts }
-    })
-    expect(small.texts).toBeGreaterThan(20)
-    expect(small.found).toEqual([]) // 12pt is 16px
-    // The table's own text is set to 12pt, not left to the 15px it has on screen.
-    const cell = await article(page).locator('tbody td').first().evaluate((el) => getComputedStyle(el).fontSize)
-    expect(parseFloat(cell)).toBeGreaterThanOrEqual(16)
+    await expectNoTextUnder12pt(page, article(page), 20)
   })
 
   test('is its own page with its own margins, repeats the table heading and keeps a row whole', async ({ page }) => {
-    const styles = await page.evaluate(() => {
-      const style = (selector: string) => getComputedStyle(document.querySelector(selector)!)
-      return { page: style('.report-frame').page, thead: style('thead').display, row: style('tbody tr').breakInside, main: style('main').paddingLeft }
-    })
-    expect(styles).toEqual({ page: 'report', thead: 'table-header-group', row: 'avoid', main: '0px' })
+    await expectOwnPage(page)
   })
 
   test('prints on one A4 page with the Categories, the total and the page number, every figure in at least 12pt type', async ({ page }, testInfo) => {
@@ -550,12 +507,18 @@ test.describe('printed', () => {
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     expect(pages).toHaveLength(1)
     const text = textOf(pages[0]!)
-    for (const [name, cents] of [[d.rates, EVERYDAY.rates], [d.fuel, EVERYDAY.fuel], [d.food, EVERYDAY.food], [d.back, EVERYDAY.back], ['Uncategorised', EVERYDAY.uncategorised]] as const) {
+    for (const [name, cents] of [[d.rates, EVERYDAY.rates], [d.fuel, EVERYDAY.fuel], [d.food, EVERYDAY.food], [d.back, EVERYDAY.back]] as const) {
       expect(text, name).toContain(`${name} ${spent(cents)}`)
     }
+    // The Uncategorised row's name is long and may wrap, so its words and its amount are looked for apart.
+    expect(squash(text)).toContain(squash(UNCATEGORISED))
+    expect(text).toContain(spent(EVERYDAY.uncategorised))
     expect(text).toContain(`Total spending ${spent(total(EVERYDAY))}`)
     expect(text).toContain('Page 1 of 1')
-    expect(pages.flatMap((p, index) => p.text.filter((t) => t.size < 11.95).map((t) => `page ${index + 1}: ${t.size}pt "${t.str}"`))).toEqual([])
+    expectNoTypeUnder12pt(pages, 25)
+    // The table's heading, with what the Report is, who generated it and what is not counted, is on the page that has the table.
+    expectIdentityOnEveryPage(pages, 'Total spending', `${TITLE} – Spending by Category – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`, 1)
+    expect(squash(text)).toContain(squash(NOT_COUNTED))
   })
 
   test('prints the same from a phone-width window: still a table', async ({ page }) => {
@@ -569,28 +532,30 @@ test.describe('printed', () => {
 test.describe('printed over several pages', () => {
   const CATEGORIES = 80
   const name = (i: number) => `Stub category ${String(i + 1).padStart(2, '0')}`
-  /** Every Category's figure is different, so a row can be told from the others in a PDF; they are given largest first. */
+  /** Every Category's figure is different, so a row can be told from the others in a PDF; they are given most spent first, as the Worker gives them. */
   const cents = (i: number) => 100_000 - i * 137
+  const UNCATEGORISED_CENTS = 12_345 // less than every Category's, so its row is the last of the table
 
   test.beforeEach(async ({ page, context, request, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
-    const { everydayId } = await seed(context, baseURL!, testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, TITLE)
     await signInAs(context, 'member')
     await context.clock.setFixedTime(NOW)
     await page.route('**/api/reports/spending?**', (route) =>
       route.fulfill({
         json: {
-          accountId: everydayId,
           ...wholeYear(d.year),
-          categories: Array.from({ length: CATEGORIES }, (_, i) => ({ categoryId: i + 1, categoryName: name(i), cents: cents(i) })),
-          uncategorisedCents: 12_345,
-          totalCents: Array.from({ length: CATEGORIES }, (_, i) => cents(i)).reduce((sum, c) => sum + c, 0) + 12_345,
+          totalCents: Array.from({ length: CATEGORIES }, (_, i) => cents(i)).reduce((sum, c) => sum + c, 0) + UNCATEGORISED_CENTS,
+          categories: [
+            ...Array.from({ length: CATEGORIES }, (_, i) => ({ categoryId: i + 1, name: name(i), cents: cents(i) })),
+            { categoryId: null, name: 'Uncategorised', cents: UNCATEGORISED_CENTS },
+          ],
         },
       }),
     )
     await page.emulateMedia({ media: 'print' })
-    await page.goto(address(everydayId, `${d.year}-01-01`, `${d.year}-12-31`))
+    await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`)) // every Account, so the heading says so
     await expect(tableOf(page)).toBeVisible()
   })
 
@@ -608,40 +573,27 @@ test.describe('printed over several pages', () => {
       const row = `${name(i)} ${spent(cents(i))}`
       expect(all.split(row).length - 1, row).toBe(1)
     }
-    expect(all.split('Uncategorised $123.45').length - 1).toBe(1)
+    // The Uncategorised row's name is long and may wrap, so its name and its amount are counted apart.
+    expect(squash(all).split(squash(UNCATEGORISED)).length - 1).toBe(1)
+    expect(all.split(spent(UNCATEGORISED_CENTS)).length - 1).toBe(1)
   })
 
-  test('says what the Report is, which Account and dates, and who generated it and when, at the top of every page the table runs onto', async ({ page }, testInfo) => {
+  test('says what the Report is, which Accounts and dates, who generated it and when, and what is not counted, at the top of every page the table runs onto', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    const withRows = pages.filter((p) => textOf(p).includes('Stub category'))
-    expect(withRows.length).toBeGreaterThanOrEqual(2)
-    // In each page's own body, not its margins, so every browser prints it. The Admin's title comes through as typed, quote and backslash too.
-    // (The line may wrap, even inside the Account's number at a hyphen, so the comparison ignores where it broke.)
-    const squash = (text: string) => text.replace(/\s+/g, '')
-    for (const p of withRows) {
-      const text = squash(textOf(p))
-      expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(`${TITLE} – Spending by Category – ${d.everyday.name} (${d.everyday.number}) – ${dateText(`${d.year}-01-01`)} to ${dateText(`${d.year}-12-31`)}`))
-      expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(GENERATED))
-    }
+    // The Admin's title comes through as typed, quote and backslash too; the heading says "All Accounts", not each of them on every page.
+    const withRows = expectIdentityOnEveryPage(pages, 'Stub category', `${TITLE} – Spending by Category – All Accounts – ${dateText(`${d.year}-01-01`)} to ${dateText(`${d.year}-12-31`)}`, 2)
+    for (const p of withRows) expect(squash(textOf(p)), `page ${pages.indexOf(p) + 1}`).toContain(squash(NOT_COUNTED))
   })
 
   test('numbers every page "Page 2 of 5" in the bottom margin, and has nothing else in the margins', async ({ page }) => {
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    const margin = (20 / 25.4) * 72 // the bottom margin, 20mm, in points
-    for (const [index, p] of pages.entries()) {
-      const numbered = p.text.filter((t) => t.str === `Page ${index + 1} of ${pages.length}`)
-      expect(numbered, `page ${index + 1}`).toHaveLength(1)
-      expect(numbered[0]!.y).toBeLessThan(margin)
-      expect(p.text.filter((t) => t.y > p.height - (18 / 25.4) * 72), `top margin of page ${index + 1}`).toEqual([])
-      expect(p.text.filter((t) => t.y < margin).map((t) => t.str), `bottom margin of page ${index + 1}`).toEqual([`Page ${index + 1} of ${pages.length}`])
-    }
+    expectPageNumbers(pages)
+    expectBareMargins(pages)
   })
 
   test('sets every word of it, the page numbers included, in at least 12pt type', async ({ page }) => {
-    const pages = await readPdf(await page.pdf({ format: 'A4' }))
-    expect(pages.flatMap((p, index) => p.text.filter((t) => t.size < 11.95).map((t) => `page ${index + 1}: ${t.size}pt "${t.str}"`))).toEqual([])
-    expect(pages.flatMap((p) => p.text).length).toBeGreaterThan(150) // 80 rows of two, and the rest
+    expectNoTypeUnder12pt(await readPdf(await page.pdf({ format: 'A4' })), 150) // 80 rows of two, and the rest
   })
 })
 

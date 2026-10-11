@@ -2,13 +2,14 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import worker from './index'
-import { spendingReport, type SpendingReport } from './report-spending'
 import { buildSpending, rollUp, type SpendingRow } from './spending'
+import { readSpendingByCategory, type SpendingByCategory } from './spending-by-category'
 
 // Seam 1: the spending-by-Category Report's data (GET /api/reports/spending), through the Worker's exported handler as the local-development
-// Admin or a read-only Member (the dev identity cookie is honoured on localhost only). The Report adds nothing up itself: the main tests hold
-// its numbers to `buildSpending` and `rollUp` (spending.ts) and to Budget vs actual, which total spending the same way, so the Report and
-// every page that shows spending by Category agree. All the data is made up (bank 99).
+// Admin or a read-only Member (the dev identity cookie is honoured on localhost only). The Report works out nothing itself: it is
+// `readSpendingByCategory`'s answer (spending-by-category.ts, which has its own tests), the one the Dashboard's chart gives. So the tests here are about
+// what a Report asks of it (the Account, the dates, the Account that does not exist) and that the Report and the chart agree, row for row and in total,
+// and with `buildSpending` and `rollUp` run directly and with Budget vs actual. All the data is made up (bank 99).
 const origin = 'http://localhost:5173'
 type Who = 'admin' | 'member'
 
@@ -45,13 +46,13 @@ const query = (over: Record<string, string | undefined> = {}) => {
   for (const [name, value] of Object.entries({ from: '2026-10-01', to: '2026-10-31', ...over })) if (value !== undefined) params.set(name, value)
   return params.toString()
 }
-async function report(over: Record<string, string | undefined> = {}, who: Who = 'member'): Promise<SpendingReport> {
+async function report(over: Record<string, string | undefined> = {}, who: Who = 'member'): Promise<SpendingByCategory> {
   const res = await call(`/api/reports/spending?${query(over)}`, who)
   expect(res.status, JSON.stringify(over)).toBe(200)
   return res.json()
 }
-/** The Report's Categories as `[name, cents]`, in the order it gives them. */
-const lines = (r: SpendingReport) => r.categories.map((c) => [c.categoryName, c.cents])
+/** The Report's Categories as `[name, cents]`, in the order it gives them, Uncategorised where its amount puts it. */
+const lines = (r: SpendingByCategory) => r.categories.map((c) => [c.name, c.cents])
 
 beforeEach(async () => {
   await env.DB.batch(['budgets', 'transactions', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
@@ -66,7 +67,7 @@ beforeEach(async () => {
 })
 
 describe('what the Report totals', () => {
-  it('adds each Spending Category over the dates, months together, largest first, with the total', async () => {
+  it('adds each Spending Category over the dates, months together, the most spent first, with the total', async () => {
     await add(accountA, '2026-09-10', -4000, { override: 'Groceries' })
     await add(accountA, '2026-10-02', -2550, { override: 'Groceries' })
     await add(accountA, '2026-10-05', -9000, { override: 'Fuel' })
@@ -76,9 +77,9 @@ describe('what the Report totals', () => {
     const r = await report({ from: '2026-09-01', to: '2026-11-30' })
 
     expect(lines(r)).toEqual([['Tax', 30000], ['Fuel', 9000], ['Groceries', 6550], ['Eating out', 1500]])
-    expect(r.uncategorisedCents).toBeNull()
     expect(r.totalCents).toBe(47_050)
-    expect(r).toMatchObject({ accountId: null, from: '2026-09-01', to: '2026-11-30' })
+    expect(r).toMatchObject({ from: '2026-09-01', to: '2026-11-30' })
+    expect(r).not.toHaveProperty('accountId') // every Account
   })
 
   it('takes money back, such as a refund, off what a Category spent, and goes below zero when more came back than went out', async () => {
@@ -92,24 +93,31 @@ describe('what the Report totals', () => {
     expect(r.totalCents).toBe(500)
   })
 
-  it('puts the Categories that spent the same in order of name, whatever case, then lists them the same way every time', async () => {
+  it('puts the Categories that spent the same in order of name, ignoring capitals', async () => {
     await add(accountA, '2026-10-02', -1000, { override: 'Tax' })
     await add(accountA, '2026-10-03', -1000, { override: 'Eating out' })
     await add(accountA, '2026-10-04', -1000, { override: 'Groceries' })
-
-    expect(lines(await report())).toEqual([['Eating out', 1000], ['Groceries', 1000], ['Tax', 1000]])
+    await env.DB.prepare("UPDATE categories SET name = 'groceries' WHERE name = 'Groceries'").run()
+    try {
+      // A lowercase name sorts between the others, where a comparison of capitals first would put it last.
+      expect(lines(await report())).toEqual([['Eating out', 1000], ['groceries', 1000], ['Tax', 1000]])
+    } finally {
+      await env.DB.prepare("UPDATE categories SET name = 'Groceries' WHERE name = 'groceries'").run()
+    }
   })
 
-  it('shows Uncategorised on its own, as Spending, with money in that has no Category yet taken off', async () => {
+  it('shows Uncategorised on its own, as Spending, with money in that has no Category yet taken off, and where its amount puts it', async () => {
     await add(accountA, '2026-10-02', -4000, { override: 'Groceries' })
     await add(accountA, '2026-10-04', -700)
     await add(accountA, '2026-10-06', 300) // a payment in nobody has given a Category: it counts against Spending (ADR 0012)
 
     const r = await report()
 
-    expect(lines(r)).toEqual([['Groceries', 4000]])
-    expect(r.uncategorisedCents).toBe(400)
+    expect(r.categories).toEqual([{ categoryId: ids['Groceries'], name: 'Groceries', cents: 4000 }, { categoryId: null, name: 'Uncategorised', cents: 400 }])
     expect(r.totalCents).toBe(4400)
+
+    await add(accountA, '2026-10-07', -9000) // now Uncategorised spent the most, and is first: it is not always last
+    expect(lines(await report())).toEqual([['Uncategorised', 9400], ['Groceries', 4000]])
   })
 
   it('has Uncategorised as the whole of a Report that has nothing else, and counts what is in a removed Category as Uncategorised', async () => {
@@ -119,8 +127,7 @@ describe('what the Report totals', () => {
 
     const r = await report()
 
-    expect(r.categories).toEqual([])
-    expect(r.uncategorisedCents).toBe(300)
+    expect(r.categories).toEqual([{ categoryId: null, name: 'Uncategorised', cents: 300 }])
     expect(r.totalCents).toBe(300)
   })
 
@@ -134,7 +141,7 @@ describe('what the Report totals', () => {
   it('is empty, with a zero total, for dates with no Transactions', async () => {
     await add(accountA, '2026-09-30', -4000, { override: 'Groceries' })
 
-    expect(await report()).toEqual({ accountId: null, from: '2026-10-01', to: '2026-10-31', categories: [], uncategorisedCents: null, totalCents: 0 })
+    expect(await report()).toEqual({ from: '2026-10-01', to: '2026-10-31', categories: [], totalCents: 0 })
   })
 
   it('includes both ends of the dates and nothing outside them, and a single day is a range', async () => {
@@ -164,8 +171,7 @@ describe('what is not Spending', () => {
 
     const r = await report()
 
-    expect(lines(r)).toEqual([['Fuel', 300]])
-    expect(r.uncategorisedCents).toBeNull()
+    expect(lines(r)).toEqual([['Fuel', 300]]) // no Uncategorised row: the Transfers are all there is that has no Category
     expect(r.totalCents).toBe(300)
   })
 
@@ -194,8 +200,7 @@ describe('what is not Spending', () => {
     expect(marked.status).toBe(200)
 
     const r = await report()
-    expect(lines(r)).toEqual([['Groceries', 5000]])
-    expect(r.uncategorisedCents).toBe(-5000) // the money in is Uncategorised, which counts against Spending
+    expect(lines(r)).toEqual([['Groceries', 5000], ['Uncategorised', -5000]]) // the money in is Uncategorised, which counts against Spending
     expect(r.totalCents).toBe(0)
   })
 
@@ -210,7 +215,6 @@ describe('what is not Spending', () => {
     const r = await report()
 
     expect(lines(r)).toEqual([['Fuel', 300]])
-    expect(r.uncategorisedCents).toBeNull()
     expect(r.totalCents).toBe(300)
   })
 
@@ -245,21 +249,19 @@ describe('one Account or all of them', () => {
 
   it('totals every Account when none is named', async () => {
     const r = await report()
-    expect(lines(r)).toEqual([['Groceries', 1250], ['Eating out', -75]])
-    expect(r.uncategorisedCents).toBe(40)
-    expect(r.accountId).toBeNull()
+    expect(lines(r)).toEqual([['Groceries', 1250], ['Uncategorised', 40], ['Eating out', -75]])
+    expect(r.totalCents).toBe(1215)
+    expect(r).not.toHaveProperty('accountId')
   })
 
   it('totals only the Account named, and says which', async () => {
     const savings = await report({ accountId: String(accountB) })
-    expect(lines(savings)).toEqual([['Groceries', 250], ['Eating out', -75]])
-    expect(savings.uncategorisedCents).toBe(40)
+    expect(lines(savings)).toEqual([['Groceries', 250], ['Uncategorised', 40], ['Eating out', -75]])
     expect(savings.totalCents).toBe(215)
     expect(savings.accountId).toBe(accountB)
 
     const everyday = await report({ accountId: String(accountA) })
-    expect(lines(everyday)).toEqual([['Groceries', 1000]])
-    expect(everyday.uncategorisedCents).toBeNull() // the Transfer out of this Account is not spending
+    expect(lines(everyday)).toEqual([['Groceries', 1000]]) // the Transfer out of this Account is not spending, so there is no Uncategorised row
   })
 
   it('is a 404 for an Account that does not exist, not an empty Report', async () => {
@@ -288,36 +290,66 @@ describe('the same figures as everywhere else that totals spending (ADR 0012)', 
     await add(accountA, '2026-10-08', -7000, { ruleTransfer: true })
   }
 
-  /** What `rollUp` makes of `buildSpending`, run here directly against D1 (no Report in between): Spending Categories as `[categoryId, cents]`. */
+  /** What `rollUp` makes of `buildSpending`, run here directly against D1 (no Report and no chart in between): Spending Categories and the total. */
   async function direct(range: { from: string; to: string; accountId?: number }) {
     const { sql, binds } = buildSpending(range)
     const rows = (await env.DB.prepare(sql).bind(...binds).all<SpendingRow>()).results
-    const byCategory = rollUp(rows).byCategory.filter((total) => total.kind === 'spending')
-    return { byCategory, months: rollUp(rows).months }
+    const { byCategory, totals } = rollUp(rows)
+    return { byCategory: byCategory.filter((total) => total.kind === 'spending'), totalCents: totals.spendingCents }
   }
 
-  it.each([
+  const ranges = [
     ['all three months', { from: '2026-09-01', to: '2026-11-30' }],
     ['one month', { from: '2026-10-01', to: '2026-10-31' }],
     ['part of a month', { from: '2026-10-02', to: '2026-10-20' }],
-    ['one Account', { from: '2026-09-01', to: '2026-11-30', account: 'a' }],
-    ['the other Account', { from: '2026-09-01', to: '2026-11-30', account: 'b' }],
+    ['one day', { from: '2026-10-05', to: '2026-10-05' }],
     ['dates with nothing in them', { from: '2025-01-01', to: '2025-12-31' }],
-  ])('gives, for %s, what rollUp\'s byCategory gives for buildSpending\'s rows', async (_what, range) => {
+  ] as const
+
+  it.each(ranges)("gives, for %s, what rollUp's byCategory and totals give for buildSpending's rows", async (_what, range) => {
     await history()
-    const accountId = 'account' in range ? (range.account === 'a' ? accountA : accountB) : undefined
-    const expected = await direct({ from: range.from, to: range.to, accountId })
+    const expected = await direct(range)
 
-    const r = await report({ from: range.from, to: range.to, accountId: accountId === undefined ? undefined : String(accountId) })
+    const r = await report(range)
 
-    const byId = new Map<number | null, number>([
-      ...r.categories.map((c) => [c.categoryId, c.cents] as const),
-      ...(r.uncategorisedCents === null ? [] : [[null, r.uncategorisedCents] as const]),
-    ])
-    expect(Object.fromEntries(byId)).toEqual(Object.fromEntries(expected.byCategory.map((total) => [total.categoryId, total.cents])))
-    // The total is the sum of the months' Spending, which is how the other Reports add it up.
-    expect(r.totalCents).toBe(expected.months.reduce((sum, month) => sum + month.spendingCents, 0))
-    expect(r.totalCents).toBe([...byId.values()].reduce((sum, cents) => sum + cents, 0))
+    expect(Object.fromEntries(r.categories.map((c) => [c.categoryId, c.cents]))).toEqual(Object.fromEntries(expected.byCategory.map((total) => [total.categoryId, total.cents])))
+    expect(r.totalCents).toBe(expected.totalCents)
+  })
+
+  it.each([
+    ['one Account', 'a'],
+    ['the other Account', 'b'],
+  ] as const)("gives, for %s, what rollUp's byCategory and totals give for buildSpending's rows", async (_what, which) => {
+    await history()
+    const accountId = which === 'a' ? accountA : accountB
+    const range = { from: '2026-09-01', to: '2026-11-30' }
+    const expected = await direct({ ...range, accountId })
+
+    const r = await report({ ...range, accountId: String(accountId) })
+
+    expect(Object.fromEntries(r.categories.map((c) => [c.categoryId, c.cents]))).toEqual(Object.fromEntries(expected.byCategory.map((total) => [total.categoryId, total.cents])))
+    expect(r.totalCents).toBe(expected.totalCents)
+  })
+
+  // The Dashboard's chart and a Report of spending by Category are one function's answer (spending-by-category.ts), so the same dates give the same rows, in the
+  // same order, with the same total. This is the test that holds them to it: a Report that named, ordered or totalled its own would fail it.
+  it.each(ranges)('gives, for %s, the very rows and total /api/charts/spending gives for the same dates', async (_what, range) => {
+    await history()
+
+    const r = await report(range)
+    const chart = (await (await call(`/api/charts/spending?from=${range.from}&to=${range.to}`)).json()) as SpendingByCategory
+
+    expect(r.categories).toEqual(chart.categories)
+    expect(r.totalCents).toBe(chart.totalCents)
+    expect(r).toEqual(chart)
+    if (range.from === '2026-09-01') expect(r.categories.length).toBeGreaterThan(3) // the history does have something to compare
+  })
+
+  it('gives, for one Account, what readSpendingByCategory gives for it (the chart is for every Account)', async () => {
+    await history()
+    const range = { from: '2026-09-01', to: '2026-11-30', accountId: accountB }
+
+    expect(await report({ from: range.from, to: range.to, accountId: String(accountB) })).toEqual(await readSpendingByCategory(env.DB, range))
   })
 
   it('gives for a month what Budget vs actual spent: each Category with a Budget, the rest together, and Uncategorised', async () => {
@@ -335,45 +367,9 @@ describe('the same figures as everywhere else that totals spending (ADR 0012)', 
     const budgeted = new Map(vsActual.rows.map((row) => [row.categoryId, row.spentCents]))
     expect([...budgeted.keys()].sort()).toEqual([ids['Groceries']!, ids['Tax']!].sort())
     for (const [categoryId, spentCents] of budgeted) expect(r.categories.find((c) => c.categoryId === categoryId)?.cents ?? 0, `Category ${categoryId}`).toBe(spentCents)
-    expect(r.categories.filter((c) => !budgeted.has(c.categoryId)).reduce((sum, c) => sum + c.cents, 0)).toBe(vsActual.otherCents)
-    expect(r.uncategorisedCents ?? 0).toBe(vsActual.uncategorisedCents)
+    expect(r.categories.filter((c) => c.categoryId !== null && !budgeted.has(c.categoryId)).reduce((sum, c) => sum + c.cents, 0)).toBe(vsActual.otherCents)
+    expect(r.categories.find((c) => c.categoryId === null)?.cents ?? 0).toBe(vsActual.uncategorisedCents)
     expect(r.totalCents).toBe([...budgeted.values()].reduce((sum, c) => sum + c, 0) + vsActual.otherCents + vsActual.uncategorisedCents)
-  })
-})
-
-describe('spendingReport', () => {
-  const row = (month: string, categoryId: number | null, kind: SpendingRow['kind'], outCents: number, inCents: number): SpendingRow => ({ month, categoryId, kind, outCents, inCents })
-  const request = { from: '2026-09-01', to: '2026-10-31' }
-
-  it('adds the months of a Category together, orders by amount and puts Uncategorised apart', () => {
-    const r = spendingReport(
-      request,
-      [row('2026-09', 1, 'spending', 100, 0), row('2026-10', 1, 'spending', 50, 0), row('2026-09', 2, 'spending', 400, 0), row('2026-09', null, 'spending', 7, 0), row('2026-10', null, 'spending', 0, 2)],
-      [{ id: 1, name: 'Groceries' }, { id: 2, name: 'Fuel' }],
-    )
-
-    expect(r).toEqual({
-      accountId: null,
-      ...request,
-      categories: [{ categoryId: 2, categoryName: 'Fuel', cents: 400 }, { categoryId: 1, categoryName: 'Groceries', cents: 150 }],
-      uncategorisedCents: 5,
-      totalCents: 555,
-    })
-  })
-
-  it('leaves out Income and Loans', () => {
-    const r = spendingReport(request, [row('2026-09', 1, 'spending', 100, 0), row('2026-09', 2, 'income', 0, 5000), row('2026-09', 3, 'loans', 900, 0)], [{ id: 1, name: 'Groceries' }, { id: 2, name: 'Wages' }, { id: 3, name: 'Loans' }])
-
-    expect(r.categories).toEqual([{ categoryId: 1, categoryName: 'Groceries', cents: 100 }])
-    expect(r.totalCents).toBe(100)
-  })
-
-  it('is a total of zero for no rows, and keeps the Account it was for', () => {
-    expect(spendingReport({ ...request, accountId: 4 }, [], [])).toEqual({ accountId: 4, ...request, categories: [], uncategorisedCents: null, totalCents: 0 })
-  })
-
-  it('stops, without a value in the message, at a Category that has no name', () => {
-    expect(() => spendingReport(request, [row('2026-09', 99, 'spending', 100, 0)], [])).toThrow('A Category in the spending has no name')
   })
 })
 
@@ -400,32 +396,45 @@ describe('who can read it, and what a request refuses', () => {
     ['an Account that is not a number', { accountId: 'x' }, 'accountId'],
     ['an Account with a sign', { accountId: '-1' }, 'accountId'],
     ['an Account of zero', { accountId: '0' }, 'accountId'],
-    ['an Account with too many digits', { accountId: '1234567890' }, 'accountId'],
+    ['an Account with too many digits', { accountId: '1234567890123456' }, 'accountId'],
     ['an Account that is empty', { accountId: '' }, 'accountId'],
   ])('refuses %s', async (_what, over, field) => {
     const res = await call(`/api/reports/spending?${query(over)}`)
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: 'Invalid request', field })
   })
+
+  it('takes an Account of fifteen digits, the most an ID has, and says there is no such Account', async () => {
+    const res = await call(`/api/reports/spending?${query({ accountId: '999999999999999' })}`)
+    expect(res.status).toBe(404)
+  })
 })
 
 describe('what a request costs (ADR 0004)', () => {
-  /** D1 that counts the statements prepared on it and the rows its batches read, to see what one request asks of the free plan. */
+  /** D1 that counts the statements prepared on it and the rows its queries read, to see what one request asks of the free plan. */
   function metered() {
     const usage = { queries: 0, rowsRead: 0 }
+    const wrap = (statement: D1PreparedStatement): D1PreparedStatement =>
+      new Proxy(statement, {
+        get(target, property) {
+          if (property === 'bind') return (...values: unknown[]) => wrap(target.bind(...values))
+          if (property === 'all') {
+            return async () => {
+              const result = await target.all()
+              usage.rowsRead += (result.meta as { rows_read: number }).rows_read
+              return result
+            }
+          }
+          const value = Reflect.get(target, property)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
     const db = new Proxy(env.DB, {
       get(target, property) {
         if (property === 'prepare') {
           return (sql: string) => {
             usage.queries += 1
-            return target.prepare(sql)
-          }
-        }
-        if (property === 'batch') {
-          return async (statements: D1PreparedStatement[]) => {
-            const results = await target.batch(statements)
-            for (const result of results) usage.rowsRead += (result.meta as { rows_read: number }).rows_read
-            return results
+            return wrap(target.prepare(sql))
           }
         }
         const value = Reflect.get(target, property)
@@ -442,8 +451,7 @@ describe('what a request costs (ADR 0004)', () => {
     return res
   }
 
-  const categoryRows = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM categories').first<{ n: number }>())!.n
-  const SLACK = 20 // the Account row, and the grouping of the months
+  const SLACK = 20 // the grouping of the months
 
   beforeEach(async () => {
     // 3,000 Transactions of history from 2020, none in the dates below: they must cost nothing.
@@ -464,15 +472,15 @@ describe('what a request costs (ADR 0004)', () => {
       .run()
   })
 
-  it('is one batch of two statements for all Accounts, three for one, however many Transactions', async () => {
+  it('is one D1 query for all Accounts, and two for one (the check that it exists), however many Transactions', async () => {
     const all = metered()
     const res = await requestWith(all.db, { from: '2026-01-01', to: '2026-12-31' })
     expect(res.status).toBe(200)
-    expect(all.usage.queries).toBe(2)
+    expect(all.usage.queries).toBe(1)
 
     const one = metered()
     expect((await requestWith(one.db, { from: '2026-01-01', to: '2026-12-31', accountId: String(accountA) })).status).toBe(200)
-    expect(one.usage.queries).toBe(3)
+    expect(one.usage.queries).toBe(2)
   })
 
   it('reads the Transactions of the dates asked for, four rows each, and not the history around them', async () => {
@@ -480,10 +488,10 @@ describe('what a request costs (ADR 0004)', () => {
 
     const res = await requestWith(db, { from: '2026-01-01', to: '2026-12-31' })
 
-    const r = (await res.json()) as SpendingReport
+    const r = (await res.json()) as SpendingByCategory
     expect(lines(r)).toEqual([['Groceries', 48_000]])
-    // The date index entry, the row, the Override's Category and the Rule's Category for each Transaction, and the Categories (their names).
-    expect(usage.rowsRead).toBeLessThanOrEqual(480 * 4 + (await categoryRows()) + SLACK)
+    // The date index entry, the row, the Override's Category and the Rule's Category for each Transaction.
+    expect(usage.rowsRead).toBeLessThanOrEqual(480 * 4 + SLACK)
     expect(usage.rowsRead).toBeGreaterThan(480 * 3) // the Rule's Category is read too, so the allowance above is not slack for a cheaper plan
   })
 
@@ -492,6 +500,16 @@ describe('what a request costs (ADR 0004)', () => {
 
     await requestWith(db, { from: '2026-03-01', to: '2026-03-31' })
 
-    expect(usage.rowsRead).toBeLessThanOrEqual(40 * 4 + (await categoryRows()) + SLACK)
+    expect(usage.rowsRead).toBeLessThanOrEqual(40 * 4 + SLACK)
+  })
+
+  it('reads none of the figures for an Account that does not exist: it asks, finds none, and stops', async () => {
+    const { db, usage } = metered()
+
+    const res = await requestWith(db, { from: '2026-01-01', to: '2026-12-31', accountId: String(accountB + 1000) })
+
+    expect(res.status).toBe(404)
+    expect(usage.queries).toBe(1)
+    expect(usage.rowsRead).toBe(0) // the check is a `first()`, which D1 does not report rows for, and nothing else was read
   })
 })

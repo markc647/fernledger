@@ -16,11 +16,11 @@ export const reports = new Hono<AppEnv>()
     const { results } = await c.env.DB.prepare(sql).bind(...binds).all<ReportRow>()
     return c.json(pageOf(results, query.limit))
   })
-  // Spending by Category over the dates, for every Account or the one named (spending.ts is the only place spending is worked out). It is one
+  // Spending by Category over the dates, for every Account or the one named: the Dashboard chart's own answer (spending-by-category.ts). It is one
   // request however many Accounts there are, so a Report of all of them is not a request for each.
   .get('/spending', validate('query', spendingReportQuery), async (c) => {
     const { accountId, from, to } = c.req.valid('query')
-    const report = await readSpendingReport(c.env.DB, { accountId: accountId === undefined ? undefined : Number(accountId), from, to })
+    const report = await readSpendingReport(c.env.DB, { from, to, ...(accountId === undefined ? {} : { accountId: Number(accountId) }) })
     return report ? c.json(report) : c.json({ error: 'Not found' }, 404)
   })
   // Balances over time for one Account: its balance history (worker/balances.ts) at the end of each month. One request is one
