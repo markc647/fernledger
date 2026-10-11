@@ -282,11 +282,14 @@ function RemoveConfirm({ category, budgetChanges, onDone, onCancel }: { category
   const remove = useMutation({
     mutationFn: async () => {
       const res = await api.categories[':id'].$delete({ param: { id: String(category.id) }, json: {} })
+      if (res.status === 404) return null // another page, or a second click, removed it first: the list on this page is out of date, and nothing is left to remove
       if (!res.ok) throw new HttpError(res.status)
       return res.json()
     },
-    onSuccess: async ({ overrides }) => {
+    onSuccess: async (removed) => {
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['transactions'] }), queryClient.invalidateQueries({ queryKey: ['budgets'] })])
+      if (removed === null) return onDone(`${category.name} had already been removed, so nothing was changed. The list is up to date now.`)
+      const { overrides } = removed
       onDone(
         overrides === 0
           ? `Removed ${category.name}.`

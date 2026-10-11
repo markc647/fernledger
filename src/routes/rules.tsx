@@ -373,10 +373,13 @@ function RemoveConfirm({ item, runGoing, onDone, onCancel }: { item: Item; runGo
   const remove = useMutation({
     mutationFn: async () => {
       const res = await api.rules[':id'].$delete({ param: { id: String(item.rule.id) }, json: {} })
+      if (res.status === 404) return 'already gone' as const // another page, or a second click, removed it first: the list on this page is out of date, and nothing is left to remove
       if (!res.ok) throw new HttpError(res.status)
+      return 'removed' as const
     },
-    onSuccess: async () => {
+    onSuccess: async (outcome) => {
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
+      if (outcome === 'already gone') return onDone('That Rule had already been removed, so nothing was changed. The list is up to date now.')
       onDone(
         `Removed Rule ${item.number}. It is no longer used for new Transactions. ${
           runGoing ? 'The run that is going starts again from the first Transaction, so that it no longer uses the Rule.' : 'Transactions it already put in a Category keep that Category until you apply the Rules to all Transactions.'

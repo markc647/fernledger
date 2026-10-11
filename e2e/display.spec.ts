@@ -1065,5 +1065,5 @@ test.describe('header', () => {
 test('the examples page has no WCAG 2.2 AA violations at the largest text size', async ({ page }) => {
   await page.goto('/styleguide')
   await sizeButton(page, 'A++').click()
-  await noAxeViolations(page) // straight after the click, while the size buttons may still be changing width
+  await noAxeViolations(page) // right after the click: it waits for the size buttons to finish changing width
 })

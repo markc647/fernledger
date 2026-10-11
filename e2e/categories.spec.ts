@@ -153,6 +153,29 @@ test.describe('a refused rename or kind', () => {
   })
 })
 
+// A Category another page (or a second click) removed first: the answer is the 404 a Category that is not there has, which the page takes as it being gone.
+test.describe('a Category removed meanwhile', () => {
+  test.use({ expectedStatuses: [404] })
+
+  test('is said to be gone already, and the list is brought up to date', async ({ page, context, baseURL }, testInfo) => {
+    await signInAs(context, 'admin')
+    const name = `Gone ${testInfo.project.name} ${Date.now() % 1000000}`
+    const added = await context.request.post('/api/categories', { headers: { Origin: baseURL! }, data: { name } })
+    expect(added.ok()).toBe(true)
+    const { id } = (await added.json()) as { id: number }
+
+    await page.goto('/categories')
+    await expect(page.getByRole('cell', { name, exact: true })).toBeVisible()
+    await page.getByRole('button', { name: `Remove ${name}` }).click()
+    expect((await context.request.delete(`/api/categories/${id}`, { headers: { Origin: baseURL! }, data: {} })).ok()).toBe(true) // another page removes it while this one asks
+    await page.getByRole('button', { name: `Yes, remove ${name}` }).click()
+
+    await expect(page.getByRole('status').filter({ hasText: 'had already been removed' })).toHaveText(`${name} had already been removed, so nothing was changed. The list is up to date now.`)
+    await expect(page.getByRole('cell', { name, exact: true })).toHaveCount(0)
+    await noAxeViolations(page)
+  })
+})
+
 test('the Admin sets the kind of a Category, Members see it, and only a Spending Category has a Budget', async ({ page, context, baseURL }, testInfo) => {
   await signInAs(context, 'admin')
   const name = `Kind ${testInfo.project.name} ${Date.now() % 1000000}`
