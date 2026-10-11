@@ -1,1 +1,321 @@
 @import "tailwindcss";
+
+/* Geist, Latin and Latin Extended only. Latin Extended carries the macrons (ā, ē, ī, ō, ū) that Māori words need;
+   the browser downloads it only when a page uses one. */
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/geist/files/geist-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Geist Variable", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+/* shadcn/ui neutral theme. Two deliberate changes from the stock tokens, both for WCAG AA
+   (scripts/theme-contrast.test.mjs pins them): --muted-foreground and --ring. */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  /* Stock is 0.556, about 4.4:1 on the muted fill, under the 4.5:1 that AA needs for text. */
+  --muted-foreground: oklch(0.505 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  /* Money in/out and statuses. Green and red differ in lightness as well as hue, so they stay apart for colour-blind
+     readers, and they are never the only signal (a sign, an icon or words always go with them). Text colours, AA on
+     the page, cards and muted fills (scripts/theme-contrast.test.mjs). */
+  --success: oklch(0.45 0.12 155);
+  --warning: oklch(0.47 0.1 70);
+  --danger: oklch(0.5 0.19 27);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  /* Focus indicators need 3:1 against the page (WCAG 1.4.11); the stock 0.708 is about 2.6:1 on white. */
+  --ring: oklch(0.45 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: var(--ring);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.8 0.15 155);
+  --warning: oklch(0.82 0.13 85);
+  --danger: oklch(0.76 0.15 25);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring;
+  }
+  html {
+    @apply font-sans;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  /* The A / A+ / A++ control (src/lib/text-size.ts). Everything is sized in rem, so it all scales together, and the
+     percentage is of the browser's own text size, so a larger browser setting is respected. */
+  html[data-text-size="a"] {
+    font-size: 100%;
+  }
+  html[data-text-size="a-plus"] {
+    font-size: 115%;
+  }
+  html[data-text-size="a-plus-plus"] {
+    font-size: 130%;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* Long words, such as an app title or a bank's payee name, wrap instead of forcing sideways scrolling. */
+    overflow-wrap: anywhere;
+  }
+}
+
+/* Reduced motion: no animation or smooth scrolling for anyone who asks the device for less. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Paper is white. Printed from the dark theme, light text would come out pale on white paper (and browsers leave
+   backgrounds out of a printout), so print always uses the light theme's colours. Every token `.dark` overrides is
+   restated here with its light value, so nothing from the dark theme survives into print. A token added to `.dark`
+   must be added here too: scripts/theme-contrast.test.mjs fails otherwise, and checks each value equals the light one. */
+@media print {
+  :root,
+  .dark {
+    color-scheme: light;
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.505 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: oklch(0.985 0 0);
+    --success: oklch(0.45 0.12 155);
+    --warning: oklch(0.47 0.1 70);
+    --danger: oklch(0.5 0.19 27);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.45 0 0);
+    --chart-1: oklch(0.646 0.222 41.116);
+    --chart-2: oklch(0.6 0.118 184.704);
+    --chart-3: oklch(0.398 0.07 227.392);
+    --chart-4: oklch(0.828 0.189 84.429);
+    --chart-5: oklch(0.769 0.188 70.08);
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: var(--ring);
+  }
+}
+
+/* Anything that is printed: a table's headings come back at the top of every page it runs onto, and a row, or a heading
+   and what it heads, is not cut by a page break. */
+@media print {
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    break-inside: avoid;
+  }
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+}
+
+/* Reports (src/components/report-frame.tsx; README: Reports). A Report is a named page, so these margins and the number in
+   them are the Report's alone: How to sign in keeps the browser's own margins.
+   Everything a reader needs to identify a page (what it is, which Account and dates, who generated it and when) is in the page
+   itself, in each table's heading, so it comes back on every page in every browser, and the text is 12pt or more. The one thing
+   that comes from the page margin is "Page 2 of 5": CSS margin boxes, which only Chrome and Edge 131 and later draw. Firefox and
+   Safari print the Report without them, and can number the pages in their own header and footer if the reader turns that on
+   (the hint on the Report says so). */
+@page report {
+  margin: 18mm 15mm 20mm;
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font: 12pt/1.3 var(--font-sans);
+    color: #000;
+    vertical-align: top;
+    padding-top: 3mm;
+    white-space: nowrap;
+  }
+}
+.report-frame {
+  page: report;
+}
+/* On paper a Report's own margins stand in for the screen's width limit and padding, which would narrow its tables. Only a
+   Report: every other printed page keeps them. */
+@media print {
+  main:has(.report-frame) {
+    max-width: none;
+    padding: 0;
+  }
+}
+/* Black on white. The colours that carry meaning on screen (money in and out, warnings, muted words) are black on paper, because the
+   sign, the words "Money in" and "Money out", and a warning's icon and box carry it, and a black-and-white printer would turn a colour
+   into a grey. */
+@media print {
+  .report-frame {
+    --foreground: oklch(0 0 0);
+    --muted-foreground: oklch(0 0 0);
+    --success: oklch(0 0 0);
+    --warning: oklch(0 0 0);
+    --danger: oklch(0 0 0);
+    --border: oklch(0.45 0 0);
+    color: oklch(0 0 0);
+  }
+}
+
+/* Windows high contrast (forced colours). The browser swaps our colours for the reader's palette, which drops
+   box-shadow focus rings and background-only states, so give both a border or outline that survives. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  [aria-pressed="true"],
+  [aria-current="page"] {
+    forced-color-adjust: none;
+    background-color: Highlight;
+    color: HighlightText;
+  }
+  /* A chart's line and bars are drawn in theme colours, which the reader's palette may not keep. Draw them in the text colour; the
+     figures beside the chart say the rest. */
+  [data-slot="chart"] :is(.recharts-line-curve, .recharts-dot, .recharts-rectangle):not(.recharts-tooltip-cursor) {
+    fill: CanvasText;
+    stroke: CanvasText;
+  }
+  [data-slot="chart"] .recharts-line-curve {
+    fill: none;
+  }
+}

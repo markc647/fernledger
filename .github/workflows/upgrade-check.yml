@@ -1,0 +1,54 @@
+name: Check for a Fernledger update
+
+# For copies made with the Deploy button. Once a week it looks for a newer Fernledger release and, if there is one,
+# opens a pull request that brings this copy up to it. Merging does not touch your database: run `npm run deploy`
+# from the merged commit (README.md#updating).
+# It does nothing in the upstream repository. This file is deliberately thin, because a copy never receives workflow
+# updates: the logic is in scripts/upgrade-check.mjs (tested by scripts/upgrade-check.test.mjs, which also checks the
+# rules in this file), and README.md#updating explains the rest.
+#
+# One setting is needed in your copy: Settings > Actions > General > Workflow permissions >
+# "Allow GitHub Actions to create and approve pull requests". It lets Actions approve pull requests as well as create
+# them. Pull requests opened with GITHUB_TOKEN do not trigger pull_request checks, so no CI runs on them.
+
+on:
+  schedule:
+    - cron: "41 3 * * 2" # Tuesday 03:41 UTC; not on the hour, when scheduled runs are most delayed
+  workflow_dispatch:
+
+permissions: {}
+
+# One run at a time, so a manual run and the schedule can't push the same branch together.
+concurrency:
+  group: fernledger-upgrade-check
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    if: github.repository != 'markc647/fernledger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      UPSTREAM: markc647/fernledger
+    steps:
+      # The credentials checkout leaves behind are what `git push` uses in the last step.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Look for a newer release
+        id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/upgrade-check.mjs check "$UPSTREAM" "$RUNNER_TEMP/pr-body.md"
+
+      - name: Open a pull request
+        if: steps.plan.outputs.upgrade == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          BRANCH: ${{ steps.plan.outputs.branch }}
+          TITLE: ${{ steps.plan.outputs.title }}
+          BASE: ${{ github.ref_name }}
+        run: node scripts/upgrade-check.mjs open "https://github.com/$UPSTREAM.git" "$TAG" "$BRANCH" "$BASE" "$TITLE" "$RUNNER_TEMP/pr-body.md"

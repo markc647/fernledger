@@ -12,9 +12,11 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  "observability": { "enabled": true },
+  // Invocation logs would record request URLs and headers (the Access email, search text). Only our own logEvent console logs are kept.
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
   // This repo is public: never put names, emails, account numbers or resource IDs here.
-  // D1/R2 are created by the setup script in the chosen region (ADR 0007).
+  // D1/R2 are created by the setup script in the chosen region (ADR 0007). Wrangler finds them by
+  // name, so there is deliberately no database_id (docs/setup.md).
   "d1_databases": [{ "binding": "DB", "database_name": "fernledger", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "fernledger-backups" }],
   "triggers": {

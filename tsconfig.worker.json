@@ -7,5 +7,6 @@
     "types": ["./worker-configuration.d.ts"],
     "lib": ["ES2023"]
   },
-  "include": ["worker", "worker-configuration.d.ts"]
+  "include": ["worker", "worker-configuration.d.ts"],
+  "exclude": ["worker/**/*.test.ts", "worker/test-setup.ts"]
 }

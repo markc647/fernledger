@@ -1,0 +1,15 @@
+{
+  // Emits declarations for the API (worker/app.ts and what it imports) into src/generated/api, so the browser
+  // program sees the API's types without type-checking Worker code against browser globals.
+  "extends": "./tsconfig.worker.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "./src/generated/api",
+    "rootDir": "./worker",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.api-types.tsbuildinfo"
+  },
+  "include": ["worker/app.ts", "worker/env.d.ts", "worker-configuration.d.ts"],
+  "exclude": []
+}

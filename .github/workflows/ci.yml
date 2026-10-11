@@ -17,9 +17,22 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      - run: npm run check
 
+  # Browser tests (Playwright + axe, light and dark) are slower than `check`, so they run as their own job.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  # gitleaks runs twice on purpose: `check` scans the working tree, this job scans git history.
   secrets-scan:
     runs-on: ubuntu-latest
     steps:
@@ -29,3 +42,4 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.24.3 # keep equal to VERSION in scripts/gitleaks.mjs
