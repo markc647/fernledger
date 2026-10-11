@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { balanceDiffersMessage, describeBalanceCheck, noBalanceReason } from './balance-check'
+import { balanceDiffersMessage, describeBalanceCheck, noBalanceHint, noBalanceReason } from './balance-check'
+
+describe('noBalanceHint', () => {
+  it('says what the Admin can do, for each reason an Account can have no balance', () => {
+    expect(noBalanceHint('after-cutover')).toBe('The Admin can import a file with a bank balance dated before the Cutover Date, or change the Cutover Date in Settings.')
+    expect(noBalanceHint('file-ends-early')).toBe('The Admin can import a file that runs to its balance date.')
+    expect(noBalanceHint('alone')).toBe('The Admin can import a bank file to give it one.')
+    expect(noBalanceHint(null)).toBe('The Admin can import a bank file to give it one.')
+  })
+})
 
 describe('noBalanceReason', () => {
   it('says why an Account has no balance, in the words the Summary and the balances Report share', () => {
