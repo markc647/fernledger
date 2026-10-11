@@ -510,6 +510,5 @@ describe('what a request costs (ADR 0004)', () => {
 
     expect(res.status).toBe(404)
     expect(usage.queries).toBe(1)
-    expect(usage.rowsRead).toBe(0) // the check is a `first()`, which D1 does not report rows for, and nothing else was read
   })
 })

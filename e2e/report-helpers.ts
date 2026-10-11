@@ -130,7 +130,7 @@ export async function expectIdentityRow(page: Page, identity: string) {
   await expect(row).toBeVisible() // on screen it is not
   await expect(row).toContainText(identity)
   await expect(row).toContainText(GENERATED)
-  expect(await page.locator('thead').evaluate((el) => [getComputedStyle(el).display, el.querySelectorAll('tr').length])).toEqual(['table-header-group', 2])
+  expect(await page.locator('thead').first().evaluate((el) => [getComputedStyle(el).display, el.querySelectorAll('tr').length])).toEqual(['table-header-group', 2])
 }
 
 // ---------------------------------------------------------------------------------------------------------------
