@@ -42,3 +42,7 @@ export function monthsBefore(month: string, count: number): string {
 
 /** The NZ calendar month a moment falls in (Pacific/Auckland, so a month changes at NZ midnight, not UTC midnight). */
 export const nzMonth = (at: Date): string => nzDate(at).slice(0, 7)
+
+/** Whether a month is over, is the month it is now, or is still to come (by the NZ month it is now). */
+export type MonthState = 'ended' | 'under-way' | 'not-begun'
+export const monthState = (month: string, thisMonth: string): MonthState => (month < thisMonth ? 'ended' : month === thisMonth ? 'under-way' : 'not-begun')

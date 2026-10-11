@@ -6,7 +6,8 @@ import { MAX_REPORT_MONTHS as PAGE_MAX_REPORT_MONTHS, monthsTouched } from '../s
 import { MAX_BUDGET_CHANGES, type Change, type InEffect } from './budget-rules'
 import worker from './index'
 import { monthCount } from './months'
-import { budgetReport, isOver, MAX_REPORT_MONTHS, monthState, readBudgetReport, type BudgetReport } from './report-budget'
+import { monthState } from './months'
+import { budgetReport, isOver, MAX_REPORT_MONTHS, readBudgetReport, type BudgetReport } from './report-budget'
 import type { SpendingRow } from './spending'
 
 // Seam 1: the Budget vs actual Report's data (GET /api/reports/budget-vs-actual), through the Worker's exported handler as the local-development Admin or a

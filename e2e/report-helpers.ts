@@ -28,11 +28,15 @@ export const dateText = (iso: string) => {
 export const money = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2 })}`
 /** What a Spent cell says: no sign, and "back" after an amount that is less than nothing. */
 export const spent = (cents: number) => `${money(Math.abs(cents))}${cents < 0 ? ' back' : ''}`
+/** A change in money as the app writes it: the sign is always written ("+$12.00", "−$12.00"), and nothing is "$0.00". */
+export const signedMoney = (cents: number) => `${cents > 0 ? '+' : ''}${money(cents)}`
 
 /** What the Dashboard calls Uncategorised in a table, which is what a row of a Report of Spending says too. */
 export const UNCATEGORISED = 'Uncategorised (includes money in not yet given a Category)'
 /** What a Report of Spending says is not counted, in the Dashboard's words; the table's heading repeats it on every printed page. */
 export const NOT_COUNTED = "Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted."
+/** What a Report of Spending and Income together says is not counted: the same, except that Income is what it is about. */
+export const NOT_COUNTED_AS_SPENDING_OR_INCOME = "Transfers between your own Accounts, Pending Transactions and Loans aren't counted."
 
 /** A line of a PDF's text with every space taken out, for "contains" checks that must not care where a long line wrapped (even inside an Account's number at a hyphen). */
 export const squash = (text: string) => text.replace(/\s+/g, '')

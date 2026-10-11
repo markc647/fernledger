@@ -13,3 +13,6 @@ export function isSearchDate(value: string) {
   // A date such as 30 February rolls over into March in Date; compare it back.
   return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).toISOString().slice(0, 10) === value
 }
+
+/** The last day of an NZ calendar month ("2026-10"), as two digits: "31". */
+export const lastDay = (month: string) => String(new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate()).padStart(2, '0')

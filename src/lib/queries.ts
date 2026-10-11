@@ -157,6 +157,22 @@ export const reportBudgetQuery = (from: string, to: string) =>
     },
   })
 
+/**
+ * The income-vs-spending-by-month Report's data: Income and Spending in each month of the range, for the one Account or, with none, all of them. One request
+ * either way. Read once and kept, as the other Reports are: a Report is a snapshot.
+ */
+export const reportIncomeVsSpendingQuery = (accountId: number | undefined, from: string, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'income-vs-spending', accountId ?? null, from, to],
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const res = await api.reports['income-vs-spending'].$get({ query: { ...(accountId === undefined ? {} : { accountId: String(accountId) }), from, to } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
 /** The Categories in use, by name. */
 export const categoriesQuery = queryOptions({
   queryKey: ['categories'],

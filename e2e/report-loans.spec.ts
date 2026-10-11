@@ -188,10 +188,10 @@ test.describe('opening the Report', () => {
     expect(Object.fromEntries(new URL(one.url()).searchParams)).toEqual({ category: String(aliceId), from: `${d.year}-11-01`, to: `${d.year}-12-31` })
   })
 
-  test('the Reports page has no WCAG 2.2 AA violations with all five forms on it', async ({ page, context }) => {
+  test('the Reports page has no WCAG 2.2 AA violations with all its forms on it', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/reports')
-    await expect(page.getByRole('form')).toHaveCount(5)
+    await expect(page.getByRole('form')).toHaveCount(6)
     await expect(page.getByRole('form', { name: 'Loans' }).getByRole('status')).toContainText('to choose from')
     await noAxeViolations(page)
   })

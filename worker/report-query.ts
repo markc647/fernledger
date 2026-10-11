@@ -20,8 +20,16 @@ export const reportRange = {
   ...reportDates,
 }
 
-/** For a Report that can cover every Account in one request (spending by Category): the same fields with the Account left out for all of them. */
+/** For a Report that can cover every Account in one request (Spending by Category, Income vs spending by month): the same fields with the Account left out for all of them. */
 export const reportRangeOfAll = { accountId: z.optional(reportRange.accountId), ...reportDates }
 
 /** The last check of a Report's query: `from` is not after `to`. A refusal names `to`. */
 export const datesInOrder = z.refine<{ from: string; to: string }>((q) => q.from <= q.to, { path: ['to'] })
+
+const ACCOUNT_EXISTS = 'SELECT id FROM accounts WHERE id = ?'
+
+/**
+ * Whether a Report that was asked about one Account (`accountId` set) must be a 404: that Account does not exist, so the Report is not mistaken for an Account that
+ * had nothing in the dates. One D1 query, and none when the Report is for every Account.
+ */
+export const accountMissing = async (db: D1Database, { accountId }: { accountId?: number }) => accountId !== undefined && !(await db.prepare(ACCOUNT_EXISTS).bind(accountId).first())

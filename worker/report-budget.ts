@@ -1,6 +1,6 @@
 import * as z from 'zod/mini'
 import { ALL_CHANGES, budgetInMonth, budgetVsActual, IN_EFFECT, withChanges, type Change, type InEffect, type VsActual } from './budget-rules'
-import { monthCount, monthEnd, monthStart, nextMonth, nzMonth } from './months'
+import { monthCount, monthEnd, monthStart, monthState, nextMonth, nzMonth, type MonthState } from './months'
 import { datesInOrder, reportDates } from './report-query'
 import { buildSpending, rollUp, type SpendingRow } from './spending'
 
@@ -35,10 +35,6 @@ export const budgetReportQuery = z
   )
 
 export type BudgetReportRequest = { from: string; to: string }
-
-/** Whether a month is over, is the month it is now, or is still to come (by the NZ month it is now). */
-export type MonthState = 'ended' | 'under-way' | 'not-begun'
-export const monthState = (month: string, thisMonth: string): MonthState => (month < thisMonth ? 'ended' : month === thisMonth ? 'under-way' : 'not-begun')
 
 /**
  * Whether a Category (or the Budgets together) spent more than its Budget: the Summary's "Over Budget". `budgetStatus` in src/lib/budgets.ts words it, and

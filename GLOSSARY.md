@@ -88,6 +88,10 @@ _Avoid_: Expenses, outgoings
 What the Income Categories brought into the Accounts in a month, less what went out of them. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
 _Avoid_: Earnings
 
+**Difference**:
+Income less Spending: in a month, or over the dates of the Income vs spending by month Report. Below zero when more was spent than came in. Money in that has no Category comes off Spending and is not Income, but the Difference is the same whichever Category it is given.
+_Avoid_: Net, surplus, profit
+
 **Loans**:
 The Category kind for money lent or borrowed, such as a loan between family: neither Spending nor Income, and left out of Budgets. The Loans Report adds each one up. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
 _Avoid_: Debt
@@ -135,7 +139,7 @@ What a Change Log entry changed, such as Settings, Import, Account, Category, Ru
 _Avoid_: Type on its own
 
 **Report**:
-A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, of Budget vs actual, or of what is owed on a loan, over a date range, which any Member can print or save as PDF.
+A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, of Budget vs actual, of Income and Spending by month, or of what is owed on a loan, over a date range, which any Member can print or save as PDF.
 _Avoid_: Statement, export
 
 **Loans Report**:

@@ -31,6 +31,9 @@ export const SPENDING_OUTSIDE_BUDGETS = 'Spending outside Budgets'
 /** What is left out of Spending, in the Dashboard's words. The Reports of Spending say it before their figures and again in the heading of each table, so every printed page says it. */
 export const NOT_COUNTED = "Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted."
 
+/** What a Report of Spending and Income together leaves out: the same, except that Income is what it is about. */
+export const NOT_COUNTED_AS_SPENDING_OR_INCOME = "Transfers between your own Accounts, Pending Transactions and Loans aren't counted."
+
 /** A row of Budget vs actual: a Category with a Budget, or what has none (Spending Categories without a Budget, and Uncategorised), which has `budgetCents: null`. `note` is said under the name. */
 export type BudgetRow = { key: string; name: string; budgetCents: number | null; spentCents: number; note?: string }
 

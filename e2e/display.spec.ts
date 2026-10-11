@@ -93,7 +93,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/loans']
+  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/income-vs-spending', '/reports/loans']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -783,6 +783,54 @@ test.describe('zoom', () => {
     }
   }
 
+  // The income-vs-spending-by-month Report with its longest content: a long app title and Account name, the largest amounts, Spending back, Income and a Difference
+  // below zero, the notice about money in with no Category with a large amount in it, and months with sentences under their names (the dates cover only part of the
+  // first, the second is not over, the third has not begun), on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/reports/income-vs-spending with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'member')
+        await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
+        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
+        await page.route('**/api/reports/income-vs-spending?**', (route) =>
+          route.fulfill({
+            json: {
+              from: '2026-09-15',
+              to: '2026-11-10',
+              months: [
+                { month: '2026-09', state: 'ended', incomeCents: 123456789012, spendingCents: -123456789, differenceCents: 123580245801, uncategorisedInCents: 123456789012, counted: 3 },
+                { month: '2026-10', state: 'under-way', incomeCents: -123456789012, spendingCents: 123456789012, differenceCents: -246913578024, uncategorisedInCents: 0, counted: 2 },
+                { month: '2026-11', state: 'not-begun', incomeCents: 0, spendingCents: 0, differenceCents: 0, uncategorisedInCents: 0, counted: 0 },
+              ],
+              totals: { incomeCents: 0, spendingCents: 123333332223, differenceCents: -123333332223, uncategorisedInCents: 123456789012, counted: 5 },
+            },
+          }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/reports/income-vs-spending?from=2026-09-15&to=2026-11-10')
+        await sizeButton(page, size).click()
+        const report = page.getByRole('article', { name: 'Income vs spending by month' })
+        await expect(report).toContainText('$1,234,567,890.12')
+        await expect(report).toContainText('−$1,234,567,890.12')
+        await expect(report).toContainText('$1,234,567.89 back')
+        await expect(report).toContainText('−$2,469,135,780.24')
+        await expect(report).toContainText('Difference (income less spending)') // the longest label
+        await expect(report).toContainText('$1,234,567,890.12 of money in has no Category')
+        await expect(report).toContainText('Counts only Tue 15 Sept 2026 to Wed 30 Sept 2026') // the longest sentence about a part month
+        await expect(report).toContainText('This month is not over yet, so these are the figures so far.')
+        await expect(report).toContainText('This month has not begun, so there is nothing to show yet.')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
   test('a very long app title wraps instead of scrolling sideways', async ({ page }) => {
     await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(120, 'x'), about_contact: '', about_retention: '' } }))
     await page.setViewportSize({ width: 320, height: 256 })
@@ -814,6 +862,29 @@ test.describe('responsive table', () => {
     await expect(cards.first()).toContainText('Thu 8 Oct 2026')
     await expect(cards.first()).toContainText('Example Supermarket')
     await expect(cards.first()).toContainText('−$1,111.11')
+  })
+
+  // A card's label and value sit side by side, the value taking the rest of the line, unless the value's narrowest form (a word, or an amount, that cannot be broken)
+  // will not fit beside the label: then it goes under it, at any text size. Ordinary content at size A is as it always was; a value that cannot fit is what moves.
+  test('keeps a card\'s label beside its value for ordinary content, and puts a value that cannot fit beside its label under it', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/styleguide')
+    const cards = page.getByRole('list', { name: 'Sample transactions' }).getByRole('listitem')
+    await expect(cards).toHaveCount(3)
+    /** For each label and value of each card: whether the value starts on the label's line. */
+    const beside = () =>
+      cards.evaluateAll((items) =>
+        items.flatMap((item) =>
+          Array.from(item.querySelectorAll('dl > div'), (row) => row.querySelector('dd')!.getBoundingClientRect().top < row.querySelector('dt')!.getBoundingClientRect().bottom - 1),
+        ),
+      )
+
+    expect(await beside()).toEqual(Array(9).fill(true)) // three cards of a date, a description and an amount
+
+    // A description with a word too wide to sit beside "Description" goes under it, and the page does not grow sideways.
+    await cards.first().locator('dd').nth(1).evaluate((dd) => (dd.textContent = 'Example'.padEnd(60, 'x')))
+    expect(await beside()).toEqual([true, false, true, true, true, true, true, true, true])
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   })
 
   test('sorts by a column heading on a wide screen and from a menu on cards', async ({ page }) => {

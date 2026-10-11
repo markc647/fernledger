@@ -8,6 +8,7 @@ import { Select } from '@/components/ui/select'
 import { isLoansKind } from '@/lib/category-kinds'
 import { MAX_DATE, MIN_DATE, isSearchDate } from '@/lib/date-range'
 import { nzDate } from '@/lib/format'
+import { MAX_INCOME_MONTHS, tooManyIncomeMonths } from '@/lib/income-vs-spending'
 import { accountsQuery, categoriesQuery } from '@/lib/queries'
 import { MAX_REPORT_MONTHS, tooManyMonths } from '@/lib/report-budget'
 import type { LoansSearch } from '@/lib/report-loans'
@@ -162,6 +163,19 @@ export function SpendingForm({ defaults }: { defaults?: ReportSearch }) {
       action="/reports/spending"
       defaults={defaults}
       note="A Report has one row for each Category with spending in your dates, the most spent first, and one for Uncategorised when there is any."
+    />
+  )
+}
+
+/** The income-vs-spending-by-month Report's form (spec story 95). */
+export function IncomeVsSpendingForm({ defaults }: { defaults?: ReportSearch }) {
+  return (
+    <ReportForm
+      name="Income vs spending by month"
+      action="/reports/income-vs-spending"
+      defaults={defaults}
+      rangeProblem={tooManyIncomeMonths}
+      note={`A Report has one row for each month in your dates, with the income, the spending and the difference between them, and the totals above, up to ${MAX_INCOME_MONTHS} months. Your dates are counted exactly: a month they begin or end part way through counts only those dates, and the row says so.`}
     />
   )
 }

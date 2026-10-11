@@ -150,10 +150,13 @@ export function ResponsiveTable<Row>({
           {rows.map((row) => (
             <li key={getRowKey(row)} className="rounded-xl border bg-card p-4 text-card-foreground">
               <dl className="grid grid-cols-1 gap-2">
+                {/* A label and a value sit side by side, the value taking the rest of the line, unless the value's narrowest form (a large amount that keeps its digits together, or a long
+                    word) will not fit beside the label: then, at any text size, it goes under the label, and a label wider than the card wraps, rather than push the page wider.
+                    Ordinary content at the usual text size is where it always was; a row changes only when its value could not fit. */}
                 {columns.map((column) => (
-                  <div key={column.key} className="flex items-start justify-between gap-4">
-                    <dt className="shrink-0 text-muted-foreground">{column.header}</dt>
-                    <dd className="min-w-0 text-end break-words">{column.cell(row)}</dd>
+                  <div key={column.key} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                    <dt className="text-muted-foreground">{column.header}</dt>
+                    <dd className="min-w-0 grow basis-[min-content] text-end break-words">{column.cell(row)}</dd>
                   </div>
                 ))}
               </dl>

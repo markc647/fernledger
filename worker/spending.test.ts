@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { buildSpending, isLoan, rollUp, type SpendingRow } from './spending'
+import { buildMonthlySpending, buildSpending, isLoan, rollUp, rollUpMonthly, type MonthlyRow, type SpendingRow } from './spending'
 import { effectiveCategory } from './effective-category'
 
 // Spending and Income (spending.ts, ADR 0012), tested directly against D1. How Budgets use them, through the real request
@@ -327,6 +327,170 @@ describe('rollUp', () => {
 
   it('has nothing for no rows', () => {
     expect(rollUp([])).toEqual({ categories: [], byCategory: [], months: [], totals: { spendingCents: 0, incomeCents: 0 } })
+  })
+})
+
+describe('rollUpMonthly', () => {
+  const row = (month: string, kind: MonthlyRow['kind'], outCents: number, inCents: number, over: Partial<MonthlyRow> = {}): MonthlyRow => ({ month, uncategorised: 0, kind, outCents, inCents, counted: 1, ...over })
+
+  it('works out Spending as money out less money in and Income as money in less money out, for each month and in all, and leaves Loans out', () => {
+    const r = rollUpMonthly([
+      row('2026-09', 'spending', 4000, 500),
+      row('2026-09', 'spending', 7, 0, { uncategorised: 1 }),
+      row('2026-09', 'income', 20, 300_000),
+      row('2026-09', 'loans', 50_000, 0),
+      row('2026-10', 'spending', 0, 1500),
+      row('2026-10', 'income', 800, 0),
+      row('2026-11', 'loans', 0, 5_000),
+    ])
+
+    expect(r.months.map(({ month, spendingCents, incomeCents }) => [month, spendingCents, incomeCents])).toEqual([['2026-09', 3507, 299_980], ['2026-10', -1500, -800]]) // November had only a loan: no entry
+    expect(r.totals).toMatchObject({ spendingCents: 2007, incomeCents: 299_180 })
+    expect(rollUpMonthly([])).toEqual({ months: [], totals: { spendingCents: 0, incomeCents: 0, uncategorisedInCents: 0, counted: 0 } })
+  })
+
+  it('adds up the money in that has no Category, from the rows that say so, and how many Transactions were counted, for each month and in all', () => {
+    const r = rollUpMonthly([
+      row('2026-01', 'spending', 100, 40, { uncategorised: 1, counted: 3 }),
+      row('2026-01', 'spending', 0, 999, { counted: 2 }), // money in to a Category is not Uncategorised
+      row('2026-03', 'spending', 5, 25, { uncategorised: 1, counted: 4 }),
+      row('2026-03', 'income', 0, 70, { counted: 1 }),
+      row('2026-03', 'loans', 9, 9, { counted: 6 }), // a loan is not counted
+    ])
+
+    expect(r.months.map((m) => [m.month, m.uncategorisedInCents, m.counted])).toEqual([['2026-01', 40, 5], ['2026-03', 25, 5]])
+    expect(r.totals).toMatchObject({ uncategorisedInCents: 65, counted: 10 })
+  })
+
+  it('counts a month that nets out to nothing, and finds a month again when its rows are apart', () => {
+    const r = rollUpMonthly([row('2026-09', 'spending', 4000, 4000, { counted: 2 }), row('2026-10', 'spending', 7, 0), row('2026-09', 'income', 0, 0, { counted: 1 })])
+
+    expect(r.months.map((m) => [m.month, m.spendingCents, m.counted])).toEqual([['2026-09', 0, 3], ['2026-10', 7, 1]])
+  })
+})
+
+describe('buildMonthlySpending', () => {
+  const monthly = async (range: Parameters<typeof buildMonthlySpending>[0]) => {
+    const { sql, binds } = buildMonthlySpending(range)
+    const result = await env.DB.prepare(sql).bind(...binds).all<MonthlyRow>()
+    return { rows: result.results, reads: (result.meta as { rows_read: number }).rows_read }
+  }
+  const full = async (range: Parameters<typeof buildSpending>[0]) => {
+    const { sql, binds } = buildSpending(range)
+    const result = await env.DB.prepare(sql).bind(...binds).all<SpendingRow>()
+    return { rows: result.results, reads: (result.meta as { rows_read: number }).rows_read }
+  }
+
+  /** Everything that tells Spending, Income, Loans, Uncategorised and Transfers apart, across two Accounts and four months. */
+  async function history() {
+    await add(accountA, '2026-08-05', -4000, { override: 'Groceries' })
+    await add(accountA, '2026-08-20', 1000, { override: 'Groceries' }) // a refund
+    await add(accountB, '2026-09-05', -2000, { rule: 'Groceries' })
+    await add(accountA, '2026-09-05', -9000, { override: 'Fuel', rule: 'Groceries' }) // an Override outranks a Rule
+    await add(accountA, '2026-09-09', -700) // Uncategorised
+    await add(accountA, '2026-09-10', 300) // money in with no Category
+    await add(accountB, '2026-09-11', 450)
+    await add(accountA, '2026-09-01', 300_000, { override: 'Wages and salary' })
+    await add(accountA, '2026-10-01', 300_000, { rule: 'Wages and salary' })
+    await add(accountA, '2026-10-03', -50_000, { override: 'Loans' })
+    await add(accountB, '2026-10-04', 10_000, { rule: 'Loans' })
+    await pair('2026-10-05', 5000)
+    await add(accountA, '2026-10-08', -7000, { ruleTransfer: true })
+    const { out } = await pair('2026-10-12', 1200)
+    await env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(ids['Fuel'], out).run() // a half of a Transfer the Admin gave a Category
+    await add(accountA, '2026-11-02', -200, { override: 'Eating out' })
+    await add(accountA, '2026-11-03', -300, { override: 'Eating out' })
+    await env.DB.prepare("UPDATE categories SET removed_at = '2026-10-09T00:00:00.000Z' WHERE name = 'Eating out'").run() // so it is Uncategorised
+  }
+
+  const ranges = [
+    ['all four months', { from: '2026-08-01', to: '2026-11-30' }],
+    ['one month', { from: '2026-09-01', to: '2026-09-30' }],
+    ['part of two months', { from: '2026-09-06', to: '2026-10-09' }],
+    ['one day', { from: '2026-09-05', to: '2026-09-05' }],
+    ['dates with nothing in them', { from: '2025-01-01', to: '2025-12-31' }],
+  ] as const
+
+  // The two statements are built from one (spending.ts's `spendingStatement`), and this is what holds the second to the first on the data: the same Spending and Income for
+  // every month and in all, and the money in with no Category, which `buildSpending` has as the row with no Category ID.
+  it.each(ranges)("gives, for %s, the months and totals rollUp gives for buildSpending's rows, and the money in that has no Category", async (_what, range) => {
+    await history()
+
+    const expected = rollUp((await full(range)).rows)
+    const none = (await full(range)).rows.filter((r) => r.categoryId === null)
+    const got = rollUpMonthly((await monthly(range)).rows)
+
+    expect(got.months.map(({ month, spendingCents, incomeCents }) => ({ month, spendingCents, incomeCents }))).toEqual(expected.months)
+    expect(got.totals).toMatchObject(expected.totals)
+    expect(got.totals.uncategorisedInCents).toBe(none.reduce((sum, r) => sum + r.inCents, 0))
+    for (const m of got.months) expect(m.uncategorisedInCents, m.month).toBe(none.filter((r) => r.month === m.month).reduce((sum, r) => sum + r.inCents, 0))
+    if (range.from === '2026-08-01') expect(got.totals.uncategorisedInCents).toBeGreaterThan(0) // the history does have some
+  })
+
+  it.each([['one Account', 'a'], ['the other Account', 'b']] as const)('gives, for %s, what buildSpending gives for it', async (_what, which) => {
+    await history()
+    const range = { from: '2026-08-01', to: '2026-11-30', accountId: which === 'a' ? accountA : accountB }
+
+    const expected = rollUp((await full(range)).rows)
+    const got = rollUpMonthly((await monthly(range)).rows)
+
+    expect(got.months.map(({ month, spendingCents, incomeCents }) => ({ month, spendingCents, incomeCents }))).toEqual(expected.months)
+    expect(got.totals).toMatchObject(expected.totals)
+  })
+
+  it('counts the Transactions it adds up, and none of a Transfer, and a loan only in the Loans rows that rollUpMonthly leaves out', async () => {
+    await history()
+
+    const { rows } = await monthly({ from: '2026-08-01', to: '2026-11-30' })
+
+    // Counted: August 2, September 6 (the Override's and the Rule's, the Uncategorised two, the other money in, the wages), October 2 (wages, and the half of a Transfer given a Category),
+    // November 2. Not counted: the Transfers, and the loans, which are in the 'loans' rows.
+    expect(rollUpMonthly(rows).months.map((m) => [m.month, m.counted])).toEqual([['2026-08', 2], ['2026-09', 6], ['2026-10', 2], ['2026-11', 2]])
+    expect(rows.filter((r) => r.kind === 'loans').reduce((sum, r) => sum + r.counted, 0)).toBe(2)
+  })
+
+  it('hands back at most four rows a month, however many Categories there are, where buildSpending hands back a row for each Category', async () => {
+    for (let i = 0; i < 25; i++) {
+      const { meta } = await env.DB.prepare("INSERT INTO categories (name, kind) VALUES (?, 'spending')").bind(`Extra category ${i}`).run()
+      await env.DB.prepare('INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category) VALUES (?, ?, ?, ?, ?, ?)').bind(accountA, '2026-10-02', -100, 'EXAMPLE SHOP', 'import', meta.last_row_id).run()
+    }
+    await add(accountA, '2026-10-03', 5000, { override: 'Wages and salary' })
+    await add(accountA, '2026-10-04', -700)
+
+    const range = { from: '2026-10-01', to: '2026-10-31' }
+    try {
+      expect((await full(range)).rows).toHaveLength(27)
+      expect((await monthly(range)).rows).toHaveLength(3) // Spending with a Category, Spending with none, and Income
+    } finally {
+      await env.DB.prepare('DELETE FROM transactions').run()
+      await env.DB.prepare("DELETE FROM categories WHERE name LIKE 'Extra category %'").run()
+    }
+  })
+
+  it('reads what buildSpending reads, a month of Transactions and not the history around it', async () => {
+    await env.DB.prepare(
+      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < 3000)
+       INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category)
+       SELECT ?, date('2020-01-01', '+' || (i / 4) || ' days'), -100, 'EXAMPLE ' || i, 'import', ? FROM seq`,
+    )
+      .bind(accountA, ids['Fuel'])
+      .run()
+    await env.DB.prepare(
+      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < 400)
+       INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category, rule_category)
+       SELECT ?, date('2026-10-01', '+' || (i % 28) || ' days'), -100, 'EXAMPLE ' || i, 'import', ?, ? FROM seq`,
+    )
+      .bind(accountA, ids['Groceries'], ids['Fuel'])
+      .run()
+    const range = { from: '2026-10-01', to: '2026-10-31' }
+
+    const a = await full(range)
+    const b = await monthly(range)
+
+    expect(b.reads).toBeLessThanOrEqual(a.reads) // the same rows of the same Transactions: it never reads more (D1 reported 1,600 for this against 1,601)
+    expect(b.reads).toBeGreaterThan(400 * 3) // the index entry, the row and a Category for each of the 400, so it did read them
+    expect(b.rows).toHaveLength(1)
+    expect(b.rows[0]).toMatchObject({ month: '2026-10', kind: 'spending', uncategorised: 0, outCents: 40_000, inCents: 0, counted: 400 })
   })
 })
 

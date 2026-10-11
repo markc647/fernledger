@@ -1,5 +1,5 @@
 import * as z from 'zod/mini'
-import { datesInOrder, reportRangeOfAll } from './report-query'
+import { accountMissing, datesInOrder, reportRangeOfAll } from './report-query'
 import type { SpendingRange } from './spending'
 import { readSpendingByCategory, type SpendingByCategory } from './spending-by-category'
 
@@ -13,10 +13,8 @@ import { readSpendingByCategory, type SpendingByCategory } from './spending-by-c
 /** The query string of the Report: the dates every Report takes, and an Account when it is for one (all of them when left out). A refusal names the field. */
 export const spendingReportQuery = z.object(reportRangeOfAll).check(datesInOrder)
 
-const ACCOUNT_EXISTS = 'SELECT id FROM accounts WHERE id = ?'
-
 /** The Report: `readSpendingByCategory`'s answer for the range. Null when the Account named does not exist, so that is not mistaken for an Account that spent nothing. */
 export async function readSpendingReport(db: D1Database, range: SpendingRange): Promise<SpendingByCategory | null> {
-  if (range.accountId !== undefined && !(await db.prepare(ACCOUNT_EXISTS).bind(range.accountId).first())) return null
+  if (await accountMissing(db, range)) return null
   return readSpendingByCategory(db, range)
 }
