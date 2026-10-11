@@ -13,6 +13,7 @@ import {
   expectPageNumbers,
   expectTitleBlock,
   GENERATED,
+  importRows,
   noAxeViolations,
   NOW,
   restoreAppTitleAfterEach,
@@ -58,27 +59,20 @@ async function seed(context: BrowserContext, baseURL: string, project: string): 
   if (known) return known
   const { year, savings, cheque } = dataFor(project)
   await signInAs(context, 'admin')
-  const importRows = async (account: { number: string; name: string }, rows: { date: string; uniqueId: string; payee: string; amountCents: number; chequeNumber?: string }[]) => {
-    const res = await context.request.post('/api/imports/chunks', {
-      headers: { Origin: baseURL },
-      data: {
-        account,
-        chunk: { index: 0, count: 1 },
-        file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: `${year}-01-01`, to: `${year}-12-31`, ledgerBalance: { cents: 0, date: `${year}-12-31` } },
-        rows: rows.map((r) => ({ ...r, tranType: 'EFTPOS', chequeNumber: r.chequeNumber ?? null, bankMemo: 'EFTPOS' })),
-      },
-    })
-    expect(res.ok()).toBe(true)
-  }
-  await importRows(
-    savings,
-    Array.from({ length: SHOPS }, (_, i) => ({ date: day(year, 4 * i), uniqueId: `RPT${year}S${i}`, payee: shop(i), amountCents: shopCents(i), chequeNumber: hasCheque(i) ? chequeNumber(i) : undefined })),
-  )
-  await importRows(cheque, [
-    { date: day(year, 10), uniqueId: `RPT${year}C1`, payee: 'EXAMPLE WAGES', amountCents: 50000 },
-    { date: day(year, 20), uniqueId: `RPT${year}C2`, payee: 'EXAMPLE RATES', amountCents: -30000 },
-    { date: day(year, 30), uniqueId: `RPT${year}C3`, payee: 'EXAMPLE CAFE', amountCents: -1500 },
-  ])
+  await importRows(context, baseURL, {
+    account: savings,
+    year,
+    rows: Array.from({ length: SHOPS }, (_, i) => ({ date: day(year, 4 * i), uniqueId: `RPT${year}S${i}`, payee: shop(i), amountCents: shopCents(i), chequeNumber: hasCheque(i) ? chequeNumber(i) : undefined })),
+  })
+  await importRows(context, baseURL, {
+    account: cheque,
+    year,
+    rows: [
+      { date: day(year, 10), uniqueId: `RPT${year}C1`, payee: 'EXAMPLE WAGES', amountCents: 50000 },
+      { date: day(year, 20), uniqueId: `RPT${year}C2`, payee: 'EXAMPLE RATES', amountCents: -30000 },
+      { date: day(year, 30), uniqueId: `RPT${year}C3`, payee: 'EXAMPLE CAFE', amountCents: -1500 },
+    ],
+  })
 
   const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
   const savingsId = accounts.find((a) => a.name === savings.name)!.id

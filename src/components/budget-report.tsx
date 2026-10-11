@@ -64,7 +64,7 @@ function Totals({ budget, spentCents, overMonths }: { budget: { budgetCents: num
               <span className="tabular-nums">{net.detail}</span>
             </span>
           </Pair>
-          {overMonths && <Pair label="Months over Budget">{overMonths}</Pair>}
+          {overMonths && <Pair label="Months the Budgets together were over">{overMonths}</Pair>}
         </>
       )}
       <Pair label="Total spending">

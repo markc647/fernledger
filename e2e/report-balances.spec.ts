@@ -15,6 +15,8 @@ import {
   expectPageNumbers,
   expectTitleBlock,
   GENERATED,
+  importRows,
+  money,
   noAxeViolations,
   NOW,
   restoreAppTitleAfterEach,
@@ -46,8 +48,6 @@ const dataFor = (project: string) => {
   }
 }
 
-// Money, written the way the app writes it.
-const money = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2 })}`
 const two = (n: number) => String(n).padStart(2, '0')
 
 /** Month `i` (0 is January of the first year): one Transaction on the 15th, money out of $10.00 and `i` cents, so every balance is different. */
@@ -69,30 +69,36 @@ async function seed(context: BrowserContext, baseURL: string, project: string): 
   if (known) return known
   const { start, end, savings, cheque, nothing } = dataFor(project)
   await signInAs(context, 'admin')
-  const importRows = async (account: { number: string; name: string }, from: string, to: string, ledger: [string, number], rows: { date: string; uniqueId: string; payee: string; amountCents: number }[]) => {
-    const res = await context.request.post('/api/imports/chunks', {
-      headers: { Origin: baseURL },
-      data: {
-        account,
-        chunk: { index: 0, count: 1 },
-        file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from, to, ledgerBalance: { date: ledger[0], cents: ledger[1] } },
-        rows: rows.map((r) => ({ ...r, tranType: 'EFTPOS', chequeNumber: null, bankMemo: 'EFTPOS' })),
-      },
-    })
-    expect(res.ok()).toBe(true)
-  }
-  await importRows(
-    savings,
-    `${start}-01-01`,
-    `${end}-12-31`,
-    [`${end}-12-31`, balanceAfter(MONTHS_HELD - 1)],
-    Array.from({ length: MONTHS_HELD }, (_, i) => ({ date: transactionDate(start, i), uniqueId: `BAL${start}S${i}`, payee: `EXAMPLE SHOP ${i + 1}`, amountCents: -spend(i) })),
-  )
+  await importRows(context, baseURL, {
+    account: savings,
+    from: `${start}-01-01`,
+    to: `${end}-12-31`,
+    ledger: { date: `${end}-12-31`, cents: balanceAfter(MONTHS_HELD - 1) },
+    rows: Array.from({ length: MONTHS_HELD }, (_, i) => ({ date: transactionDate(start, i), uniqueId: `BAL${start}S${i}`, payee: `EXAMPLE SHOP ${i + 1}`, amountCents: -spend(i) })),
+  })
   // $1,000.00 before the first. The second file's balance is $3.00 less than its Transactions add up to: a Transaction is missing.
-  await importRows(cheque, `${start}-01-01`, `${start}-01-31`, [`${start}-01-31`, 98_500], [{ date: `${start}-01-10`, uniqueId: `BAL${start}C1`, payee: 'EXAMPLE RATES', amountCents: -1500 }])
-  await importRows(cheque, `${start}-02-01`, `${start}-02-28`, [`${start}-02-28`, 95_700], [{ date: `${start}-02-10`, uniqueId: `BAL${start}C2`, payee: 'EXAMPLE POWER', amountCents: -2500 }])
+  await importRows(context, baseURL, {
+    account: cheque,
+    from: `${start}-01-01`,
+    to: `${start}-01-31`,
+    ledger: { date: `${start}-01-31`, cents: 98_500 },
+    rows: [{ date: `${start}-01-10`, uniqueId: `BAL${start}C1`, payee: 'EXAMPLE RATES', amountCents: -1500 }],
+  })
+  await importRows(context, baseURL, {
+    account: cheque,
+    from: `${start}-02-01`,
+    to: `${start}-02-28`,
+    ledger: { date: `${start}-02-28`, cents: 95_700 },
+    rows: [{ date: `${start}-02-10`, uniqueId: `BAL${start}C2`, payee: 'EXAMPLE POWER', amountCents: -2500 }],
+  })
   // The file ends on 31 January but its balance is dated 28 February, so the balance cannot be counted.
-  await importRows(nothing, `${start}-01-01`, `${start}-01-31`, [`${start}-02-28`, 5000], [{ date: `${start}-01-20`, uniqueId: `BAL${start}N1`, payee: 'EXAMPLE CAFE', amountCents: -500 }])
+  await importRows(context, baseURL, {
+    account: nothing,
+    from: `${start}-01-01`,
+    to: `${start}-01-31`,
+    ledger: { date: `${start}-02-28`, cents: 5000 },
+    rows: [{ date: `${start}-01-20`, uniqueId: `BAL${start}N1`, payee: 'EXAMPLE CAFE', amountCents: -500 }],
+  })
 
   const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
   const idOf = (name: string) => accounts.find((a) => a.name === name)!.id

@@ -2,9 +2,10 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { budgetStatus } from '../src/lib/budgets'
-import { MAX_REPORT_MONTHS as PAGE_MAX_REPORT_MONTHS } from '../src/lib/report-budget'
+import { MAX_REPORT_MONTHS as PAGE_MAX_REPORT_MONTHS, monthsTouched } from '../src/lib/report-budget'
 import { MAX_BUDGET_CHANGES, type Change, type InEffect } from './budget-rules'
 import worker from './index'
+import { monthCount } from './months'
 import { budgetReport, isOver, MAX_REPORT_MONTHS, monthState, readBudgetReport, type BudgetReport } from './report-budget'
 import type { SpendingRow } from './spending'
 
@@ -422,6 +423,22 @@ describe('the months together', () => {
     expect(r.categories[0]).toMatchObject({ months: 9, overMonths: 1 })
   })
 
+  it('count the months the Budgets together were over apart from the months a Category was over its own: they can differ a great deal', async () => {
+    // Groceries has $100.00 and spends $150.00 in January, March and May, and $50.00 in the six months between. Fuel has $10,000.00 and spends nothing, so the two
+    // Budgets together ($10,100.00) are never overspent, though Groceries was over its own in 3 of the 9 months.
+    await rule('EXAMPLE COUNTDOWN', 'Groceries')
+    await mustSet('Groceries', '2026-01', 10_000)
+    await mustSet('Fuel', '2026-01', 1_000_000)
+    const over = new Set(['01', '03', '05'])
+    await importInto(EVERYDAY, ['01', '02', '03', '04', '05', '06', '07', '08', '09'].map((m) => row(`2026-${m}-10`, over.has(m) ? -15_000 : -5_000, 'EXAMPLE COUNTDOWN')))
+
+    const r = await readBudgetReport(env.DB, { from: '2026-01-01', to: '2026-09-30' }, OCTOBER)
+
+    expect(r.total).toMatchObject({ budgetMonths: 9, overMonths: 0 }) // the Budgets together: over in none of the 9 months
+    expect(r.categories.find((c) => c.categoryName === 'Groceries')).toMatchObject({ months: 9, overMonths: 3 }) // Groceries: over in 3 of its 9
+    expect(r.categories.find((c) => c.categoryName === 'Fuel')).toMatchObject({ months: 9, overMonths: 0 })
+  })
+
   it('are nothing while no month has ended, with every month still shown', async () => {
     await seedGroceries()
 
@@ -571,6 +588,11 @@ describe('who can read the Report, and what it refuses', () => {
 
   it('has the same limit as the Report page, which asks before it opens a Report it would be refused', () => {
     expect(PAGE_MAX_REPORT_MONTHS).toBe(MAX_REPORT_MONTHS)
+  })
+
+  it('counts the months the dates touch as the Report page does, so the page refuses what the Worker would', () => {
+    const dates = ['2000-01-01', '2000-12-31', '2024-01-31', '2025-12-01', '2026-02-28', '2027-11-30', '2028-02-29', '2100-12-31']
+    for (const from of dates) for (const to of dates) if (from <= to) expect(monthsTouched(from, to), `${from} ${to}`).toBe(monthCount(from.slice(0, 7), to.slice(0, 7)))
   })
 })
 

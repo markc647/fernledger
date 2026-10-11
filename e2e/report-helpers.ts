@@ -66,18 +66,36 @@ export async function ensureCategory(context: BrowserContext, baseURL: string, n
   return ((await res.json()) as { id: number }).id
 }
 
-/** A Transaction to import: its date, what the bank calls it (unique among a spec's rows, so it can be found again), its amount in cents (money out is negative), and the name of the Category to Override it into. */
-export type SeedRow = { date: string; payee: string; amountCents: number; category?: string }
+/**
+ * A Transaction to import: its date, what the bank calls it (unique among a spec's rows, so it can be found again), its amount in cents (money out is negative), the name
+ * of the Category to Override it into, its own unique ID (else `importRows` makes one) and the cheque number an Import has for it.
+ */
+export type SeedRow = { date: string; payee: string; amountCents: number; category?: string; uniqueId?: string; chequeNumber?: string }
 
-/** Imports `rows` into `account` as one file for the whole of `year`, each row with the unique ID `${idPrefix}${index}`. An Import recognises rows it already holds. */
-export async function importRows(context: BrowserContext, baseURL: string, { account, year, rows, idPrefix }: { account: { number: string; name: string }; year: number; rows: SeedRow[]; idPrefix: string }) {
+/**
+ * Imports `rows` into `account` as one file: the whole of `year` unless `from` and `to` say otherwise (a spec that gives both needs no `year`), with a bank balance of
+ * nothing on the last day unless `ledger` says otherwise. A row has the unique ID it gives, else `${idPrefix}${index}`. An Import recognises rows it already holds.
+ */
+export async function importRows(
+  context: BrowserContext,
+  baseURL: string,
+  {
+    account,
+    rows,
+    idPrefix = '',
+    year,
+    from = `${year}-01-01`,
+    to = `${year}-12-31`,
+    ledger = { date: to, cents: 0 },
+  }: { account: { number: string; name: string }; rows: SeedRow[]; idPrefix?: string; year?: number; from?: string; to?: string; ledger?: { date: string; cents: number } },
+) {
   const res = await context.request.post('/api/imports/chunks', {
     headers: { Origin: baseURL },
     data: {
       account,
       chunk: { index: 0, count: 1 },
-      file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: `${year}-01-01`, to: `${year}-12-31`, ledgerBalance: { cents: 0, date: `${year}-12-31` } },
-      rows: rows.map((r, i) => ({ date: r.date, uniqueId: `${idPrefix}${i}`, tranType: 'EFTPOS', chequeNumber: null, payee: r.payee, bankMemo: 'EFTPOS', amountCents: r.amountCents })),
+      file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from, to, ledgerBalance: { cents: ledger.cents, date: ledger.date } },
+      rows: rows.map((r, i) => ({ date: r.date, uniqueId: r.uniqueId ?? `${idPrefix}${i}`, tranType: 'EFTPOS', chequeNumber: r.chequeNumber ?? null, payee: r.payee, bankMemo: 'EFTPOS', amountCents: r.amountCents })),
     },
   })
   expect(res.ok()).toBe(true)

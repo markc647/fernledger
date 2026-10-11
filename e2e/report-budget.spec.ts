@@ -283,7 +283,7 @@ test.describe('on screen', () => {
     await expect(section.locator('dl')).toContainText(`Total Budget${money(TOTAL.budget)}`)
     await expect(section.locator('dl')).toContainText(`Spent in Categories with a Budget${money(TOTAL.budgeted)}`)
     await expect(section.locator('dl')).toContainText(`Against the Budgets${net.words}${net.detail}`) // like for like: not the Transfer, the wages or the loan, and not what is outside Budgets
-    await expect(section.locator('dl')).toContainText('Months over Budget1 of 6 months') // March, when the Budgets together were overspent
+    await expect(section.locator('dl')).toContainText('Months the Budgets together were over1 of 6 months') // March, when the Budgets together were overspent
     await expect(section.locator('dl')).toContainText(`Total spending${money(TOTAL.spending)}`)
     await expect(section.locator('dl dt').first()).toHaveCSS('font-weight', '600')
     const table = section.getByRole('table', { name: new RegExp(`^Budget and spending in the months that have ended from ${monthText(`${year}-01`)} to ${monthText(`${year}-06`)}`) })
@@ -310,7 +310,7 @@ test.describe('on screen', () => {
       await expect(region.locator('dl')).toContainText(`Spent in Categories with a Budget${spent(figures.budgeted)}`)
       await expect(region.locator('dl')).toContainText(`Against the Budgets${net.words}${net.detail}`)
       await expect(region.locator('dl')).toContainText(`Total spending${spent(figures.spending)}`)
-      await expect(region.locator('dl')).not.toContainText('Months over Budget') // a month has one standing; the months together count them
+      await expect(region.locator('dl')).not.toContainText('Months the Budgets together were over') // a month has one standing; the months together count them
       const table = tableIn(region, monthText(`${year}-${m}`))
       await expect(table.getByRole('columnheader')).toHaveText(['Category', 'Budget', 'Spent', 'Status'])
       await expect(table.locator('tbody tr')).toHaveCount(figures.rows.length + 2) // the Categories with a Budget that month, and the two that are not in one
@@ -433,6 +433,53 @@ test.describe('on screen', () => {
     await expect(article(page).locator('header')).toContainText('Account: All Accounts: ')
     await expect(article(page).locator('header')).toContainText(everyday.name)
     await expect(month(page, monthText(`${year}-01`)).locator('dl')).toContainText(`Total spending${money(86_234)}`)
+  })
+
+  test('labels the months the Budgets together were over apart from the months a Category was over, because they can differ', async ({ page, context }, testInfo) => {
+    const { year } = dataFor(testInfo.project.name)
+    // Nine months. Stub category has $10.00 and is over in January, March and May; Big one has $1,000.00 and spends nothing, so the Budgets together are never over.
+    const months = ['01', '02', '03', '04', '05', '06', '07', '08', '09'].map((m) => {
+      const spentCents = ['01', '03', '05'].includes(m) ? 1_500 : 500
+      return {
+        month: `${year}-${m}`,
+        state: 'ended',
+        rows: [
+          { categoryId: 1, categoryName: 'Big one', budgetCents: 100_000, spentCents: 0, effectiveFrom: `${year}-01`, changed: false },
+          { categoryId: 2, categoryName: 'Stub category', budgetCents: 1_000, spentCents, effectiveFrom: `${year}-01`, changed: false },
+        ],
+        otherCents: 0,
+        uncategorisedCents: 0,
+        budgetCents: 101_000,
+        budgetedSpentCents: spentCents,
+        spentCents,
+      }
+    })
+    await signInAs(context, 'member')
+    await page.route('**/api/reports/budget-vs-actual?**', (route) =>
+      route.fulfill({
+        json: {
+          from: `${year}-01-01`,
+          to: `${year}-09-30`,
+          covers: { from: `${year}-01-01`, to: `${year}-09-30` },
+          months,
+          together: { first: `${year}-01`, last: `${year}-09`, months: 9 },
+          total: { budgetCents: 909_000, budgetedSpentCents: 7_500, spentCents: 7_500, otherCents: 0, uncategorisedCents: 0, budgetMonths: 9, overMonths: 0 },
+          categories: [
+            { categoryId: 1, categoryName: 'Big one', months: 9, overMonths: 0, budgetCents: 900_000, spentCents: 0 },
+            { categoryId: 2, categoryName: 'Stub category', months: 9, overMonths: 3, budgetCents: 9_000, spentCents: 7_500 },
+          ],
+        },
+      }),
+    )
+    await page.goto(address(`${year}-01-01`, `${year}-09-30`))
+
+    const section = together(page)
+    await expect(section.locator('dl')).toContainText('Months the Budgets together were over0 of 9 months')
+    await expect(section.locator('dl')).not.toContainText('Months over Budget') // that is the table's column, a Category at a time
+    const table = section.getByRole('table')
+    await expect(table.getByRole('columnheader').last()).toHaveText('Months over Budget')
+    await expect(table.locator('tbody tr').filter({ hasText: 'Stub category' })).toContainText('3 of 9 months')
+    await expect(table.locator('tbody tr').filter({ hasText: 'Big one' })).toContainText('0 of 9 months')
   })
 
   test('leaves the month it is now and the months to come out of the months together, says so and why, and still shows each', async ({ page, context }) => {

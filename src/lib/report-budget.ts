@@ -23,7 +23,7 @@ export function parseBudgetReportSearch(raw: Record<string, unknown>): ReportSea
   return { account: undefined, ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) }
 }
 
-/** How many NZ months the dates touch, both ends included (`2026-01-15` to `2026-03-10` touch 3). The dates are real and `from` is not after `to`. */
+/** How many NZ months the dates touch, both ends included (`2026-01-15` to `2026-03-10` touch 3). The dates are real and `from` is not after `to`. The Worker's `monthCount` (worker/months.ts) counts the same, and worker/report-budget.test.ts holds the two together. */
 export const monthsTouched = (from: string, to: string) => (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + (Number(to.slice(5, 7)) - Number(from.slice(5, 7))) + 1
 
 /** What to say, instead of opening the Report, when the dates touch more months than a Report covers; null when they don't. */
