@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { applyRulesStatement } from './rule-apply'
 import { MAX_RULES, toCriteria } from './rule-criteria'
 import { previewStatements } from './rule-preview'
-import { callWhileInterrupted } from './test-support'
+import { callAsAdminWith, callWhileInterrupted, meteredDb } from './test-support'
 import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member
@@ -880,6 +880,22 @@ describe('the preview and the Rules a chunk gets', () => {
     expect(((await (await preview({ textContains: 'example' })).json()) as Preview).samples).toEqual([
       { id: expect.any(Number), date: day(9), description: 'EXAMPLE SHOP', bankType: 'DIRECT DEBIT', amountCents: -2500 },
     ])
+  })
+})
+
+describe('what putting the Rules in order reads (ADR 0004)', () => {
+  it('is a few reads for each Rule, not for each pair of Rules, with the most there can be', async () => {
+    const groceries = await categoryId('Groceries')
+    await env.DB.batch(Array.from({ length: MAX_RULES }, (_, i) => env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(i + 1, `filler ${i}`, groceries)))
+    const ids = (await rules()).map((rule) => rule.id)
+    const { db, usage } = meteredDb()
+
+    const res = await callAsAdminWith(db, '/api/rules/order', 'PUT', { ids: ids.toReversed() })
+
+    expect(res.status).toBe(200)
+    // Measured at 100 Rules: 1,005 through the route, 801 of them the write and its check. Finding each Rule's place by scanning the list, which the write did (5,250 reads) and the check did again
+    // (5,250 more), was about 10,800 through the route.
+    expect(usage.rowsRead).toBeLessThanOrEqual(MAX_RULES * 11)
   })
 })
 

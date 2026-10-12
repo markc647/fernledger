@@ -103,18 +103,20 @@ export const rules = new Hono<AppEnv>()
     // Only if the Rules in use are still the ones that were read, in the order they were read in: another request can add, remove or move one between the read and the write,
     // and a Rule left out of the list would be given no place. The check is on the whole order at once (?2, the ids as read, against the Rules in use numbered in order by a window
     // function, which is exact where the order of a group_concat is only what SQLite happens to do), and the UPDATE is the last statement, which `onlyIfChanged` looks at.
+    // Both lookups go by position in a JSON array, and each is written to cost one read per Rule: `UPDATE … FROM json_each` walks the list once (a correlated `SELECT … FROM json_each`
+    // per Rule walks it once per Rule), and `json_extract` takes the n-th element directly (a `json_each` lookup per row walks it again). At 100 Rules that is about 800 rows read, not 10,600.
     const [, moved] = await recordChange(
       db,
       [
         restartRerun(db),
         db
           .prepare(
-            `UPDATE rules SET position = (SELECT j.key + 1 FROM json_each(?1) j WHERE j.value = rules.id)
-             WHERE removed_at IS NULL
+            `UPDATE rules SET position = j.key + 1 FROM json_each(?1) j
+             WHERE rules.id = j.value AND rules.removed_at IS NULL
                AND (SELECT COUNT(*) FROM rules WHERE removed_at IS NULL) = json_array_length(?2)
                AND NOT EXISTS (
                  SELECT 1 FROM (SELECT id, row_number() OVER (ORDER BY position, id) AS n FROM rules WHERE removed_at IS NULL) r
-                 WHERE r.id IS NOT (SELECT e.value FROM json_each(?2) e WHERE e.key = r.n - 1)
+                 WHERE r.id IS NOT json_extract(?2, '$[' || (r.n - 1) || ']')
                )`,
           )
           .bind(JSON.stringify(ids), JSON.stringify(current.map((rule) => rule.id))),

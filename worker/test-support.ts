@@ -53,6 +53,52 @@ export async function callWhileInterrupted(path: string, method: string, body: u
   return res
 }
 
+/**
+ * D1 that totals the rows D1 says it read for what is run on it (what the free plan bills: ADR 0004), batches included. Pass it to `callAsAdminWith`. Its statements are
+ * wrappers, so only `bind`, `first`, `all` and `run` work on them, and a batch takes the ones it made.
+ */
+export function meteredDb() {
+  const usage = { rowsRead: 0 }
+  const original = new WeakMap<object, D1PreparedStatement>()
+  const wrap = (statement: D1PreparedStatement): D1PreparedStatement => {
+    const read = async () => {
+      const result = await statement.all()
+      usage.rowsRead += result.meta.rows_read
+      return result
+    }
+    const wrapped = {
+      bind: (...values: unknown[]) => wrap(statement.bind(...values)),
+      all: read,
+      first: async () => (await read()).results[0] ?? null,
+      run: async () => {
+        const result = await statement.run()
+        usage.rowsRead += result.meta.rows_read
+        return result
+      },
+    }
+    original.set(wrapped, statement)
+    return wrapped as unknown as D1PreparedStatement
+  }
+  const db = {
+    prepare: (sql: string) => wrap(env.DB.prepare(sql)),
+    batch: async (statements: D1PreparedStatement[]) => {
+      const results = await env.DB.batch(statements.map((statement) => original.get(statement)!))
+      for (const result of results) usage.rowsRead += result.meta.rows_read
+      return results
+    },
+  } as unknown as D1Database
+  return { db, usage }
+}
+
+/** A request as the Admin with `db` standing in for D1 (see `meteredDb`). */
+export async function callAsAdminWith(db: D1Database, path: string, method: string, body: unknown) {
+  const ctx = createExecutionContext()
+  const request = new Request(`${origin}${path}`, { method, headers: { Cookie: 'fernledger_dev_as=admin', Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const res = await worker.fetch!(request as never, { ...env, DB: db }, ctx)
+  await waitOnExecutionContext(ctx)
+  return res
+}
+
 /** A statement that sets a Setting outright, for the tests of `recordChange` and the schema, which need some change to log. The Admin's own change is `updateSettings` (settings.ts). */
 export const putSetting = (db: D1Database, key: SettingKey, value: string): D1PreparedStatement =>
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').bind(key, value)
