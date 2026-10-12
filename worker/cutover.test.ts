@@ -1,8 +1,8 @@
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { REPLACE_SLICE } from './import-rows'
+import { IMPORTED_SLICE, REPLACE_SLICE } from './import-rows'
 import { FIRST_ROW_LEFT } from './imports'
-import { callWhileInterrupted } from './test-support'
+import { callAsAdminWith, callWhileInterrupted, meteredDb } from './test-support'
 import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member.
@@ -446,15 +446,63 @@ describe('POST /api/imports/clear-history', () => {
     expect(JSON.parse(entry!.after as string)).toEqual({ removed: 5000, remaining: 201 })
   })
 
-  it('finds the first row a step leaves by walking the table in ID order, so the guard reads about a slice and not the whole history', async () => {
+  // The rows are cleared oldest date first (IMPORTED_SLICE, the order of the index transactions_account_date), whatever order they were imported in. OLD1 is the first row imported
+  // here (the lowest ID) and the last by date, so it is one of the rows a step leaves; the seeded rows are dated 2020, ties going by ID.
+  it('removes the oldest dates first, not the first imported: a row imported first but dated last is left', async () => {
     await sendChunk([row('OLD1', '2026-09-01')])
     const id = await accountId()
-    await seedImportRows(id, 20_000)
+    await seedImportRows(id, 5200)
 
-    const found = await env.DB.prepare(FIRST_ROW_LEFT).bind(id, REPLACE_SLICE).all<{ id: number }>()
+    expect((await clear(id)).status).toBe(200)
 
-    expect(found.results).toEqual([{ id: await rowId('SEED5000', id) }]) // OLD1 and SEED1 to SEED4999 are the 5,000 it removes
-    expect(found.meta.rows_read).toBeLessThanOrEqual(REPLACE_SLICE + 100) // left to sort the Account's 20,001 rows it would be four times that
+    const left = (await storedIds()).sort()
+    expect(left).toContain('OLD1')
+    expect(left).toEqual(['OLD1', ...Array.from({ length: 200 }, (_, i) => `SEED${5001 + i}`)].sort())
+  })
+
+  // What a step reads must follow the Account being cleared, not the table: the guard looks for the first row it leaves once before and once in each statement, and every Account
+  // shares the table. Another Account's rows are older (imported first, so lower IDs), the case that made a walk of the table in ID order read every one of them.
+  describe('what a step reads', () => {
+    const history = async () => {
+      await sendChunk([row('OTHER1', '2026-09-01')], { number: current })
+      await seedImportRows(await accountId(current), 20_000)
+      await sendChunk([row('OLD1', '2026-09-01')])
+      const id = await accountId()
+      await seedImportRows(id, 20_000)
+      return id
+    }
+
+    it('finds the first row a step leaves in the index of the Account, reading about a slice whatever else the table holds', async () => {
+      const id = await history()
+
+      const found = await env.DB.prepare(FIRST_ROW_LEFT).bind(id, REPLACE_SLICE).all<{ id: number }>()
+
+      expect(found.results).toEqual([{ id: await rowId('SEED5001', id) }]) // SEED1 to SEED5000, dated 2020 before OLD1, are the 5,000 it removes
+      expect(found.meta.rows_read).toBeLessThanOrEqual(REPLACE_SLICE + 100) // in ID order it would walk the other Account's 20,001 rows first (25,001), or sort the Account's own
+    })
+
+    it('reads, in the whole of a step, about what its statements need for a slice, and not what the other Account or the history holds', async () => {
+      const id = await history()
+      const { db, usage } = meteredDb()
+
+      const res = await callAsAdminWith(db, '/api/imports/clear-history', 'POST', { accountId: id })
+
+      expect(res.status).toBe(200)
+      // The count of the Account's rows (20,001), then a look at the slice for the boundary and one in each of the statements that removes rows (the balances one looks only when the Account has balance rows, 5,002 reads, and has none here). Measured at 105,063 for these two Accounts, where the form
+      // before this one read 345,075 (the walk), and the one before that 220,070 (a sort of the Account's rows in each statement).
+      expect(usage.rowsRead).toBeLessThanOrEqual(115_000)
+    })
+
+    it.each([
+      ['the first row a step leaves', FIRST_ROW_LEFT],
+      ['the slice a step removes', IMPORTED_SLICE],
+    ])('is %s found by searching the Account in transactions_account_date, with no sort and no scan of the table', async (_what, sql) => {
+      const plan = (await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(1, REPLACE_SLICE).all<{ detail: string }>()).results.map((step) => step.detail)
+
+      expect(plan).toHaveLength(1)
+      expect(plan[0]).toMatch(/SEARCH transactions USING INDEX transactions_account_date \(account_id=\?\)/)
+      expect(plan.join(' ')).not.toMatch(/TEMP B-TREE|SCAN/)
+    })
   })
 
   // Another request can land between the handler's count and its batch. A step does something only while the slice it counted is still the oldest Import-sourced rows of the
@@ -475,15 +523,15 @@ describe('POST /api/imports/clear-history', () => {
     })
 
     // Each of the four statements checks the slice, so each has to be shown to: here a row before the slice goes (SEED2), which moves the slice on by one, to include the first
-    // row it was to leave (SEED5000), and every effect of a step that took the slice it counted would show: balances gone, a Note held, a partner let go, rows removed.
+    // row it was to leave (SEED5001), and every effect of a step that took the slice it counted would show: balances gone, a Note held, a partner let go, rows removed.
     it('keeps the balances, holds nothing, lets go of no partner and removes nothing when rows before the slice went meanwhile, because it is another slice now (409)', async () => {
       await sendChunk([row('OLD1', '2026-09-01')])
       await sendChunk([row('OTHER1', '2026-09-01')], { number: current })
       const id = await accountId()
       await seedImportRows(id, 5200)
       await env.DB.prepare("UPDATE transactions SET note = 'Keep me' WHERE bank_unique_id = 'SEED1'").run()
-      // SEED5000 is the 5,001st Import-sourced row by ID: the first one the step leaves. OTHER1, in another Account, is paired with it.
-      const [edge, partner] = [await rowId('SEED5000', id), await rowId('OTHER1', await accountId(current))]
+      // SEED1 to SEED5000, dated 2020, are the 5,000 oldest; SEED5001 is the first one the step leaves (OLD1 is dated 2026). OTHER1, in another Account, is paired with it.
+      const [edge, partner] = [await rowId('SEED5001', id), await rowId('OTHER1', await accountId(current))]
       await env.DB.batch([env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(partner, edge), env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(edge, partner)])
       const balances = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM balance_checks WHERE account_id = ? AND source = ?').bind(id, 'import').first<{ n: number }>())!.n
       const before = await balances()

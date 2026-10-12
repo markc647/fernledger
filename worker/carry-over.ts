@@ -41,7 +41,7 @@ const giveable = (h: string, target: string) => `(${h}.note IS NOT NULL OR ${h}.
 /** The Override to keep: the Category, but only while it is in use. */
 const liveOverride = (alias: string) => `CASE WHEN ${alias}.override_category IN (${IN_USE}) THEN ${alias}.override_category END`
 
-// Copies the Overrides, Notes and marks of the Account's first ?2 Import-sourced rows (by ID: the rows DELETE_IMPORTED removes
+// Copies the Overrides, Notes and marks of the Account's oldest-dated ?2 Import-sourced rows (the rows DELETE_IMPORTED removes
 // in the same batch, imports.ts; both select them with IMPORTED_SLICE) into the holding table, with what is needed to say what they were on. A row already
 // held (from a replace that did not finish) is brought up to date and made waiting again, so what the Account holds is
 // always what it last had. ?1 = the Account.

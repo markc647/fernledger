@@ -145,12 +145,16 @@ export const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (${IMPORTED
 
 // A step of clearing a history too big to replace (POST /clear-history) is the statements a replace uses, each made to do nothing unless the slice it removes is still the one
 // that was counted: another step or an Import can land between the count and the batch, and a step that finds the Account changed must neither remove rows the entry does not
-// describe, nor remove any when the history now fits in one replace (which is what the route refuses). The slice is the oldest REPLACE_SLICE Import-sourced rows, so it has
+// describe, nor remove any when the history now fits in one replace (which is what the route refuses). The slice is the oldest-dated REPLACE_SLICE Import-sourced rows, so it has
 // not moved while the first row left over (the one after it, `FIRST_ROW_LEFT`) is the same row; if rows before it went or there are no longer more than a slice, it is another or none.
-// What it costs, measured (ADR 0004): `NOT INDEXED` walks the table in ID order and stops at that row, so each of the five times it runs (once to read the boundary, once in each
-// statement) reads about a slice, 5,001 rows, whatever the history holds: 20,000 more reads a step. Left to choose, SQLite searches the Account's index and sorts every one of its
-// rows to put them in ID order, which is a read of the whole history each time (+48% a step at 5,201 rows and +73% at 20,000, where this is +23% and +9%). Counting the rows would be the same.
-export const FIRST_ROW_LEFT = "SELECT id FROM transactions NOT INDEXED WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT 1 OFFSET ?2"
+// (A gap, accepted: nothing removes a single imported row today, but an Import adding a row dated before the boundary in the same instant as a removal of one before it would swap a
+// row of the slice without moving the boundary.)
+// What it costs (ADR 0004): both are ordered by (date, id), which is the order of the index `transactions_account_date`, so D1 searches the Account in that index from its start and stops
+// at the row it wants, reading a slice and sorting nothing, whatever else the table holds. The check runs up to five times in a step (once to read the boundary, once in each of the
+// four statements, the balances one only if the Account has balance rows) at about 5,000 reads each, in a step that reads 90,262 rows at 5,201 and 105,061 at 20,000 and more, with or without other Accounts' rows in the table (measured, and pinned
+// in cutover.test.ts). In ID order it either sorts every row of the Account in a temporary b-tree (the whole history, each time), or, forced to walk the table in ID order with
+// NOT INDEXED, reads every Account's rows up to the 5,001st of this one (the whole table, when another Account's rows were imported first). Counting the rows would read them all too.
+export const FIRST_ROW_LEFT = "SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY date, id LIMIT 1 OFFSET ?2"
 const STILL_THE_SAME = `(${FIRST_ROW_LEFT}) IS ?3`
 const SLICE_IF_SAME = IMPORTED_SLICE.replace('LIMIT ?2', `LIMIT CASE WHEN ${STILL_THE_SAME} THEN ?2 ELSE 0 END`)
 /** `sql`, with the rows it selects by IMPORTED_SLICE (?1 the Account, ?2 how many) selected only while the boundary (?3) is unchanged. */
