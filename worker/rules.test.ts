@@ -343,6 +343,19 @@ describe('when another request lands between this one\'s reads and its write', (
       expect(await entries()).toEqual(['Changed the order of Rules'])
     })
 
+    it('answers 409, and writes nothing, when only the last two Rules were swapped meanwhile', async () => {
+      const [a, b] = await twoRules()
+      const c = await addRule({ textContains: 'c', categoryId: await categoryId('Tax') })
+      await settle()
+
+      const res = await callWhileInterrupted('/api/rules/order', 'PUT', { ids: [c, b, a] }, () => call('/api/rules/order', { method: 'PUT', body: { ids: [a, c, b] } }))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect((await rules()).map((r) => r.id)).toEqual([a, c, b])
+      expect(await entries()).toEqual(['Changed the order of Rules'])
+    })
+
     it('writes no second entry for the same order, and says it is so', async () => {
       const [a, b] = await twoRules()
       await settle()

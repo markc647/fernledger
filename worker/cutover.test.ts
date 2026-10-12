@@ -488,7 +488,7 @@ describe('POST /api/imports/clear-history', () => {
       const res = await callAsAdminWith(db, '/api/imports/clear-history', 'POST', { accountId: id })
 
       expect(res.status).toBe(200)
-      // The count of the Account's rows (20,001), then a look at the slice for the boundary and one in each of the statements that removes rows (the balances one looks only when the Account has balance rows, 5,002 reads, and has none here). Measured at 105,063 for these two Accounts, where the form
+      // The count of the Account's rows (20,001), then a look at the slice for the boundary and one in each of the statements that removes rows (the balances one looks only when the Account has balance rows, 5,002 reads, and this one has one, the ledger balance sendChunk records). Measured at 105,063 for these two Accounts, where the form
       // before this one read 345,075 (the walk), and the one before that 220,070 (a sort of the Account's rows in each statement).
       expect(usage.rowsRead).toBeLessThanOrEqual(115_000)
     })
@@ -547,6 +547,31 @@ describe('POST /api/imports/clear-history', () => {
       expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM carry_over WHERE account_id = ?').bind(id).first<{ n: number }>())!.n).toBe(0)
       expect((await env.DB.prepare('SELECT transfer_of AS partnerOf FROM transactions WHERE id = ?').bind(partner).first<{ partnerOf: number | null }>())!.partnerOf).toBe(edge)
       expect(await storedIds()).toHaveLength(5200) // OLD1 and SEED1 to SEED5200, less SEED2
+    })
+
+    // The boundary is the first row a step leaves. A row dated before it, imported meanwhile, is one the step would take first, so the slice it counted is another now and nothing is
+    // removed. A row dated after it leaves the boundary where it was, so the step goes ahead.
+    it('removes nothing when a row dated before the boundary is imported meanwhile, because the slice it counted is another now (409)', async () => {
+      await sendChunk([row('OLD1', '2026-09-01')])
+      const id = await accountId()
+      await seedImportRows(id, 5200)
+
+      const res = await callWhileInterrupted('/api/imports/clear-history', 'POST', { accountId: id }, () => sendChunk([row('OLDER1', '2019-06-01')]))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await storedIds()).toHaveLength(5202) // OLDER1, OLD1 and SEED1 to SEED5200: none removed
+    })
+
+    it('still removes the slice when a row dated after the boundary is imported meanwhile', async () => {
+      await sendChunk([row('OLD1', '2026-09-01')])
+      const id = await accountId()
+      await seedImportRows(id, 5200)
+
+      const res = await callWhileInterrupted('/api/imports/clear-history', 'POST', { accountId: id }, () => sendChunk([row('NEWER1', '2026-10-02')]))
+
+      expect(res.status).toBe(200)
+      expect(await storedIds()).toHaveLength(202) // NEWER1, OLD1 and SEED5001 to SEED5200: SEED1 to SEED5000 removed
     })
   })
 

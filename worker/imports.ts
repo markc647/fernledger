@@ -151,7 +151,7 @@ export const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (${IMPORTED
 // row of the slice without moving the boundary.)
 // What it costs (ADR 0004): both are ordered by (date, id), which is the order of the index `transactions_account_date`, so D1 searches the Account in that index from its start and stops
 // at the row it wants, reading a slice and sorting nothing, whatever else the table holds. The check runs up to five times in a step (once to read the boundary, once in each of the
-// four statements, the balances one only if the Account has balance rows) at about 5,000 reads each, in a step that reads 90,262 rows at 5,201 and 105,061 at 20,000 and more, with or without other Accounts' rows in the table (measured, and pinned
+// four statements, the balances one only if the Account has balance rows) at about 5,000 reads each, in a step that reads 90,262 rows at 5,201 and 105,061 at 20,000, with or without other Accounts' rows in the table (measured, and pinned
 // in cutover.test.ts). In ID order it either sorts every row of the Account in a temporary b-tree (the whole history, each time), or, forced to walk the table in ID order with
 // NOT INDEXED, reads every Account's rows up to the 5,001st of this one (the whole table, when another Account's rows were imported first). Counting the rows would read them all too.
 export const FIRST_ROW_LEFT = "SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY date, id LIMIT 1 OFFSET ?2"
