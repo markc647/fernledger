@@ -41,7 +41,7 @@ const giveable = (h: string, target: string) => `(${h}.note IS NOT NULL OR ${h}.
 /** The Override to keep: the Category, but only while it is in use. */
 const liveOverride = (alias: string) => `CASE WHEN ${alias}.override_category IN (${IN_USE}) THEN ${alias}.override_category END`
 
-// Copies the Overrides, Notes and marks of the Account's first ?2 Import-sourced rows (by ID: the rows DELETE_IMPORTED removes
+// Copies the Overrides, Notes and marks of the Account's oldest-dated ?2 Import-sourced rows (the rows DELETE_IMPORTED removes
 // in the same batch, imports.ts; both select them with IMPORTED_SLICE) into the holding table, with what is needed to say what they were on. A row already
 // held (from a replace that did not finish) is brought up to date and made waiting again, so what the Account holds is
 // always what it last had. ?1 = the Account.
@@ -95,6 +95,15 @@ export const MARK_APPLIED = `
 
 /** The last chunk of a completed replace empties the Account's held rows: what it has not given to a Transaction is lost, and was counted. */
 export const CLEAR_HELD = 'DELETE FROM carry_over WHERE account_id = ?'
+
+/**
+ * The Admin's discard (imports.ts): CLEAR_HELD, but only while the Account is still waiting on as many as WAITING_LIST counted (?2), the count the Change Log entry
+ * says. Another request can land between the count and the delete: an Import that gives some out, or a discard. The check is a subquery that does not depend on the
+ * rows being deleted, which SQLite works out once, before the first. Its row count is what `onlyIfChanged` looks at.
+ */
+export const CLEAR_HELD_IF_WAITING = `
+  DELETE FROM carry_over WHERE account_id = ?1
+    AND (SELECT COUNT(*) FROM carry_over WHERE account_id = ?1 AND applied = 0 AND ${annotated('carry_over')}) = ?2`
 
 // The last chunk of any other Import drops only what is finished with: rows already given out, and rows with nothing left
 // to give (the Admin removed the Category and there is no Note or mark). What still waits stays, for a replace to finish or the

@@ -1,6 +1,8 @@
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { callWhileInterrupted } from './test-support'
+import { IMPORTED_SLICE, REPLACE_SLICE } from './import-rows'
+import { FIRST_ROW_LEFT } from './imports'
+import { callAsAdminWith, callWhileInterrupted, meteredDb } from './test-support'
 import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member.
@@ -46,6 +48,8 @@ const stored = async (number = savings) =>
       .all<{ date: string; id: string; source: string }>()
   ).results
 const storedIds = async (number = savings) => (await stored(number)).map((t) => t.id)
+/** The ID of the Account's Transaction with this bank unique ID. */
+const rowId = async (uniqueId: string, accountId: number) => (await env.DB.prepare('SELECT id FROM transactions WHERE account_id = ? AND bank_unique_id = ?').bind(accountId, uniqueId).first<{ id: number }>())!.id
 
 /** Puts `count` Import-sourced rows straight into an Account (bypassing the API), to reach the limits. */
 const seedImportRows = (id: number, count: number) =>
@@ -440,6 +444,135 @@ describe('POST /api/imports/clear-history', () => {
     expect(rest).toEqual([])
     expect(entry).toMatchObject({ actor: 'admin@example.com', summary: `Removed 5000 imported rows from ${savings} to replace its imported history (201 left)` })
     expect(JSON.parse(entry!.after as string)).toEqual({ removed: 5000, remaining: 201 })
+  })
+
+  // The rows are cleared oldest date first (IMPORTED_SLICE, the order of the index transactions_account_date), whatever order they were imported in. OLD1 is the first row imported
+  // here (the lowest ID) and the last by date, so it is one of the rows a step leaves; the seeded rows are dated 2020, ties going by ID.
+  it('removes the oldest dates first, not the first imported: a row imported first but dated last is left', async () => {
+    await sendChunk([row('OLD1', '2026-09-01')])
+    const id = await accountId()
+    await seedImportRows(id, 5200)
+
+    expect((await clear(id)).status).toBe(200)
+
+    const left = (await storedIds()).sort()
+    expect(left).toContain('OLD1')
+    expect(left).toEqual(['OLD1', ...Array.from({ length: 200 }, (_, i) => `SEED${5001 + i}`)].sort())
+  })
+
+  // What a step reads must follow the Account being cleared, not the table: the guard looks for the first row it leaves once before and once in each statement, and every Account
+  // shares the table. Another Account's rows are older (imported first, so lower IDs), the case that made a walk of the table in ID order read every one of them.
+  describe('what a step reads', () => {
+    const history = async () => {
+      await sendChunk([row('OTHER1', '2026-09-01')], { number: current })
+      await seedImportRows(await accountId(current), 20_000)
+      await sendChunk([row('OLD1', '2026-09-01')])
+      const id = await accountId()
+      await seedImportRows(id, 20_000)
+      return id
+    }
+
+    it('finds the first row a step leaves in the index of the Account, reading about a slice whatever else the table holds', async () => {
+      const id = await history()
+
+      const found = await env.DB.prepare(FIRST_ROW_LEFT).bind(id, REPLACE_SLICE).all<{ id: number }>()
+
+      expect(found.results).toEqual([{ id: await rowId('SEED5001', id) }]) // SEED1 to SEED5000, dated 2020 before OLD1, are the 5,000 it removes
+      expect(found.meta.rows_read).toBeLessThanOrEqual(REPLACE_SLICE + 100) // in ID order it would walk the other Account's 20,001 rows first (25,001), or sort the Account's own
+    })
+
+    it('reads, in the whole of a step, about what its statements need for a slice, and not what the other Account or the history holds', async () => {
+      const id = await history()
+      const { db, usage } = meteredDb()
+
+      const res = await callAsAdminWith(db, '/api/imports/clear-history', 'POST', { accountId: id })
+
+      expect(res.status).toBe(200)
+      // The count of the Account's rows (20,001), then a look at the slice for the boundary and one in each of the statements that removes rows (the balances one looks only when the Account has balance rows, 5,002 reads, and this one has one, the ledger balance sendChunk records). Measured at 105,063 for these two Accounts, where the form
+      // before this one read 345,075 (the walk), and the one before that 220,070 (a sort of the Account's rows in each statement).
+      expect(usage.rowsRead).toBeLessThanOrEqual(115_000)
+    })
+
+    it.each([
+      ['the first row a step leaves', FIRST_ROW_LEFT],
+      ['the slice a step removes', IMPORTED_SLICE],
+    ])('is %s found by searching the Account in transactions_account_date, with no sort and no scan of the table', async (_what, sql) => {
+      const plan = (await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(1, REPLACE_SLICE).all<{ detail: string }>()).results.map((step) => step.detail)
+
+      expect(plan).toHaveLength(1)
+      expect(plan[0]).toMatch(/SEARCH transactions USING INDEX transactions_account_date \(account_id=\?\)/)
+      expect(plan.join(' ')).not.toMatch(/TEMP B-TREE|SCAN/)
+    })
+  })
+
+  // Another request can land between the handler's count and its batch. A step does something only while the slice it counted is still the oldest Import-sourced rows of the
+  // Account, with more than a slice behind it: the entry says what it removed, and a history that fits in one replace is never cleared.
+  describe('when another request lands between this one\'s count and its batch', () => {
+    it('removes nothing more once another step has taken the history down to what one replace removes, and says so', async () => {
+      await sendChunk([row('OLD1', '2026-09-01')])
+      const id = await accountId()
+      await seedImportRows(id, 5200)
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      const res = await callWhileInterrupted('/api/imports/clear-history', 'POST', { accountId: id }, () => clear(id))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'The imported history is small enough to replace in one go', remaining: 201 })
+      expect(await storedIds()).toHaveLength(201)
+      expect(await changeLog()).toMatchObject([{ summary: `Removed 5000 imported rows from ${savings} to replace its imported history (201 left)` }])
+    })
+
+    // Each of the four statements checks the slice, so each has to be shown to: here a row before the slice goes (SEED2), which moves the slice on by one, to include the first
+    // row it was to leave (SEED5001), and every effect of a step that took the slice it counted would show: balances gone, a Note held, a partner let go, rows removed.
+    it('keeps the balances, holds nothing, lets go of no partner and removes nothing when rows before the slice went meanwhile, because it is another slice now (409)', async () => {
+      await sendChunk([row('OLD1', '2026-09-01')])
+      await sendChunk([row('OTHER1', '2026-09-01')], { number: current })
+      const id = await accountId()
+      await seedImportRows(id, 5200)
+      await env.DB.prepare("UPDATE transactions SET note = 'Keep me' WHERE bank_unique_id = 'SEED1'").run()
+      // SEED1 to SEED5000, dated 2020, are the 5,000 oldest; SEED5001 is the first one the step leaves (OLD1 is dated 2026). OTHER1, in another Account, is paired with it.
+      const [edge, partner] = [await rowId('SEED5001', id), await rowId('OTHER1', await accountId(current))]
+      await env.DB.batch([env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(partner, edge), env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(edge, partner)])
+      const balances = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM balance_checks WHERE account_id = ? AND source = ?').bind(id, 'import').first<{ n: number }>())!.n
+      const before = await balances()
+      expect(before).toBeGreaterThan(0)
+
+      const dropOne = () => env.DB.prepare("DELETE FROM transactions WHERE bank_unique_id = 'SEED2'").run()
+
+      const res = await callWhileInterrupted('/api/imports/clear-history', 'POST', { accountId: id }, dropOne)
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await balances()).toBe(before)
+      expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM carry_over WHERE account_id = ?').bind(id).first<{ n: number }>())!.n).toBe(0)
+      expect((await env.DB.prepare('SELECT transfer_of AS partnerOf FROM transactions WHERE id = ?').bind(partner).first<{ partnerOf: number | null }>())!.partnerOf).toBe(edge)
+      expect(await storedIds()).toHaveLength(5200) // OLD1 and SEED1 to SEED5200, less SEED2
+    })
+
+    // The boundary is the first row a step leaves. A row dated before it, imported meanwhile, is one the step would take first, so the slice it counted is another now and nothing is
+    // removed. A row dated after it leaves the boundary where it was, so the step goes ahead.
+    it('removes nothing when a row dated before the boundary is imported meanwhile, because the slice it counted is another now (409)', async () => {
+      await sendChunk([row('OLD1', '2026-09-01')])
+      const id = await accountId()
+      await seedImportRows(id, 5200)
+
+      const res = await callWhileInterrupted('/api/imports/clear-history', 'POST', { accountId: id }, () => sendChunk([row('OLDER1', '2019-06-01')]))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await storedIds()).toHaveLength(5202) // OLDER1, OLD1 and SEED1 to SEED5200: none removed
+    })
+
+    it('still removes the slice when a row dated after the boundary is imported meanwhile', async () => {
+      await sendChunk([row('OLD1', '2026-09-01')])
+      const id = await accountId()
+      await seedImportRows(id, 5200)
+
+      const res = await callWhileInterrupted('/api/imports/clear-history', 'POST', { accountId: id }, () => sendChunk([row('NEWER1', '2026-10-02')]))
+
+      expect(res.status).toBe(200)
+      expect(await storedIds()).toHaveLength(202) // NEWER1, OLD1 and SEED5001 to SEED5200: SEED1 to SEED5000 removed
+    })
   })
 
   it('never removes Sync-sourced rows', async () => {

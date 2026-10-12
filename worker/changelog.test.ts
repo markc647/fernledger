@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Member } from './auth'
 import { recordChange, type ChangeLogRow } from './changelog'
-import { getSetting, putSetting } from './settings'
+import { getSetting, putSetting } from './test-support'
 
 const admin: Member = { email: 'admin@example.com', role: 'admin' }
 const changeLog = async () => (await env.DB.prepare('SELECT * FROM change_log ORDER BY id').all<ChangeLogRow>()).results

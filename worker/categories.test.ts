@@ -411,6 +411,15 @@ describe('removing a Category', () => {
     expect((await list()).transactions[0]).toMatchObject({ categoryId: null })
   })
 
+  it('writes one entry when two requests remove it, and answers the second 404, as it does for a Category already removed', async () => {
+    const id = await idOf('Groceries')
+
+    const res = await callWhileInterrupted(`/api/categories/${id}`, 'DELETE', {}, () => call(`/api/categories/${id}`, { method: 'DELETE', body: {} }))
+
+    expect(res.status).toBe(404)
+    expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Removed Category Groceries' })])
+  })
+
   it('answers 404 for a Category already removed, or never there', async () => {
     const id = await add('Test Care Fees')
     await call(`/api/categories/${id}`, { method: 'DELETE', body: {} })

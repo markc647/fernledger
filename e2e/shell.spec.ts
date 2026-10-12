@@ -1,6 +1,5 @@
-import { AxeBuilder } from '@axe-core/playwright'
 import { drawn, LINE, netWorth, SPENT, spending, stubNetWorth, stubSpending } from './chart-helpers'
-import { expect, noAxeViolations, signInAs, test, WCAG } from './fixtures'
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 const pages = [
   { role: 'admin', path: '/', heading: 'Dashboard' },
@@ -30,8 +29,7 @@ for (const { role, path, heading } of pages) {
     // The project's theme must really be showing, or the scan would not be testing it.
     await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
 
-    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
-    expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
+    await noAxeViolations(page)
   })
 }
 

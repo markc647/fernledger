@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
-import { AxeBuilder } from '@axe-core/playwright'
-import { expect, signInAs, test, WCAG } from './fixtures'
+import { netWorth as netWorthRegion, spending as spendingRegion } from './chart-helpers'
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 const fontSize = (page: Page, selector: string) =>
   page.locator(selector).first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
@@ -456,8 +456,8 @@ test.describe('zoom', () => {
           await page.setViewportSize({ width, height })
           await page.goto(path)
           await sizeButton(page, size).click()
-          const netWorth = page.getByRole('region', { name: 'Net worth over time' })
-          const spending = page.getByRole('region', { name: 'Spending by Category' })
+          const netWorth = netWorthRegion(page)
+          const spending = spendingRegion(page)
           // The Dashboard draws net worth when it is asked to; the Charts page draws it at once.
           if (path === '/') await netWorth.getByRole('button', { name: 'Show net worth' }).click()
           await expect(netWorth.getByRole('img', { name: /^Line chart of net worth by month/ }).locator('svg.recharts-surface')).toBeVisible()
@@ -496,12 +496,12 @@ test.describe('zoom', () => {
         await page.setViewportSize({ width, height })
         await page.goto('/')
         await sizeButton(page, size).click()
-        const netWorth = page.getByRole('region', { name: 'Net worth over time' })
+        const netWorth = netWorthRegion(page)
         const button = netWorth.getByRole('button', { name: 'Show net worth' })
         await expect(button).toBeVisible()
         await expect(netWorth).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
         await expect(netWorth.getByRole('link', { name: 'Open the Charts page for longer ranges' })).toBeVisible()
-        await expect(page.getByRole('region', { name: 'Spending by Category' }).getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
+        await expect(spendingRegion(page).getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
         await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
@@ -1065,6 +1065,5 @@ test.describe('header', () => {
 test('the examples page has no WCAG 2.2 AA violations at the largest text size', async ({ page }) => {
   await page.goto('/styleguide')
   await sizeButton(page, 'A++').click()
-  const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
-  expect(violations.map((v) => `${v.id}: ${v.nodes.length} element(s)`)).toEqual([])
+  await noAxeViolations(page) // right after the click: it waits for the size buttons to finish changing width
 })

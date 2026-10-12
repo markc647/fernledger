@@ -576,7 +576,7 @@ function ReplaceDialog(props: {
         ))}
         {inSteps && (
           <p>
-            That is more than {REPLACE_SLICE.toLocaleString('en-NZ')}, so the old Transactions are removed in steps of {REPLACE_SLICE.toLocaleString('en-NZ')} before the file is imported. Each step is final: if the
+            That is more than {REPLACE_SLICE.toLocaleString('en-NZ')}, so the old Transactions are removed in steps of {REPLACE_SLICE.toLocaleString('en-NZ')}, the oldest dates first, before the file is imported. Each step is final: if the
             Import stops part way, the part of the old history already removed can't be put back.{' '}
             {overOneDay
               ? `Removing and importing this many Transactions takes more database writes than the free plan allows in a day (${DAILY_ROW_WRITES.toLocaleString('en-NZ')}). Fernledger stops when the limit is reached, and you choose the same file again tomorrow to finish.`

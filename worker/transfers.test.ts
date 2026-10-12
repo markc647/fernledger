@@ -609,7 +609,7 @@ describe('replacing imported history', () => {
     const everyday = (await env.DB.prepare('SELECT id FROM accounts WHERE name = ?').bind('Everyday').first<{ id: number }>())!.id
     await env.DB.prepare(
       `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5200)
-       INSERT INTO transactions (account_id, date, amount_cents, description, source, bank_unique_id) SELECT ?1, '2020-01-01', -100, 'EXAMPLE', 'import', 'SEED' || i FROM n`,
+       INSERT INTO transactions (account_id, date, amount_cents, description, source, bank_unique_id) SELECT ?1, '2026-11-01', -100, 'EXAMPLE', 'import', 'SEED' || i FROM n`,
     )
       .bind(everyday)
       .run()
@@ -617,9 +617,9 @@ describe('replacing imported history', () => {
     const res = await call('/api/imports/clear-history', { method: 'POST', body: { accountId: everyday } })
 
     expect(res.status).toBe(200)
-    // The $50.00 out was the oldest row, so it went in the first 5,000.
+    // The $50.00 out was the oldest-dated row (the 5,200 others are dated after it), so it went in the first 5,000.
     expect(await idOf('IN')).toBeGreaterThan(0)
-    expect((await described()).find((t) => t.description === 'IN')).toMatchObject({ transfer: null, transferAccountName: null })
+    expect((await described('&text=IN')).find((t) => t.description === 'IN')).toMatchObject({ transfer: null, transferAccountName: null })
     await expectWholePairs()
   })
 })

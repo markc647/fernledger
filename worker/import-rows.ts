@@ -74,11 +74,14 @@ export const MAX_CHUNKS = 20
 export const REPLACE_SLICE = 5000
 
 /**
- * The IDs of the rows one replace (or one step of clearing) removes: the Account's (?1) oldest Import-sourced rows, at most ?2
- * of them. The removal and the release of those rows' matching Transactions (transfers.ts) both select with this, so they agree
- * on which rows go. Only ever Import-sourced rows: Sync-sourced Transactions are never removed here.
+ * The IDs of the rows one replace (or one step of clearing) removes: the Account's (?1) oldest-dated Import-sourced rows (the
+ * earlier ID first among rows of a date), at most ?2 of them. The removal, the holding of what the rows carry and the release of
+ * their matching Transactions (transfers.ts) all select with this, so they agree on which rows go. A history cleared in steps
+ * loses its oldest dates first. The order is that of `transactions_account_date` (account_id, date, id), so D1 reads the Account's
+ * index from its start and stops at ?2 rows; in ID order it would have to sort every row of the Account, or walk the table of every Account.
+ * Only ever Import-sourced rows: Sync-sourced Transactions are never removed here.
  */
-export const IMPORTED_SLICE = "SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY id LIMIT ?2"
+export const IMPORTED_SLICE = "SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY date, id LIMIT ?2"
 
 const isText = (value: unknown, max: number) => typeof value === 'string' && value.length <= max
 

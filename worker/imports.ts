@@ -12,6 +12,7 @@ import {
   carryOutcome,
   carryStatements,
   CLEAR_HELD,
+  CLEAR_HELD_IF_WAITING,
   COUNT_COLUMNS,
   COUNT_REMOVED_ANNOTATED,
   FORGET_APPLIED,
@@ -29,8 +30,8 @@ import { recordChange } from './changelog'
 import { chunkDetail, chunkStatements, chunkSummary, replaceWouldLeaveNothing } from './import-chunk'
 import { badPreviewField, badRowField, IMPORTED_SLICE, MAX_CHUNKS, REPLACE_SLICE, serialisePreviewRows, serialiseRows, type ImportRow, type PreviewRow } from './import-rows'
 import { applyRulesStatement, lastTransactionId } from './rule-apply'
-import { pairTransfersStatement, unpairPartnersOfImportedStatement } from './transfers'
-import { pathId, validate } from './validate'
+import { pairTransfersStatement, UNPAIR_PARTNERS, unpairPartnersOfImportedStatement } from './transfers'
+import { CHANGED_MEANWHILE, pathId, validate } from './validate'
 
 // The browser parses the file (ADR 0004) and sends rows in chunks of about 500. Limits measured and chosen
 // (D1 limits from developers.cloudflare.com/d1/platform/limits, checked 2026-10):
@@ -142,6 +143,31 @@ const COUNT_IMPORTED_AND_ANNOTATED = `SELECT COUNT(*) AS imported,
 // 15,000 more again.
 export const DELETE_IMPORTED = `DELETE FROM transactions WHERE id IN (${IMPORTED_SLICE})`
 
+// A step of clearing a history too big to replace (POST /clear-history) is the statements a replace uses, each made to do nothing unless the slice it removes is still the one
+// that was counted: another step or an Import can land between the count and the batch, and a step that finds the Account changed must neither remove rows the entry does not
+// describe, nor remove any when the history now fits in one replace (which is what the route refuses). The slice is the oldest-dated REPLACE_SLICE Import-sourced rows, so it has
+// not moved while the first row left over (the one after it, `FIRST_ROW_LEFT`) is the same row; if rows before it went or there are no longer more than a slice, it is another or none.
+// (A gap, accepted: nothing removes a single imported row today, but an Import adding a row dated before the boundary in the same instant as a removal of one before it would swap a
+// row of the slice without moving the boundary.)
+// What it costs (ADR 0004): both are ordered by (date, id), which is the order of the index `transactions_account_date`, so D1 searches the Account in that index from its start and stops
+// at the row it wants, reading a slice and sorting nothing, whatever else the table holds. The check runs up to five times in a step (once to read the boundary, once in each of the
+// four statements, the balances one only if the Account has balance rows) at about 5,000 reads each, in a step that reads 90,262 rows at 5,201 and 105,061 at 20,000, with or without other Accounts' rows in the table (measured, and pinned
+// in cutover.test.ts). In ID order it either sorts every row of the Account in a temporary b-tree (the whole history, each time), or, forced to walk the table in ID order with
+// NOT INDEXED, reads every Account's rows up to the 5,001st of this one (the whole table, when another Account's rows were imported first). Counting the rows would read them all too.
+export const FIRST_ROW_LEFT = "SELECT id FROM transactions WHERE account_id = ?1 AND source = 'import' ORDER BY date, id LIMIT 1 OFFSET ?2"
+const STILL_THE_SAME = `(${FIRST_ROW_LEFT}) IS ?3`
+const SLICE_IF_SAME = IMPORTED_SLICE.replace('LIMIT ?2', `LIMIT CASE WHEN ${STILL_THE_SAME} THEN ?2 ELSE 0 END`)
+/** `sql`, with the rows it selects by IMPORTED_SLICE (?1 the Account, ?2 how many) selected only while the boundary (?3) is unchanged. */
+const ifTheSame = (sql: string) => {
+  const guarded = sql.replaceAll(IMPORTED_SLICE, SLICE_IF_SAME)
+  if (guarded === sql || SLICE_IF_SAME === IMPORTED_SLICE) throw new Error('A step of clearing needs statements that select their rows with IMPORTED_SLICE')
+  return guarded
+}
+const HOLD_REMOVED_IF_SAME = ifTheSame(HOLD_REMOVED)
+const UNPAIR_PARTNERS_IF_SAME = ifTheSame(UNPAIR_PARTNERS)
+const DELETE_IMPORTED_IF_SAME = ifTheSame(DELETE_IMPORTED)
+const CLEAR_BALANCES_IF_SAME = `DELETE FROM balance_checks WHERE account_id = ?1 AND source = 'import' AND ${STILL_THE_SAME}`
+
 type AccountRow = { id: number; name: string; cutover_date: string | null }
 
 export const imports = new Hono<AppEnv>()
@@ -235,7 +261,8 @@ export const imports = new Hono<AppEnv>()
     // pairing, whose count of rows changed is two for each pair made.
     const markAt = planned.length + 2
     const pairAt = planned.length + 1 + give.length
-    // Every chunk is its own Change Log entry, written in the same batch as its rows.
+    // Every chunk is its own Change Log entry, written in the same batch as its rows. Its counts are the ones worked out before the batch ran (`counts` above): two identical
+    // chunks landing together could each say they added rows that only one did, and the response below, from the batch, has what was done.
     const outcome = { accountName: name, replace: replace === true, removed: toRemove, added, dropped, index: chunk.index, count: chunk.count, carry }
     const results = await recordChange(db, statements, {
       actor: c.var.member,
@@ -298,25 +325,35 @@ export const imports = new Hono<AppEnv>()
     const total = (await db.prepare(COUNT_IMPORTED).bind(accountId).first<{ n: number }>())?.n ?? 0
     if (total <= REPLACE_SLICE) return c.json({ error: 'The imported history is small enough to replace in one go', remaining: total }, 409)
     const remaining = total - REPLACE_SLICE
+    // The first row this step leaves, which is how a step knows its slice is still the one it counted (STILL_THE_SAME).
+    const boundary = (await db.prepare(FIRST_ROW_LEFT).bind(accountId, REPLACE_SLICE).first<{ id: number }>())?.id
+    if (boundary === undefined) return c.json({ error: 'The imported history is small enough to replace in one go', remaining: total }, 409)
     // The Overrides, Notes and Not a Transfer marks of the rows this step removes are held for the Import that follows (carry-over.ts).
     const held = (await db.prepare(COUNT_REMOVED_ANNOTATED).bind(accountId, REPLACE_SLICE).first<{ n: number }>())?.n ?? 0
     const kept = held > 0 ? `, keeping the ${CARRIED} of ${held} ${held === 1 ? 'Transaction' : 'Transactions'} to carry over` : ''
-    // The balances of the history being replaced go with its first step: they describe Transactions that are going.
-    await recordChange(
+    // The balances of the history being replaced go with its first step: they describe Transactions that are going. Each statement is the one a replace uses, made to do
+    // nothing unless the slice is still the one that was counted (?3 is the boundary), and the removal is last, which `onlyIfChanged` looks at.
+    const [, , , removed] = await recordChange(
       db,
       [
-        db.prepare(DELETE_IMPORT_BALANCES).bind(accountId),
-        db.prepare(HOLD_REMOVED).bind(accountId, REPLACE_SLICE),
-        unpairPartnersOfImportedStatement(db, { accountId, limit: REPLACE_SLICE }),
-        db.prepare(DELETE_IMPORTED).bind(accountId, REPLACE_SLICE),
+        db.prepare(CLEAR_BALANCES_IF_SAME).bind(accountId, REPLACE_SLICE, boundary),
+        db.prepare(HOLD_REMOVED_IF_SAME).bind(accountId, REPLACE_SLICE, boundary),
+        db.prepare(UNPAIR_PARTNERS_IF_SAME).bind(accountId, REPLACE_SLICE, boundary),
+        db.prepare(DELETE_IMPORTED_IF_SAME).bind(accountId, REPLACE_SLICE, boundary),
       ],
       {
         actor: c.var.member,
         type: 'import',
         summary: `Removed ${REPLACE_SLICE} imported rows from ${account.name} to replace its imported history (${remaining} left)${kept}`,
         after: { removed: REPLACE_SLICE, remaining, ...(held > 0 ? { heldForCarryOver: held } : {}) },
+        onlyIfChanged: true,
       },
     )
+    if (removed!.meta.changes === 0) {
+      // Nothing was removed: another step, or an Import, changed how many rows the Account holds since they were counted.
+      const now = (await db.prepare(COUNT_IMPORTED).bind(accountId).first<{ n: number }>())?.n ?? 0
+      return now <= REPLACE_SLICE ? c.json({ error: 'The imported history is small enough to replace in one go', remaining: now }, 409) : c.json(CHANGED_MEANWHILE, 409)
+    }
     return c.json({ removed: REPLACE_SLICE, remaining })
   })
   // What a replace with this file would do with the Account's Overrides, Notes and Not a Transfer marks, for the Replace question to say before
@@ -343,11 +380,17 @@ export const imports = new Hono<AppEnv>()
     if (!account) return c.json({ error: 'Not found' }, 404)
     const waiting = (await db.prepare(WAITING_LIST).bind(accountId).first<{ n: number; listed: string }>())!
     if (waiting.n === 0) return c.json({ error: 'Nothing is waiting to be carried over', waiting: 0 }, 409)
-    await recordChange(db, db.prepare(CLEAR_HELD).bind(accountId), {
+    // Only while the Account is still waiting on as many as were counted, which is what the entry says: another discard, or an Import that gives some out, can land between.
+    const [discarded] = await recordChange(db, db.prepare(CLEAR_HELD_IF_WAITING).bind(accountId, waiting.n), {
       actor: c.var.member,
       type: 'import',
       summary: `Discarded the ${CARRIED} of ${waiting.n} ${waiting.n === 1 ? 'Transaction' : 'Transactions'} that ${account.name} was holding from a replace that did not finish`,
       after: { discarded: waiting.n, lostTransactions: parseLostRows(waiting.listed) },
+      onlyIfChanged: true,
     })
+    if (discarded!.meta.changes === 0) {
+      const now = (await db.prepare(WAITING_LIST).bind(accountId).first<{ n: number }>())?.n ?? 0
+      return now === 0 ? c.json({ error: 'Nothing is waiting to be carried over', waiting: 0 }, 409) : c.json(CHANGED_MEANWHILE, 409)
+    }
     return c.json({ discarded: waiting.n })
   })

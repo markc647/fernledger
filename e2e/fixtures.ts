@@ -39,8 +39,8 @@ export const test = base.extend<{ expectedStatuses: number[] }>({
   },
 })
 
-/** The WCAG 2.2 AA rule tags axe is asked for. A spec that scans in a way `noAxeViolations` can't uses these, so there is one list. */
-export const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
+/** The WCAG 2.2 AA rule tags axe is asked for. */
+const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
 
 /**
  * Axe on the page as it is, against WCAG 2.2 AA: the one check every spec calls. A button that has just been enabled is still fading in, and axe reads the colour it has at
