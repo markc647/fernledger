@@ -10,7 +10,8 @@ export type PdfPage = { width: number; height: number; text: PdfText[] }
  * count alone (as e2e/member-pages.spec.ts counts it) says nothing about what is on the pages.
  */
 export async function readPdf(pdf: Buffer): Promise<PdfPage[]> {
-  const doc = await getDocument({ data: new Uint8Array(pdf), verbosity: 0 }).promise
+  const loading = getDocument({ data: new Uint8Array(pdf), verbosity: 0 })
+  const doc = await loading.promise
   const pages: PdfPage[] = []
   for (let number = 1; number <= doc.numPages; number++) {
     const page = await doc.getPage(number)
@@ -19,7 +20,7 @@ export async function readPdf(pdf: Buffer): Promise<PdfPage[]> {
     const text = items.flatMap((item) => ('str' in item && item.str.trim() !== '' ? [{ str: item.str, x: item.transform[4] as number, y: item.transform[5] as number, size: item.height }] : []))
     pages.push({ width, height, text })
   }
-  await doc.destroy()
+  await loading.destroy() // pdf.js 6 removed PDFDocumentProxy.destroy; the loading task is what it called
   return pages
 }
 
