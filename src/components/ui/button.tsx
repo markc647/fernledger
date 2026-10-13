@@ -12,9 +12,11 @@ const buttonVariants = cva(
         default: 'bg-primary text-primary-foreground hover:bg-primary/80',
         outline:
           'border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50',
+        ghost: 'hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50',
       },
       size: {
         default: 'h-8 gap-1.5 px-2.5',
+        icon: 'size-8',
         // 44px target, and body-size (16px) text since it is for people who find small controls hard.
         touch: 'min-h-11 min-w-11 gap-1.5 px-4 text-base',
       },
