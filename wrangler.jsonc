@@ -3,7 +3,7 @@
   "name": "fernledger",
   "main": "worker/index.ts",
   "workers_dev": true,
-  // Off: version preview URLs would fall outside this app's own Access application.
+  // Off: Fernledger doesn't use preview URLs; a Workers Access application set to All traffic would cover them (docs/setup.md).
   "preview_urls": false,
   "compatibility_date": "2026-09-01",
   // Run next to the D1 database rather than at the visitor's edge location (ADR 0007).

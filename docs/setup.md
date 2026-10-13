@@ -177,22 +177,22 @@ What you do by hand afterwards:
 
 The app has no login of its own. Cloudflare Access sits in front of it, and the Worker checks the Access token on every API request (ADR 0002).
 
-You protect the Worker itself, with an Access application of the **Workers** type. The dashboard's Add application screen offers Private destinations, Workers, Public DNS and Service auth, and has no "Self-hosted public hostname" option for a `workers.dev` Worker. A Workers application covers every address the Worker answers on, `fernledger.<your-subdomain>.workers.dev` included. Cloudflare describes it as "Protect one Worker" on [Cloudflare Access for Workers](https://developers.cloudflare.com/workers/configuration/cloudflare-access/).
+You protect the Worker itself, with an Access application of the **Workers** type. When this was written, the dashboard's Add application screen offered Private destinations, Workers, Public DNS and Service auth. A Workers application is the protection Cloudflare's docs call "Protect one Worker" ([Cloudflare Access for Workers](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)), and it covers every address the Worker answers on, `fernledger.<your-subdomain>.workers.dev` included.
 
 If your Cloudflare account already has an account-wide Access rule (**Protect all Workers**) or a wildcard policy, for example from another project, this Worker still gets **its own** application. Access applies the most specific rule that matches: a hostname or path application first, then a Worker's own application, then the account-wide rule. So the other project's policy won't apply here.
 
-1. **One-time PIN.** In Zero Trust, go to **Integrations → Identity providers** and make sure **One-time PIN** is listed. If it isn't, choose **Add new identity provider**, then **One-time PIN** (a new Zero Trust account doesn't get it automatically). Your team name is under **Settings**, and your team domain is `<your-team>.cloudflareaccess.com`.
+1. **One-time PIN.** In Zero Trust, go to **Integrations → Identity providers** and make sure **One-time PIN** is listed. If it isn't, choose **Add new identity provider**, then **One-time PIN** (a new Zero Trust account doesn't get it automatically).
 2. **Zero Trust → Access → Applications → Add an application → Workers.** (Cloudflare's own pages call the Access menu "Access controls".) Deploy the Worker first so it can be chosen.
    - **Worker:** `fernledger`, the `name` in `wrangler.jsonc`.
    - **Traffic:** **All traffic**. **Previews only** would leave the live app open.
    - **Session duration:** 24 hours.
    - **Login methods:** One-time PIN only.
+
+   Cloudflare also describes a quicker route (Workers & Pages → your Worker → **Access**). Its policy options are **Cloudflare account** and **Email domain**, and neither is a list of people, so use the Zero Trust route above.
 3. **Policies:** create a **new** policy, and don't attach any reusable policy that already exists in the account.
    - **Name:** Fernledger Members
    - **Action:** Allow
    - **Include → Emails:** each Member's email, the Admin's included.
-
-   Cloudflare also describes a quicker route (Workers & Pages → your Worker → **Access**). Its policy options are **Cloudflare account** and **Email domain**, and neither is a list of people, so add the application from Zero Trust as above.
 4. Save the application, then copy its **Application Audience (AUD) tag**: **Zero Trust → Access → Applications**, **Configure** on the application, then **Additional settings**. That is where Cloudflare's [instructions for the AUD tag](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/#get-your-aud-tag) put it for any Access application. They don't describe a Workers application separately, so if yours looks different, look for **Application Audience (AUD) Tag** in its settings.
 5. Set the Worker secrets:
 
@@ -202,24 +202,17 @@ If your Cloudflare account already has an account-wide Access rule (**Protect al
    npx wrangler secret put ADMIN_EMAIL          # the Admin's email
    ```
 
-   Until all three are set, every API request returns 401. The app fails closed.
-6. **Check it.** Open `https://fernledger.<your-subdomain>.workers.dev` in a private window. A Member's email should be sent a code and then reach the app. Any other email gets no code and no message, as the **How to sign in** page tells Members.
-7. **Check Sign out.** The app's header has a **Sign out** link (README [What it does](../README.md#what-it-does)) to `/cdn-cgi/access/logout` on the app's own address. It is a plain page request that Access answers before the Worker is reached. Cloudflare's [session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/#log-out-as-a-user) page says it ends the person's Access session for every Access application, not only this one. Press it once after setup: the next visit should ask for a code again. [Local development](#local-development) can't try it.
+   Your team name is under **Zero Trust → Settings**. It is also the start of the address of Cloudflare's sign-in page (`<your-team>.cloudflareaccess.com`), which you reach by opening the app's address in a private window. Until all three secrets are set, every API request returns 401. The app fails closed.
+6. **Check it.** Open `https://fernledger.<your-subdomain>.workers.dev` in a private window. A Member's email should be sent a code and then reach the app. Then try an email that isn't on the list: it should get no code.
+7. **Check Sign out.** Press **Sign out** in the header once (the README's [What it does](../README.md#what-it-does) says what it does). The next visit should ask for a code. [Local development](#local-development) can't try it.
 
 **Adding or removing a Member:** edit the "Fernledger Members" policy. The app needs no changes. Give a new Member the app's address. Its **How to sign in** page prints as a one-page guide for anyone who finds the email code hard, and **About your data** shows what you write in Settings under "About your data", so fill those in too. As the Admin, print **How to sign in** and give it to each Member before their first sign-in: the page says so to you alone, and the printout has a line to write your name and phone on, as well as the contact you set in Settings.
 
-**Home Screen icon (optional):** Members can add Fernledger to an iPad or phone's Home Screen (README [What it does](../README.md#what-it-does)). iOS may fetch the icon, `/apple-touch-icon.png`, without the Access sign-in cookie. Access then answers with its login page instead of the image, and the Home Screen shows a plain tile. Nothing else is affected, so you can leave it.
-
-Whether the icon can be left out of Access on a Workers application is **not confirmed, and has not been tried on one**. What Cloudflare's pages say, and what they don't:
-
-- A hostname or path application (the Workers page names `workers.dev` hostnames) is checked before a Worker's own application. The [policies page](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/#bypass) uses an application for one path, with a single policy of **Action: Bypass** and **Include: Everyone**, to make that endpoint public. So an application for `fernledger.<your-subdomain>.workers.dev/apple-touch-icon.png` with that one policy should win over the Workers application for that path.
-- They don't say the dashboard will take a `workers.dev` address for such an application. The steps for adding a public hostname pick the domain from the zones in your account, and a Workers application is chosen by Worker, with no path. Nothing on the Workers page says how to leave some paths of a Worker open.
-
-If your dashboard does let you add one, do it for `apple-touch-icon.png`, and for `icon-192.png`, `icon-512.png` and `icon-maskable-512.png` if you want the manifest's icons to load without a session too, each with that single Bypass policy. Bypass turns off Access checks and logging for those paths only, and each one is just the app's icon, which holds no data. Bypass nothing else. If it won't, leave the plain tile.
+**Home Screen icon (optional):** Members can add Fernledger to an iPad or phone's Home Screen (README [What it does](../README.md#what-it-does)). iOS may fetch the icon, `/apple-touch-icon.png`, without the Access sign-in cookie, so Access answers with its login page and the Home Screen shows a plain tile. That is fine, and nothing else is affected. If your dashboard lets you add an Access application for an icon's path (`apple-touch-icon.png`, and `icon-192.png`, `icon-512.png` and `icon-maskable-512.png` for the manifest's icons), give it one policy, **Action: Bypass** with **Include: Everyone**; if it doesn't, leave the tile plain. Bypass turns off Access checks and logging for that path only, and each icon holds no data. Bypass nothing else.
 
 **Changing the Admin:** run `wrangler secret put ADMIN_EMAIL` again.
 
-`preview_urls` is off in `wrangler.jsonc`. It was turned off because version preview hostnames fell outside the old hostname-based application and would have used whatever wildcard policy the account has. A Workers application set to **All traffic** also covers previews (Cloudflare's words: its routes, Custom Domains, `workers.dev` hostname and previews), so that reason no longer applies. Leave it off unless you want preview URLs.
+`preview_urls` is off in `wrangler.jsonc`, so the Worker has no preview hostnames. A Workers application set to **All traffic** would cover them if you turned them on.
 
 ## Update pull requests
 
