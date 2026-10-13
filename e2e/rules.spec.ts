@@ -540,13 +540,14 @@ test('a Member does not see the Rules page, and the API refuses their changes', 
   await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Rules' })).toHaveCount(0)
   await noAxeViolations(page)
 
-  const refused = await context.request.post('/api/rules', { headers: { Origin: baseURL! }, data: { textContains: 'example', transfer: true } })
-  expect(refused.status()).toBe(403)
-
-  // The D1 usage figures are the Admin's alone, whether or not they are set up (here they are not).
+  // The D1 usage figures are the Admin's alone, whether or not they are set up (here they are not). (Asked before the refused write below:
+  // that one is sent without a body, and Vite's local server then drops the next request on its connection, as settings.spec.ts says.)
   const usage = await context.request.get('/api/d1-usage')
   expect(usage.status()).toBe(403)
   expect(await usage.json()).toEqual({ error: 'Admin only' })
+
+  const refused = await context.request.post('/api/rules', { headers: { Origin: baseURL! }, data: { textContains: 'example', transfer: true } })
+  expect(refused.status()).toBe(403)
 })
 
 // The D1 usage bar (worker/d1-usage.ts, src/components/d1-usage-bar.tsx). Local development has no CF_ANALYTICS_TOKEN or CF_ACCOUNT_ID, so the
