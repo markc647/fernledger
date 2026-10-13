@@ -1,6 +1,6 @@
 // Run with `npm run test:scripts`. The static half of the outbound-calls promise (ADR 0010: no one but Akahu, only if you
-// use Sync, and, to check a sign-in, your own Cloudflare Access). worker/outbound.test.ts runs the routes and crons and
-// watches `fetch`; this catches code paths those don't reach. The browser is held to the same promise by the CSP
+// use Sync, and your own Cloudflare account: its Access, to check a sign-in, and, only if you set a token for it, its D1 usage
+// figures). worker/outbound.test.ts runs the routes and crons and watches `fetch`; this catches code paths those don't reach. The browser is held to the same promise by the CSP
 // (`connect-src 'self'`, worker/security-headers.ts).
 //
 // Known limits. It is a line scan, a tripwire for honest mistakes, not a defence against deliberate evasion:
@@ -22,16 +22,40 @@ const root = resolve(import.meta.dirname, '..')
 const OUTBOUND = [/\bfetch\s*\(/, /\bnew\s+WebSocket\b/, /\bXMLHttpRequest\b/, /\bsendBeacon\b/, /\bEventSource\b/, /cloudflare:sockets/]
 
 /**
- * Source files that may make outbound calls, by path from the repo root. None yet. Akahu Sync will add its one
- * module here, and worker/outbound.test.ts must then exercise it against the Akahu host.
+ * Source files that may make an outbound call, by path from the repo root, each with the one address it may call and the name of
+ * the constant that holds it. Akahu Sync will add its one module here, and worker/outbound.test.ts must then exercise it against
+ * the Akahu host. A file here is not let off: `checkAllowedFile` holds it to exactly one call, to that constant, and to that address
+ * as the only one it names.
+ * - worker/d1-usage.ts: the D1 usage bar asks Cloudflare's GraphQL Analytics API for the Deployer's own account usage, and only when
+ *   CF_ANALYTICS_TOKEN and CF_ACCOUNT_ID are set (ADR 0010, amended 2026-10-14). worker/outbound.test.ts reaches it with both set.
  */
-const ALLOWED_FILES = []
+const ALLOWED_FILES = {
+  'worker/d1-usage.ts': { url: 'https://api.cloudflare.com/client/v4/graphql', urlName: 'GRAPHQL_URL' },
+}
 
 /** Returns "file:line: text" for each outbound call in the source. Comment-only lines are skipped. */
 export function findOutboundCalls(file, source) {
   return source
     .split(/\r?\n/)
     .flatMap((text, i) => (/^\s*(\/\/|\*|\/\*)/.test(text) || !OUTBOUND.some((re) => re.test(text)) ? [] : [`${file}:${i + 1}: ${text.trim()}`]))
+}
+
+const URL_LITERAL = /https?:\/\/[^\s'"`)\\]+/g
+
+/**
+ * What is wrong with a file that is allowed to call out, as problems to print (none if it is as allowed): it makes exactly one call,
+ * that call is `fetch(<urlName>, ...)`, `<urlName>` is the allowed address, and no other address is named in the file's code.
+ */
+export function checkAllowedFile(file, source, { url, urlName }) {
+  const code = source.split(/\r?\n/).filter((text) => !/^\s*(\/\/|\*|\/\*)/.test(text))
+  const calls = findOutboundCalls(file, source)
+  const problems = []
+  if (calls.length !== 1) problems.push(`${file}: it may make exactly one outbound call, and makes ${calls.length}`)
+  else if (!new RegExp(`\\bfetch\\(${urlName}[,)]`).test(calls[0])) problems.push(`${file}: its one call must be fetch(${urlName}, ...): ${calls[0]}`)
+  if (!code.some((text) => text.includes(`const ${urlName} = '${url}'`))) problems.push(`${file}: ${urlName} must be '${url}'`)
+  const named = [...new Set(code.flatMap((text) => text.match(URL_LITERAL) ?? []))].filter((name) => name !== url)
+  if (named.length > 0) problems.push(`${file}: it may name no address but ${url}, and names ${named.join(', ')}`)
+  return problems
 }
 
 function sourceFiles(dir) {
@@ -42,14 +66,34 @@ function sourceFiles(dir) {
   })
 }
 
-test('no source file in worker/ or src/ makes an outbound call', () => {
+test('no source file in worker/ or src/ makes an outbound call, but the one allowed to, to its one address', () => {
+  const seen = []
   const found = ['worker', 'src'].flatMap((dir) =>
     sourceFiles(join(root, dir)).flatMap((path) => {
       const file = relative(root, path).replaceAll('\\', '/')
-      return ALLOWED_FILES.includes(file) ? [] : findOutboundCalls(file, readFileSync(path, 'utf8'))
+      seen.push(file)
+      const source = readFileSync(path, 'utf8')
+      return file in ALLOWED_FILES ? checkAllowedFile(file, source, ALLOWED_FILES[file]) : findOutboundCalls(file, source)
     }),
   )
-  assert.deepEqual(found, [], 'ADR 0010: no one but Akahu (only if you use Sync) and your own Cloudflare Access. Akahu Sync belongs in ALLOWED_FILES, with a test in worker/outbound.test.ts.')
+  assert.deepEqual(found, [], 'ADR 0010: no one but Akahu (only if you use Sync) and your own Cloudflare account (Access, and the D1 usage figures if you set their token). A new call belongs in ALLOWED_FILES, with a test in worker/outbound.test.ts.')
+  assert.deepEqual(Object.keys(ALLOWED_FILES).filter((file) => !seen.includes(file)), [], 'a file in ALLOWED_FILES that is not in worker/ or src/')
+})
+
+test('an allowed file is held to one call, to one address', () => {
+  const allowed = { url: 'https://api.example.test/graphql', urlName: 'API_URL' }
+  const ok = "// see https://docs.example.test/page\nexport const API_URL = 'https://api.example.test/graphql'\nconst res = await fetch(API_URL, { method: 'POST' })"
+  assert.deepEqual(checkAllowedFile('x.ts', ok, allowed), [])
+  const bad = {
+    'a second call': `${ok}\nawait fetch(API_URL)`,
+    'no call at all': "export const API_URL = 'https://api.example.test/graphql'",
+    'a call to something else': ok.replace('fetch(API_URL', 'fetch(otherUrl'),
+    'a call to a literal address': ok.replace('fetch(API_URL', "fetch('https://api.example.test/graphql'"),
+    'another address named': `${ok}\nconst other = 'https://github.com/markc647/fernledger'`,
+    'the address changed': ok.replaceAll('api.example.test', 'elsewhere.test'),
+    'a socket as well': `${ok}\nnew WebSocket(API_URL)`,
+  }
+  for (const [name, source] of Object.entries(bad)) assert.notDeepEqual(checkAllowedFile('x.ts', source, allowed), [], name)
 })
 
 test('the finder recognises each way of calling out, and skips comments', () => {

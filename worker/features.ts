@@ -35,8 +35,22 @@ export const AKAHU_SYNC: Feature = {
   ],
 }
 
+/**
+ * The Rules page's D1 usage bar: how much of D1 Free's daily allowance the Cloudflare account has used. It asks Cloudflare's GraphQL
+ * Analytics API (worker/d1-usage.ts), which is the one outbound call a Deployer's own token turns on (ADR 0010). Nothing else needs it.
+ */
+export const D1_USAGE: Feature = {
+  id: 'd1-usage',
+  name: 'D1 usage bar',
+  optional: true,
+  requires: [
+    { env: 'CF_ANALYTICS_TOKEN', what: 'the Cloudflare analytics token', how: 'Add it as the Worker secret CF_ANALYTICS_TOKEN.' },
+    { env: 'CF_ACCOUNT_ID', what: 'the Cloudflare account ID', how: 'Add it as the Worker secret CF_ACCOUNT_ID.' },
+  ],
+}
+
 /** Every feature that can be switched off by missing configuration. A feature adds itself here. */
-export const FEATURES: Feature[] = [AKAHU_SYNC]
+export const FEATURES: Feature[] = [AKAHU_SYNC, D1_USAGE]
 
 const isSet = (value: unknown) => typeof value === 'string' && value.trim() !== ''
 

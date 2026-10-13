@@ -2,7 +2,7 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
-import { AKAHU_SYNC, requireFeature } from './features'
+import { AKAHU_SYNC, D1_USAGE, requireFeature } from './features'
 import worker from './index'
 
 // Fake token values, deliberately recognisable so a leak into a response is obvious.
@@ -72,6 +72,42 @@ describe('GET /api/features', () => {
   it('is refused to a visitor who is not signed in', async () => {
     const res = await exports.default.fetch(new Request('https://app.test/api/features'))
     expect(res.status).toBe(401)
+  })
+})
+
+describe('the D1 usage bar', () => {
+  const usage = (features: Features) => features.features.find((feature) => feature.id === D1_USAGE.id)!
+  const off = { CF_ANALYTICS_TOKEN: undefined, CF_ACCOUNT_ID: undefined }
+
+  it('tells the Admin it is optional, and what to set up and how, when neither secret is set', async () => {
+    const { body } = await getFeatures('admin', off)
+    expect(usage(body)).toEqual({
+      id: 'd1-usage',
+      name: 'D1 usage bar',
+      enabled: false,
+      message:
+        'Optional: you only need this to use D1 usage bar. ' +
+        'Setup needed: the Cloudflare analytics token. Add it as the Worker secret CF_ANALYTICS_TOKEN. ' +
+        'Setup needed: the Cloudflare account ID. Add it as the Worker secret CF_ACCOUNT_ID.',
+    })
+  })
+
+  it('names only what is still missing, and gives a Member no detail', async () => {
+    const half = { ...off, CF_ANALYTICS_TOKEN: 'cf_token_SECRET_VALUE_1' }
+    expect(usage((await getFeatures('admin', half)).body).message).toBe(
+      'Optional: you only need this to use D1 usage bar. Setup needed: the Cloudflare account ID. Add it as the Worker secret CF_ACCOUNT_ID.',
+    )
+    const member = await getFeatures('member', half)
+    expect(usage(member.body)).toEqual({ id: 'd1-usage', name: 'D1 usage bar', enabled: false, message: "D1 usage bar isn't set up yet." })
+    expect(member.text).not.toMatch(/CF_|SECRET_VALUE/)
+  })
+
+  it('is on once both are set, and says nothing of their values', async () => {
+    for (const as of ['admin', 'member'] as const) {
+      const { body, text } = await getFeatures(as, { CF_ANALYTICS_TOKEN: 'cf_token_SECRET_VALUE_1', CF_ACCOUNT_ID: 'account_SECRET_VALUE_2' })
+      expect(usage(body)).toEqual({ id: 'd1-usage', name: 'D1 usage bar', enabled: true })
+      expect(text).not.toContain('SECRET_VALUE')
+    }
   })
 })
 

@@ -24,7 +24,7 @@ Each Deployer runs their own copy in their own Cloudflare account. There is no F
 | Cross-site attacks | Changes must come from the app's own address with a JSON body. Strict security headers are set: a Content Security Policy, no framing, no referrer. |
 | Malicious spreadsheet formulas in exports | CSV cells that would run as spreadsheet formulas, such as a payee named `=HYPERLINK(…)`, are defused with an apostrophe (see CSV export under [What it does](../README.md#what-it-does)). |
 | Data leaking through logs | Logs contain only IDs, counts and error types, never Transactions, tokens or emails. A test enforces this. |
-| Data leaving for third parties | Nothing calls home: no analytics, telemetry, email or third-party scripts. |
+| Data leaving for third parties | Nothing calls home: no analytics, telemetry, email or third-party scripts. The Worker contacts no one but Akahu (only if you use Sync) and your own Cloudflare account: its Access, to check a sign-in, and, only if you add a token for it, its D1 usage figures, a request that carries the token, your account ID and a date and none of your data (ADR 0010). A test fails on any other call. |
 | Bank data in the repository | [gitleaks](https://github.com/gitleaks/gitleaks) secret scanning, with extra rules that block NZ bank account numbers and bank CSV exports from ever being committed. |
 
 ### What is not protected

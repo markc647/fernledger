@@ -10,6 +10,7 @@ import { budgets } from './budgets'
 import { categories } from './categories'
 import { charts } from './charts'
 import { isDailyLimitError } from './d1-errors'
+import { d1Usage } from './d1-usage-route'
 import { changeLogList } from './changelog-list'
 import { FEATURES, featureStatuses } from './features'
 import { imports } from './imports'
@@ -69,6 +70,7 @@ export const app = new Hono<AppEnv>()
   .route('/api/categories', categories)
   .route('/api/change-log', changeLogList)
   .route('/api/charts', charts)
+  .route('/api/d1-usage', d1Usage)
   .route('/api/imports', imports)
   .route('/api/reports', reports)
   .route('/api/rules', rules)
