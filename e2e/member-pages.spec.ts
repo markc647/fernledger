@@ -130,6 +130,21 @@ test.describe('About your data', () => {
     await expect(section(page, 'Who can see it')).toContainText('no one but Akahu (only if this Fernledger uses Akahu Sync) and, to check a sign-in, your own Cloudflare Access')
   })
 
+  test('names the Cloudflare account call as well, and only when the D1 usage bar is on (ADR 0010)', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/about-your-data')
+    // Off, as it is here: the promise is the older, shorter one.
+    await expect(section(page, 'Who can see it')).not.toContainText('usage figures')
+
+    await page.route('**/api/features', (route) => route.fulfill({ json: { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] } }))
+    await page.reload()
+    const seen = section(page, 'Who can see it')
+    await expect(seen).toContainText('no one but Akahu (only if this Fernledger uses Akahu Sync) and your own Cloudflare account: its Access, to check a sign-in, and its usage figures')
+    await expect(seen).toContainText('sends no Transactions, Notes or other data of yours')
+    await expect(seen).toContainText('It has no analytics, tracking or email.')
+    await noAxeViolations(page)
+  })
+
   test('says whether Akahu Sync is set up, from what the Worker reports', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/about-your-data')

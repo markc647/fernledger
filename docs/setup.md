@@ -171,6 +171,7 @@ What you do by hand afterwards:
 - **Delete the Worker**, which also deletes the secrets it holds: `npx wrangler delete`.
 - **Delete the Access application:** Zero Trust → Access → Applications → Fernledger.
 - **Revoke Akahu access, only if you used Akahu Sync.** README ("Leaving Fernledger") says how.
+- **Revoke the usage token, only if you made one for the [D1 usage bar](#d1-usage-bar-optional):** Manage account → Account API tokens. Deleting the Worker does not revoke it.
 - **Decide what to do with the final backup folder.**
 
 ## Cloudflare Access (one-time, by hand)
@@ -208,6 +209,32 @@ If your Cloudflare account already has a wildcard or account-wide Access policy,
 **Changing the Admin:** run `wrangler secret put ADMIN_EMAIL` again.
 
 `preview_urls` is off in `wrangler.jsonc`, because version preview hostnames wouldn't match this application and would fall back to whatever wildcard policy the account has.
+
+## D1 usage bar (optional)
+
+README ([What it does](../README.md#what-it-does)) says what the bar shows. D1 Free allows 5 million rows read and 100,000 rows written a day for the whole Cloudflare account, and setting up Rules can use the reads quickly. If you skip this, the Rules page says how to turn the bar on and nothing else changes. Turning it on lets the Worker ask **your own** Cloudflare account for its usage, the one extra outbound call ([ADR 0010](adr/0010-outbound-calls.md)). The request carries the token, your account ID and today's date, and none of your data.
+
+1. **Create an account-owned API token** (Cloudflare's [Account API tokens](https://developers.cloudflare.com/fundamentals/api/get-started/account-owned-tokens/)), not a user token under My Profile. An account token isn't tied to one person, so it keeps working if they leave the account, and Cloudflare lists Account Analytics as supported by account tokens. In the Cloudflare dashboard:
+   - **Manage account → Account API tokens → Create Token**, then **Custom token** (Get started).
+   - **Token name:** `Fernledger D1 usage (read only)`.
+   - **Permissions:** Account → Account Analytics → Read. **Nothing else.** The token can then read your account's analytics and change nothing.
+   - **Resources:** leave it limited to this one account. Don't add IP address filtering: a Worker's outbound address isn't fixed.
+   - **Expiration:** optional. When the token expires the bar says "Usage unavailable" until you make a new one and run the `secret put` below again.
+   - **Continue to summary → Create Token**, and copy the token now: Cloudflare shows it once.
+2. **Copy your account ID:** in the dashboard, search (CMD/CTRL + K) for `Copy account ID`, or open **Workers & Pages** and copy it from **Account Details** ([Cloudflare's steps](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/)).
+3. **Set both Worker secrets.** Wrangler asks for each value at a prompt, so neither goes on a command line or into a file:
+
+   ```bash
+   npx wrangler secret put CF_ANALYTICS_TOKEN   # the token from step 1
+   npx wrangler secret put CF_ACCOUNT_ID        # the account ID from step 2
+   ```
+
+   Both are needed. With one, or neither, the bar stays off and Setup needed (Settings, and the Rules page) names what is missing. If your login reaches more than one Cloudflare account, set `CLOUDFLARE_ACCOUNT_ID` first so Wrangler puts the secrets on the right Worker, as in [Create the resources and deploy](#create-the-resources-and-deploy).
+4. **Check:** open **Rules**. Under "Apply the Rules to all Transactions", **Free database allowance** shows rows read and rows written today, a Low, Medium or High badge for each, and when the allowance starts again in NZ time (00:00 UTC, about midday or 1 pm). The figures are for the whole account, not only Fernledger, and run a few minutes behind, so a number that hasn't moved yet after an Import or a run is normal. The page reads them when it opens and when a run of the Rules finishes, pauses or is stopped; it doesn't poll.
+
+If the page says **Usage unavailable**, Cloudflare did not give the figures. Check that the token has Account Analytics Read and belongs to the account whose ID you gave. The Worker log has one line saying which kind of failure it was, with no message and none of your values: `d1-usage.refused` (Cloudflare rejected the token or the account ID), `d1-usage.failed` (it could not be reached, was slow, or answered with an error) or `d1-usage.unreadable` (it answered with something unexpected). The bar never stops the app: only the Admin can see it, and the Rules, Imports and everything else carry on without it.
+
+**Turning it off:** `npx wrangler secret delete CF_ANALYTICS_TOKEN`, then revoke the token under **Manage account → Account API tokens**. Deleting the Worker deletes its secrets but not the token, so revoke it in the dashboard when you [leave Fernledger](#leaving-fernledger-teardown).
 
 ## Update pull requests
 

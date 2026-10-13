@@ -1,7 +1,8 @@
-import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { Amount } from '@/components/amount'
+import { D1UsageBar, d1UsageQuery } from '@/components/d1-usage-bar'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,6 +40,9 @@ const rerunQuery = queryOptions({
   staleTime: Infinity,
   refetchOnWindowFocus: false,
 })
+
+/** Read the D1 usage bar's figures again (a query that is not on, because the feature is not set up, is left alone). */
+const refreshUsage = (queryClient: QueryClient) => queryClient.invalidateQueries({ queryKey: d1UsageQuery.queryKey })
 
 const INTRO =
   'A Rule is used for new Transactions as they are imported. The Transactions you already have change only when you choose Apply the Rules to all Transactions, below.'
@@ -212,6 +216,8 @@ function AdminRules() {
  * `holding` is true while the Admin is changing a Rule: the run waits, since a change sends it back to the start.
  * A run pauses itself when it has used its share of the free plan's day (the Worker says so in the job, `paused`), and the plan can
  * refuse a step outright (429) when the day's allowance is gone; either way the page asks again when the day changes, at 00:00 UTC.
+ * The panel also shows how much of that day the Cloudflare account has used (D1UsageBar, if the Deployer turned it on). It is read when the
+ * panel shows and again when a run ends, pauses or is stopped, or the plan refuses a step: not at each step, and not on a timer.
  */
 function ApplyToHistory({ holding }: { holding: boolean }) {
   const queryClient = useQueryClient()
@@ -253,6 +259,7 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
       if (stopped) queryClient.setQueryData(rerunQuery.queryKey, stopped)
       else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
       status.current?.focus()
+      void refreshUsage(queryClient)
     },
   })
 
@@ -273,13 +280,18 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
       while (!stopped) {
         const res = await api.rules.rerun.step.$post({ json: {} })
         if (stopped) return
-        if (!res.ok) return setProblem(res.status === 429 ? 'limit' : 'failed')
+        if (!res.ok) {
+          // The plan refusing a step is the day's allowance gone: the usage bar is worth reading again.
+          if (res.status === 429) void refreshUsage(queryClient)
+          return setProblem(res.status === 429 ? 'limit' : 'failed')
+        }
         const { job: next } = await res.json()
         if (stopped) return
         queryClient.setQueryData(rerunQuery.queryKey, next)
         if (!next?.paused) asked.current = 0
         if (next?.status !== 'running' || next.paused) {
-          // Every Category shown in a list may have changed.
+          // Every Category shown in a list may have changed, and the run has used some of the day's allowance.
+          void refreshUsage(queryClient)
           await queryClient.invalidateQueries({ queryKey: ['transactions'] })
           return
         }
@@ -318,6 +330,7 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
         Category a Rule gave it. A Category you set by hand (an Override) is never changed.
       </p>
       <p className="mt-1">Change the Rules first, then apply them once.</p>
+      <D1UsageBar />
       <div className="mt-3 flex flex-wrap gap-2">
         <Button id="rerun-button" className="max-w-full py-2 whitespace-normal" size="touch" disabled={running || start.isPending || job === undefined} onClick={() => start.mutate()}>
           Apply the Rules to all Transactions

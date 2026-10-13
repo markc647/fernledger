@@ -5,6 +5,12 @@ const MINUS = '−' // a real minus sign: a hyphen is too short to read as one, 
 
 const wholeDollars = new Intl.NumberFormat('en-NZ')
 
+/** A count of things (not money) with the thousands marked: "1,234,567". For a figure such as the rows D1 has read; money goes through `formatAmount`. */
+export function formatCount(count: number) {
+  if (!Number.isSafeInteger(count)) throw new RangeError('Counts are whole numbers')
+  return wholeDollars.format(count)
+}
+
 // Built from integer parts, never `cents / 100`: a float loses the last cents near Number.MAX_SAFE_INTEGER.
 function dollarsFromCents(cents: number) {
   // The message never includes the value: amounts are private (CODING_STANDARDS.md, Security and privacy).

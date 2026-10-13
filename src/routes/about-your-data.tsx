@@ -23,6 +23,7 @@ function AboutYourData() {
   const { data: settings, isError: settingsFailed } = useQuery(settingsQuery)
   const { data: features } = useQuery(featuresQuery)
   const akahu = features?.find((feature) => feature.id === 'akahu-sync')
+  const usageFigures = features?.find((feature) => feature.id === 'd1-usage')?.enabled === true
   // Until both have arrived there is nothing to show for the two Settings: a Member must not read the neutral line
   // for a moment before the Admin's own words replace it, and the Admin's guidance needs the role.
   const ready = me && settings
@@ -90,8 +91,13 @@ function AboutYourData() {
             <strong className="font-semibold">Behind the scenes.</strong> Cloudflare hosts Fernledger, and whoever looks after the Cloudflare account it runs in can reach the data directly. As with any online service, Cloudflare can technically access what it hosts.
           </li>
         </ul>
+        {/* ADR 0010: the promise names every outbound call, so it says so when the optional D1 usage bar is on. */}
         <p>
-          Fernledger sends your data to no one else. It contacts no one but Akahu (only if this Fernledger uses Akahu Sync) and, to check a sign-in, your own Cloudflare Access. It has no analytics, tracking or email.
+          Fernledger sends your data to no one else.{' '}
+          {usageFigures
+            ? 'It contacts no one but Akahu (only if this Fernledger uses Akahu Sync) and your own Cloudflare account: its Access, to check a sign-in, and its usage figures, which whoever runs Fernledger has turned on for the Admin\'s Rules page. Asking for those sends no Transactions, Notes or other data of yours. '
+            : 'It contacts no one but Akahu (only if this Fernledger uses Akahu Sync) and, to check a sign-in, your own Cloudflare Access. '}
+          It has no analytics, tracking or email.
         </p>
         <p>
           A file saved from Fernledger, such as a CSV export of Transactions, is outside all of this. See{' '}

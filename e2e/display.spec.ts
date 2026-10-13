@@ -212,6 +212,32 @@ test.describe('zoom', () => {
     }
   }
 
+  // The Rules page with the D1 usage bar on and the day used up: the longest figures and badge it shows (the figures are stubbed, so this needs
+  // no token). With it off, the page's own test above covers the longer Setup needed words.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['A', 'A++'] as const) {
+      test(`/rules with the D1 usage bar showing the day used up at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await page.route('**/api/features', (route) => route.fulfill({ json: { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] } }))
+        await page.route('**/api/d1-usage', (route) =>
+          route.fulfill({ json: { rowsRead: 5_100_000, rowsWritten: 100_000, readLimit: 5_000_000, writeLimit: 100_000, resetsAt: '2026-10-15T00:00:00.000Z' } }),
+        )
+        await page.setViewportSize({ width, height })
+        await page.goto('/rules')
+        await sizeButton(page, size).click()
+        await expect(page.getByText('5,100,000 of 5,000,000 rows read · 102%')).toBeVisible()
+        await expect(page.getByText('The allowance starts again on Thu 15 Oct 2026, 1:00 pm, New Zealand time.')).toBeVisible()
+        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
   // The Summary with its longest content: long Account names, big amounts, a warning with its explanation, and a
   // Transaction with a long description. The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
