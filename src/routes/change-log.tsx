@@ -1,9 +1,9 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
+import { DatePicker } from '@/components/date-picker'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { changeFields, type ChangeRow } from '@/lib/change-log'
 import { MAX_DATE, MIN_DATE, outOfRange } from '@/lib/date-range'
 import { formatDateTime } from '@/lib/format'
@@ -79,16 +79,16 @@ function ChangeLog() {
           </select>
         </div>
         <div>
-          <label htmlFor="filter-from" className="block font-medium">
+          <label id="filter-from-label" htmlFor="filter-from" className="block font-medium">
             From
           </label>
-          <Input id="filter-from" type="date" value={filters.from} min={MIN_DATE} max={filters.to || MAX_DATE} onChange={(event) => change({ from: event.target.value })} />
+          <DatePicker id="filter-from" labelId="filter-from-label" value={filters.from} max={filters.to || MAX_DATE} onChange={(from) => change({ from })} />
         </div>
         <div>
-          <label htmlFor="filter-to" className="block font-medium">
+          <label id="filter-to-label" htmlFor="filter-to" className="block font-medium">
             To
           </label>
-          <Input id="filter-to" type="date" value={filters.to} min={filters.from || MIN_DATE} max={MAX_DATE} onChange={(event) => change({ to: event.target.value })} />
+          <DatePicker id="filter-to" labelId="filter-to-label" value={filters.to} min={filters.from || MIN_DATE} onChange={(to) => change({ to })} />
         </div>
         {filtered && (
           <Button type="button" size="touch" variant="outline" onClick={() => change(NO_FILTERS)}>

@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test'
+import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 import {
@@ -126,8 +127,8 @@ test.describe('opening the Report', () => {
 
     const form = page.getByRole('form', { name: 'Balances over time' })
     await form.getByLabel('Account').selectOption({ label: savings.name })
-    await form.getByLabel('From').fill(`${start}-01-01`)
-    await form.getByLabel('To').fill(`${end}-12-31`)
+    await pickDate(form, 'From', `${start}-01-01`)
+    await pickDate(form, 'To', `${end}-12-31`)
     const [popup] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
     await expect(popup.getByRole('heading', { level: 1, name: 'Balances over time' })).toBeVisible()
     expect(new URL(popup.url()).pathname).toBe('/reports/balances')
@@ -150,13 +151,13 @@ test.describe('opening the Report', () => {
 
     await open.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a From date.')
-    await form.getByLabel('From').fill('2010-12-31')
+    await pickDate(form, 'From', '2010-12-31')
     await open.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a To date.')
-    await form.getByLabel('To').fill('2010-01-01')
+    await pickDate(form, 'To', '2010-01-01')
     await open.click()
     await expect(form.getByRole('alert')).toContainText('before the “From” date')
-    await expect(form.getByLabel('To')).toHaveAttribute('aria-invalid', 'true')
+    await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
     await expect(page.getByRole('form', { name: 'Transaction listing' }).getByRole('alert')).toHaveCount(0) // the other form is untouched
     expect(context.pages()).toHaveLength(1)
   })

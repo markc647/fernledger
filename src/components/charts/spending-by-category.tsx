@@ -1,15 +1,14 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useId, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
+import { DatePicker } from '@/components/date-picker'
 import { LiveStatus } from '@/components/live-status'
 import { ResponsiveTable } from '@/components/responsive-table'
 import { Spent } from '@/components/spent'
 import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
-import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { UNCATEGORISED_SPENDING } from '@/lib/budgets'
 import { barsOf, datesProblem, describeDates, PERIOD_LABELS, PERIODS, shorten, spendingSummary, type SpendingCategory, type SpendingPeriod } from '@/lib/charts'
-import { MAX_DATE, MIN_DATE } from '@/lib/date-range'
 import { formatAxisDollars, formatBalance } from '@/lib/format'
 import { spendingByCategoryQuery } from '@/lib/queries'
 import { useElementWidth, useRem } from '@/lib/use-chart-size'
@@ -94,18 +93,16 @@ export function SpendingByCategory() {
         {choice === 'custom' &&
           (['from', 'to'] as const).map((field) => (
             <div key={field}>
-              <label htmlFor={`${id}-${field}`} className="block font-medium">
+              <label id={`${id}-${field}-label`} htmlFor={`${id}-${field}`} className="block font-medium">
                 {field === 'from' ? 'From' : 'To'}
               </label>
-              <Input
+              <DatePicker
                 id={`${id}-${field}`}
-                type="date"
-                min={MIN_DATE}
-                max={MAX_DATE}
+                labelId={`${id}-${field}-label`}
                 value={field === 'from' ? from : to}
                 aria-invalid={problem?.field === field}
                 aria-describedby={problem?.field === field ? `${id}-problem` : undefined}
-                onChange={(event) => (field === 'from' ? setFrom : setTo)(event.target.value)}
+                onChange={field === 'from' ? setFrom : setTo}
               />
             </div>
           ))}

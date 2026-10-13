@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test'
+import { dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 // The light and dark projects run side by side against one local database, so each uses its own made-up Account.
@@ -59,20 +60,20 @@ test('the Admin changes and clears the Cutover Date in Settings, which explains 
   await page.goto('/settings')
   await expect(page.getByRole('heading', { level: 2, name: 'Cutover Dates' })).toBeVisible()
   await expect(page.getByText('Setting or clearing it deletes nothing already saved: imported rows already saved on or after the date stay')).toBeVisible()
-  const field = page.getByLabel(`Cutover Date for ${name}`, { exact: true })
-  await expect(field).toHaveValue('2026-10-01')
+  const label = `Cutover Date for ${name}`
+  await expectDate(page, label, '2026-10-01')
   await noAxeViolations(page)
 
-  await field.fill('2026-09-30')
-  await page.locator('form', { has: field }).getByRole('button', { name: 'Save Cutover Date' }).click()
+  await pickDate(page, label, '2026-09-30')
+  await page.locator('form', { has: dateField(page, label) }).getByRole('button', { name: 'Save Cutover Date' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Cutover Date saved.' })).toBeVisible()
   await page.reload()
-  await expect(page.getByLabel(`Cutover Date for ${name}`, { exact: true })).toHaveValue('2026-09-30')
+  await expectDate(page, label, '2026-09-30')
 
   await page.getByRole('button', { name: `Clear the Cutover Date for ${name}` }).click()
-  await expect(page.getByLabel(`Cutover Date for ${name}`, { exact: true })).toHaveValue('')
+  await expectDate(page, label, '')
   await page.reload()
-  await expect(page.getByLabel(`Cutover Date for ${name}`, { exact: true })).toHaveValue('')
+  await expectDate(page, label, '')
 })
 
 test('the Admin replaces imported history after confirming, and the old rows go, with the Notes that found no match reported as lost', async ({ page, context, baseURL }, testInfo) => {

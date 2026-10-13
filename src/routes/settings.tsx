@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, type ChangeEvent } from 'react'
+import { DatePicker } from '@/components/date-picker'
 import { Status } from '@/components/status'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
@@ -23,9 +24,6 @@ const FIELD_LABELS: Record<keyof Settings, string> = {
 
 const inputStyle =
   'mt-1 block w-full min-h-11 rounded-lg border border-foreground/60 bg-background px-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring aria-invalid:border-destructive aria-invalid:border-2'
-
-const dateStyle =
-  'min-h-11 rounded-lg border border-foreground/60 bg-background px-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
 function SettingsScreen() {
   const { data: me } = useQuery(meQuery)
@@ -191,18 +189,18 @@ function CutoverForm({ id, name, cutoverDate }: { id: number; name: string; cuto
         save.mutate(value || null)
       }}
     >
-      <label htmlFor={inputId} className="block font-medium">
+      <label id={`${inputId}-label`} htmlFor={inputId} className="block font-medium">
         Cutover Date for {name}
       </label>
       <p className="text-sm text-muted-foreground">{cutoverDate ? `Now ${formatDate(cutoverDate)}.` : 'None set.'}</p>
       <div className="flex flex-wrap items-center gap-2">
-        <input
+        <DatePicker
           id={inputId}
-          type="date"
+          labelId={`${inputId}-label`}
           value={value}
-          className={dateStyle}
-          onChange={(event) => {
-            setValue(event.target.value)
+          className="w-auto border-foreground/60 dark:border-foreground/60"
+          onChange={(date) => {
+            setValue(date)
             save.reset()
           }}
         />

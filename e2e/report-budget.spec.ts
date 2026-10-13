@@ -1,4 +1,5 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
+import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 import {
@@ -168,8 +169,8 @@ test.describe('opening the Report', () => {
     const form = page.getByRole('form', { name: 'Budget vs actual' })
     await expect(form.getByLabel('Account')).toHaveCount(0) // a Budget is for all Accounts together
     await expect(form).toContainText('A Budget is for a whole month, so a Report shows every month your dates touch, in full, up to 24 months.')
-    await form.getByLabel('From').fill(`${year}-01-01`)
-    await form.getByLabel('To').fill(`${year}-06-30`)
+    await pickDate(form, 'From', `${year}-01-01`)
+    await pickDate(form, 'To', `${year}-06-30`)
     const [popup] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
     await expect(popup.getByRole('heading', { level: 1, name: 'Budget vs actual' })).toBeVisible()
     expect(new URL(popup.url()).pathname).toBe('/reports/budget-vs-actual')
@@ -185,18 +186,18 @@ test.describe('opening the Report', () => {
 
     await open.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a From date.')
-    await form.getByLabel('From').fill('2001-12-31')
+    await pickDate(form, 'From', '2001-12-31')
     await open.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a To date.')
-    await form.getByLabel('To').fill('2001-01-01')
+    await pickDate(form, 'To', '2001-01-01')
     await open.click()
     await expect(form.getByRole('alert')).toContainText('before the “From” date')
-    await expect(form.getByLabel('To')).toHaveAttribute('aria-invalid', 'true')
-    await form.getByLabel('From').fill('2001-01-31')
-    await form.getByLabel('To').fill('2003-01-01') // 25 months
+    await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
+    await pickDate(form, 'From', '2001-01-31')
+    await pickDate(form, 'To', '2003-01-01') // 25 months
     await open.click()
     await expect(form.getByRole('alert')).toHaveText('A Budget vs actual Report covers at most 24 months. Choose dates that touch 24 months or fewer.')
-    await expect(form.getByLabel('To')).toHaveAttribute('aria-invalid', 'true')
+    await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
     await expect(page.getByRole('form', { name: 'Transaction listing' }).getByRole('alert')).toHaveCount(0) // the other forms are untouched
     expect(context.pages()).toHaveLength(1)
   })

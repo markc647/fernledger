@@ -309,6 +309,16 @@
     background-color: Highlight;
     color: HighlightText;
   }
+  /* A calendar's chosen day is a fill, and today a tint, which the reader's palette drops: the chosen day takes the palette's highlight and today an outline. */
+  [data-slot="calendar"] [data-selected-single="true"] {
+    forced-color-adjust: none;
+    background-color: Highlight;
+    color: HighlightText;
+  }
+  [data-slot="calendar"] [data-today="true"] {
+    outline: 1px dashed CanvasText;
+    outline-offset: -2px;
+  }
   /* A chart's line and bars are drawn in theme colours, which the reader's palette may not keep. Draw them in the text colour; the
      figures beside the chart say the rest. */
   [data-slot="chart"] :is(.recharts-line-curve, .recharts-dot, .recharts-rectangle):not(.recharts-tooltip-cursor) {
