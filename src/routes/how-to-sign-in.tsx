@@ -75,6 +75,7 @@ function HowToSignIn() {
         </li>
       </ul>
       <p className="mt-4 print:mt-3">Keep your code to yourself, and only sign in on a phone, tablet or computer you trust.</p>
+      <p className="mt-2 print:mt-1">On a computer that is not your own, press "Sign out" at the top of Fernledger when you have finished.</p>
     </article>
   )
 }

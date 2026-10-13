@@ -12,6 +12,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   component: Layout,
 })
 
+/** Cloudflare Access's sign-out path on this app's own hostname. It ends the person's Access session for every Access application, not only this one (docs/setup.md). */
+const SIGN_OUT_PATH = '/cdn-cgi/access/logout'
+
 const focusStyle = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
 function Layout() {
@@ -61,6 +64,16 @@ function Layout() {
           <div className="ms-auto flex flex-wrap gap-x-4 gap-y-2">
             <TextSizeControl />
             <ThemeToggle />
+            {/* Cloudflare Access answers this path itself, before the Worker, so it is a plain link (a full page load) and not a route or a fetch.
+                Local development has no Access, so there it only reaches the app's fallback page. Hidden once we know nobody is signed in. */}
+            {!meError && (
+              <a
+                href={SIGN_OUT_PATH}
+                className={`inline-flex min-h-11 items-center rounded-lg px-3 underline underline-offset-4 hover:bg-muted ${focusStyle}`}
+              >
+                Sign out
+              </a>
+            )}
           </div>
         </div>
       </header>

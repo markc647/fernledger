@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test'
 import { drawn, LINE, netWorth, SPENT, spending, stubNetWorth, stubSpending } from './chart-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
@@ -73,6 +74,69 @@ test('the Admin sees Settings in the navigation, a Member does not', async ({ pa
   await expect(page.getByText('Member (read-only)')).toBeVisible()
   await expect(nav.getByRole('link', { name: 'Summary' })).toBeVisible()
   await expect(nav.getByRole('link', { name: 'Settings' })).toHaveCount(0)
+})
+
+// Cloudflare Access's own sign-out path on the app's hostname (docs/setup.md). Access answers it before the Worker is reached, and local dev has no Access, so these tests
+// prove the link and that pressing it makes the browser navigate there, never that anyone is signed out. The answer is stubbed: the dev Worker would send its single-page
+// fallback, which is not what Access sends.
+const SIGN_OUT_PATH = '/cdn-cgi/access/logout'
+const stubSignOut = (page: Page) => page.route(`**${SIGN_OUT_PATH}`, (route) => route.fulfill({ contentType: 'text/html', body: '<title>Stub for Access</title>' }))
+const signOutNavigation = (page: Page) =>
+  page.waitForRequest((request) => request.isNavigationRequest() && new URL(request.url()).pathname === SIGN_OUT_PATH)
+
+for (const role of ['admin', 'member'] as const) {
+  test(`the ${role} has a Sign out link in the header that goes to Access's logout path`, async ({ page, context }) => {
+    await signInAs(context, role)
+    await page.goto('/')
+    const link = page.getByRole('banner').getByRole('link', { name: 'Sign out' })
+    await expect(link).toBeVisible()
+    // Relative, so it stays on the app's own hostname: no new host for the CSP or ADR 0010 to allow.
+    await expect(link).toHaveAttribute('href', SIGN_OUT_PATH)
+  })
+}
+
+test('Sign out is a full page navigation, not a fetch or a route of the app', async ({ page }) => {
+  await stubSignOut(page)
+  await page.goto('/')
+  const navigation = signOutNavigation(page)
+  await page.getByRole('link', { name: 'Sign out' }).click()
+  const request = await navigation
+  expect(request.method()).toBe('GET')
+  expect(request.resourceType()).toBe('document')
+  await expect(page).toHaveURL(new RegExp(`${SIGN_OUT_PATH}$`))
+})
+
+test('Sign out can be reached with Tab, shows a focus outline and is pressed with Enter', async ({ page }) => {
+  await stubSignOut(page)
+  await page.goto('/')
+  const link = page.getByRole('link', { name: 'Sign out' })
+  await expect(link).toBeVisible()
+  let reached = false
+  for (let presses = 0; presses < 40 && !reached; presses++) {
+    await page.keyboard.press('Tab')
+    reached = await link.evaluate((element) => element === document.activeElement)
+  }
+  expect(reached).toBe(true)
+  const outline = await link.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { width: parseFloat(style.outlineWidth), style: style.outlineStyle }
+  })
+  expect(outline).toEqual({ width: 2, style: 'solid' })
+
+  const navigation = signOutNavigation(page)
+  await page.keyboard.press('Enter')
+  await navigation
+})
+
+test.describe('with no signed-in Member', () => {
+  test.use({ expectedStatuses: [401] })
+
+  test('the header has no Sign out link on the Not signed in page', async ({ page }) => {
+    await page.route('**/api/me', (route) => route.fulfill({ status: 401, json: { error: 'unauthorised' } }))
+    await page.goto('/')
+    await expect(page.getByRole('heading', { level: 1, name: 'Not signed in' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Sign out' })).toHaveCount(0)
+  })
 })
 
 test('the theme toggle overrides the device and is remembered', async ({ page }, testInfo) => {

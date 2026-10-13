@@ -61,6 +61,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Light and dark themes.**
 - **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and so does the top of every report.
 - **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications. The icon's label comes from a fixed file, so it is normally "Fernledger" whatever title the Admin sets, though some iOS versions use the page title instead. You can rename it when you add it.
+- **Sign out:** a "Sign out" link in the header ends your Cloudflare Access sign-in on that device, which is what to use on a computer that isn't yours. Cloudflare ends it for every application behind the same Access team, not only Fernledger.
 
 ## What it doesn't do
 
