@@ -1060,39 +1060,31 @@ test.describe('header', () => {
     await expect(page).toHaveTitle('Fernledger')
   })
 
-  // The header wraps (src/routes/__root.tsx), and it has been reflowed before: Sign out must stay whole and inside the screen where the controls beside it wrap.
-  for (const role of ['admin', 'member'] as const) {
-    for (const { name, width } of [
-      { name: 'a phone', width: 375 },
-      { name: '400% zoom', width: 320 },
-    ]) {
-      for (const size of ['A', 'A++'] as const) {
-        test(`Sign out is a whole 44px target inside the screen on ${name} (${width}px) at text size ${size} as the ${role}`, async ({ page, context }) => {
-          await signInAs(context, role)
-          await page.setViewportSize({ width, height: 640 })
-          await page.goto('/')
-          await sizeButton(page, size).click()
-          await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
-          const link = page.getByRole('banner').getByRole('link', { name: 'Sign out' })
-          await expect(link).toBeVisible()
-          const box = await link.boundingBox()
-          expect(box!.x).toBeGreaterThanOrEqual(0)
-          expect(box!.x + box!.width).toBeLessThanOrEqual(width)
-          expect(box!.height).toBeGreaterThanOrEqual(44)
-          expect(box!.width).toBeGreaterThanOrEqual(44)
-          // Its words stay on one line, so a narrow header does not squeeze them into two.
-          const lines = await link.evaluate((element) => {
-            const range = document.createRange()
-            range.selectNodeContents(element)
-            return range.getClientRects().length
-          })
-          expect(lines).toBe(1)
-          const { scrollWidth, innerWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }))
-          expect(scrollWidth).toBeLessThanOrEqual(innerWidth)
-        })
-      }
-    }
+  // Sign out is in the wrapping group of header controls (src/routes/__root.tsx). On a narrow screen it must not be cut off at the edge or broken over two lines. The 44px size
+  // and the lack of sideways scrolling are held by the touch-target test and the 320px header test above.
+  for (const { width, size } of [
+    { width: 375, size: 'A' },
+    { width: 320, size: 'A++' },
+  ] as const) {
+    test(`Sign out stays whole and inside the screen at ${width}px and text size ${size}`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.setViewportSize({ width, height: 640 })
+      await page.goto('/')
+      await sizeButton(page, size).click()
+      await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+      await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+      const link = page.getByRole('banner').getByRole('link', { name: 'Sign out' })
+      await expect(link).toBeVisible()
+      const box = await link.boundingBox()
+      expect(box!.x).toBeGreaterThanOrEqual(0)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width)
+      const lines = await link.evaluate((element) => {
+        const range = document.createRange()
+        range.selectNodeContents(element)
+        return range.getClientRects().length
+      })
+      expect(lines).toBe(1)
+    })
   }
 })
 

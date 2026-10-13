@@ -200,15 +200,10 @@ test.describe('How to sign in', () => {
     await expect(main).not.toContainText(/within a minute|minute or two/i)
   })
 
-  test('tells a Member to press Sign out on a computer that is not their own, by the name the header link has', async ({ page, context }) => {
+  test('tells a Member to press Sign out after using a computer that is not their own', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/how-to-sign-in')
-    const main = page.getByRole('main')
-    await expect(main).toContainText('On a computer that is not your own, press "Sign out" at the top of Fernledger when you have finished.')
-    // The words in the guide are the words on the link, so a Member can find it.
-    await expect(page.getByRole('banner').getByRole('link', { name: 'Sign out' })).toBeVisible()
-    // It is advice outside the five steps, which the first test counts.
-    await expect(page.getByRole('list', { name: 'Steps' }).getByRole('listitem')).toHaveCount(5)
+    await expect(page.getByRole('main')).toContainText('If you used a computer that is not your own, press "Sign out" at the top of Fernledger when you have finished.')
   })
 
   test('tells the Admin, and only the Admin, to print it for each Member', async ({ page, context }) => {

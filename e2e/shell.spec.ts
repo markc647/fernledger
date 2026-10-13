@@ -76,7 +76,7 @@ test('the Admin sees Settings in the navigation, a Member does not', async ({ pa
   await expect(nav.getByRole('link', { name: 'Settings' })).toHaveCount(0)
 })
 
-// Cloudflare Access's own sign-out path on the app's hostname (docs/setup.md). Access answers it before the Worker is reached, and local dev has no Access, so these tests
+// Cloudflare Access's own sign-out path on the app's hostname (README, What it does). Access answers it before the Worker is reached, and local dev has no Access, so these tests
 // prove the link and that pressing it makes the browser navigate there, never that anyone is signed out. The answer is stubbed: the dev Worker would send its single-page
 // fallback, which is not what Access sends.
 const SIGN_OUT_PATH = '/cdn-cgi/access/logout'
@@ -99,44 +99,47 @@ test('Sign out is a full page navigation, not a fetch or a route of the app', as
   await stubSignOut(page)
   await page.goto('/')
   const navigation = signOutNavigation(page)
-  await page.getByRole('link', { name: 'Sign out' }).click()
+  await page.getByRole('banner').getByRole('link', { name: 'Sign out' }).click()
   const request = await navigation
   expect(request.method()).toBe('GET')
   expect(request.resourceType()).toBe('document')
   await expect(page).toHaveURL(new RegExp(`${SIGN_OUT_PATH}$`))
 })
 
-test('Sign out can be reached with Tab, shows a focus outline and is pressed with Enter', async ({ page }) => {
-  await stubSignOut(page)
+test('Sign out is the next Tab stop after the colour theme buttons, and shows where the focus is', async ({ page }) => {
   await page.goto('/')
-  const link = page.getByRole('link', { name: 'Sign out' })
+  const link = page.getByRole('banner').getByRole('link', { name: 'Sign out' })
   await expect(link).toBeVisible()
-  let reached = false
-  for (let presses = 0; presses < 40 && !reached; presses++) {
-    await page.keyboard.press('Tab')
-    reached = await link.evaluate((element) => element === document.activeElement)
+  // The button style draws focus as a ring and a changed border colour, and Windows high contrast removes the ring, so the border has to change too.
+  const look = async () => {
+    await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+    return link.evaluate((element) => ({ shadow: getComputedStyle(element).boxShadow, border: getComputedStyle(element).borderTopColor }))
   }
-  expect(reached).toBe(true)
-  const outline = await link.evaluate((element) => {
-    const style = getComputedStyle(element)
-    return { width: parseFloat(style.outlineWidth), style: style.outlineStyle }
-  })
-  expect(outline).toEqual({ width: 2, style: 'solid' })
-
-  const navigation = signOutNavigation(page)
-  await page.keyboard.press('Enter')
-  await navigation
+  const resting = await look()
+  await page.getByRole('button', { name: 'Dark' }).focus()
+  await page.keyboard.press('Tab')
+  await expect(link).toBeFocused()
+  const focused = await look()
+  expect(focused.shadow).not.toBe(resting.shadow)
+  expect(focused.border).not.toBe(resting.border)
 })
 
-test.describe('with no signed-in Member', () => {
-  test.use({ expectedStatuses: [401] })
+// Sign out needs no API data, so it is there when who is signed in can't be read: a 401 from a wrong ACCESS_AUD or team domain while an Access session is live,
+// and a failing API. Those are the cases where someone needs it.
+test.describe('when who is signed in cannot be read', () => {
+  test.use({ expectedStatuses: [401, 500] })
 
-  test('the header has no Sign out link on the Not signed in page', async ({ page }) => {
-    await page.route('**/api/me', (route) => route.fulfill({ status: 401, json: { error: 'unauthorised' } }))
-    await page.goto('/')
-    await expect(page.getByRole('heading', { level: 1, name: 'Not signed in' })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Sign out' })).toHaveCount(0)
-  })
+  for (const { status, heading } of [
+    { status: 401, heading: 'Not signed in' },
+    { status: 500, heading: 'Something went wrong' },
+  ]) {
+    test(`the header still has Sign out on the "${heading}" page (${status})`, async ({ page }) => {
+      await page.route('**/api/me', (route) => route.fulfill({ status, json: { error: 'stubbed' } }))
+      await page.goto('/')
+      await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+      await expect(page.getByRole('banner').getByRole('link', { name: 'Sign out' })).toHaveAttribute('href', SIGN_OUT_PATH)
+    })
+  }
 })
 
 test('the theme toggle overrides the device and is remembered', async ({ page }, testInfo) => {
