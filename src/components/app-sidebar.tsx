@@ -115,8 +115,9 @@ function SignedIn({ email, role }: { email: string; role: Role | undefined }) {
     <Tooltip open={isRail && pointedAt} onOpenChange={setPointedAt}>
       <TooltipTrigger asChild>
         <div
-          role="group"
-          aria-label={words}
+          // Only in the rail, where the words are not on the screen: it is a named group that can take focus. Open, it is the words themselves, which a label would only repeat.
+          role={isRail ? 'group' : undefined}
+          aria-label={isRail ? words : undefined}
           tabIndex={isRail ? 0 : undefined}
           className="flex min-h-10 items-center gap-2 rounded-md px-2 text-sm outline-sidebar-ring focus-visible:outline-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
         >
