@@ -1,9 +1,10 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+import { DatePicker } from '@/components/date-picker'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { MAX_DATE, MIN_DATE, isSearchDate } from '@/lib/date-range'
+import { isSearchDate } from '@/lib/date-range'
 import { accountsQuery, categoriesQuery, transactionCountQuery } from '@/lib/queries'
 import { EXPORT_MAX_ROWS, exportPath, MAX_TEXT, TRANSFERS_FILTERS, tidy, type TransactionSearch } from '@/lib/transaction-search'
 
@@ -148,19 +149,16 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
         <div className="grid gap-4 sm:col-span-2 sm:grid-cols-2 lg:col-span-1">
           {(['from', 'to'] as const).map((field) => (
             <div key={field}>
-              <label htmlFor={`filter-${field}`} className="block font-medium">
+              <label id={`filter-${field}-label`} htmlFor={`filter-${field}`} className="block font-medium">
                 {field === 'from' ? 'From' : 'To'}
               </label>
-              <Input
+              <DatePicker
                 id={`filter-${field}`}
-                name={field}
-                type="date"
-                min={MIN_DATE}
-                max={MAX_DATE}
+                labelId={`filter-${field}-label`}
                 value={draft[field]}
                 aria-invalid={problem?.field === field}
                 aria-describedby={problem?.field === field ? 'filter-problem' : undefined}
-                onChange={(event) => set({ [field]: event.target.value })}
+                onChange={(date) => set({ [field]: date })}
               />
             </div>
           ))}

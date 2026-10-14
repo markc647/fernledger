@@ -1,4 +1,5 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
+import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 import {
@@ -171,9 +172,9 @@ test.describe('opening the Report', () => {
     await expect(form.getByRole('status')).toContainText('Loans Categories to choose from.') // said to a screen reader when the list arrives
 
     // The last date starts at today (the NZ date), and the first is blank.
-    await expect(form.getByLabel('To', { exact: true })).toHaveValue('2026-10-08')
-    await expect(form.getByLabel('From (optional)')).toHaveValue('')
-    await form.getByLabel('To', { exact: true }).fill(`${d.year}-12-31`)
+    await expectDate(form, 'To', '2026-10-08')
+    await expectDate(form, 'From (optional)', '')
+    await pickDate(form, 'To', `${d.year}-12-31`)
     const [all] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
     await expect(all.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
     expect(new URL(all.url()).pathname).toBe('/reports/loans')
@@ -181,7 +182,7 @@ test.describe('opening the Report', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible() // the Reports page is still where it was
 
     await loan.selectOption({ label: d.aliceLoan })
-    await form.getByLabel('From (optional)').fill(`${d.year}-11-01`)
+    await pickDate(form, 'From (optional)', `${d.year}-11-01`)
     const [one] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
     await expect(one.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
     expect(Object.fromEntries(new URL(one.url()).searchParams)).toEqual({ category: String(aliceId), from: `${d.year}-11-01`, to: `${d.year}-12-31` })
@@ -200,22 +201,21 @@ test.describe('opening the Report', () => {
     await page.goto('/reports')
     const form = page.getByRole('form', { name: 'Loans' })
     const open = form.getByRole('button', { name: 'Open Report in a new window' })
-    const from = form.getByLabel('From (optional)')
-    const to = form.getByLabel('To', { exact: true })
+    const to = dateField(form, 'To')
 
-    await to.fill('') // it starts at today
+    await clearDate(form, 'To') // it starts at today
     await open.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a To date.') // not "Choose a From date."
-    await to.fill('2001-12-31')
-    await from.fill('2001-12-31')
-    await to.fill('2001-01-01')
+    await pickDate(form, 'To', '2001-12-31')
+    await pickDate(form, 'From (optional)', '2001-12-31')
+    await pickDate(form, 'To', '2001-01-01')
     await open.click()
     await expect(form.getByRole('alert')).toContainText('before the “From” date')
     await expect(to).toHaveAttribute('aria-invalid', 'true')
     await expect(page.getByRole('form', { name: 'Transaction listing' }).getByRole('alert')).toHaveCount(0) // the other forms are untouched
     expect(context.pages()).toHaveLength(1)
 
-    await from.fill('') // blank is allowed
+    await clearDate(form, 'From (optional)') // blank is allowed
     const [report] = await Promise.all([context.waitForEvent('page'), open.click()])
     await expect(report.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
   })

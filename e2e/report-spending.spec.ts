@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test'
+import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 import {
@@ -142,8 +143,8 @@ test.describe('opening the Report', () => {
     const form = page.getByRole('form', { name: 'Spending by Category' })
     await expect(form).toContainText('the most spent first, and one for Uncategorised when there is any.')
     await expect(form.getByLabel('Account')).toHaveValue('') // every Account unless one is chosen
-    await form.getByLabel('From').fill(`${d.year}-01-01`)
-    await form.getByLabel('To').fill(`${d.year}-12-31`)
+    await pickDate(form, 'From', `${d.year}-01-01`)
+    await pickDate(form, 'To', `${d.year}-12-31`)
     const [all] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
     await expect(all.getByRole('heading', { level: 1, name: 'Spending by Category' })).toBeVisible()
     expect(new URL(all.url()).pathname).toBe('/reports/spending')
@@ -171,13 +172,13 @@ test.describe('opening the Report', () => {
 
     await open.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a From date.')
-    await form.getByLabel('From').fill('2022-12-31')
+    await pickDate(form, 'From', '2022-12-31')
     await open.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a To date.')
-    await form.getByLabel('To').fill('2022-01-01')
+    await pickDate(form, 'To', '2022-01-01')
     await open.click()
     await expect(form.getByRole('alert')).toContainText('before the “From” date')
-    await expect(form.getByLabel('To')).toHaveAttribute('aria-invalid', 'true')
+    await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
     await expect(page.getByRole('form', { name: 'Transaction listing' }).getByRole('alert')).toHaveCount(0) // the other forms are untouched
     expect(context.pages()).toHaveLength(1)
   })

@@ -58,6 +58,7 @@ Reviewers apply these to every diff. They're judgement calls. Anything mechanica
 ## UI
 - shadcn/ui components and plain NZ English ("Money in" / "Money out"). The commitments (WCAG 2.2 AA, text sizes, touch targets, zoom, colour, high contrast) are in README [Accessibility](README.md#accessibility); a diff that breaks one fails review.
 - Use the shared building blocks rather than formatting by hand: `formatAmount`, `formatBalance`, `formatDate` and `formatInstantDate` (`src/lib/format.ts`), `Amount`, `Status`, and `ResponsiveTable`. `/styleguide` shows them, and the browser tests scan it.
+- A date a form takes is a `DatePicker` (`src/components/date-picker.tsx`), not `<input type="date">`. A `Date` that came from the calendar is in the device's local time, so it is never read or written through UTC (`new Date("2026-10-08")`, `toISOString()`), which moves the day for anyone east or west of it: go between it and `YYYY-MM-DD` with `dayOf` and `isoDateOf` (`src/lib/calendar-day.ts`; `scripts/calendar-day.test.mjs` runs them in other time zones). A browser spec chooses a date with `pickDate` (`e2e/date-helpers.ts`).
 - Size text in `rem` so the A / A+ / A++ control scales it, and use `size="touch"` for interactive targets.
 - Add a new page to the zoom test in `e2e/display.spec.ts`.
 - A printout leaves out the app header (`print:hidden` in `src/routes/__root.tsx`), and with it the app title, so a printable page writes its own title, as How to sign in does.

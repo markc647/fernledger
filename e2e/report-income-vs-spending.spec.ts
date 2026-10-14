@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test'
+import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 import {
@@ -167,8 +168,8 @@ test.describe('opening the Report', () => {
     await expect(form).toContainText('up to 120 months')
     await expect(page.getByRole('heading', { level: 2, name: NAME }).locator('xpath=following-sibling::p[1]')).toContainText(NOT_COUNTED_AS_SPENDING_OR_INCOME)
     await expect(form.getByLabel('Account')).toHaveValue('') // every Account unless one is chosen
-    await form.getByLabel('From').fill(from)
-    await form.getByLabel('To').fill(to)
+    await pickDate(form, 'From', from)
+    await pickDate(form, 'To', to)
     const [all] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
     await expect(all.getByRole('heading', { level: 1, name: NAME })).toBeVisible()
     expect(new URL(all.url()).pathname).toBe('/reports/income-vs-spending')
@@ -196,13 +197,13 @@ test.describe('opening the Report', () => {
 
     await open.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a From date.')
-    await form.getByLabel('From').fill('2022-12-31')
+    await pickDate(form, 'From', '2022-12-31')
     await open.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a To date.')
-    await form.getByLabel('To').fill('2022-01-01')
+    await pickDate(form, 'To', '2022-01-01')
     await open.click()
     await expect(form.getByRole('alert')).toContainText('before the “From” date')
-    await expect(form.getByLabel('To')).toHaveAttribute('aria-invalid', 'true')
+    await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
     await expect(page.getByRole('form', { name: 'Transaction listing' }).getByRole('alert')).toHaveCount(0) // the other forms are untouched
     expect(context.pages()).toHaveLength(1)
   })
@@ -211,14 +212,14 @@ test.describe('opening the Report', () => {
     await signInAs(context, 'member')
     await page.goto('/reports')
     const form = page.getByRole('form', { name: NAME })
-    await form.getByLabel('From').fill('2000-01-31')
-    await form.getByLabel('To').fill('2010-01-01') // 121 months, though not quite ten years
+    await pickDate(form, 'From', '2000-01-31')
+    await pickDate(form, 'To', '2010-01-01') // 121 months, though not quite ten years
     await form.getByRole('button', { name: 'Open Report in a new window' }).click()
     await expect(form.getByRole('alert')).toHaveText('An Income vs spending by month Report covers at most 120 months (10 years). Choose dates that touch 120 months or fewer.')
-    await expect(form.getByLabel('To')).toHaveAttribute('aria-invalid', 'true')
+    await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
     expect(context.pages()).toHaveLength(1)
 
-    await form.getByLabel('To').fill('2009-12-01') // 120 months. This opens a Report of every Account over 2000 to 2009, which holds other specs' Transactions too: assert nothing of its figures
+    await pickDate(form, 'To', '2009-12-01') // 120 months. This opens a Report of every Account over 2000 to 2009, which holds other specs' Transactions too: assert nothing of its figures
     const [opened] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
     await expect(opened.getByRole('heading', { level: 1, name: NAME })).toBeVisible()
   })

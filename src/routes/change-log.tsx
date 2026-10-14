@@ -1,11 +1,11 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
+import { DatePicker } from '@/components/date-picker'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { changeFields, type ChangeRow } from '@/lib/change-log'
-import { MAX_DATE, MIN_DATE, outOfRange } from '@/lib/date-range'
+import { MAX_DATE, MIN_DATE } from '@/lib/date-range'
 import { formatDateTime } from '@/lib/format'
 import { CHANGE_LOG_PAGE_SIZE, changeLogQuery, type ChangeLogFilters } from '@/lib/queries'
 
@@ -26,9 +26,7 @@ const columnsFor = ({ showBefore, showAfter }: { showBefore: boolean; showAfter:
 function ChangeLog() {
   const [filters, setFilters] = useState(NO_FILTERS)
   const [page, setPage] = useState(0)
-  const backwards = filters.from !== '' && filters.to !== '' && filters.from > filters.to
-  const searchable = !backwards && !outOfRange(filters.from) && !outOfRange(filters.to)
-  const { data, error, isFetching } = useQuery({ ...changeLogQuery(filters, page), placeholderData: keepPreviousData, enabled: searchable })
+  const { data, error, isFetching } = useQuery({ ...changeLogQuery(filters, page), placeholderData: keepPreviousData })
   const filtered = filters.type !== '' || filters.from !== '' || filters.to !== ''
   // An entry from before types were recorded has none; it shows no type rather than a made-up one.
   const typeLabel = (id: string | null) => (id === null ? null : (data?.types.find((t) => t.id === id)?.label ?? null))
@@ -79,16 +77,16 @@ function ChangeLog() {
           </select>
         </div>
         <div>
-          <label htmlFor="filter-from" className="block font-medium">
+          <label id="filter-from-label" htmlFor="filter-from" className="block font-medium">
             From
           </label>
-          <Input id="filter-from" type="date" value={filters.from} min={MIN_DATE} max={filters.to || MAX_DATE} onChange={(event) => change({ from: event.target.value })} />
+          <DatePicker id="filter-from" labelId="filter-from-label" value={filters.from} max={filters.to || MAX_DATE} onChange={(from) => change({ from })} />
         </div>
         <div>
-          <label htmlFor="filter-to" className="block font-medium">
+          <label id="filter-to-label" htmlFor="filter-to" className="block font-medium">
             To
           </label>
-          <Input id="filter-to" type="date" value={filters.to} min={filters.from || MIN_DATE} max={MAX_DATE} onChange={(event) => change({ to: event.target.value })} />
+          <DatePicker id="filter-to" labelId="filter-to-label" value={filters.to} min={filters.from || MIN_DATE} onChange={(to) => change({ to })} />
         </div>
         {filtered && (
           <Button type="button" size="touch" variant="outline" onClick={() => change(NO_FILTERS)}>
@@ -97,11 +95,7 @@ function ChangeLog() {
         )}
       </form>
 
-      {backwards ? (
-        <p role="alert" className="mt-4 font-medium">
-          The “To” date is before the “From” date. Change one of them to see the Change Log.
-        </p>
-      ) : error ? (
+      {error ? (
         <p role="alert" className="mt-4">Fernledger couldn't load the Change Log. Reload the page to try again.</p>
       ) : !data ? (
         <p role="status" className="mt-4">Loading…</p>

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import type { BrowserContext, Page } from '@playwright/test'
+import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 // The light and dark projects share one local database, so each project has Accounts of its own, and each test finds its
@@ -87,8 +88,8 @@ test('a Member finds Transactions by text, Account, Category and dates, and the 
   await expect(page.getByRole('link', { name: names.cafeTwo })).toHaveCount(0)
 
   // Dates, both ends included: the first of October is out of this range, the eighth is in.
-  await page.getByLabel('From', { exact: true }).fill('2012-10-02')
-  await page.getByLabel('To', { exact: true }).fill('2012-10-08')
+  await pickDate(page, 'From', '2012-10-02')
+  await pickDate(page, 'To', '2012-10-08')
   await page.getByRole('button', { name: 'Search', exact: true }).click()
   await expect(dataRows(page)).toHaveCount(1)
   await expect(page.getByRole('link', { name: names.cafeOne })).toBeVisible()
@@ -110,7 +111,7 @@ test('a Member finds Transactions by text, Account, Category and dates, and the 
   await expect(dataRows(page)).toHaveCount(1)
   await expect(searchBox(page)).toHaveValue(stamp.toUpperCase())
   await expect(page.getByLabel('Account', { exact: true })).toHaveValue(/\d+/)
-  await expect(page.getByLabel('From', { exact: true })).toHaveValue('2012-10-02')
+  await expectDate(page, 'From', '2012-10-02')
   await page.goBack()
   await expect(page.getByText('No Transactions match these filters.')).toBeVisible()
 
@@ -119,7 +120,7 @@ test('a Member finds Transactions by text, Account, Category and dates, and the 
   await expect(page).not.toHaveURL(/q=/)
   await expect(page.getByLabel('Account', { exact: true })).toHaveValue('')
   await expect(page.getByLabel('Category', { exact: true })).toHaveValue('')
-  await expect(page.getByLabel('From', { exact: true })).toHaveValue('')
+  await expectDate(page, 'From', '')
   // Everything is listed again, not only what matched.
   await expect(page.getByRole('status').filter({ hasText: 'Showing' })).not.toContainText('matching')
   await expect(page.getByRole('button', { name: 'Clear filters' })).toHaveCount(0)
@@ -139,11 +140,11 @@ test('a range that ends before it starts is explained and not searched', async (
   await signInAs(context, 'member')
   await page.goto('/transactions')
   await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
-  await page.getByLabel('From', { exact: true }).fill('2012-10-09')
-  await page.getByLabel('To', { exact: true }).fill('2012-10-08')
+  await pickDate(page, 'From', '2012-10-09')
+  await pickDate(page, 'To', '2012-10-08')
   await page.getByRole('button', { name: 'Search', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('before the “From” date')
-  await expect(page.getByLabel('To', { exact: true })).toHaveAttribute('aria-invalid', 'true')
+  await expect(dateField(page, 'To')).toHaveAttribute('aria-invalid', 'true')
   await expect(page).not.toHaveURL(/from=/)
   await noAxeViolations(page)
 
@@ -298,9 +299,9 @@ test('typed filters say they are not applied until Search is pressed', async ({ 
 
   await page.getByRole('button', { name: 'Search', exact: true }).click()
   await expect(page.getByText(hint)).toHaveCount(0)
-  await page.getByLabel('From', { exact: true }).fill('2012-10-02')
+  await pickDate(page, 'From', '2012-10-02')
   await expect(page.getByText(hint)).toBeVisible()
-  await page.getByLabel('From', { exact: true }).fill('')
+  await clearDate(page, 'From')
   await expect(page.getByText(hint)).toHaveCount(0)
 })
 
