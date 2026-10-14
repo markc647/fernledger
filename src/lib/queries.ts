@@ -328,7 +328,7 @@ export const netWorthQuery = (range: NetWorthRange) =>
 /** Which spending the chart is of: a period the Worker names (so "this month" is a NZ month whatever the device's clock), or two dates. */
 export type SpendingChoice = { period: SpendingPeriod } | { from: string; to: string }
 
-/** Spending by Category for a period or two dates, Transfers left out. It reads the Transactions in those dates (ADR 0004), so it is asked again only when the choice changes or the page is opened. */
+/** Spending by Category for a period or two dates, Transfers left out. It reads the Transactions in those dates (ADR 0004), so it is asked again only when the choice changes or the reader asks for it. */
 export const spendingByCategoryQuery = (choice: SpendingChoice) =>
   queryOptions({
     queryKey: ['spending', choice],

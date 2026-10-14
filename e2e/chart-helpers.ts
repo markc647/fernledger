@@ -3,7 +3,7 @@ import { expect } from './fixtures'
 
 // What a spec needs to look at the charts (cards of the Summary and the Dashboard) with answers of its own, whatever the shared database holds: a net worth the Worker
 // refuses for having more than 49 Accounts (worker/net-worth.ts) draws nothing. The specs that look at the charts stub both answers and wait for the pictures
-// (dashboard.spec.ts, shell.spec.ts).
+// (dashboard.spec.ts, display.spec.ts, shell.spec.ts).
 
 export const netWorth = (page: Page) => page.getByRole('region', { name: 'Net worth over time' })
 export const spending = (page: Page) => page.getByRole('region', { name: 'Spending by Category' })

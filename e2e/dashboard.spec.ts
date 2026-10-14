@@ -203,7 +203,7 @@ test('the Admin lands on the Dashboard: their tools, every card of the Summary, 
 
   // Pressing one asks once, tells the reader what is happening, and draws the last 24 months, the range that was chosen beside the button.
   await show.click()
-  await expect(region.getByRole('heading', { level: 2, name: 'Net worth over time' })).toBeFocused() // focus stays where the button was
+  await expect(region.getByRole('heading', { level: 2, name: 'Net worth over time' })).toBeFocused() // focus moves to the heading, as the button is gone
   await drawn(region, LINE)
   await expect(live).toHaveText('Net worth has loaded.') // the words arrive in the region that was already there, which is what is announced
   expect(await element.evaluate((el) => el.isConnected)).toBe(true)
@@ -772,7 +772,7 @@ test.describe('when the answers are not the usual ones', () => {
   // A tab left open across a deploy asks for a chunk of code that is no longer there. The browser and React both log that, which is what this test expects of them; what it holds
   // the page to is that the charts' place says so and the rest of the page, which does not need the chunk, is still there (without a boundary the whole page goes).
   test.describe("when the charts' code cannot be loaded", () => {
-    test.use({ expectedConsoleErrors: ['Failed to load resource', 'dynamically imported module'] })
+    test.use({ expectedConsoleErrors: ['Failed to load resource: net::ERR_FAILED', 'dynamically imported module'] })
 
     test('says so where the charts would be, and leaves the rest of the page', async ({ page, context }) => {
       await signInAs(context, 'member')
