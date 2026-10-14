@@ -1,24 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { loadTextSize, parseTextSize, saveTextSize, TEXT_SIZE_STORAGE_KEY, TEXT_SIZES } from './text-size'
-
-/** A stand-in for localStorage. */
-const fakeStorage = (initial: Record<string, string> = {}) => {
-  const data = new Map(Object.entries(initial))
-  return {
-    getItem: (key: string) => data.get(key) ?? null,
-    setItem: (key: string, value: string) => void data.set(key, value),
-  }
-}
-
-/** A stand-in for storage that the browser blocks (private modes, blocked site data): every access throws. */
-const blockedStorage = () => ({
-  getItem: () => {
-    throw new DOMException('blocked', 'SecurityError')
-  },
-  setItem: () => {
-    throw new DOMException('blocked', 'SecurityError')
-  },
-})
+import { blockedStorage, fakeStorage } from './test-storage'
 
 describe('the three sizes', () => {
   it('are Small, Medium and Large, smallest first', () => {

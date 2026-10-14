@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useCallback, useMemo, useSyncExternalStore } from 'react'
 
 /**
  * Whether a media query matches, now and as it changes. The first render already has the right answer (the page is drawn in the browser, never on a
@@ -6,12 +6,13 @@ import { useSyncExternalStore } from 'react'
  * must be decided in code, like whether the sidebar is a sheet.
  */
 export function useMediaQuery(query: string) {
-  return useSyncExternalStore(
-    (onChange) => {
-      const list = window.matchMedia(query)
+  const list = useMemo(() => window.matchMedia(query), [query])
+  const subscribe = useCallback(
+    (onChange: () => void) => {
       list.addEventListener('change', onChange)
       return () => list.removeEventListener('change', onChange)
     },
-    () => window.matchMedia(query).matches,
+    [list],
   )
+  return useSyncExternalStore(subscribe, () => list.matches)
 }

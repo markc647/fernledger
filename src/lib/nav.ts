@@ -1,17 +1,18 @@
 import type { Role } from './role'
 
-const GROUPS = [
-  { id: 'transactions', title: 'Transactions' },
-  { id: 'reports', title: 'Reports' },
-  // A Member never sees this group. It hides the group from the sidebar only: the pages in it keep their own access, and the API enforces the Admin on every change.
-  { id: 'setup', title: 'Set up', adminOnly: true },
-  { id: 'help', title: 'Help' },
-] as const
+/**
+ * The sidebar's groups, in the order it shows them. A group's icon is in src/components/app-sidebar.tsx, which fails to compile if one is missing. A group with
+ * `adminOnly` is not in a Member's sidebar at all (Set up): that hides the group and nothing else. The pages in it keep their own access, and the API enforces the
+ * Admin on every change.
+ */
+export const NAV_GROUPS = [
+  { id: 'transactions', label: 'Transactions', adminOnly: false },
+  { id: 'reports', label: 'Reports', adminOnly: false },
+  { id: 'setup', label: 'Set up', adminOnly: true },
+  { id: 'help', label: 'Help', adminOnly: false },
+] as const satisfies readonly { id: string; label: string; adminOnly: boolean }[]
 
-export type NavGroupId = (typeof GROUPS)[number]['id']
-
-/** The sidebar's groups, in the order it shows them. A group's icon is in src/components/app-sidebar.tsx, which fails to compile if one is missing. */
-export const NAV_GROUPS: readonly { id: NavGroupId; title: string; adminOnly?: boolean }[] = GROUPS
+export type NavGroupId = (typeof NAV_GROUPS)[number]['id']
 
 /**
  * A route opts into the navigation with `staticData: { nav: { label, group, ... } }` in its own route file
@@ -27,6 +28,8 @@ export type NavMeta = {
   group?: NavGroupId
   /** Lower comes first within its group (default 50); ties sort alphabetically. */
   order?: number
+  /** Where a Member finds it when that is not where the Admin does: Accounts is in Set up for the Admin, whose group a Member never sees, and in Reports for a Member. */
+  member?: { group?: NavGroupId; order?: number }
 }
 
 declare module '@tanstack/react-router' {
@@ -38,40 +41,52 @@ export type NavEntry<To extends string = string> = NavMeta & { to: To }
 
 const DEFAULT_ORDER = 50
 
-/** The links this reader sees, in order, each by the label this reader sees it by. */
-export const navFor = <To extends string>(entries: NavEntry<To>[], role: Role | undefined) =>
-  entries
-    .filter((entry) => !entry.adminOnly || role === 'admin')
-    .map((entry) => ({ ...entry, label: role === 'admin' && entry.adminLabel ? entry.adminLabel : entry.label }))
+/**
+ * The pages as this reader finds them, in order, each by the label, the group and the place in it that this reader sees. With `everyone`, the pages that are not this reader's
+ * to see are there too: that is for saying where a page is (the breadcrumb), not for what the sidebar shows.
+ */
+function pagesFor<To extends string>(entries: NavEntry<To>[], role: Role | undefined, everyone: boolean) {
+  const admin = role === 'admin'
+  return entries
+    .filter((entry) => everyone || !entry.adminOnly || admin)
+    .map((entry) => ({ ...entry, ...(admin ? undefined : entry.member), label: admin && entry.adminLabel ? entry.adminLabel : entry.label }))
     .sort((a, b) => (a.order ?? DEFAULT_ORDER) - (b.order ?? DEFAULT_ORDER) || a.label.localeCompare(b.label))
+}
 
-/** What the sidebar shows: a link on its own, or a group of links under a title. */
+/** The links this reader sees, in order, each by the label this reader sees it by. */
+export const navFor = <To extends string>(entries: NavEntry<To>[], role: Role | undefined) => pagesFor(entries, role, false)
+
+/** What the sidebar shows: a link on its own, or a group of links under a label. */
 export type NavSection<To extends string = string> =
-  | { kind: 'link'; id: string; title: string; to: To }
-  | { kind: 'group'; id: NavGroupId; title: string; items: { to: To; label: string }[] }
+  | { kind: 'link'; id: string; label: string; to: To }
+  | { kind: 'group'; id: NavGroupId; label: string; items: { to: To; label: string }[] }
 
-/** The sidebar for this reader: links of their own first, then each group that has something to show them, in `NAV_GROUPS` order. */
-export function navSections<To extends string>(entries: NavEntry<To>[], role: Role | undefined): NavSection<To>[] {
-  const seen = navFor(entries, role)
-  const links = seen.filter((entry) => !entry.group).map((entry): NavSection<To> => ({ kind: 'link', id: entry.to, title: entry.label, to: entry.to }))
-  const groups = NAV_GROUPS.filter((group) => !group.adminOnly || role === 'admin').flatMap((group): NavSection<To>[] => {
-    const items = seen.filter((entry) => entry.group === group.id).map(({ to, label }) => ({ to, label }))
-    return items.length > 0 ? [{ kind: 'group', id: group.id, title: group.title, items }] : []
+function sectionsOf<To extends string>(pages: ReturnType<typeof pagesFor<To>>, role: Role | undefined, everyone: boolean): NavSection<To>[] {
+  const links = pages.filter((page) => !page.group).map((page): NavSection<To> => ({ kind: 'link', id: page.to, label: page.label, to: page.to }))
+  const groups = NAV_GROUPS.filter((group) => everyone || !group.adminOnly || role === 'admin').flatMap((group): NavSection<To>[] => {
+    const items = pages.filter((page) => page.group === group.id).map(({ to, label }) => ({ to, label }))
+    return items.length > 0 ? [{ kind: 'group', id: group.id, label: group.label, items }] : []
   })
   return [...links, ...groups]
 }
 
+/** The sidebar for this reader: links of their own first, then each group that has something to show them, in `NAV_GROUPS` order. */
+export const navSections = <To extends string>(entries: NavEntry<To>[], role: Role | undefined) => sectionsOf(pagesFor(entries, role, false), role, false)
+
 // "/" is the Summary only; "/transactions" is also the page of a Transaction ("/transactions/42") but not "/transactions-old".
 const covers = (to: string, pathname: string) => (to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(`${to}/`))
 
-/** Where a page sits, for the breadcrumb and for which group opens: the group (none for a link on its own) and the page, from the longest address that covers `pathname`. */
-export function trailFor(sections: NavSection[], pathname: string): { group?: string; groupId?: NavGroupId; page?: string; to?: string } {
+/**
+ * Where a page is, for the breadcrumb and for which group opens: the group (none for a link on its own) and the page, from the longest address that covers `pathname`. It
+ * looks through every page, not only those in this reader's sidebar, so a Member who arrives at Budgets from the Summary is told it is in Set up, though their sidebar has no such group.
+ */
+export function trailFor<To extends string>(entries: NavEntry<To>[], role: Role | undefined, pathname: string): { group?: string; groupId?: NavGroupId; page?: string; to?: string } {
   let best: { group?: string; groupId?: NavGroupId; page: string; to: string } | undefined
-  for (const section of sections) {
-    const pages = section.kind === 'link' ? [{ to: section.to, label: section.title }] : section.items
+  for (const section of sectionsOf(pagesFor(entries, role, true), role, true)) {
+    const pages = section.kind === 'link' ? [{ to: section.to, label: section.label }] : section.items
     for (const { to, label } of pages) {
       if (covers(to, pathname) && (!best || to.length > best.to.length)) {
-        best = section.kind === 'link' ? { page: label, to } : { group: section.title, groupId: section.id, page: label, to }
+        best = section.kind === 'link' ? { page: label, to } : { group: section.label, groupId: section.id, page: label, to }
       }
     }
   }

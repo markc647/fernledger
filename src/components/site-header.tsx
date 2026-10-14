@@ -19,7 +19,7 @@ const SIGN_OUT_PATH = '/cdn-cgi/access/logout'
  */
 function SignOut({ className }: { className?: string }) {
   return (
-    <a href={SIGN_OUT_PATH} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), className)}>
+    <a href={SIGN_OUT_PATH} className={cn(buttonVariants({ variant: 'outline', size: 'compact' }), className)}>
       <LogOut aria-hidden />
       Sign out
     </a>
@@ -50,7 +50,7 @@ export function SiteHeader({
     <header className="sticky top-0 z-50 flex w-full items-center bg-sidebar text-sidebar-foreground print:hidden">
       <div className="flex h-(--header-height) w-full items-center gap-2 px-3 md:px-4">
         <SidebarTrigger />
-        <Separator orientation="vertical" className="me-1 h-4" />
+        <Separator className="me-1 h-4" />
         <Breadcrumb className="min-w-0">
           <BreadcrumbList className="flex-nowrap gap-1.5 text-sm sm:gap-2">
             {group && (

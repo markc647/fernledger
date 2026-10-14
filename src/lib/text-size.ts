@@ -1,4 +1,4 @@
-import type { DeviceStorage } from './device-storage'
+import { readDevice, writeDevice, type DeviceStorage } from './device-storage.ts'
 
 export type TextSize = 'small' | 'medium' | 'large'
 
@@ -29,21 +29,7 @@ export function parseTextSize(raw: string | null): TextSize {
 }
 
 /** The size saved on this device; Medium when none is saved or storage is blocked. */
-export function loadTextSize(storage: DeviceStorage): TextSize {
-  try {
-    return parseTextSize(storage?.getItem(TEXT_SIZE_STORAGE_KEY) ?? null)
-  } catch {
-    return 'medium' // storage blocked: the page still works, at the standard size
-  }
-}
+export const loadTextSize = (storage: DeviceStorage): TextSize => parseTextSize(readDevice(storage, TEXT_SIZE_STORAGE_KEY))
 
 /** Remembers the size on this device. False when it couldn't be saved; the size still applies until the page closes. */
-export function saveTextSize(size: TextSize, storage: DeviceStorage) {
-  if (!storage) return false
-  try {
-    storage.setItem(TEXT_SIZE_STORAGE_KEY, size)
-    return true
-  } catch {
-    return false
-  }
-}
+export const saveTextSize = (size: TextSize, storage: DeviceStorage) => writeDevice(storage, TEXT_SIZE_STORAGE_KEY, size)

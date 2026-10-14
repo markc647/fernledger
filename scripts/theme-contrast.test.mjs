@@ -47,6 +47,10 @@ const pairs = [
   ['muted-foreground', 'sidebar', 4.5],
   ['ring', 'sidebar', 3],
   ['ring', 'sidebar-accent', 3],
+  // The bar at the start of the current page's row (1.4.11): the pill alone is a fill under 1.2:1 against the tint, so the bar is what makes the row stand out at 3:1,
+  // against the tint (the row in the rail's gap, and the header) and against the pill it is drawn on.
+  ['sidebar-marker', 'sidebar', 3],
+  ['sidebar-marker', 'sidebar-accent', 3],
   // Money in/out and statuses are text on the page or a card (the Amount and Status components).
   ...['success', 'warning', 'danger'].flatMap((fg) => [[fg, 'background', 4.5], [fg, 'card', 4.5], [fg, 'muted', 4.5]]),
   // The line and the bars of the charts (src/components/charts) are graphics that carry meaning: 3:1 against the page and a card (1.4.11).

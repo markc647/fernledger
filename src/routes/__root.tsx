@@ -1,6 +1,6 @@
 import { useQuery, type QueryClient } from '@tanstack/react-query'
 import { createRootRouteWithContext, Outlet, useRouter, useRouterState } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AppSidebar } from '@/components/app-sidebar'
 import { DevIdentitySwitcher } from '@/components/dev-identity-switcher'
 import { SiteHeader } from '@/components/site-header'
@@ -38,7 +38,7 @@ function Layout() {
   )
   const sections = navSections(entries, me?.role)
   const pathname = useRouterState({ select: (state) => state.location.pathname })
-  const trail = trailFor(sections, pathname)
+  const trail = trailFor(entries, me?.role, pathname) // through every page, so a page that is not in this reader's sidebar still says where it is
 
   // These three are the layout's, so they stay mounted: following the device's theme, and a text size or sidebar remembered on this device, keep working
   // while the controls themselves are out of sight (in a phone's menu, or in the sheet).
@@ -48,6 +48,10 @@ function Layout() {
   const [sidebarChoice, setSidebarChoice] = useState(() => loadSidebarChoice(deviceStorage()))
   const wide = useMediaQuery(SIDEBAR_WIDE_QUERY)
   const sidebarOpen = sidebarIsOpen(sidebarChoice, wide)
+  const chooseSidebar = useCallback((open: boolean) => {
+    setSidebarChoice(open ? 'open' : 'closed')
+    saveSidebarChoice(open, deviceStorage())
+  }, [])
 
   return (
     <>
@@ -61,15 +65,12 @@ function Layout() {
           neither is printed. A page that wants the title in its printout writes it itself, as How to sign in does. */}
       <SidebarProvider
         open={sidebarOpen}
-        onOpenChange={(open) => {
-          setSidebarChoice(open ? 'open' : 'closed')
-          saveSidebarChoice(open, deviceStorage())
-        }}
+        onOpenChange={chooseSidebar}
         className="flex-col"
       >
         <SiteHeader group={trail.group} page={trail.page ?? appTitle} textSize={textSize} onTextSize={chooseTextSize} theme={theme} onToggleTheme={toggleTheme} />
         <div className="flex flex-1">
-          <AppSidebar appTitle={appTitle} sections={sections} pathname={pathname} activeTo={trail.to} email={me?.email} role={me?.role} />
+          <AppSidebar appTitle={appTitle} sections={sections} activeTo={trail.to} roleKnown={roleKnown} email={me?.email} role={me?.role} />
           {/* On paper the page is the paper's: no margin for the sidebar (important, because the collapsed sidebar's margin is more specific), no rounded edge or shadow. */}
           <SidebarInset className="print:m-0! print:rounded-none! print:border-0! print:shadow-none!">
             {/* Local development only: inside the panel, because the sidebar is fixed to the left edge. */}

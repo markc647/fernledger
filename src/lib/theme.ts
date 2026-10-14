@@ -1,4 +1,4 @@
-import type { DeviceStorage } from './device-storage'
+import { readDevice, writeDevice, type DeviceStorage } from './device-storage.ts'
 
 /** `system` is no one's choice: it is what a device has until the toggle is first used. */
 export type ThemePreference = 'system' | 'light' | 'dark'
@@ -20,21 +20,7 @@ export function resolveTheme(preference: ThemePreference, systemPrefersDark: boo
 export const otherTheme = (theme: Theme): Theme => (theme === 'dark' ? 'light' : 'dark')
 
 /** What the person chose on this device; `system` while they haven't, or when storage is blocked. */
-export function loadThemePreference(storage: DeviceStorage): ThemePreference {
-  try {
-    return parsePreference(storage?.getItem(THEME_STORAGE_KEY) ?? null)
-  } catch {
-    return 'system' // storage blocked: follow the device
-  }
-}
+export const loadThemePreference = (storage: DeviceStorage): ThemePreference => parsePreference(readDevice(storage, THEME_STORAGE_KEY))
 
 /** Remembers the choice on this device. False when it couldn't be saved; the theme still applies until the page closes. */
-export function saveThemePreference(theme: Theme, storage: DeviceStorage) {
-  if (!storage) return false
-  try {
-    storage.setItem(THEME_STORAGE_KEY, theme)
-    return true
-  } catch {
-    return false
-  }
-}
+export const saveThemePreference = (theme: Theme, storage: DeviceStorage) => writeDevice(storage, THEME_STORAGE_KEY, theme)

@@ -1,24 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { loadThemePreference, otherTheme, parsePreference, resolveTheme, saveThemePreference, THEME_STORAGE_KEY } from './theme'
-
-/** A stand-in for localStorage. */
-const fakeStorage = (initial: Record<string, string> = {}) => {
-  const data = new Map(Object.entries(initial))
-  return {
-    getItem: (key: string) => data.get(key) ?? null,
-    setItem: (key: string, value: string) => void data.set(key, value),
-  }
-}
-
-/** A stand-in for storage that the browser blocks (private modes, blocked site data): every access throws. */
-const blockedStorage = () => ({
-  getItem: () => {
-    throw new DOMException('blocked', 'SecurityError')
-  },
-  setItem: () => {
-    throw new DOMException('blocked', 'SecurityError')
-  },
-})
+import { blockedStorage, fakeStorage } from './test-storage'
 
 describe('resolveTheme', () => {
   it('follows the device when the preference is system', () => {
