@@ -30,6 +30,11 @@ export type NavMeta = {
   order?: number
   /** Where a Member finds it when that is not where the Admin does: Accounts is in Set up for the Admin, whose group a Member never sees, and in Reports for a Member. */
   member?: { group?: NavGroupId; order?: number }
+  /**
+   * For a page the sidebar does not list: the address of the page it belongs to (each of the six Reports belongs to Reports). It has no row of its own. The sidebar marks the page it
+   * belongs to as the current one, and the breadcrumb names this page under that page's group ("Reports › Loans"). The page it belongs to is one that is in the sidebar.
+   */
+  parent?: string
 }
 
 declare module '@tanstack/react-router' {
@@ -61,7 +66,8 @@ export type NavSection<To extends string = string> =
   | { kind: 'link'; id: string; label: string; to: To }
   | { kind: 'group'; id: NavGroupId; label: string; items: { to: To; label: string }[] }
 
-function sectionsOf<To extends string>(pages: ReturnType<typeof pagesFor<To>>, role: Role | undefined, everyone: boolean): NavSection<To>[] {
+function sectionsOf<To extends string>(allPages: ReturnType<typeof pagesFor<To>>, role: Role | undefined, everyone: boolean): NavSection<To>[] {
+  const pages = allPages.filter((page) => !page.parent) // a page that belongs to another has no row of its own
   const links = pages.filter((page) => !page.group).map((page): NavSection<To> => ({ kind: 'link', id: page.to, label: page.label, to: page.to }))
   const groups = NAV_GROUPS.filter((group) => everyone || !group.adminOnly || role === 'admin').flatMap((group): NavSection<To>[] => {
     const items = pages.filter((page) => page.group === group.id).map(({ to, label }) => ({ to, label }))
@@ -79,16 +85,25 @@ const covers = (to: string, pathname: string) => (to === '/' ? pathname === '/' 
 /**
  * Where a page is, for the breadcrumb and for which group opens: the group (none for a link on its own) and the page, from the longest address that covers `pathname`. It
  * looks through every page, not only those in this reader's sidebar, so a Member who arrives at Budgets from the Summary is told it is in Set up, though their sidebar has no such group.
+ * A page that belongs to another (`parent`) is named as itself, in its parent's group, and `to` is its parent's, because that is the row the sidebar marks.
  */
 export function trailFor<To extends string>(entries: NavEntry<To>[], role: Role | undefined, pathname: string): { group?: string; groupId?: NavGroupId; page?: string; to?: string } {
-  let best: { group?: string; groupId?: NavGroupId; page: string; to: string } | undefined
-  for (const section of sectionsOf(pagesFor(entries, role, true), role, true)) {
-    const pages = section.kind === 'link' ? [{ to: section.to, label: section.label }] : section.items
-    for (const { to, label } of pages) {
-      if (covers(to, pathname) && (!best || to.length > best.to.length)) {
-        best = section.kind === 'link' ? { page: label, to } : { group: section.label, groupId: section.id, page: label, to }
-      }
-    }
+  type Place = { group?: string; groupId?: NavGroupId; page: string; to: string }
+  const pages = pagesFor(entries, role, true)
+  const inSidebar = new Map<string, Place>()
+  for (const section of sectionsOf(pages, role, true)) {
+    const items = section.kind === 'link' ? [{ to: section.to, label: section.label }] : section.items
+    for (const { to, label } of items) inSidebar.set(to, section.kind === 'link' ? { page: label, to } : { group: section.label, groupId: section.id, page: label, to })
   }
-  return best ?? {}
+  // Every address that can say where a page is, with the place it names: the sidebar's own, and the pages that belong to one of them.
+  const candidates: [string, Place][] = [...inSidebar]
+  for (const page of pages) {
+    const parent = page.parent === undefined ? undefined : inSidebar.get(page.parent)
+    if (parent) candidates.push([page.to, { ...parent, page: page.label }])
+  }
+  let best: [string, Place] | undefined
+  for (const candidate of candidates) {
+    if (covers(candidate[0], pathname) && (!best || candidate[0].length > best[0].length)) best = candidate
+  }
+  return best?.[1] ?? {}
 }
