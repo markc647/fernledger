@@ -15,8 +15,8 @@ Each Deployer runs their own copy in their own Cloudflare account. There is no F
 
 | Threat | Protection |
 |---|---|
-| A stranger reaching the app | Only people you list can reach it. Anyone else stops at Cloudflare's login page. The example policy also limits sign-in to New Zealand. |
-| Stolen or guessed passwords | The app has no passwords. [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) handles sign-in with email one-time codes, or Google/Microsoft with MFA. |
+| A stranger reaching the app | Only people you list can reach it. Anyone else stops at Cloudflare's login page. |
+| Stolen or guessed passwords | The app has no passwords. [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) handles sign-in with email one-time codes. |
 | A forged or missing sign-in token | The app checks Access's signed token (signature, issuer, audience) on **every** request. If configuration is missing, it refuses all requests rather than allowing them (ADR 0002). |
 | A Member changing data | Read-only by default. Only the Admin can change anything, and every change goes in the Change Log, which all Members can see. |
 | A leaked Akahu token (if you use Akahu Sync) | Akahu personal-app tokens can't make payments, so a leak exposes history, not money. Tokens are stored as encrypted Worker secrets, never in code or the database. |

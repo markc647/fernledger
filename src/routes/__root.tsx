@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { DevIdentitySwitcher } from '@/components/dev-identity-switcher'
 import { TextSizeControl } from '@/components/text-size-control'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { buttonVariants } from '@/components/ui/button'
 import { isNotSignedIn, meQuery } from '@/lib/me'
 import { navFor } from '@/lib/nav'
 import { FALLBACK_APP_TITLE, settingsQuery } from '@/lib/settings'
@@ -11,6 +12,9 @@ import { FALLBACK_APP_TITLE, settingsQuery } from '@/lib/settings'
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: Layout,
 })
+
+/** Cloudflare Access's sign-out path on this app's own hostname (README, What it does). */
+const SIGN_OUT_PATH = '/cdn-cgi/access/logout'
 
 const focusStyle = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
@@ -61,6 +65,11 @@ function Layout() {
           <div className="ms-auto flex flex-wrap gap-x-4 gap-y-2">
             <TextSizeControl />
             <ThemeToggle />
+            {/* Access answers this path itself, before the Worker, so this is a plain link (a full page load), not a route or a fetch. It needs no API data, so it is shown
+                even when who is signed in can't be read. Local development has no Access: there it only reaches the app's fallback page. */}
+            <a href={SIGN_OUT_PATH} className={buttonVariants({ variant: 'outline', size: 'touch' })}>
+              Sign out
+            </a>
           </div>
         </div>
       </header>

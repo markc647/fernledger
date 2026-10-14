@@ -169,7 +169,7 @@ In order, `npm run teardown`:
 What you do by hand afterwards:
 
 - **Delete the Worker**, which also deletes the secrets it holds: `npx wrangler delete`.
-- **Delete the Access application:** Zero Trust → Access → Applications → Fernledger.
+- **Delete the Access application:** Zero Trust → Access → Applications → the application you added for the Worker.
 - **Revoke Akahu access, only if you used Akahu Sync.** README ("Leaving Fernledger") says how.
 - **Revoke the D1 usage token, only if you made one** for the [D1 usage bar](#d1-usage-bar-optional). README ("Leaving Fernledger") says how.
 - **Decide what to do with the final backup folder.**
@@ -178,37 +178,42 @@ What you do by hand afterwards:
 
 The app has no login of its own. Cloudflare Access sits in front of it, and the Worker checks the Access token on every API request (ADR 0002).
 
-If your Cloudflare account already has a wildcard or account-wide Access policy, for example from another project, this app still gets **its own** Access application. Access applies only the most specific matching application, so the other project's policy won't apply here.
+You protect the Worker itself, with an Access application of the **Workers** type. When this was written, the dashboard's Add application screen offered Private destinations, Workers, Public DNS and Service auth. A Workers application is the protection Cloudflare's docs call "Protect one Worker" ([Cloudflare Access for Workers](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)), and it covers every address the Worker answers on, `fernledger.<your-subdomain>.workers.dev` included.
 
-1. **Zero Trust → Settings → Authentication → Login methods.** Make sure **One-time PIN** is enabled. Your team domain is shown under **Settings → Custom pages**, in the form `<team>.cloudflareaccess.com`.
-2. **Zero Trust → Access → Applications → Add an application → Self-hosted:**
-   - **Name:** Fernledger
-   - **Session duration:** 24 hours
-   - **Public hostname:** `fernledger.<your-subdomain>.workers.dev`, with no path.
+If your Cloudflare account already has an account-wide Access rule (**Protect all Workers**) or a wildcard policy, for example from another project, this Worker still gets **its own** application. Access applies the most specific rule that matches: a hostname or path application first, then a Worker's own application, then the account-wide rule. So the other project's policy won't apply here.
+
+1. **One-time PIN.** In Zero Trust, go to **Integrations → Identity providers** and make sure **One-time PIN** is listed. If it isn't, choose **Add new identity provider**, then **One-time PIN** (a new Zero Trust account doesn't get it automatically).
+2. **Zero Trust → Access → Applications → Add an application → Workers.** (Cloudflare's own pages call the Access menu "Access controls".) Deploy the Worker first so it can be chosen.
+   - **Worker:** `fernledger`, the `name` in `wrangler.jsonc`.
+   - **Traffic:** **All traffic**. **Previews only** would leave the live app open.
+   - **Session duration:** 24 hours.
    - **Login methods:** One-time PIN only.
+
+   Cloudflare also describes a quicker route (Workers & Pages → your Worker → **Access**). Its policy options are **Cloudflare account** and **Email domain**, and neither is a list of people, so use the Zero Trust route above.
 3. **Policies:** create a **new** policy, and don't attach any reusable policy that already exists in the account.
    - **Name:** Fernledger Members
    - **Action:** Allow
    - **Include → Emails:** each Member's email, the Admin's included.
-4. Save the application, then copy its **Application Audience (AUD) tag** from the application's overview.
-5. **Test policies** (on the application): an email belonging to a Member should pass, and an email from any other project should fail.
-6. Set the Worker secrets:
+4. Save the application, then copy its **Application Audience (AUD) tag**: **Zero Trust → Access → Applications**, **Configure** on the application, then **Additional settings**. That is where Cloudflare's [instructions for the AUD tag](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/#get-your-aud-tag) put it for any Access application. They don't describe a Workers application separately, so if yours looks different, look for **Application Audience (AUD) Tag** in its settings.
+5. Set the Worker secrets:
 
    ```bash
-   npx wrangler secret put ACCESS_TEAM_DOMAIN   # <team>.cloudflareaccess.com
+   npx wrangler secret put ACCESS_TEAM_DOMAIN   # <your-team>.cloudflareaccess.com
    npx wrangler secret put ACCESS_AUD           # the AUD tag from step 4
    npx wrangler secret put ADMIN_EMAIL          # the Admin's email
    ```
 
-   Until all three are set, every API request returns 401. The app fails closed.
+   Your team name is under **Zero Trust → Settings**. It is also the start of the address of Cloudflare's sign-in page (`<your-team>.cloudflareaccess.com`), which you reach by opening the app's address in a private window. Until all three secrets are set, every API request returns 401. The app fails closed.
+6. **Check it.** Open `https://fernledger.<your-subdomain>.workers.dev` in a private window. A Member's email should be sent a code and then reach the app. Then try an email that isn't on the list: it should get no code.
+7. **Check Sign out.** Press **Sign out** in the header once (the README's [What it does](../README.md#what-it-does) says what it does). The next visit should ask for a code. [Local development](#local-development) can't try it.
 
 **Adding or removing a Member:** edit the "Fernledger Members" policy. The app needs no changes. Give a new Member the app's address. Its **How to sign in** page prints as a one-page guide for anyone who finds the email code hard, and **About your data** shows what you write in Settings under "About your data", so fill those in too. As the Admin, print **How to sign in** and give it to each Member before their first sign-in: the page says so to you alone, and the printout has a line to write your name and phone on, as well as the contact you set in Settings.
 
-**Home Screen icon (optional):** Members can add Fernledger to an iPad or phone's Home Screen (README [What it does](../README.md#what-it-does)). iOS may fetch the icon, `/apple-touch-icon.png`, without the Access sign-in cookie. Access then answers with its login page instead of the image, and the Home Screen shows a plain tile. Nothing else is affected, so you can leave it. To fix it, add one more self-hosted Access application for the same hostname with the path `apple-touch-icon.png`, and give it a single policy: **Action: Bypass**, **Include: Everyone**. Do the same for `icon-192.png`, `icon-512.png` and `icon-maskable-512.png` if you want the manifest's icons to load without a session too. Bypass turns off Access checks and logging for those paths only, and each one is just the app's icon, which holds no data. Bypass nothing else.
+**Home Screen icon (optional):** Members can add Fernledger to an iPad or phone's Home Screen (README [What it does](../README.md#what-it-does)). iOS may fetch the icon, `/apple-touch-icon.png`, without the Access sign-in cookie, so Access answers with its login page and the Home Screen shows a plain tile. That is fine, and nothing else is affected. If your dashboard lets you add an Access application for an icon's path (`apple-touch-icon.png`, and `icon-192.png`, `icon-512.png` and `icon-maskable-512.png` for the manifest's icons), give it one policy, **Action: Bypass** with **Include: Everyone**; if it doesn't, leave the tile plain. Bypass turns off Access checks and logging for that path only, and each icon holds no data. Bypass nothing else.
 
 **Changing the Admin:** run `wrangler secret put ADMIN_EMAIL` again.
 
-`preview_urls` is off in `wrangler.jsonc`, because version preview hostnames wouldn't match this application and would fall back to whatever wildcard policy the account has.
+`preview_urls` is off in `wrangler.jsonc`, so the Worker has no preview hostnames. A Workers application set to **All traffic** would cover them if you turned them on.
 
 ## D1 usage bar (optional)
 
@@ -258,7 +263,7 @@ npm run dev
 
 On a fresh clone, run `npm run gen` once (or any of `npm run check`, `typecheck` or `build`, which run it for you) before opening the project in an editor. It generates the route tree and the API types the browser code imports.
 
-Access isn't in front of the local dev server, so `DEV_USER_EMAIL` stands in for the signed-in Member. It's honoured only on `localhost`. Set it to something other than `ADMIN_EMAIL` to see the read-only view.
+Access isn't in front of the local dev server, so `DEV_USER_EMAIL` stands in for the signed-in Member. It's honoured only on `localhost`. Set it to something other than `ADMIN_EMAIL` to see the read-only view. The header's **Sign out** link goes to `/cdn-cgi/access/logout`, which belongs to Access, so on the dev server it only reaches the app's own fallback page.
 
 The dev server shows a "Development only" bar to switch between the Admin and a read-only Member. It works by a cookie that the Worker honours only on `localhost`, and only when `DEV_USER_EMAIL` is set. Production builds don't include the bar.
 
