@@ -61,6 +61,7 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Light and dark themes.**
 - **Your own title:** for example "Mum's finances", which the Admin sets on the Settings screen. The header shows it, and so does the top of every report.
 - **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications. The icon's label comes from a fixed file, so it is normally "Fernledger" whatever title the Admin sets, though some iOS versions use the page title instead. You can rename it when you add it.
+- **Sign out:** a "Sign out" link in the header ends your Cloudflare Access sign-in, which is what to use on a computer that isn't yours. Cloudflare ends your session for every Access application, not only Fernledger.
 
 ## What it doesn't do
 
@@ -102,7 +103,7 @@ R2 may ask for a payment method on file even within the free allowance (unconfir
 
 ```
  Your family's browsers
-        │  sign in with an email code (or Google/Microsoft)
+        │  sign in with an email code
         ▼
  Cloudflare Access ── blocks anyone not on your list
         │  signed identity token
@@ -147,8 +148,8 @@ We're as clear about the limits as about the protections. The full threat model 
 ### What protects your data
 
 - **It lives in your own Cloudflare account.** There's no Fernledger server. The authors can't see your data, lose it, or be breached for it.
-- **No passwords in the app.** Sign-in is handled by [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) with email one-time codes, or Google/Microsoft with MFA. The app checks Access's signed token (signature, issuer, audience) on **every** request. If configuration is missing, it refuses all requests rather than allowing them (ADR 0002).
-- **Only people you list can reach the app at all.** Anyone else stops at Cloudflare's login page. The example policy also limits sign-in to New Zealand.
+- **No passwords in the app.** Sign-in is handled by [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) with email one-time codes. The app checks Access's signed token (signature, issuer, audience) on **every** request. If configuration is missing, it refuses all requests rather than allowing them (ADR 0002).
+- **Only people you list can reach the app at all.** Anyone else stops at Cloudflare's login page.
 - **Read-only by default.** Only the Admin can change anything, and every change goes in a Change Log that all Members can see, including the Admin's email address (see [docs/privacy.md](docs/privacy.md#what-a-deployment-holds)).
 - **Read-only bank access.** If you use Akahu Sync, its personal-app tokens can't make payments. A leaked token exposes history, not money.
 - **Encrypted** in transit (TLS) and at rest (D1, R2). If you use Akahu Sync, its tokens are stored as encrypted Worker secrets, never in code or the database.
@@ -164,7 +165,7 @@ The breach checklist is in [docs/security.md](docs/security.md#if-something-goes
 ### What it can't protect against
 
 - **Your Cloudflare account is the master key.** Anyone who controls it controls your data. The setup guide requires two-factor authentication on it, and as few account members as possible.
-- **Each Member's email is their key.** If someone's inbox is compromised, so is their access. Use Google or Microsoft sign-in with MFA for stronger protection.
+- **Each Member's email is their key.** If someone's inbox is compromised, so is their access, so each Member should protect their email with two-factor authentication.
 - **No app-level encryption.** We rely on Cloudflare's encryption at rest. Encrypting inside the app wouldn't add real protection, because the key would live in the same Worker as the data, and it would make search and reports much harder.
 - **Cloudflare can technically access data in your account,** as with any cloud host. See Cloudflare's [privacy policy](https://www.cloudflare.com/privacypolicy/).
 - **A file you download is on your own.** Once a CSV export is saved, it has no sign-in, can be read by anyone who has it, and isn't in the Change Log. Keep it somewhere private, and delete it when you're done.
@@ -279,7 +280,7 @@ For anything older, export CSVs from your internet banking and **import** them. 
 
 1. **Before you start:** create an Akahu personal app and note its two tokens. Create a new Cloudflare account and turn on two-factor authentication.
 2. **Deploy:** run `npm run setup`, which creates the database and backup bucket in your chosen region, then `npm run deploy`. Both ask you to confirm the Cloudflare account first, and take `--yes` to skip that prompt when there is no terminal. [docs/setup.md](docs/setup.md) has the steps. Or use the **Deploy to Cloudflare** button (coming before the public release).
-3. **Lock it down:** turn on Cloudflare Access for the app's address, add your Members' emails, and paste the two Access values into the app's secrets. Until you do, the app refuses every request.
+3. **Lock it down:** turn on Cloudflare Access for the Worker, add your Members' emails, and paste the two Access values into the app's secrets. Until you do, the app refuses every request.
 4. **Load your data:** import your CSV history, link each account to Akahu, and let the first sync run.
 
 **Choosing public names:** your app's address (`fernledger.<subdomain>.workers.dev`) and sign-in page (`<team>.cloudflareaccess.com`) are visible to anyone who sees the link. Use neutral names, not the account holder's name.

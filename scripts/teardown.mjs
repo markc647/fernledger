@@ -37,7 +37,7 @@ function remainingSteps() {
     '',
     'By hand',
     '  - Delete the Worker, which also deletes the secrets it holds: npx wrangler delete',
-    '  - Delete the Access application: Cloudflare Zero Trust > Access > Applications > Fernledger.',
+    '  - Delete the Access application: Cloudflare Zero Trust > Access > Applications > the application you added for the Worker.',
     '  - If you used Akahu Sync, revoke Fernledger\'s access in your Akahu account (README: "Leaving Fernledger"). With CSV Imports only, skip this.',
     '  - Keep or destroy the final backup folder as you see fit. It holds every Transaction.',
   ].join('\n')

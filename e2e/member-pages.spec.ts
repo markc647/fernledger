@@ -200,6 +200,12 @@ test.describe('How to sign in', () => {
     await expect(main).not.toContainText(/within a minute|minute or two/i)
   })
 
+  test('tells a Member to press Sign out after using a computer that is not their own', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/how-to-sign-in')
+    await expect(page.getByRole('main')).toContainText('If you used a computer that is not your own, press "Sign out" at the top of Fernledger when you have finished.')
+  })
+
   test('tells the Admin, and only the Admin, to print it for each Member', async ({ page, context }) => {
     const note = 'Print this and give it to each Member before their first sign-in.'
     await signInAs(context, 'member')
