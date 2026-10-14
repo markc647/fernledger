@@ -23,6 +23,10 @@ export type Feature = {
   requires: Requirement[]
   /** True when the product works fully without this feature (ADR 0008), so its setup is offered, not demanded. */
   optional?: boolean
+  /** True when the name takes "the" in a sentence ("the D1 usage bar"), as "Akahu Sync" does not. The name alone is still what a list calls it. */
+  the?: boolean
+  /** Where the Admin finds the steps, said after what to set up. Written once here, so Settings and the feature's own page say the same. */
+  steps?: string
 }
 
 export const AKAHU_SYNC: Feature = {
@@ -43,6 +47,8 @@ export const D1_USAGE: Feature = {
   id: 'd1-usage',
   name: 'D1 usage bar',
   optional: true,
+  the: true,
+  steps: 'The steps are in docs/setup.md, under "D1 usage bar (optional)".',
   requires: [
     { env: 'CF_ANALYTICS_TOKEN', what: 'the Cloudflare analytics token', how: 'Add it as the Worker secret CF_ANALYTICS_TOKEN.' },
     { env: 'CF_ACCOUNT_ID', what: 'the Cloudflare account ID', how: 'Add it as the Worker secret CF_ACCOUNT_ID.' },
@@ -63,9 +69,12 @@ export function featureStatuses(features: Feature[], env: Env, role: Role): Feat
     const { id, name } = feature
     const missing = missingFor(feature, env)
     if (!missing.length) return { id, name, enabled: true }
-    const setup = missing.map(({ what, how }) => `Setup needed: ${what}. ${how}`).join(' ')
+    const setup = [...missing.map(({ what, how }) => `Setup needed: ${what}. ${how}`), ...(feature.steps ? [feature.steps] : [])].join(' ')
+    // A name that takes "the" says it mid-sentence and capitalises it at the start of one.
+    const inSentence = feature.the ? `the ${name}` : name
+    const atStart = feature.the ? `The ${name}` : name
     // An optional feature says so first, so an instance that doesn't use it knows it can ignore the rest.
-    const message = role !== 'admin' ? `${name} isn't set up yet.` : feature.optional ? `Optional: you only need this to use ${name}. ${setup}` : setup
+    const message = role !== 'admin' ? `${atStart} isn't set up yet.` : feature.optional ? `Optional: you only need this to use ${inSentence}. ${setup}` : setup
     return { id, name, enabled: false, message }
   })
 }

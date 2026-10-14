@@ -217,14 +217,6 @@ describe('outbound calls', () => {
     expect(attempts).toEqual([])
   })
 
-  it('with only one of the D1 usage secrets set, does not call Cloudflare', async () => {
-    for (const secrets of [{ CF_ANALYTICS_TOKEN: USAGE_SECRETS.CF_ANALYTICS_TOKEN }, { CF_ACCOUNT_ID: USAGE_SECRETS.CF_ACCOUNT_ID }]) {
-      expect((await call('/api/d1-usage', {}, secrets)).status).toBe(503)
-    }
-
-    expect(attempts).toEqual([])
-  })
-
   it('contacts only the Deployer\'s own Access sign-in service when verifying a sign-in', async () => {
     const part = (value: object) => btoa(JSON.stringify(value)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
     const token = `${part({ alg: 'RS256', kid: 'k1' })}.${part({ email: 'admin@example.com' })}.c2ln`

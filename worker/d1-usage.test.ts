@@ -1,7 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { GRAPHQL_URL } from './d1-usage'
+import { GRAPHQL_URL, TIMEOUT_MS } from './d1-usage'
 import worker from './index'
 
 // Seam 1: GET /api/d1-usage, the Admin's D1 usage bar. It asks Cloudflare's GraphQL Analytics API how many rows the whole account has
@@ -89,6 +89,8 @@ describe('GET /api/d1-usage', () => {
     // A call that can hang would hold the request open: it has a time limit, and it has not run out.
     expect(init.signal).toBeInstanceOf(AbortSignal)
     expect(init.signal!.aborted).toBe(false)
+    // The token goes to this address and no other: a redirect is handed back and not followed. (Not 'error': workerd's Request refuses that mode.)
+    expect(init.redirect).toBe('manual')
 
     const sent = JSON.parse(String(init.body)) as { query: string; variables: Record<string, string> }
     // The day is the UTC date, from midnight to midnight, because that is D1's day. The account ID goes in as a variable, not into the text.
@@ -102,6 +104,15 @@ describe('GET /api/d1-usage', () => {
     expect(sent.query).not.toContain('databaseId')
     for (const part of [url, String(init.body)]) expect(part).not.toContain(TOKEN)
     expect(sent.query).not.toContain(ACCOUNT)
+  })
+
+  it('uses the secrets as features.ts reads them, trimmed: one pasted with a trailing newline still works', async () => {
+    stubCloudflare(() => asJson(answer({ rowsRead: 1, rowsWritten: 2 })))
+    const { res } = await getUsage('admin', { CF_ANALYTICS_TOKEN: `${TOKEN}\n`, CF_ACCOUNT_ID: `  ${ACCOUNT}\r\n` })
+
+    expect(res.status).toBe(200)
+    expect(new Headers(calls[0]!.init.headers).get('Authorization')).toBe(`Bearer ${TOKEN}`)
+    expect(JSON.parse(String(calls[0]!.init.body)).variables.accountTag).toBe(ACCOUNT)
   })
 
   it('asks about the new UTC day as soon as it starts, which is midday or 1 pm in New Zealand', async () => {
@@ -124,11 +135,31 @@ describe('GET /api/d1-usage', () => {
     expect(JSON.parse(text)).toMatchObject({ rowsRead: 15, rowsWritten: 3 })
   })
 
-  it('says zero before the day has recorded anything', async () => {
+  it('says zero before the day has recorded anything, whether it sends no group or a group of nulls', async () => {
     stubCloudflare(() => asJson({ data: { viewer: { accounts: [{ d1AnalyticsAdaptiveGroups: [] }] } }, errors: null }))
-    const { res, text } = await getUsage('admin')
-    expect(res.status).toBe(200)
-    expect(JSON.parse(text)).toMatchObject({ rowsRead: 0, rowsWritten: 0 })
+    const none = await getUsage('admin')
+    expect(none.res.status).toBe(200)
+    expect(JSON.parse(none.text)).toMatchObject({ rowsRead: 0, rowsWritten: 0 })
+
+    // A sum can be null for a group with nothing in it, and one figure can be null without the other.
+    stubCloudflare(() => asJson(answer({ rowsRead: null, rowsWritten: null })))
+    const nulls = await getUsage('admin')
+    expect(nulls.res.status).toBe(200)
+    expect(JSON.parse(nulls.text)).toMatchObject({ rowsRead: 0, rowsWritten: 0 })
+
+    stubCloudflare(() => asJson(answer({ rowsRead: 7, rowsWritten: null })))
+    expect(JSON.parse((await getUsage('admin')).text)).toMatchObject({ rowsRead: 7, rowsWritten: 0 })
+  })
+
+  it('needs nothing from D1: the database is absent, or fails if it is touched, and the figures still come', async () => {
+    stubCloudflare(() => asJson(answer({ rowsRead: 5_000_000, rowsWritten: 100_000 })))
+    // The day's allowance being gone is when the Admin most wants to read this, and every D1 query then fails.
+    const broken = new Proxy({}, { get: () => { throw new Error('D1 was used') } })
+    for (const DB of [undefined, broken]) {
+      const { res, text } = await getUsage('admin', { ...SECRETS, DB: DB as unknown as D1Database })
+      expect(res.status).toBe(200)
+      expect(JSON.parse(text)).toMatchObject({ rowsRead: 5_000_000, rowsWritten: 100_000 })
+    }
   })
 
   describe('who may ask', () => {
@@ -168,60 +199,83 @@ describe('GET /api/d1-usage', () => {
   })
 
   describe('when Cloudflare cannot give the figures', () => {
-    const unavailable = async () => {
+    /** The answer is 502 with one of the four reasons and nothing of what Cloudflare said; the log has the event (and the error's class, if any) and nothing else. */
+    const unavailable = async (reason: string) => {
       const { res, text } = await getUsage('admin')
       expect(res.status).toBe(502)
-      expect(JSON.parse(text)).toEqual({ error: 'Usage unavailable' })
+      expect(JSON.parse(text)).toEqual({ error: 'Usage unavailable', reason })
       expectNoSecrets(text)
       return logged.filter((line) => line.includes('d1-usage'))
     }
 
-    it('says unavailable, and logs only the event and the error class, when the call fails', async () => {
+    it('says unreachable, and logs only the event and the error class, when the call fails', async () => {
       // An error whose message holds the token, as a badly behaved library's might.
       stubCloudflare(() => {
         throw new TypeError(`fetch failed for Bearer ${TOKEN} and ${ACCOUNT}`)
       })
-      expect(await unavailable()).toEqual(['{"event":"d1-usage.failed","errorClass":"TypeError"}'])
+      expect(await unavailable('unreachable')).toEqual(['{"event":"d1-usage.failed","errorClass":"TypeError"}'])
     })
 
-    it('says unavailable when the call runs out of time', async () => {
-      stubCloudflare(() => {
-        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    it('gives up when the call runs past the time limit, and says unreachable', async () => {
+      // The limit is a timer on the call's signal, so the clock is faked for it too; the stub fails as a real fetch does when its signal aborts.
+      vi.useRealTimers()
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+      vi.setSystemTime(new Date('2026-10-14T05:30:00Z'))
+      let callIsOut = () => {}
+      const out = new Promise<void>((resolve) => (callIsOut = resolve))
+      stubCloudflare(({ init }) => {
+        callIsOut()
+        return new Promise<Response>((_resolve, reject) => init.signal!.addEventListener('abort', () => reject(new DOMException('The operation was aborted', 'AbortError'))))
       })
-      expect(await unavailable()).toEqual(['{"event":"d1-usage.failed","errorClass":"DOMException"}'])
+      const pending = getUsage('admin')
+      await out // the call is out, so its timer is set (and the clock has not moved: waitFor would move it)
+      await vi.advanceTimersByTimeAsync(TIMEOUT_MS - 1)
+      expect(calls[0]!.init.signal!.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(calls[0]!.init.signal!.aborted).toBe(true)
+
+      const { res, text } = await pending
+      expect(res.status).toBe(502)
+      expect(JSON.parse(text)).toEqual({ error: 'Usage unavailable', reason: 'unreachable' })
+      expect(logged.filter((line) => line.includes('d1-usage'))).toEqual(['{"event":"d1-usage.failed","errorClass":"DOMException"}'])
     })
 
-    it.each([401, 403])('says unavailable, and logs that Cloudflare refused, when it answers %i (the token or account ID is wrong)', async (status) => {
+    it.each([401, 403])('says refused, and logs it, when Cloudflare answers %i (the token or the account ID is wrong)', async (status) => {
       stubCloudflare(() => asJson({ data: null, errors: [{ message: `not authorized, token ${TOKEN}` }] }, status))
-      expect(await unavailable()).toEqual(['{"event":"d1-usage.refused"}'])
+      expect(await unavailable('refused')).toEqual(['{"event":"d1-usage.refused"}'])
     })
 
-    it.each([400, 429, 500, 503])('says unavailable when it answers %i', async (status) => {
+    // 302: a redirect is handed back, not followed, so it is not an answer with figures (and the token goes nowhere else).
+    it.each([302, 400, 429, 500, 503])('says unreachable when it answers %i', async (status) => {
       stubCloudflare(() => asJson({ data: null, errors: [{ message: `try later ${ACCOUNT}` }] }, status))
-      expect(await unavailable()).toEqual(['{"event":"d1-usage.failed"}'])
+      expect(await unavailable('unreachable')).toEqual(['{"event":"d1-usage.failed"}'])
     })
 
-    it('says unavailable when a 200 carries errors, and does not pass their message on', async () => {
+    it('says no-account, and logs it, when the answer has no account (the account ID is not one the token can see)', async () => {
+      stubCloudflare(() => asJson({ data: { viewer: { accounts: [] } }, errors: null }))
+      expect(await unavailable('no-account')).toEqual(['{"event":"d1-usage.no-account"}'])
+    })
+
+    it('says unreadable when a 200 carries errors, and does not pass their message on', async () => {
       stubCloudflare(() => asJson({ data: null, errors: [{ message: `unknown field, ${TOKEN}`, path: ['viewer'] }] }))
-      expect(await unavailable()).toEqual(['{"event":"d1-usage.failed"}'])
+      expect(await unavailable('unreadable')).toEqual(['{"event":"d1-usage.unreadable"}'])
     })
 
     it.each([
       ['an empty object', {}],
-      ['no account in the answer (the account ID is not one the token can see)', { data: { viewer: { accounts: [] } }, errors: null }],
       ['figures that are not numbers', answer({ rowsRead: '5', rowsWritten: 1 })],
       ['a missing figure', answer({ rowsRead: 5 })],
       ['a negative figure', answer({ rowsRead: -1, rowsWritten: 1 })],
       ['a fraction', answer({ rowsRead: 1.5, rowsWritten: 1 })],
       ['a figure too large to be exact', answer({ rowsRead: Number.MAX_SAFE_INTEGER + 1, rowsWritten: 1 })],
-    ])('says unavailable when the answer is %s', async (_name, body) => {
+    ])('says unreadable when the answer is %s', async (_name, body) => {
       stubCloudflare(() => asJson(body))
-      expect(await unavailable()).toEqual(['{"event":"d1-usage.unreadable"}'])
+      expect(await unavailable('unreadable')).toEqual(['{"event":"d1-usage.unreadable"}'])
     })
 
-    it('says unavailable when the answer is not JSON', async () => {
+    it('says unreadable when the answer is not JSON', async () => {
       stubCloudflare(() => new Response(`<html>${TOKEN}</html>`, { status: 200 }))
-      expect(await unavailable()).toEqual(['{"event":"d1-usage.unreadable"}'])
+      expect(await unavailable('unreadable')).toEqual(['{"event":"d1-usage.unreadable"}'])
     })
   })
 })
