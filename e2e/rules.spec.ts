@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { mainNav, navGroup, navigateTo } from './shell-helpers'
 
 // The light and dark projects share one local database, so each test uses text and an Account of its own, no earlier run used
 // and no other spec uses: the Summary spec has 86 and 87, Categories 88 and 89, the Change Log 90 and 91, Cutover 92 and 93
@@ -84,7 +85,7 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
 
   // A Transaction imported now is put in Groceries by the Rule; the one on file from before is not.
   await importTransaction(context, baseURL!, testInfo.project.name, `${shop} NEW`, `RB${stamp}`)
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Transactions' }).click()
+  await navigateTo(page, 'All Transactions', 'Transactions')
   const added = rowFor(page, `${shop} NEW`)
   await expect(added).toContainText('Groceries')
   await expect(added).toContainText('Rule')
@@ -536,8 +537,9 @@ test('a Member does not see the Rules page, and the API refuses their changes', 
   await expect(page.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible()
   await expect(page.getByText('Only the Admin can use this page.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add a Rule' })).toHaveCount(0)
-  await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Transactions' })).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Rules' })).toHaveCount(0)
+  await expect(navGroup(page, 'Transactions')).toBeVisible()
+  await expect(navGroup(page, 'Set up')).toHaveCount(0) // a Member's sidebar has no Set up group, so no Rules link in it
+  await expect(mainNav(page).getByRole('link', { name: 'Rules' })).toHaveCount(0)
   await noAxeViolations(page)
 
   // The D1 usage figures are the Admin's alone, whether or not they are set up (here they are not). (Asked before the refused write below:

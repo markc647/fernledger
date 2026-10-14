@@ -2,10 +2,10 @@ import * as React from 'react'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
-// shadcn/ui Button, trimmed to what the app uses. Focus is a solid ring (the stock 50% ring fails 3:1 contrast),
-// and `touch` is the 44px minimum target from the README's Accessibility section.
+// shadcn/ui Button, trimmed to what the app uses. Focus is a solid 2px outline in the ring colour, not the stock shadow ring and not `outline-none` (CODING_STANDARDS.md, UI).
+// `touch` is the 44px minimum target from the README's Accessibility section; `compact` and `icon` are the header's controls, 32px with a mouse and 44px on a touch screen.
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -18,6 +18,8 @@ const buttonVariants = cva(
       },
       size: {
         default: 'h-8 gap-1.5 px-2.5',
+        compact: 'h-8 gap-1.5 px-2.5 pointer-coarse:min-h-11',
+        icon: 'size-8 pointer-coarse:size-11',
         // 44px target, and body-size (16px) text since it is for people who find small controls hard.
         touch: 'min-h-11 min-w-11 gap-1.5 px-4 text-base',
       },

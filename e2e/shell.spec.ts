@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { drawn, LINE, netWorth, SPENT, spending, stubNetWorth, stubSpending } from './chart-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { changeDeviceScheme, mainNav, openHeaderControls, openNavGroup, signOutLink, themeToggle } from './shell-helpers'
 
 const pages = [
   { role: 'admin', path: '/', heading: 'Dashboard' },
@@ -66,13 +67,15 @@ test('pages and the API carry the security headers, and the built app is not the
 test('the Admin sees Settings in the navigation, a Member does not', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.goto('/')
-  const nav = page.getByRole('navigation', { name: 'Main' })
+  const nav = mainNav(page)
+  await openNavGroup(page, 'Set up')
   await expect(nav.getByRole('link', { name: 'Settings' })).toBeVisible()
 
   await signInAs(context, 'member')
   await page.reload()
-  await expect(page.getByText('Member (read-only)')).toBeVisible()
+  await expect(page.locator('[data-slot="sidebar-footer"]').getByText('Member (read-only)')).toBeVisible()
   await expect(nav.getByRole('link', { name: 'Summary' })).toBeVisible()
+  await expect(nav.getByRole('button', { name: 'Set up' })).toHaveCount(0)
   await expect(nav.getByRole('link', { name: 'Settings' })).toHaveCount(0)
 })
 
@@ -106,22 +109,6 @@ test('Sign out is a full page navigation, not a fetch or a route of the app', as
   await expect(page).toHaveURL(new RegExp(`${SIGN_OUT_PATH}$`))
 })
 
-test('Sign out is the next Tab stop after the colour theme buttons, and shows where the focus is', async ({ page }) => {
-  await page.goto('/')
-  const link = page.getByRole('banner').getByRole('link', { name: 'Sign out' })
-  await expect(link).toBeVisible()
-  // The button style draws focus as a 3px ring. (The border colour changes only in the light theme, so it is not what this test holds to.)
-  const ring = async () => {
-    await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
-    return link.evaluate((element) => getComputedStyle(element).boxShadow)
-  }
-  const resting = await ring()
-  await page.getByRole('button', { name: 'Dark' }).focus()
-  await page.keyboard.press('Tab')
-  await expect(link).toBeFocused()
-  expect(await ring()).not.toBe(resting)
-})
-
 // Sign out needs no API data, so it is there when who is signed in can't be read: a 401 from a wrong ACCESS_AUD or team domain while an Access session is live,
 // and a failing API. Those are the cases where someone needs it.
 test.describe('when who is signed in cannot be read', () => {
@@ -131,48 +118,62 @@ test.describe('when who is signed in cannot be read', () => {
     { status: 401, heading: 'Not signed in' },
     { status: 500, heading: 'Something went wrong' },
   ]) {
-    test(`the header still has Sign out on the "${heading}" page (${status})`, async ({ page }) => {
-      await page.route('**/api/me', (route) => route.fulfill({ status, json: { error: 'stubbed' } }))
-      await page.goto('/')
-      await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
-      await expect(page.getByRole('banner').getByRole('link', { name: 'Sign out' })).toHaveAttribute('href', SIGN_OUT_PATH)
-    })
+    // In the header's bar, and on a phone in its menu.
+    for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
+      test(`the header still has Sign out on the "${heading}" page (${status}) at ${viewport.width}px`, async ({ page }) => {
+        await page.setViewportSize(viewport)
+        await page.route('**/api/me', (route) => route.fulfill({ status, json: { error: 'stubbed' } }))
+        await page.goto('/')
+        await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+        await openHeaderControls(page)
+        await expect(signOutLink(page)).toHaveAttribute('href', SIGN_OUT_PATH)
+        await noAxeViolations(page)
+      })
+    }
   }
 })
 
-test('the theme toggle overrides the device and is remembered', async ({ page }, testInfo) => {
-  const deviceIsDark = testInfo.project.name === 'dark'
-  await page.goto('/')
-  const html = page.locator('html')
+// The theme: one toggle. A first visit follows the device, and so does a device that changes while the page is open. Once the toggle has been used, the choice is the person's, on this device.
+test.describe('the theme toggle', () => {
+  test('follows the device until it is used, then keeps the choice across a reload and a change of the device', async ({ page }, testInfo) => {
+    const deviceIsDark = testInfo.project.name === 'dark'
+    await page.goto('/')
+    const html = page.locator('html')
+    await expect(html).toHaveClass(darkClass(deviceIsDark)) // a first visit follows the device
+    await expect(themeToggle(page)).toHaveAccessibleName(`Switch to ${deviceIsDark ? 'light' : 'dark'} theme`)
 
-  await page.getByRole('button', { name: deviceIsDark ? 'Light' : 'Dark' }).click()
-  await expect(html).toHaveClass(darkClass(!deviceIsDark))
+    // The device changes its mind before the toggle is used, and the page follows it (the theme is the layout's, so this does not need the toggle on screen).
+    await changeDeviceScheme(page, deviceIsDark ? 'light' : 'dark')
+    await expect(html).toHaveClass(darkClass(!deviceIsDark))
+    await changeDeviceScheme(page, deviceIsDark ? 'dark' : 'light')
+    await expect(html).toHaveClass(darkClass(deviceIsDark))
 
-  await page.reload()
-  await expect(html).toHaveClass(darkClass(!deviceIsDark))
-  await expect(page.getByRole('button', { name: deviceIsDark ? 'Light' : 'Dark' })).toHaveAttribute('aria-pressed', 'true')
+    await themeToggle(page).click()
+    await expect(html).toHaveClass(darkClass(!deviceIsDark))
+    await expect(themeToggle(page)).toHaveAccessibleName(`Switch to ${deviceIsDark ? 'dark' : 'light'} theme`)
 
-  await page.getByRole('button', { name: 'Device' }).click()
-  await expect(html).toHaveClass(darkClass(deviceIsDark))
-})
+    await page.reload()
+    await expect(html).toHaveClass(darkClass(!deviceIsDark)) // remembered, and applied before the app starts
+    // Now it is the person's choice, so the device does not move it.
+    await changeDeviceScheme(page, deviceIsDark ? 'light' : 'dark')
+    await expect(html).toHaveClass(darkClass(!deviceIsDark))
 
-test('theme buttons are at least 44px and focus is visible with enough contrast', async ({ page }) => {
-  await page.goto('/')
-  for (const name of ['Device', 'Light', 'Dark']) {
-    const box = await page.getByRole('button', { name }).boundingBox()
-    expect(box?.height).toBeGreaterThanOrEqual(44)
-    expect(box?.width).toBeGreaterThanOrEqual(44)
-  }
-  for (const link of await page.getByRole('navigation', { name: 'Main' }).getByRole('link').all()) {
-    expect((await link.boundingBox())?.height).toBeGreaterThanOrEqual(44)
-  }
-
-  // Tab past the skip link to the first navigation link and check a real outline is drawn.
-  await page.keyboard.press('Tab')
-  await page.keyboard.press('Tab')
-  const outline = await page.evaluate(() => {
-    const style = getComputedStyle(document.activeElement!)
-    return { tag: document.activeElement!.tagName, width: parseFloat(style.outlineWidth), style: style.outlineStyle }
+    await themeToggle(page).click() // and the toggle switches it back, which is remembered too
+    await expect(html).toHaveClass(darkClass(deviceIsDark))
+    await page.reload()
+    await expect(html).toHaveClass(darkClass(deviceIsDark))
   })
-  expect(outline).toEqual({ tag: 'A', width: 2, style: 'solid' })
+
+  test('follows the device while it is in a phone\'s menu out of sight, and switches from there', async ({ page }, testInfo) => {
+    const deviceIsDark = testInfo.project.name === 'dark'
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/')
+    const html = page.locator('html')
+    await changeDeviceScheme(page, deviceIsDark ? 'light' : 'dark')
+    await expect(html).toHaveClass(darkClass(!deviceIsDark)) // no toggle was on the screen
+    await openHeaderControls(page)
+    await themeToggle(page).click()
+    await expect(html).toHaveClass(darkClass(deviceIsDark))
+    await expect(themeToggle(page)).toHaveAccessibleName(`Switch to ${deviceIsDark ? 'light' : 'dark'} theme`)
+  })
 })

@@ -104,7 +104,7 @@ function SortMenu<Row>({ columns }: { columns: Column<Row>[] }) {
 
 /**
  * Data as a table on a wide screen and as one card per row on a narrow one (below 768px, which is also what a phone,
- * or a desktop browser at 200% zoom, looks like), so nothing ever scrolls sideways. Text is never below 15px.
+ * or a desktop browser at 200% zoom, looks like), so nothing ever scrolls sideways. Text is 15px or more at the Medium and Large text sizes; Small scales it with the rest of the page (README, Accessibility).
  * `caption` names the data for screen readers in both layouts. Only the layout on screen is rendered, so each cell
  * is built once (a cell with an `id` or a form control never appears twice in the page).
  * A column with `sort` can be sorted by the reader: by its heading in the table, from a "Sort by" menu on cards.

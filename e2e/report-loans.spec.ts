@@ -1,6 +1,7 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { navigateTo } from './shell-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   dateText,
@@ -156,7 +157,7 @@ test.describe('opening the Report', () => {
     await signInAs(context, 'member')
     await context.clock.setFixedTime(NOW)
     await page.goto('/')
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Reports' }).click()
+    await navigateTo(page, 'Reports', 'Reports')
     await expect(page.getByRole('heading', { level: 2, name: 'Loans' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Loans' })

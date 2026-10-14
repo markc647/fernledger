@@ -1,7 +1,8 @@
 import type { Page } from '@playwright/test'
 import { calendarOf, clearDate, dateField, expectDate, pickDate } from './date-helpers'
-import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
+import { chooseTextSize } from './shell-helpers'
 
 // The DatePicker (src/components/date-picker.tsx) on the Styleguide's three samples: "Date", "Optional date" and a date from 10 to 20 October 2026. The forms that use it
 // have their own specs, which choose their dates through `pickDate`; this is the picker itself: what it gives, how it is named, the keyboard, the limits, time zones,
@@ -184,15 +185,14 @@ test('it has no WCAG 2.2 AA violations closed, open, and open on a phone at the 
   // A phone, 200% zoom on a laptop (640 by 360, shorter than the calendar) and 400% zoom (316 by 256).
   for (const viewport of [{ width: 390, height: 844 }, { width: 640, height: 360 }, { width: 316, height: 256 }]) {
     await page.setViewportSize(viewport)
-    await page.getByRole('group', { name: 'Text size' }).getByRole('button', { name: 'A++', exact: true }).click()
-    await expect(page.getByRole('group', { name: 'Text size' }).getByRole('button', { name: 'A++', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await chooseTextSize(page, 'Large')
     await dateField(page, 'Date').scrollIntoViewIfNeeded()
     await pickDate(page, 'Date', '2027-03-31') // a day in the last row, which on a short screen is reached by scrolling the calendar
     await expectStored(page, 'Date', '2027-03-31')
     await dateField(page, 'Date').click()
     const calendar = calendarOf(page)
     await arrived(page)
-    await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+    await settle(page)
     const box = (await calendar.boundingBox())!
     expect(box.x, 'its left edge is on the screen').toBeGreaterThanOrEqual(0)
     expect(box.x + box.width, 'its right edge is on the screen').toBeLessThanOrEqual(viewport.width)

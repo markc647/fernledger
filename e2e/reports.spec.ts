@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { navigateTo } from './shell-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   expectBareMargins,
@@ -131,7 +132,7 @@ test.describe('opening a Report', () => {
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await page.goto('/')
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Reports' }).click()
+    await navigateTo(page, 'Reports', 'Reports')
     await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Transaction listing' }) // the Reports page has a form for each Report
@@ -463,10 +464,13 @@ test.describe('around a Report', () => {
 
   test('another printed page keeps the screen padding: only a Report sets its own margins', async ({ page, context }) => {
     await signInAs(context, 'member')
-    await page.emulateMedia({ media: 'print' })
     await page.goto('/how-to-sign-in')
     await expect(page.getByRole('heading', { level: 1, name: 'How to sign in' })).toBeVisible()
-    expect(await page.locator('main').evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('16px')
+    const padding = () => page.locator('main').evaluate((el) => getComputedStyle(el).paddingLeft)
+    const onScreen = await padding()
+    expect(parseFloat(onScreen)).toBeGreaterThan(0)
+    await page.emulateMedia({ media: 'print' })
+    expect(await padding()).toBe(onScreen)
   })
 
   test('a Transaction from Sync shows everything the bank said under its description, with the parts it lacks left out', async ({ page, context, baseURL }, testInfo) => {

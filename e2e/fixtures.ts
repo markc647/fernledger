@@ -39,6 +39,9 @@ export const test = base.extend<{ expectedStatuses: number[] }>({
   },
 })
 
+/** Waits for the page's transitions and animations to finish, so what is measured is where things end up and not on the way (the sheet sliding in, a button changing colour). */
+export const settle = (page: Page) => page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+
 /** The WCAG 2.2 AA rule tags axe is asked for. */
 const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
 
@@ -53,7 +56,7 @@ export async function noAxeViolations(page: Page) {
   const wasReduced = await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   try {
-    await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+    await settle(page)
     const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
     // Which element, not only how many, because a CI run keeps no trace to look at afterwards.
     expect(violations.map((v) => `${v.id}: ${v.nodes.map((node) => node.target.join(' ')).join(', ')}`)).toEqual([])

@@ -1,4 +1,5 @@
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { chooseTextSize, navLink, openNavGroup } from './shell-helpers'
 
 // The Summary is where every Member lands. These tests give an Account a Balance Check mismatch (one file imported by
 // the API, a second through the Import screen) and then read the Summary as a Member. The light and dark projects share
@@ -79,7 +80,10 @@ test('a Member lands on a Summary with balances, recent Transactions and the Bal
   await expect(recent.getByRole('link', { name: 'See all transactions' })).toBeVisible()
 
   // A Member sees none of the Admin's controls.
-  await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Import' })).toHaveCount(0)
+  await openNavGroup(page, 'Transactions') // so that what is missing from it is missing from a group that is open
+  await expect(navLink(page, 'All Transactions')).toBeVisible()
+  await expect(navLink(page, 'Import')).toHaveCount(0)
+  await expect(navLink(page, 'Uncategorised')).toHaveCount(0)
 })
 
 test('the Summary has no WCAG 2.2 AA violations at the largest text size, on a phone as well', async ({ page, context }) => {
@@ -87,7 +91,7 @@ test('the Summary has no WCAG 2.2 AA violations at the largest text size, on a p
   for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
     await page.goto('/')
-    await page.getByRole('group', { name: 'Text size' }).getByRole('button', { name: 'A++', exact: true }).click()
+    await chooseTextSize(page, 'Large')
     await expect(page.getByRole('region', { name: 'Balance checks' }).getByRole('listitem').first()).toBeVisible()
     await expect(page.getByRole('region', { name: 'Recent transactions' })).toContainText('EXAMPLE')
     await noAxeViolations(page)

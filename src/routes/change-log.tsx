@@ -11,7 +11,7 @@ import { CHANGE_LOG_PAGE_SIZE, changeLogQuery, type ChangeLogFilters } from '@/l
 
 export const Route = createFileRoute('/change-log')({
   component: ChangeLog,
-  staticData: { nav: { label: 'Change Log', order: 80 } },
+  staticData: { nav: { label: 'Change Log', group: 'help', order: 80 } },
 })
 
 const NO_FILTERS: ChangeLogFilters = { type: '', from: '', to: '' }

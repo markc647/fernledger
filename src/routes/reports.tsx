@@ -4,7 +4,7 @@ import { NOT_COUNTED_AS_SPENDING_OR_INCOME } from '@/lib/budgets'
 
 export const Route = createFileRoute('/reports')({
   component: Reports,
-  staticData: { nav: { label: 'Reports', order: 50 } },
+  staticData: { nav: { label: 'Reports', group: 'reports', order: 50 } },
 })
 
 /**

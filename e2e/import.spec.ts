@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { mainNav, navigateTo } from './shell-helpers'
 
 const fixture = (name: string) => readFileSync(new URL(`../test/fixtures/asb/${name}`, import.meta.url), 'utf8')
 
@@ -163,21 +164,23 @@ test('the Admin renames an Account and the new name shows on its Transactions', 
   await page.getByRole('button', { name: 'Save name' }).click()
 
   await expect(page.getByRole('cell', { name: after })).toBeVisible()
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Transactions' }).click()
+  await navigateTo(page, 'All Transactions', 'Transactions')
   await expect(page.getByRole('row', { name: new RegExp(`${after} ASB BANK - INTEREST`) })).toBeVisible()
 })
 
 test('a Member sees Transactions and Accounts but no Import and no rename', async ({ page, context }, testInfo) => {
   await signInAs(context, 'member')
   await page.goto('/transactions')
-  const nav = page.getByRole('navigation', { name: 'Main' })
+  const nav = mainNav(page)
 
   await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
   await expect(page.getByRole('row', { name: /ASB BANK - INTEREST/ }).first()).toBeVisible()
-  await expect(nav.getByRole('link', { name: 'Import' })).toHaveCount(0)
+  await expect(nav.getByRole('link', { name: 'Import' })).toHaveCount(0) // the Transactions group is open here, so this is a link that is not there
   await noAxeViolations(page)
 
-  await nav.getByRole('link', { name: 'Accounts' }).click()
+  // A Member has no Set up group in the sidebar, but Accounts is theirs to read: it is among their Reports.
+  await expect(nav.getByRole('button', { name: 'Set up' })).toHaveCount(0)
+  await navigateTo(page, 'Accounts', 'Reports')
   await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toBeVisible()
   await expect(page.getByRole('cell', { name: numberWith(suffixes(testInfo).small) })).toBeVisible()
   await expect(page.getByRole('button', { name: /^Rename/ })).toHaveCount(0)

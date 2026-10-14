@@ -9,7 +9,7 @@ import { settingsQuery } from '@/lib/settings'
 
 export const Route = createFileRoute('/about-your-data')({
   component: AboutYourData,
-  staticData: { nav: { label: 'About your data', order: 85 } },
+  staticData: { nav: { label: 'About your data', group: 'help', order: 85 } },
 })
 
 /**

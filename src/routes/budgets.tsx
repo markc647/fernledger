@@ -14,7 +14,7 @@ import { dollarsForInput, readDollars } from '@/lib/rules'
 
 export const Route = createFileRoute('/budgets')({
   component: Budgets,
-  staticData: { nav: { label: 'Budgets', order: 46 } },
+  staticData: { nav: { label: 'Budgets', group: 'setup', order: 46 } },
 })
 
 const AMOUNT_HINT = 'Enter an amount of more than $0 in dollars, such as 800 or 800.50.'

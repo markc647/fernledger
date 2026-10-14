@@ -3,6 +3,7 @@ import { drawn, LINE, NET_WORTH, netWorth, SPENT, spending, stubNetWorth, stubSp
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
+import { chooseTextSize, mainNav, navLink, openNavGroup } from './shell-helpers'
 
 // The Dashboard (where the Admin lands), the Summary (where a Member does) and the Charts, against the real Worker. The light and dark projects share one local
 // database, so each has two Accounts of its own, and its own months of Transactions (2004, which no other spec uses: June for light and September for dark,
@@ -76,7 +77,6 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
 
 const dollars = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
-const sizeButton = (page: Page, name: 'A' | 'A+' | 'A++') => page.getByRole('group', { name: 'Text size' }).getByRole('button', { name, exact: true })
 
 /**
  * A section's live region: the one status element it has, on the page before anything happens and empty, so that what it comes to say is a change a screen reader
@@ -94,16 +94,20 @@ type Live = { __live: Record<string, string[]> }
 /**
  * Records every text a section's status region comes to have, from the moment it is first on the page (the page's scripts run before anything is drawn). A section
  * that loads as soon as it is shown has no moment a test can stop at to see its region empty, so the test reads the history afterwards: empty, then loading, then loaded.
+ * A page's commit and the effect that fills the region can run in one task (a bigger layout around the page does it), and an observer is told of both together, after the
+ * region already has its words. So the first time it sees a region it looks for a change inside the region among the changes it is told of: that change is the words
+ * arriving in a region that was on the page without them, so the region was empty first.
  */
 const watchLiveRegions = (page: Page) =>
   page.addInitScript(() => {
     const seen: Record<string, string[]> = {}
     ;(window as unknown as Live).__live = seen
-    new MutationObserver(() => {
+    new MutationObserver((records) => {
       for (const section of document.querySelectorAll('section[aria-labelledby]')) {
         const live = section.querySelector(':scope > [role="status"]')
         if (!live) continue
         const history = (seen[section.getAttribute('aria-labelledby')!] ??= [])
+        if (history.length === 0 && records.some((record) => record.target === live || record.target.parentNode === live)) history.push('')
         if (history.at(-1) !== live.textContent) history.push(live.textContent ?? '')
       }
     }).observe(document, { childList: true, subtree: true, characterData: true })
@@ -161,10 +165,11 @@ test('the Admin lands on the Dashboard: their tools, every part of the Summary, 
   await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
 
   // The navigation calls the Admin's landing page the Dashboard, and has no separate Summary.
-  const nav = page.getByRole('navigation', { name: 'Main' })
+  const nav = mainNav(page)
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('aria-current', 'page')
   await expect(nav.getByRole('link', { name: 'Summary' })).toHaveCount(0)
-  await expect(nav.getByRole('link', { name: 'Charts' })).toBeVisible()
+  await openNavGroup(page, 'Reports') // which opens the sidebar too, if this width keeps it as the icon rail
+  await expect(navLink(page, 'Charts')).toBeVisible()
 
   // The Admin's tools lead to the Admin's pages.
   const tools = page.getByRole('region', { name: 'Your tools' })
@@ -223,8 +228,7 @@ test('the button that shows net worth is a touch target with a clear name, works
   const show = region.getByRole('button', { name: 'Show net worth', exact: true })
   await expect(show).toBeVisible()
   expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44)
-  await sizeButton(page, 'A++').click()
-  await expect(sizeButton(page, 'A++')).toHaveAttribute('aria-pressed', 'true')
+  await chooseTextSize(page, 'Large')
   const { live, element } = await liveRegion(region)
 
   await show.focus()
@@ -247,7 +251,7 @@ test('a Member lands on the Summary, which leads to the Charts, and sees none of
   await stubNetWorth(page)
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Summary' })).toBeVisible()
-  const nav = page.getByRole('navigation', { name: 'Main' })
+  const nav = mainNav(page)
   await expect(nav.getByRole('link', { name: 'Summary' })).toHaveAttribute('aria-current', 'page')
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Your tools' })).toHaveCount(0)
@@ -478,8 +482,7 @@ test('the charts have no WCAG 2.2 AA violations in this theme, with their data, 
     await page.setViewportSize(viewport)
     await page.goto('/charts')
     await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
-    await sizeButton(page, 'A++').click()
-    await expect(sizeButton(page, 'A++')).toHaveAttribute('aria-pressed', 'true')
+    await chooseTextSize(page, 'Large')
     await chooseDates(page, from, to)
     await drawn(netWorth(page), LINE)
     await drawn(spending(page), new RegExp(`^Bar chart of the 3 Categories that spent the most in ${words}`))

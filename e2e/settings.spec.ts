@@ -1,6 +1,7 @@
 import type { BrowserContext } from '@playwright/test'
 import type { Role } from '../src/generated/api/auth'
 import { expect, noAxeViolations, test } from './fixtures'
+import { sidebarTitle } from './shell-helpers'
 
 // Cookies are not scoped by port, so the dev identity needs no copy of the port from playwright.config.ts.
 const signInAs = (context: BrowserContext, role: Role) =>
@@ -33,13 +34,13 @@ test('the Admin edits the app title and the About-your-data fields, and they are
   await expect(page.getByLabel('How long the data is kept')).toHaveValue('Until Mum asks us to delete it')
 })
 
-test('saving a new app title changes the header and page title straight away', async ({ page, context }) => {
+test('saving a new app title changes the title in the sidebar and the page title straight away', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.goto('/settings')
-  await expect(page.getByRole('banner').getByText('Fernledger', { exact: true })).toBeVisible()
+  await expect(sidebarTitle(page).getByText('Fernledger', { exact: true })).toBeVisible()
   await page.getByLabel('App title').fill("Dad's finances")
   await page.getByRole('button', { name: 'Save settings' }).click()
-  await expect(page.getByRole('banner').getByText("Dad's finances")).toBeVisible()
+  await expect(sidebarTitle(page).getByText("Dad's finances")).toBeVisible()
   await expect(page).toHaveTitle("Dad's finances")
 })
 

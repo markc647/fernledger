@@ -13,7 +13,7 @@ import { saveSettings, SettingsRejected, settingsQuery, type Settings } from '@/
 
 export const Route = createFileRoute('/settings')({
   component: SettingsScreen,
-  staticData: { nav: { label: 'Settings', adminOnly: true, order: 90 } },
+  staticData: { nav: { label: 'Settings', group: 'setup', adminOnly: true, order: 90 } },
 })
 
 const FIELD_LABELS: Record<keyof Settings, string> = {
@@ -98,7 +98,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
         </label>
         <input {...field('app_title')} type="text" maxLength={60} className={inputStyle} aria-describedby="app_title-hint" />
         <p id="app_title-hint" className="mt-1 text-sm text-muted-foreground">
-          Shown in the header, and will be shown on Reports. For example, "Mum's finances".
+          Shown at the top of the sidebar, and will be shown on Reports. For example, "Mum's finances".
         </p>
       </div>
       <fieldset className="space-y-6">

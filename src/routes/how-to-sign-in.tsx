@@ -6,12 +6,12 @@ import { settingsQuery } from '@/lib/settings'
 
 export const Route = createFileRoute('/how-to-sign-in')({
   component: HowToSignIn,
-  staticData: { nav: { label: 'How to sign in', order: 86 } },
+  staticData: { nav: { label: 'How to sign in', group: 'help', order: 86 } },
 })
 
 /**
  * The Cloudflare Access email one-time PIN sign-in (ADR 0002), in large print, for Members who find it hard. Printable:
- * the header and buttons drop out of the printout (src/routes/__root.tsx, `print:hidden`), and the text is 12pt or more.
+ * the header, the sidebar and buttons drop out of the printout (`print:hidden`, in src/components/site-header.tsx and ui/sidebar.tsx), and the text is 12pt or more.
  * The address in step 1 is the one the page is open at, so nothing about the deployment is written into the guide.
  *
  * The steps and button names follow Cloudflare's own one-time PIN page:
@@ -53,7 +53,7 @@ function HowToSignIn() {
           <strong className="font-semibold">Type the code in.</strong> Type the code from the email into the Cloudflare page and press "Sign in". The code works for 10 minutes, and only once. If it has run out, press "Request new code".
         </li>
         <li className="break-inside-avoid ps-1">
-          <strong className="font-semibold">You're in.</strong> Fernledger opens. You stay signed in on this device for a while (usually 24 hours, as your family set it up). After that, do these steps again. If you used a computer that is not your own, press "Sign out" at the top of Fernledger when you have finished.
+          <strong className="font-semibold">You're in.</strong> Fernledger opens. You stay signed in on this device for a while (usually 24 hours, as your family set it up). After that, do these steps again. If you used a computer that is not your own, press "Sign out" at the top of Fernledger when you have finished. On a phone it is in the menu at the top right, called "Display settings and sign out".
         </li>
       </ol>
 

@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 // - the colours go on the container as CSS variables (`--color-<key>`) through React's `style`, which sets them on the element's style object, not in a <style>
 //   element as stock shadcn does. The Content Security Policy allows inline styles today (worker/security-headers.ts), so this is not needed to run; it keeps a
 //   chart working should a stricter `style-src` ever drop 'unsafe-inline';
-// - text is sized in rem, so the A / A+ / A++ control scales an axis as it scales the page, and never below the 15px a table's text keeps;
+// - text is sized in rem, so the Small / Medium / Large control scales an axis as it scales the page, and never below the body size a table's text keeps;
 // - nothing moves: a chart draws itself at once (each chart sets `isAnimationActive={false}`, and `ChartTooltip` does by default), which reduced-motion readers need
 //   and the accessibility checks measure.
 // A chart is a picture of numbers that are also written out: put it in a `ChartFigure`, which names it for a screen reader in a sentence, and write the

@@ -1,83 +1,131 @@
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { netWorth as netWorthRegion, spending as spendingRegion } from './chart-helpers'
-import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
+import {
+  chooseTextSize,
+  closeHeaderControls,
+  expectRailUnclipped,
+  expectTextSize,
+  mainNav,
+  navLink,
+  openHeaderControls,
+  openNavGroup,
+  showSidebar,
+  siteHeader,
+  sidebarTitle,
+  signOutLink,
+  textSizeButton,
+  textSizeGroup,
+  themeToggle,
+} from './shell-helpers'
 
 const fontSize = (page: Page, selector: string) =>
   page.locator(selector).first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
 
-const sizeButton = (page: Page, name: 'A' | 'A+' | 'A++') =>
-  page.getByRole('group', { name: 'Text size' }).getByRole('button', { name, exact: true })
-
 // ---------------------------------------------------------------------------------------------------------------
-// Text size (A / A+ / A++)
+// Text size (Small / Medium / Large)
 
 test.describe('text size', () => {
-  test('starts at A with 16px body text, and each step is bigger', async ({ page }) => {
+  test('starts at Medium with 16px body text; Small is 14px and Large is 20px', async ({ page }) => {
     await page.goto('/styleguide')
-    await expect(sizeButton(page, 'A')).toHaveAttribute('aria-pressed', 'true')
+    await expect(textSizeButton(page, 'Medium')).toBeChecked()
     expect(await fontSize(page, 'body')).toBe(16)
 
-    await sizeButton(page, 'A+').click()
-    await expect(sizeButton(page, 'A+')).toHaveAttribute('aria-pressed', 'true')
-    await expect(sizeButton(page, 'A')).toHaveAttribute('aria-pressed', 'false')
-    const medium = await fontSize(page, 'body')
-    expect(medium).toBeGreaterThan(16)
+    await textSizeButton(page, 'Small').click()
+    await expect(textSizeButton(page, 'Small')).toBeChecked()
+    await expect(textSizeButton(page, 'Medium')).not.toBeChecked()
+    expect(await fontSize(page, 'body')).toBe(14)
 
-    await sizeButton(page, 'A++').click()
-    await expect(sizeButton(page, 'A++')).toHaveAttribute('aria-pressed', 'true')
-    expect(await fontSize(page, 'body')).toBeGreaterThan(medium)
+    await textSizeButton(page, 'Large').click()
+    await expect(textSizeButton(page, 'Large')).toBeChecked()
+    expect(await fontSize(page, 'body')).toBe(20)
   })
 
   test('is remembered on this device, and applied before the app starts', async ({ page }) => {
     await page.goto('/styleguide')
-    await sizeButton(page, 'A++').click()
+    await textSizeButton(page, 'Large').click()
     await page.reload()
-    await expect(sizeButton(page, 'A++')).toHaveAttribute('aria-pressed', 'true')
-    expect(await fontSize(page, 'body')).toBeCloseTo(16 * 1.3, 1)
+    await expect(textSizeButton(page, 'Large')).toBeChecked()
+    expect(await fontSize(page, 'body')).toBe(20)
     // The CSP-safe external script has set it by the time the document has parsed, so the page never jumps.
-    await expect(page.locator('html')).toHaveAttribute('data-text-size', 'a-plus-plus')
+    await expectTextSize(page, 'Large')
   })
 
-  test('still works, without errors, when the browser blocks storage', async ({ page }) => {
-    await page.addInitScript(() => {
-      Object.defineProperty(window, 'localStorage', {
-        get() {
-          throw new DOMException('Storage is blocked', 'SecurityError')
-        },
-      })
-    })
-    await page.goto('/styleguide') // the fixture fails the test on any console error, uncaught error or CSP violation
-    await expect(sizeButton(page, 'A')).toHaveAttribute('aria-pressed', 'true')
-    await sizeButton(page, 'A+').click()
-    await expect(sizeButton(page, 'A+')).toHaveAttribute('aria-pressed', 'true')
-    expect(await fontSize(page, 'body')).toBeGreaterThan(16)
-    // Other controls still work too.
-    await page.getByRole('button', { name: 'Dark' }).click()
-    await expect(page.locator('html')).toHaveClass(/dark/)
+  // The first control (A / A+ / A++) saved 'a-plus' or 'a-plus-plus' under the same key. Someone who chose A+ on it gets Large and not the default (src/lib/text-size.test.ts
+  // and scripts/text-size-init.test.mjs hold the other values).
+  test('reads a size the old A / A+ / A++ control saved: A+ is Large', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('fernledger-text-size', 'a-plus'))
+    await page.goto('/styleguide')
+    await expectTextSize(page, 'Large')
+    await expect(textSizeButton(page, 'Large')).toBeChecked()
   })
 
   test('shrugs off a junk saved value', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('fernledger-text-size', 'enormous'))
     await page.goto('/styleguide')
-    await expect(sizeButton(page, 'A')).toHaveAttribute('aria-pressed', 'true')
+    await expect(textSizeButton(page, 'Medium')).toBeChecked()
     expect(await fontSize(page, 'body')).toBe(16)
   })
 
-  test('has touch targets of at least 44px', async ({ page, context }) => {
+  // README, Accessibility: a target is 44px on a touch screen, where it matters. With a mouse the shell's rows and header buttons are 32px (2rem), a deliberate exception, and
+  // not under 24px at any text size (WCAG 2.5.8): Small makes every rem-sized thing 12.5% smaller, targets included.
+  test.describe('on a touch screen', () => {
+    test.use({ hasTouch: true })
+    test('the header controls and every row of the sidebar are at least 44px', async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.setViewportSize({ width: 1280, height: 800 })
+      await page.goto('/styleguide')
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      for (const group of ['Transactions', 'Reports', 'Set up', 'Help']) await openNavGroup(page, group)
+      const targets = [
+        ...(['Small', 'Medium', 'Large'] as const).map((name) => textSizeButton(page, name)),
+        themeToggle(page),
+        signOutLink(page),
+        page.getByRole('button', { name: 'Toggle sidebar' }),
+        ...(await mainNav(page).getByRole('link').all()),
+        ...(await mainNav(page).getByRole('button').all()),
+      ]
+      expect(targets.length).toBeGreaterThan(20)
+      for (const target of targets) {
+        const box = await target.boundingBox()
+        expect(box?.height, await target.innerText().catch(() => 'a control')).toBeGreaterThanOrEqual(44)
+        expect(box?.width).toBeGreaterThanOrEqual(44)
+      }
+    })
+
+    test('the icons of the collapsed sidebar are at least 44px too', async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.setViewportSize({ width: 900, height: 800 }) // narrower than 1100px, so the sidebar starts as the icon rail
+      await page.goto('/styleguide')
+      await expect(mainNav(page).getByRole('button', { name: 'Transactions' })).toBeVisible()
+      for (const target of [...(await mainNav(page).getByRole('button').all()), ...(await mainNav(page).getByRole('link').all())]) {
+        const box = await target.boundingBox()
+        expect(box?.height).toBeGreaterThanOrEqual(44)
+        expect(box?.width).toBeGreaterThanOrEqual(44)
+      }
+      await expectRailUnclipped(page) // a 44px icon in a rail too narrow for it is cut off, and so is its outline
+    })
+  })
+
+  test('with a mouse the shell is at least 32px at Medium and Large and never under 24px at Small', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/styleguide')
-    // The Admin-only links appear once the signed-in Member is known; `.all()` below doesn't wait for them.
-    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' })).toBeVisible()
-    const targets = [
-      ...(['A', 'A+', 'A++'] as const).map((name) => sizeButton(page, name)),
-      ...(await page.getByRole('navigation', { name: 'Main' }).getByRole('link').all()),
-      page.getByRole('link', { name: 'Sign out' }),
-    ]
-    expect(targets.length).toBeGreaterThan(3)
-    for (const target of targets) {
-      const box = await target.boundingBox()
-      expect(box?.height).toBeGreaterThanOrEqual(44)
-      expect(box?.width).toBeGreaterThanOrEqual(44)
+    for (const group of ['Transactions', 'Reports', 'Set up', 'Help']) await openNavGroup(page, group)
+    for (const [size, least] of [['Medium', 32], ['Large', 32], ['Small', 24]] as const) {
+      await chooseTextSize(page, size)
+      await settle(page)
+      const targets = [
+        ...(['Small', 'Medium', 'Large'] as const).map((name) => textSizeButton(page, name)),
+        themeToggle(page),
+        signOutLink(page),
+        ...(await mainNav(page).getByRole('link').all()),
+        ...(await mainNav(page).getByRole('button').all()),
+      ]
+      for (const target of targets) {
+        const box = await target.boundingBox()
+        expect(box?.height, `${size}: ${await target.innerText().catch(() => 'a control')}`).toBeGreaterThanOrEqual(least)
+        expect(box?.width).toBeGreaterThanOrEqual(least)
+      }
     }
   })
 })
@@ -98,16 +146,16 @@ test.describe('zoom', () => {
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
-      for (const size of ['A', 'A++'] as const) {
+      for (const size of ['Medium', 'Large'] as const) {
         test(`${path} at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
           await signInAs(context, 'admin')
           await page.setViewportSize({ width, height })
           await page.goto(path)
-          await sizeButton(page, size).click()
+          await chooseTextSize(page, size)
           await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
           // Measure only once the size is applied and the buttons have finished their width transition.
-          await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+          await expectTextSize(page, size)
+          await settle(page)
           const { scrollWidth, clientWidth } = await page.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
@@ -118,33 +166,56 @@ test.describe('zoom', () => {
     }
   }
 
-  // The Admin's full navigation is the widest header. The per-page test above covers it only incidentally,
-  // so this one names the case: nothing in the header may push the page wider than the 320px viewport.
-  for (const path of ['/', '/settings']) {
-    test(`the header with the Admin's full navigation fits 320px at text size A++ on ${path}`, async ({ page, context }) => {
-      await signInAs(context, 'admin')
-      await page.setViewportSize({ width: 320, height: 256 })
-      await page.goto(path)
-      await sizeButton(page, 'A++').click()
-      // Measure only once the larger size is applied and the buttons have finished their width transition.
-      await expect(page.locator('html')).toHaveAttribute('data-text-size', 'a-plus-plus')
-      await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
-      const nav = page.getByRole('navigation', { name: 'Main' })
-      await expect(nav.getByRole('link', { name: 'Settings' })).toBeVisible()
-      await expect(nav.getByRole('link', { name: 'Change Log' })).toBeVisible()
-      await expect(page.getByRole('banner').getByRole('link', { name: 'Sign out' })).toBeVisible()
-      const { scrollWidth, innerWidth } = await page.evaluate(() => ({
-        scrollWidth: document.documentElement.scrollWidth,
-        innerWidth: window.innerWidth,
-      }))
-      expect(scrollWidth).toBeLessThanOrEqual(innerWidth)
-    })
-  }
+  // The header is one row on a phone (the sidebar toggle, where the page is, one menu button), and the menu and the sidebar's sheet, open, fit the window however short it is
+  // and however large the text: at 400% zoom the window is 256px high, and what does not fit scrolls. (The Admin's sidebar is the longest.)
+  test(`the header is one row at 320px and text size Large, and its menu and the sidebar's sheet fit`, async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.setViewportSize({ width: 320, height: 256 })
+    await page.goto('/')
+    await chooseTextSize(page, 'Large')
+    await settle(page)
+    const within = async (locator: Locator, where: { x?: number; y?: number; width: number; height: number }, what: string) => {
+      const box = (await locator.boundingBox())!
+      expect(box.x, `${what}: left`).toBeGreaterThanOrEqual((where.x ?? 0) - 0.5)
+      expect(box.x + box.width, `${what}: right`).toBeLessThanOrEqual((where.x ?? 0) + where.width + 0.5)
+      expect(box.y, `${what}: top`).toBeGreaterThanOrEqual((where.y ?? 0) - 0.5)
+      expect(box.y + box.height, `${what}: bottom`).toBeLessThanOrEqual((where.y ?? 0) + where.height + 0.5)
+    }
+    const screen = { width: 320, height: 256 }
+
+    // One row: the bar is 3rem tall (60px at Large), not two lines of controls, and none of it is wider than the screen.
+    const header = siteHeader(page)
+    expect((await header.boundingBox())!.height).toBeLessThanOrEqual(60.5)
+    await within(header.getByRole('button', { name: 'Toggle sidebar' }), screen, 'the sidebar toggle')
+    await within(header.getByRole('button', { name: 'Display settings and sign out' }), screen, 'the menu button')
+    await expect(header.getByRole('button', { name: 'Display settings and sign out' })).toBeVisible()
+    await expect(textSizeGroup(page)).toBeHidden() // all three of the controls are in the menu
+    const { scrollWidth, innerWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }))
+    expect(scrollWidth).toBeLessThanOrEqual(innerWidth)
+
+    // The menu: all of it is on the screen, or can be scrolled to.
+    await openHeaderControls(page)
+    const menu = page.locator('[data-slot="popover-content"]')
+    await within(menu, screen, 'the menu')
+    await signOutLink(page).scrollIntoViewIfNeeded()
+    await within(signOutLink(page), (await menu.boundingBox())!, 'Sign out, in the menu')
+    await closeHeaderControls(page)
+
+    // The sidebar's sheet, with the Admin's longest group open: it fits, and every link in it can be scrolled to.
+    await openNavGroup(page, 'Set up')
+    await settle(page) // the sheet has slid in
+    const sheet = page.locator('[data-slot="sidebar"][data-mobile="true"]')
+    await within(sheet, screen, 'the sheet')
+    for (const label of ['Accounts', 'Categories', 'Rules', 'Budgets', 'Settings']) {
+      await navLink(page, label).scrollIntoViewIfNeeded()
+      await within(navLink(page, label), (await sheet.boundingBox())!, label)
+    }
+  })
 
   // The Import screen with a file chosen and the "Replace imported history" question open: the longest text it shows.
   // The Account and its imported-row count are stubbed, so this needs no data in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/import with the replace question open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example savings', accountNumber: '99-9999-9999999-97', cutoverDate: '2026-10-01' }] }))
@@ -152,7 +223,7 @@ test.describe('zoom', () => {
         await page.route('**/api/imports/carry-preview', (route) => route.fulfill({ json: { waiting: 43, carries: 38, differing: 2 } }))
         await page.setViewportSize({ width, height })
         await page.goto('/import')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         const csv = [
           'Created date / time : 2 October 2026 / 18:55:26',
           'Bank 99; Branch 9999; Account 9999999-97 (Zoom Example)',
@@ -168,8 +239,8 @@ test.describe('zoom', () => {
         await page.getByRole('button', { name: 'Replace imported history…' }).click()
         await expect(page.getByRole('alertdialog')).toContainText('removed in steps of 5,000')
         await expect(page.getByRole('alertdialog')).toContainText("43 Transactions have an Override (your own Category), a Note or a Not a Transfer mark. 38 of them carry over to this file; 5 won't.")
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -182,7 +253,7 @@ test.describe('zoom', () => {
   // The Rules page with a long Rule listed, the form open and a check result with a long example: the longest text it shows.
   // The Rules and the check are stubbed, so this needs no data in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/rules with the form open and a check result at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         const description = 'EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN'
@@ -196,15 +267,15 @@ test.describe('zoom', () => {
         await page.route('**/api/rules/preview', (route) => route.fulfill({ json: { matches: 1234, samples: [{ id: 1, date: '2026-09-10', description, bankType: 'EFTPOS', amountCents: -123456789 }] } }))
         await page.setViewportSize({ width, height })
         await page.goto('/rules')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         await page.getByRole('button', { name: 'Add a Rule' }).click()
         await page.getByLabel('Text contains').fill('example')
         await page.getByRole('button', { name: 'Check how many match' }).click()
         await expect(page.getByText('1,234 Transactions you already have match.')).toBeVisible()
         await expect(page.getByText(/Category: Health and medical \(removed/)).toBeVisible()
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -217,7 +288,7 @@ test.describe('zoom', () => {
   // The Rules page with the D1 usage bar on and the day used up: the longest figures and badge it shows (the figures are stubbed, so this needs
   // no token). With it off, the page's own test above covers the longer Setup needed words.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/rules with the D1 usage bar showing the day used up at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         await page.route('**/api/features', (route) => route.fulfill({ json: { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] } }))
@@ -226,11 +297,11 @@ test.describe('zoom', () => {
         )
         await page.setViewportSize({ width, height })
         await page.goto('/rules')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         await expect(page.getByText('5,100,000 of 5,000,000 rows read · 102%')).toBeVisible()
         await expect(page.getByText('The allowance starts again on Thu 15 Oct 2026, 1:00 pm, New Zealand time.')).toBeVisible()
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -243,7 +314,7 @@ test.describe('zoom', () => {
   // The Summary with its longest content: long Account names, big amounts, a warning with its explanation, and a
   // Transaction with a long description. The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/ with a Balance Check warning at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         const longName = 'Example everyday account for the household bills and groceries'
@@ -275,12 +346,12 @@ test.describe('zoom', () => {
         )
         await page.setViewportSize({ width, height })
         await page.goto('/')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         await expect(page.getByRole('region', { name: 'Balance checks' })).toContainText('Balance differs from bank by $1,234,567.89 since Wed 30 Sept 2026')
         await expect(page.getByRole('region', { name: 'Recent transactions' })).toContainText('EXAMPLE SHOP WITH A LONG ENOUGH NAME')
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -293,7 +364,7 @@ test.describe('zoom', () => {
   // The Budgets page with its longest content: a long Category name, big amounts, a long list of changes, and the Admin's form open
   // with every button it can have. The Budgets are stubbed, so this needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/budgets with long content and the form open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         const longName = 'Health and medical costs for the household and the long-term care fees'
@@ -322,7 +393,7 @@ test.describe('zoom', () => {
         )
         await page.setViewportSize({ width, height })
         await page.goto('/budgets')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         await page.getByRole('button', { name: `Edit Budget for ${longName}` }).click()
         await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('1234567.89')
         await expect(page.getByRole('button', { name: 'End Budget' })).toBeVisible()
@@ -334,8 +405,8 @@ test.describe('zoom', () => {
         await page.getByRole('button', { name: 'Save Budget' }).click()
         await expect(page.getByRole('alert')).toContainText('more than $0')
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -353,7 +424,7 @@ test.describe('zoom', () => {
     { form: 'the removal question for an Income Category', button: 'Remove', category: 'Wages and salary' },
   ] as const
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       for (const { form, button, category } of categoryForms) {
         test(`/categories with ${form} open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
           await signInAs(context, 'admin')
@@ -375,7 +446,7 @@ test.describe('zoom', () => {
           )
           await page.setViewportSize({ width, height })
           await page.goto('/categories')
-          await sizeButton(page, size).click()
+          await chooseTextSize(page, size)
           const target = category === 'long' ? longName : category
           await page.getByRole('button', { name: `${button} ${target}` }).click()
           if (button === 'Select kind of') {
@@ -389,8 +460,8 @@ test.describe('zoom', () => {
             await expect(page.getByText('stops being used in every month')).toHaveCount(0)
           }
           // Measure only once the size is applied and the buttons have finished their width transition.
-          await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+          await expectTextSize(page, size)
+          await settle(page)
           const { scrollWidth, clientWidth } = await page.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
@@ -403,7 +474,7 @@ test.describe('zoom', () => {
 
   // The Summary's Budget vs actual with its longest content: a long Category name, big amounts, and each Status. The data is stubbed.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/ with Budget vs actual at its longest at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         const longName = 'Health and medical costs for the household and the long-term care fees'
@@ -423,7 +494,7 @@ test.describe('zoom', () => {
         )
         await page.setViewportSize({ width, height })
         await page.goto('/')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         const widget = page.getByRole('region', { name: 'Budget vs actual' })
         await expect(widget).toContainText('Over Budget')
         await expect(widget).toContainText('On Budget')
@@ -434,8 +505,8 @@ test.describe('zoom', () => {
         await expect(widget).toContainText('Uncategorised (includes money in not yet given a Category)')
         await expect(widget).toContainText('$1,234,567,890.12 back')
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -477,13 +548,13 @@ test.describe('zoom', () => {
   }
   for (const { path, role } of [{ path: '/charts', role: 'member' }, { path: '/', role: 'admin' }] as const) {
     for (const { name, width, height } of zoomLevels) {
-      for (const size of ['A', 'A++'] as const) {
+      for (const size of ['Medium', 'Large'] as const) {
         test(`${path} with long charts (${role}) at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
           await signInAs(context, role)
           await stubCharts(page)
           await page.setViewportSize({ width, height })
           await page.goto(path)
-          await sizeButton(page, size).click()
+          await chooseTextSize(page, size)
           const netWorth = netWorthRegion(page)
           const spending = spendingRegion(page)
           // The Dashboard draws net worth when it is asked to; the Charts page draws it at once.
@@ -496,8 +567,8 @@ test.describe('zoom', () => {
           await expect(spending).toContainText('The chart shows the biggest 12 Categories. The table has the other 2 too.')
           await expect(spending).toContainText('$1,234,567.89 back')
           // Measure only once the size is applied and the buttons have finished their width transition.
-          await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+          await expectTextSize(page, size)
+          await settle(page)
           const { scrollWidth, clientWidth } = await page.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
@@ -517,13 +588,13 @@ test.describe('zoom', () => {
   // The Dashboard as the Admin lands on it, net worth not yet asked for: its explanation, its button (a touch target that may wrap) and its link to the Charts page, beside
   // spending drawn from long data. The charts' data is stubbed, so this needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/ with the Show net worth button at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         await stubCharts(page)
         await page.setViewportSize({ width, height })
         await page.goto('/')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         const netWorth = netWorthRegion(page)
         const button = netWorth.getByRole('button', { name: 'Show net worth' })
         await expect(button).toBeVisible()
@@ -531,8 +602,8 @@ test.describe('zoom', () => {
         await expect(netWorth.getByRole('link', { name: 'Open the Charts page for longer ranges' })).toBeVisible()
         await expect(spendingRegion(page).getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -548,7 +619,7 @@ test.describe('zoom', () => {
   // A Transaction's details with every field filled in and long values, and the Admin's edit panel open: the longest text
   // that page shows. The Transaction is stubbed, so this needs no data in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/transactions/4242 with every detail filled and the edit panel open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         const long = 'EXAMPLE'.padEnd(80, 'x')
@@ -581,12 +652,12 @@ test.describe('zoom', () => {
         )
         await page.setViewportSize({ width, height })
         await page.goto('/transactions/4242')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         await page.getByRole('button', { name: 'Edit Category and Note' }).click()
         await expect(page.getByRole('region', { name: 'Edit Category and Note' })).toBeVisible()
         await expect(page.getByRole('region', { name: 'From the bank' })).toContainText('First seen by Akahu')
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -599,7 +670,7 @@ test.describe('zoom', () => {
   // The Transaction listing Report with its longest content: a long app title and Account name, a long description and Note,
   // a huge amount and totals, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/reports/transactions with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         const long = 'EXAMPLE'.padEnd(80, 'x')
@@ -615,11 +686,11 @@ test.describe('zoom', () => {
         )
         await page.setViewportSize({ width, height })
         await page.goto('/reports/transactions?account=1&from=2026-10-01&to=2026-10-31')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         await expect(page.getByRole('article', { name: 'Transaction listing' })).toContainText('−$1,234,567.89')
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -632,7 +703,7 @@ test.describe('zoom', () => {
   // The balances-over-time Report with its longest content: a long app title and Account name, the largest balances and a Balance Check
   // difference, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/reports/balances with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
@@ -657,12 +728,12 @@ test.describe('zoom', () => {
         )
         await page.setViewportSize({ width, height })
         await page.goto('/reports/balances?account=1&from=2026-09-01&to=2026-12-31')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         await expect(page.getByRole('article', { name: 'Balances over time' })).toContainText('$1,234,567.89')
         await expect(page.getByRole('article', { name: 'Balances over time' })).toContainText('Balance differs from bank by $1,234,567.89')
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -675,7 +746,7 @@ test.describe('zoom', () => {
   // The spending-by-Category Report with its longest content: a long app title and Account name, a Category name with no spaces, the largest amounts, money
   // back and a total that is less than nothing, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/reports/spending with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
@@ -696,14 +767,14 @@ test.describe('zoom', () => {
         )
         await page.setViewportSize({ width, height })
         await page.goto('/reports/spending?from=2026-09-01&to=2026-10-31')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         const report = page.getByRole('article', { name: 'Spending by Category' })
         await expect(report).toContainText('$1,234,567,890.12')
         await expect(report).toContainText('$1,234,567.89 back')
         await expect(report).toContainText('Uncategorised (includes money in not yet given a Category)') // the longest row name
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -717,7 +788,7 @@ test.describe('zoom', () => {
   // an opening balance, and a loan owed to the person as well as one owed by them, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in
   // the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/reports/loans with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         const person = 'Alexandra'.padEnd(100, 'x')
@@ -740,14 +811,14 @@ test.describe('zoom', () => {
         })
         await page.setViewportSize({ width, height })
         await page.goto('/reports/loans?from=2026-09-01&to=2026-10-31')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         const report = page.getByRole('article', { name: 'Loans', exact: true })
         await expect(report).toContainText('$2,469,135.78') // the opening balance and the loan together, the largest amount owed
         await expect(report).toContainText(`${person} owes`)
         await expect(report).toContainText('Ben is owed')
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -761,7 +832,7 @@ test.describe('zoom', () => {
   // month, a Budget that changed, a month that is not over and the months together, on screen (cards on a narrow window). The data is stubbed, so the test needs
   // nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/reports/budget-vs-actual with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         const long = 'Category with a long name'.padEnd(60, 'z')
@@ -792,7 +863,7 @@ test.describe('zoom', () => {
         )
         await page.setViewportSize({ width, height })
         await page.goto('/reports/budget-vs-actual?from=2026-08-15&to=2026-10-31')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         const report = page.getByRole('article', { name: 'Budget vs actual' })
         await expect(report).toContainText('$1,234,567.89')
         await expect(report).toContainText('You chose')
@@ -800,8 +871,8 @@ test.describe('zoom', () => {
         await expect(report).toContainText('Budget changed from September 2026')
         await expect(report).toContainText('August 2026 to September 2026, the 2 months that have ended')
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -815,7 +886,7 @@ test.describe('zoom', () => {
   // below zero, the notice about money in with no Category with a large amount in it, and months with sentences under their names (the dates cover only part of the
   // first, the second is not over, the third has not begun), on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['A', 'A++'] as const) {
+    for (const size of ['Medium', 'Large'] as const) {
       test(`/reports/income-vs-spending with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
@@ -836,7 +907,7 @@ test.describe('zoom', () => {
         )
         await page.setViewportSize({ width, height })
         await page.goto('/reports/income-vs-spending?from=2026-09-15&to=2026-11-10')
-        await sizeButton(page, size).click()
+        await chooseTextSize(page, size)
         const report = page.getByRole('article', { name: 'Income vs spending by month' })
         await expect(report).toContainText('$1,234,567,890.12')
         await expect(report).toContainText('−$1,234,567,890.12')
@@ -848,8 +919,8 @@ test.describe('zoom', () => {
         await expect(report).toContainText('This month is not over yet, so these are the figures so far.')
         await expect(report).toContainText('This month has not begun, so there is nothing to show yet.')
         // Measure only once the size is applied and the buttons have finished their width transition.
-        await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await expectTextSize(page, size)
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -859,13 +930,22 @@ test.describe('zoom', () => {
     }
   }
 
-  test('a very long app title wraps instead of scrolling sideways', async ({ page }) => {
-    await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(120, 'x'), about_contact: '', about_retention: '' } }))
-    await page.setViewportSize({ width: 320, height: 256 })
-    await page.goto('/')
-    await expect(page.getByRole('banner')).toContainText('Thexxx')
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
-  })
+  // The app title is at the top of the sidebar: on a phone, in its sheet. It wraps over as many lines as it needs rather than being cut short or scrolling sideways.
+  for (const { name, width, height } of zoomLevels.slice(0, 2)) {
+    test(`a very long app title wraps in the sidebar's sheet instead of scrolling sideways, at ${name}`, async ({ page }) => {
+      await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(120, 'x'), about_contact: '', about_retention: '' } }))
+      await page.setViewportSize({ width, height })
+      await page.goto('/')
+      await showSidebar(page)
+      const title = sidebarTitle(page).getByText('Thexxx')
+      await expect(title).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+      const sheet = (await page.locator('[data-slot="sidebar"][data-mobile="true"]').boundingBox())!
+      const box = (await title.boundingBox())!
+      expect(box.x + box.width).toBeLessThanOrEqual(sheet.x + sheet.width) // all of it is inside the sheet...
+      expect(box.height).toBeGreaterThan(40) // ...over several lines, not cut short on one
+    })
+  }
 })
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -979,11 +1059,24 @@ test.describe('responsive table', () => {
   test('keeps table text at 15px or more at every text size', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 })
     await page.goto('/styleguide')
-    for (const size of ['A', 'A+', 'A++'] as const) {
-      await sizeButton(page, size).click()
+    for (const size of ['Medium', 'Large'] as const) {
+      await chooseTextSize(page, size)
       for (const selector of ['table', 'table th', 'table td']) {
         expect(await fontSize(page, selector)).toBeGreaterThanOrEqual(15)
       }
+    }
+  })
+
+  // Small is a choice, and it makes everything 12.5% smaller, tables too (README, Accessibility): so the 15px promise is for Medium and Large. This holds a table's text at
+  // Small to exactly that, 12.5% less than it is at Medium (13.125px), so Small scales it as it scales the page and does not make it smaller still.
+  test('scales table text with the page at Small: 12.5% smaller than at Medium', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 })
+    await page.goto('/styleguide')
+    for (const selector of ['table', 'table th', 'table td']) {
+      await chooseTextSize(page, 'Medium')
+      const medium = await fontSize(page, selector)
+      await chooseTextSize(page, 'Small')
+      expect(await fontSize(page, selector)).toBeCloseTo(medium * 0.875, 3)
     }
   })
 
@@ -1026,7 +1119,7 @@ test.describe('reduced motion', () => {
   test('is respected: transitions and animations all but stop', async ({ page }) => {
     await page.goto('/styleguide')
     const duration = () =>
-      page.getByRole('button', { name: 'Dark' }).evaluate((el) => {
+      themeToggle(page).evaluate((el) => {
         const s = getComputedStyle(el)
         return { transition: parseFloat(s.transitionDuration), scroll: s.scrollBehavior }
       })
@@ -1041,26 +1134,6 @@ test.describe('reduced motion', () => {
 })
 
 test.describe('forced colours (Windows high contrast)', () => {
-  test('keeps the chosen text size and theme visible, and focus drawn as an outline', async ({ page }) => {
-    await page.emulateMedia({ forcedColors: 'active' })
-    await page.goto('/styleguide')
-    const pressed = sizeButton(page, 'A')
-    const unpressed = sizeButton(page, 'A+')
-    const background = (button: typeof pressed) => button.evaluate((el) => getComputedStyle(el).backgroundColor)
-    // The pressed button is told apart by more than the fill the browser throws away.
-    expect(await background(pressed)).not.toBe(await background(unpressed))
-
-    await unpressed.focus()
-    await page.keyboard.press('Tab')
-    await page.keyboard.press('Shift+Tab')
-    const outline = await unpressed.evaluate((el) => {
-      const s = getComputedStyle(el)
-      return { style: s.outlineStyle, width: parseFloat(s.outlineWidth) }
-    })
-    expect(outline.style).toBe('solid')
-    expect(outline.width).toBeGreaterThanOrEqual(2)
-  })
-
   test('still shows every status icon and word', async ({ page }) => {
     await page.emulateMedia({ forcedColors: 'active' })
     await page.goto('/styleguide')
@@ -1105,40 +1178,43 @@ test.describe('forced colours (Windows high contrast)', () => {
 // Header
 
 test.describe('header', () => {
-  test('shows the app title from Settings, and uses it as the page title', async ({ page }) => {
+  test('shows the app title from Settings in the sidebar, and uses it as the page title', async ({ page }) => {
     await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: "Mum's finances", about_contact: '', about_retention: '' } }))
     await page.goto('/')
-    await expect(page.getByRole('banner').getByText("Mum's finances")).toBeVisible()
+    await expect(sidebarTitle(page).getByText("Mum's finances")).toBeVisible()
     await expect(page).toHaveTitle("Mum's finances")
   })
 
   test('says Fernledger until the Admin sets a title', async ({ page }) => {
     await page.goto('/')
-    await expect(page.getByRole('banner').getByText('Fernledger', { exact: true })).toBeVisible()
+    await expect(sidebarTitle(page).getByText('Fernledger', { exact: true })).toBeVisible()
     await expect(page).toHaveTitle('Fernledger')
   })
 
-  // Sign out is in the wrapping group of header controls (src/routes/__root.tsx). On a narrow screen it must not be cut off at the edge or broken over two lines. The 44px size
-  // and the lack of sideways scrolling are held by the touch-target test and the 320px header test above.
+  // Sign out is in the header's bar from `md` up and in its menu below (src/components/site-header.tsx). On a narrow screen it must not be cut off at the edge or broken over two
+  // lines. The 44px size is held by the touch-target tests, and the lack of sideways scrolling by the 320px header test above.
   for (const { width, size } of [
-    { width: 375, size: 'A' },
-    { width: 320, size: 'A++' },
+    { width: 375, size: 'Medium' },
+    { width: 320, size: 'Large' },
   ] as const) {
     test(`Sign out stays whole and inside the screen at ${width}px and text size ${size}`, async ({ page, context }) => {
       await signInAs(context, 'admin')
       await page.setViewportSize({ width, height: 640 })
       await page.goto('/')
-      await sizeButton(page, size).click()
-      await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
-      await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
-      const link = page.getByRole('banner').getByRole('link', { name: 'Sign out' })
+      await chooseTextSize(page, size)
+      await expectTextSize(page, size)
+      await openHeaderControls(page)
+      await settle(page)
+      const link = signOutLink(page)
       await expect(link).toBeVisible()
       const box = await link.boundingBox()
       expect(box!.x).toBeGreaterThanOrEqual(0)
       expect(box!.x + box!.width).toBeLessThanOrEqual(width)
       const lines = await link.evaluate((element) => {
+        // Its words, not its icon beside them.
+        const words = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())!
         const range = document.createRange()
-        range.selectNodeContents(element)
+        range.selectNodeContents(words)
         return range.getClientRects().length
       })
       expect(lines).toBe(1)
@@ -1151,6 +1227,6 @@ test.describe('header', () => {
 
 test('the examples page has no WCAG 2.2 AA violations at the largest text size', async ({ page }) => {
   await page.goto('/styleguide')
-  await sizeButton(page, 'A++').click()
+  await chooseTextSize(page, 'Large')
   await noAxeViolations(page) // right after the click: it waits for the size buttons to finish changing width
 })
