@@ -237,6 +237,7 @@ test.describe('How to sign in', () => {
     await signInAs(context, 'member')
     await page.goto('/how-to-sign-in')
     await expect(page.getByRole('main')).toContainText('If you used a computer that is not your own, press "Sign out" at the top of Fernledger when you have finished.')
+    await expect(page.getByRole('main')).toContainText('On a phone it is in the menu at the top right, called "Display settings and sign out".')
   })
 
   test('tells the Admin, and only the Admin, to print it for each Member', async ({ page, context }) => {

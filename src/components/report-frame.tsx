@@ -29,7 +29,7 @@ export function useReportIdentity() {
 
 /**
  * The frame every Report is printed in (README: Reports). It writes the Report's own title block, because a printout leaves
- * out the app header and with it the app title: the app title from Settings, the Report's name, its Account(s) and dates, and
+ * out the app header and the sidebar, and with them the app title: the app title from Settings, the Report's name, its Account(s) and dates, and
  * "Generated Thu 8 Oct 2026 at 3:42 pm by <the signed-in email>". A Report is a page that opens in a new window; it puts what it
  * lists in `children`, as tables (ResponsiveTable with `print:text-[12pt]` and a `printHeading` from `useReportIdentity`) and
  * headings no smaller than 12pt.
