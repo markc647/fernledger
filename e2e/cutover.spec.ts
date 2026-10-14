@@ -1,5 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test'
-import { dateField, expectDate, pickDate } from './date-helpers'
+import { calendarOf, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 // The light and dark projects run side by side against one local database, so each uses its own made-up Account.
@@ -73,6 +73,39 @@ test('the Admin changes and clears the Cutover Date in Settings, which explains 
   await page.getByRole('button', { name: `Clear the Cutover Date for ${name}` }).click()
   await expectDate(page, label, '')
   await page.reload()
+  await expectDate(page, label, '')
+})
+
+test('a Cutover Date from before the years a calendar offers is shown and can be changed, and the calendar leaves clearing to the Clear button beside it', async ({ page, context, baseURL }, testInfo) => {
+  const name = accountName(testInfo)
+  await signInAs(context, 'admin')
+  const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
+  const account = accounts.find((a) => a.name === name)
+  expect(account, name).toBeDefined()
+  // The API takes any real date, so one from 1999 can be there, set before the calendar offered only 2000 to 2100.
+  const put = await context.request.put(`/api/accounts/${account!.id}/cutover-date`, { headers: { Origin: baseURL! }, data: { cutoverDate: '1999-06-15' } })
+  expect(put.ok()).toBe(true)
+  await page.goto('/settings')
+  const label = `Cutover Date for ${name}`
+  await expectDate(page, label, '1999-06-15')
+
+  await dateField(page, label).click()
+  const calendar = calendarOf(page)
+  await expect(calendar.getByLabel('Choose the Year')).toHaveValue('1999') // it is in the lists, so it can be found
+  await expect(calendar.getByLabel('Choose the Month')).toHaveValue('5')
+  await expect(calendar.locator('td[data-day="1999-06-15"] button')).toBeDisabled() // but no day of that year can be chosen
+  await expect(calendar).toBeFocused() // no day of the month can take focus, so the dialog has it
+  await expect(calendar.getByRole('button', { name: 'Clear date' })).toHaveCount(0) // Settings has its own Clear, which saves
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: `Clear the Cutover Date for ${name}` })).toBeVisible()
+
+  await pickDate(page, label, '2026-09-30')
+  await page.locator('form', { has: dateField(page, label) }).getByRole('button', { name: 'Save Cutover Date' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Cutover Date saved.' })).toBeVisible()
+  await page.reload()
+  await expectDate(page, label, '2026-09-30')
+
+  await page.getByRole('button', { name: `Clear the Cutover Date for ${name}` }).click() // leave it as the other tests found it, with none
   await expectDate(page, label, '')
 })
 

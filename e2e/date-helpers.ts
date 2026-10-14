@@ -7,14 +7,11 @@ import { dateText } from './report-helpers'
 type Scope = Page | Locator
 const pageOf = (scope: Scope): Page => ('goto' in scope ? scope : scope.page())
 
-/** The calendar's accessible name, which every open one has. */
-export const CALENDAR = 'Choose a date'
-
 /** The button that shows a date field's date, found by its label's exact text (a Report's "From" is not its "From (optional)"). `scope` is the page or a form on it. */
-export const dateField = (scope: Scope, label: string) => scope.getByLabel(label, { exact: true })
+export const dateField = (scope: Scope, label: string) => scope.getByRole('button').and(scope.getByLabel(label, { exact: true })) // not its calendar, which the label names as well
 
-/** The open calendar. */
-export const calendarOf = (scope: Scope) => pageOf(scope).getByRole('dialog', { name: CALENDAR })
+/** The open calendar: a dialog, named by its field's label. */
+export const calendarOf = (scope: Scope) => pageOf(scope).getByRole('dialog')
 
 /** Choose `date` ("2026-10-08") in the field called `label`: opens the calendar, chooses the year and month, presses the day, and waits for the calendar to close. */
 export async function pickDate(scope: Scope, label: string, date: string) {
