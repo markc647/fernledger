@@ -1,51 +1,23 @@
-import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
-import { Slot } from "radix-ui"
+import * as React from 'react'
+import { cva, type VariantProps } from 'class-variance-authority'
+import { cn } from '@/lib/utils'
 
-import { cn } from "@/lib/utils"
-
-// shadcn/ui Badge (radix-nova), as `npx shadcn@latest add badge` writes it, with `cn` imported from the project's own utils
-// (the CLI's registry item names a package called "cn", which is not this).
-const badgeVariants = cva(
-  "group/badge inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!",
-  {
-    variants: {
-      variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
-        secondary:
-          "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
-        destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
-        outline:
-          "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
-        ghost:
-          "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
-        link: "text-primary underline-offset-4 hover:underline",
-      },
+// A badge written by hand in shadcn's style, trimmed to what the app uses: three tones, the same as the Status component's (--success, --warning and
+// --danger, each pinned for contrast in scripts/theme-contrast.test.mjs). Its words carry the meaning, and it has a border as well as a colour, so
+// Windows high contrast, which removes fills, still shows it. It is built to the README's text sizes (16px text, 24px tall at least), not shadcn's
+// 12px, so a call site needs no override.
+const badgeVariants = cva('inline-flex min-h-6 w-fit shrink-0 items-center justify-center rounded-4xl border px-2.5 py-0.5 text-base font-medium whitespace-nowrap', {
+  variants: {
+    variant: {
+      success: 'border-success text-success',
+      warning: 'border-warning text-warning',
+      danger: 'border-danger text-danger',
     },
-    defaultVariants: {
-      variant: "default",
-    },
-  }
-)
+  },
+})
 
-function Badge({
-  className,
-  variant = "default",
-  asChild = false,
-  ...props
-}: React.ComponentProps<"span"> &
-  VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
-  const Comp = asChild ? Slot.Root : "span"
-
-  return (
-    <Comp
-      data-slot="badge"
-      data-variant={variant}
-      className={cn(badgeVariants({ variant }), className)}
-      {...props}
-    />
-  )
+function Badge({ className, variant, ...props }: React.ComponentProps<'span'> & { variant: NonNullable<VariantProps<typeof badgeVariants>['variant']> }) {
+  return <span data-slot="badge" data-variant={variant} className={cn(badgeVariants({ variant }), className)} {...props} />
 }
 
 export { Badge, badgeVariants }

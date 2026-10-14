@@ -3,12 +3,15 @@
 
 const MINUS = '−' // a real minus sign: a hyphen is too short to read as one, and screen readers say "dash"
 
-const wholeDollars = new Intl.NumberFormat('en-NZ')
+// Whole numbers with the thousands marked ("1,234,567"), for the dollars of an amount and for a count alike.
+const thousands = new Intl.NumberFormat('en-NZ')
 
-/** A count of things (not money) with the thousands marked: "1,234,567". For a figure such as the rows D1 has read; money goes through `formatAmount`. */
+/**
+ * A count of things that is not money, with the thousands marked: "1,234,567". The one count formatter: Transactions looked at, rows read. Money goes
+ * through `formatAmount`. It is called while a page renders, so it never throws: a figure that is not a number shows as `NaN`, not as a blank page.
+ */
 export function formatCount(count: number) {
-  if (!Number.isSafeInteger(count)) throw new RangeError('Counts are whole numbers')
-  return wholeDollars.format(count)
+  return thousands.format(count)
 }
 
 // Built from integer parts, never `cents / 100`: a float loses the last cents near Number.MAX_SAFE_INTEGER.
@@ -16,7 +19,7 @@ function dollarsFromCents(cents: number) {
   // The message never includes the value: amounts are private (CODING_STANDARDS.md, Security and privacy).
   if (!Number.isSafeInteger(cents)) throw new RangeError('Amounts are whole cents')
   const magnitude = BigInt(Math.abs(cents)) // Math.abs(-0) is 0, so negative zero reads as "$0.00"
-  return `$${wholeDollars.format(magnitude / 100n)}.${String(magnitude % 100n).padStart(2, '0')}`
+  return `$${thousands.format(magnitude / 100n)}.${String(magnitude % 100n).padStart(2, '0')}`
 }
 
 /** A Transaction's amount, always signed: "+$1,234.56" for money in, "−$1,234.56" for money out, "$0.00" for none. */

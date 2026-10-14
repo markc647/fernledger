@@ -2,12 +2,13 @@ import { queryOptions, useMutation, useQuery, useQueryClient, type QueryClient }
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { Amount } from '@/components/amount'
-import { D1UsageBar, d1UsageQuery } from '@/components/d1-usage-bar'
+import { D1UsageBar } from '@/components/d1-usage-bar'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api'
-import { formatDate } from '@/lib/format'
+import { d1UsageQuery } from '@/lib/d1-usage-query'
+import { formatCount, formatDate } from '@/lib/format'
 import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
 import { announcement, estimateSentence, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
@@ -50,8 +51,6 @@ const INTRO =
 const THEN_APPLY = 'To use the change on the Transactions you already have, choose Apply the Rules to all Transactions, below.'
 const RUN_GOING_BEFORE = 'A run is going. Saving starts it again from the first Transaction.'
 const afterChange = (runGoing: boolean) => (runGoing ? 'The run that is going starts again from the first Transaction, so that it uses the change.' : THEN_APPLY)
-
-const count = new Intl.NumberFormat('en-NZ')
 
 const sentence = (parts: string[]) => {
   const text = parts.join(' and ')
@@ -663,7 +662,7 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
                 <p className="font-medium">
                   {shown.matches === 0
                     ? 'No Transactions you already have match.'
-                    : `${count.format(shown.matches)} ${shown.matches === 1 ? 'Transaction' : 'Transactions'} you already have ${shown.matches === 1 ? 'matches' : 'match'}.`}
+                    : `${formatCount(shown.matches)} ${shown.matches === 1 ? 'Transaction' : 'Transactions'} you already have ${shown.matches === 1 ? 'matches' : 'match'}.`}
                 </p>
                 <p className="mt-1">Saving the Rule won't change {shown.matches === 1 ? 'it' : 'them'}. {shown.matches === 1 ? 'It changes' : 'They change'} when you apply the Rules to all Transactions.</p>
                 {shown.samples.length > 0 && (

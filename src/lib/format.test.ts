@@ -12,8 +12,8 @@ describe('formatCount (a number of things that is not money)', () => {
     expect(formatCount(count)).toBe(text)
   })
 
-  it('refuses what is not a whole number, without echoing it', () => {
-    for (const bad of [1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) expect(() => formatCount(bad)).toThrow(RangeError)
+  it('does not throw on a figure that is not a count, because it runs while a page renders', () => {
+    for (const odd of [1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) expect(() => formatCount(odd)).not.toThrow()
   })
 })
 

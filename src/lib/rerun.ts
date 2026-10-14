@@ -1,5 +1,5 @@
 import type { RerunJob } from '@/generated/api/rule-rerun'
-import { formatDateTime } from './format'
+import { formatCount, formatDateTime } from './format'
 
 // How the Rules page tells the Admin about applying the Rules to every Transaction (worker/rule-rerun.ts): how far it has got,
 // how long it has to go, when it last did something, and the few words a screen reader is given as it goes. Plain NZ English, with the
@@ -7,20 +7,19 @@ import { formatDateTime } from './format'
 
 export type { RerunJob }
 
-const count = new Intl.NumberFormat('en-NZ')
-const transactions = (n: number) => `${count.format(n)} ${n === 1 ? 'Transaction' : 'Transactions'}`
+const transactions = (n: number) => `${formatCount(n)} ${n === 1 ? 'Transaction' : 'Transactions'}`
 
 /** Where it is up to, or what it did. The total is the most there could be (a Transaction's ID, not a count), so it says "up to". */
 export function progressSentence(job: RerunJob): string {
-  if (job.status === 'running') return `Looked at ${count.format(job.doneRows)} of up to ${transactions(job.totalRows)} (${job.percent}%).`
+  if (job.status === 'running') return `Looked at ${formatCount(job.doneRows)} of up to ${transactions(job.totalRows)} (${job.percent}%).`
   if (job.status === 'stopped') {
     if (job.doneRows === 0) return 'Stopped before it looked at any Transaction. Nothing was changed.'
-    return `Stopped. Looked at ${transactions(job.doneRows)} and updated ${job.changedRows === 0 ? 'none' : count.format(job.changedRows)} of them. Those keep the result they were given and the rest are as they were.`
+    return `Stopped. Looked at ${transactions(job.doneRows)} and updated ${job.changedRows === 0 ? 'none' : formatCount(job.changedRows)} of them. Those keep the result they were given and the rest are as they were.`
   }
   if (job.doneRows === 0) return 'Finished. There were no Transactions to look at.'
   // IDs have gaps, so it can look at fewer than the most there could be: it says how many it looked at when that is not the total.
   const looked = job.doneRows !== job.totalRows ? transactions(job.doneRows) : job.totalRows === 1 ? 'the 1 Transaction' : `all ${transactions(job.totalRows)}`
-  const updated = job.changedRows === 0 ? 'none of them' : job.doneRows === 1 ? 'it' : `${count.format(job.changedRows)} of them`
+  const updated = job.changedRows === 0 ? 'none of them' : job.doneRows === 1 ? 'it' : `${formatCount(job.changedRows)} of them`
   return `Finished. Looked at ${looked} and updated ${updated}.`
 }
 
@@ -55,7 +54,11 @@ export function estimateSentence(job: RerunJob): string | null {
   return `About ${steps} more ${steps === 1 ? 'step' : 'steps'} if you keep this page open, or ${days <= 1 ? 'less than a day' : `about ${days} days`} if you close it. Keep this page open to finish sooner.`
 }
 
-/** When the free plan's day changes: D1 counts it in UTC, so the next 00:00 UTC (1 pm in New Zealand in summer, midday in winter). */
+/**
+ * When the free plan's day changes: D1 counts it in UTC, so the next 00:00 UTC (1 pm in New Zealand in summer, midday in winter).
+ * This page works it out for itself because it has no usage figures to take it from (the D1 usage bar takes the Worker's `resetsAt`, and is
+ * optional), and a page waiting for the day to change needs it with or without them.
+ */
 export const nextAllowanceReset = (now: Date): Date => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
 
 /** How long a page that is waiting for the day to change waits between asking again, once it has asked and been told to wait. */

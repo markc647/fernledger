@@ -75,6 +75,11 @@ test('the Admin is told what to set up, and how, for a feature that is switched 
   await expect(setup).toContainText('Akahu Sync')
   await expect(setup).toContainText('Optional: you only need this to use Akahu Sync.')
   await expect(setup).toContainText('Setup needed: the Akahu app token. Add it as the Worker secret AKAHU_APP_TOKEN.')
+  // The D1 usage bar is optional too, and its words end with where the steps are.
+  await expect(setup).toContainText('D1 usage bar')
+  await expect(setup).toContainText('Optional: you only need this to use the D1 usage bar.')
+  await expect(setup).toContainText('Setup needed: the Cloudflare analytics token. Add it as the Worker secret CF_ANALYTICS_TOKEN.')
+  await expect(setup).toContainText('The steps are in docs/setup.md, under "D1 usage bar (optional)".')
 })
 
 test('the Admin is not a Setting', async ({ page, context }) => {

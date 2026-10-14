@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { barValue, levelOf, LEVEL_WORDS, meters, percentOf, resetSentence, setupPointer, staleNote, unavailableNote, type D1Usage } from './d1-usage'
+import { levelOf, meters, percentOf, resetSentence, unavailableNote, type D1Usage } from './d1-usage'
 
 const usage = (over: Partial<D1Usage> = {}): D1Usage => ({
   rowsRead: 1_234_567,
@@ -20,11 +20,8 @@ describe('the percentage', () => {
     expect(percentOf(5_000_000, 5_000_000)).toBe(100)
   })
 
-  it('goes past 100 if the account has read more than the allowance, and the bar stops at the end', () => {
+  it('goes past 100 if the account has read more than the allowance', () => {
     expect(percentOf(5_250_000, 5_000_000)).toBe(105)
-    expect(barValue(105)).toBe(100)
-    expect(barValue(24)).toBe(24)
-    expect(barValue(0)).toBe(0)
   })
 })
 
@@ -40,20 +37,15 @@ describe('Low, Medium and High', () => {
   ] as const)('puts %i%% at %s', (percent, level) => {
     expect(levelOf(percent)).toBe(level)
   })
-
-  it('has the words, which are what carries the level for a reader who cannot see the colour', () => {
-    expect(LEVEL_WORDS).toEqual({ low: 'Low', medium: 'Medium', high: 'High' })
-  })
 })
 
 describe('what the Admin reads', () => {
   it('gives the rows read first, with the thousands marked, the percentage, and the level from the same percentage', () => {
     const [reads] = meters(usage())
-    expect(reads).toMatchObject({
-      label: 'D1 rows read today',
+    expect(reads).toEqual({
+      label: 'Database rows read today',
       level: 'low',
       percent: 24,
-      value: 24,
       text: '1,234,567 of 5,000,000 rows read · 24%',
       valueText: '1,234,567 of 5,000,000 rows read, 24%',
     })
@@ -61,8 +53,8 @@ describe('what the Admin reads', () => {
 
   it('then the rows written, against their own, much smaller, allowance', () => {
     const [, writes] = meters(usage({ rowsWritten: 85_001 }))
-    expect(writes).toMatchObject({
-      label: 'D1 rows written today',
+    expect(writes).toEqual({
+      label: 'Database rows written today',
       level: 'high',
       percent: 85,
       text: '85,001 of 100,000 rows written · 85%',
@@ -70,9 +62,9 @@ describe('what the Admin reads', () => {
     })
   })
 
-  it('says what it says when the day is used up, and does not draw past the end of the bar', () => {
+  it('says what it says when the day is used up, with a percentage past 100', () => {
     const [reads] = meters(usage({ rowsRead: 5_100_000 }))
-    expect(reads).toMatchObject({ level: 'high', percent: 102, value: 100, text: '5,100,000 of 5,000,000 rows read · 102%' })
+    expect(reads).toMatchObject({ level: 'high', percent: 102, text: '5,100,000 of 5,000,000 rows read · 102%' })
   })
 
   it('says when the allowance starts again, in New Zealand time', () => {
@@ -80,18 +72,29 @@ describe('what the Admin reads', () => {
     // In winter, 00:00 UTC is midday.
     expect(resetSentence(usage({ resetsAt: '2026-07-02T00:00:00.000Z' }))).toBe('The allowance starts again on Thu 2 Jul 2026, 12:00 pm, New Zealand time.')
   })
+})
 
-  it('says the figures are for the whole account and a few minutes behind', () => {
-    expect(staleNote()).toBe('These figures are for the whole Cloudflare account, not only Fernledger, and run a few minutes behind.')
+describe('why there are no figures', () => {
+  it('names the likely fix when Cloudflare refused the token or found no such account', () => {
+    for (const reason of ['refused', 'no-account']) {
+      const note = unavailableNote(reason)
+      expect(note).toMatch(/^Usage unavailable\./)
+      expect(note).toContain('CF_ACCOUNT_ID must be the account the token belongs to, and the token needs Account Analytics: Read.')
+    }
+    expect(unavailableNote('refused')).not.toBe(unavailableNote('no-account'))
   })
 
-  it('says where the steps to turn it on are, by the heading docs/setup.md has', () => {
-    expect(setupPointer()).toBe('The steps are in docs/setup.md, under "D1 usage bar (optional)".')
+  it('does not send the Admin to the token when the trouble is Cloudflare being slow or odd', () => {
+    for (const reason of ['unreachable', 'unreadable']) {
+      expect(unavailableNote(reason)).toMatch(/^Usage unavailable\./)
+      expect(unavailableNote(reason)).not.toContain('CF_ACCOUNT_ID')
+    }
   })
 
-  it('says, when Cloudflare cannot give them, that they are unavailable and where to look', () => {
-    expect(unavailableNote()).toBe(
-      'Usage unavailable. Cloudflare did not give the figures just now. If this keeps happening, check the token and account ID you set. The steps are in docs/setup.md, under "D1 usage bar (optional)".',
-    )
+  it('reads a reason it does not know, or none, as the plainest one', () => {
+    expect(unavailableNote('something-new')).toBe(unavailableNote('unreachable'))
+    expect(unavailableNote(undefined)).toBe(unavailableNote('unreachable'))
+    // Not a property of the table's prototype.
+    expect(unavailableNote('toString')).toBe(unavailableNote('unreachable'))
   })
 })
