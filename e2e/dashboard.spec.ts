@@ -94,16 +94,20 @@ type Live = { __live: Record<string, string[]> }
 /**
  * Records every text a section's status region comes to have, from the moment it is first on the page (the page's scripts run before anything is drawn). A section
  * that loads as soon as it is shown has no moment a test can stop at to see its region empty, so the test reads the history afterwards: empty, then loading, then loaded.
+ * A page's commit and the effect that fills the region can run in one task (a bigger layout around the page does it), and an observer is told of both together, after the
+ * region already has its words. So the first time it sees a region it looks for a change inside the region among the changes it is told of: that change is the words
+ * arriving in a region that was on the page without them, so the region was empty first.
  */
 const watchLiveRegions = (page: Page) =>
   page.addInitScript(() => {
     const seen: Record<string, string[]> = {}
     ;(window as unknown as Live).__live = seen
-    new MutationObserver(() => {
+    new MutationObserver((records) => {
       for (const section of document.querySelectorAll('section[aria-labelledby]')) {
         const live = section.querySelector(':scope > [role="status"]')
         if (!live) continue
         const history = (seen[section.getAttribute('aria-labelledby')!] ??= [])
+        if (history.length === 0 && records.some((record) => record.target === live || record.target.parentNode === live)) history.push('')
         if (history.at(-1) !== live.textContent) history.push(live.textContent ?? '')
       }
     }).observe(document, { childList: true, subtree: true, characterData: true })

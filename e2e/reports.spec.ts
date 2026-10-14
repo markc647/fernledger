@@ -464,10 +464,13 @@ test.describe('around a Report', () => {
 
   test('another printed page keeps the screen padding: only a Report sets its own margins', async ({ page, context }) => {
     await signInAs(context, 'member')
-    await page.emulateMedia({ media: 'print' })
     await page.goto('/how-to-sign-in')
     await expect(page.getByRole('heading', { level: 1, name: 'How to sign in' })).toBeVisible()
-    expect(await page.locator('main').evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('16px')
+    const padding = () => page.locator('main').evaluate((el) => getComputedStyle(el).paddingLeft)
+    const onScreen = await padding()
+    expect(parseFloat(onScreen)).toBeGreaterThan(0)
+    await page.emulateMedia({ media: 'print' })
+    expect(await padding()).toBe(onScreen)
   })
 
   test('a Transaction from Sync shows everything the bank said under its description, with the parts it lacks left out', async ({ page, context, baseURL }, testInfo) => {
