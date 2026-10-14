@@ -1,5 +1,5 @@
 import type { SpendingPeriod } from '@/generated/api/chart-spending'
-import type { CountedAccount, NetWorthRange, UncountedAccount } from '@/generated/api/net-worth'
+import type { CountedAccount, DEFAULT_NET_WORTH_RANGE as WORKER_DEFAULT_NET_WORTH_RANGE, NetWorthRange, UncountedAccount } from '@/generated/api/net-worth'
 import type { SpendingCategory } from '@/generated/api/spending-by-category'
 import { noBalanceHint, noBalanceReason } from './balance-check'
 import { isSearchDate, lastDay } from './date-range'
@@ -19,14 +19,15 @@ export const PERIOD_LABELS: Record<SpendingPeriod, string> = {
 }
 export const PERIODS = Object.keys(PERIOD_LABELS) as SpendingPeriod[]
 
-/** The ranges of months net worth can be drawn for, in the order they are offered. It is first drawn for the first. */
+/** The ranges of months net worth can be drawn for, in the order they are offered. The first is the one drawn first. */
 export const NET_WORTH_RANGE_LABELS: Record<NetWorthRange, string> = {
   '24-months': 'Last 24 months',
   '5-years': 'Last 5 years',
   all: 'All history',
 }
 export const NET_WORTH_RANGES = Object.keys(NET_WORTH_RANGE_LABELS) as NetWorthRange[]
-export const DEFAULT_NET_WORTH_RANGE: NetWorthRange = '24-months'
+/** The range net worth is drawn for until the reader chooses another: the Worker's own default (`DEFAULT_NET_WORTH_RANGE` in worker/net-worth.ts), which this is typed from, so it fails to compile if they differ. */
+export const DEFAULT_NET_WORTH_RANGE: typeof WORKER_DEFAULT_NET_WORTH_RANGE = '24-months'
 
 /** The most Categories drawn as bars. More would not fit a phone's screen, and the table lists them all. */
 export const CHART_BARS = 12

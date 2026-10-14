@@ -1,6 +1,5 @@
-import type { ComponentProps, ReactNode, Ref } from 'react'
+import type { ReactNode, Ref } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { cn } from '@/lib/utils'
 
 // The Summary and the Dashboard are a grid of cards (shadcn's dashboard-01, without its table). The grid is one column until the page's panel is wide enough for two cards to sit
 // side by side and still show a table (`ResponsiveTable` chooses a table or cards from the window, not the card, so a card that shares a row needs room for its columns), and then it has
@@ -13,7 +12,7 @@ const SPANS = {
   full: '@4xl/summary:col-span-6',
 } as const
 
-export type CardSpan = keyof typeof SPANS
+type CardSpan = keyof typeof SPANS
 
 /** The classes that give something in the grid (a note that stands in for cards still to come) the width of a card of that span. */
 export const spanClass = (span: CardSpan) => SPANS[span]
@@ -43,7 +42,6 @@ export function DashboardCard({
   span = 'full',
   busy,
   headingRef,
-  className,
   children,
 }: {
   headingId: string
@@ -51,13 +49,12 @@ export function DashboardCard({
   description?: ReactNode
   span?: CardSpan
   /** `aria-busy` for a card that loads or updates after the page is up. */
-  busy?: ComponentProps<'div'>['aria-busy']
+  busy?: boolean
   headingRef?: Ref<HTMLHeadingElement>
-  className?: string
   children: ReactNode
 }) {
   return (
-    <Card role="region" aria-labelledby={headingId} aria-busy={busy} className={cn('min-w-0 overflow-visible border text-base ring-0', SPANS[span], className)}>
+    <Card role="region" aria-labelledby={headingId} aria-busy={busy} className={`min-w-0 overflow-visible border text-base ring-0 ${spanClass(span)}`}>
       <CardHeader>
         <CardTitle className="text-xl font-semibold">
           <h2 id={headingId} ref={headingRef} tabIndex={headingRef ? -1 : undefined} className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">

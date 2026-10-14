@@ -14,7 +14,7 @@ export function BalancesWidget() {
       headingId="balances-heading"
       title="Balances"
       span="two-thirds"
-      description="Balance as of the last Transaction we hold, worked out from the bank balance in your Imports. It is not a live figure from the bank."
+      description={accounts && 'Balance as of the last Transaction we hold, worked out from the bank balance in your Imports. It is not a live figure from the bank.'}
     >
       {error ? (
         <p role="alert">Fernledger couldn't load the balances. Reload the page to try again.</p>

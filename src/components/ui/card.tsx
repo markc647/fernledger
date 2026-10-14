@@ -1,9 +1,10 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
-// shadcn/ui Card (radix-nova), written by hand because the shadcn CLI does not run here: the registry's markup and slots, unchanged. Its only difference is the
-// style hook `cn-font-heading` on CardTitle, which the CLI turns into a class this app's theme has no use for. What the app needs of a card that stock does not
-// give (the text size, a border that survives Windows high contrast, a heading) is put on a card by its caller (src/components/summary/dashboard-card.tsx).
+// shadcn/ui Card (radix-nova): deliberately the stock registry file, untrimmed, so that parallel branches which add the same file merge cleanly. Do not edit it for the app.
+// It is written by hand because the shadcn CLI does not run here; its only difference from the registry is the style hook `cn-font-heading` on CardTitle, which the CLI turns into a
+// class this app's theme has no use for. What the app needs of a card that stock does not give (the text size, a border that survives Windows high contrast, a heading) is put
+// on a card by its caller (src/components/summary/dashboard-card.tsx).
 
 function Card({ className, size = 'default', ...props }: React.ComponentProps<'div'> & { size?: 'default' | 'sm' }) {
   return (
