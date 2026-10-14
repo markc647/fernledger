@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { navigateTo } from './shell-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   expectBareMargins,
@@ -131,7 +132,7 @@ test.describe('opening a Report', () => {
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await page.goto('/')
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Reports' }).click()
+    await navigateTo(page, 'Reports', 'Reports')
     await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Transaction listing' }) // the Reports page has a form for each Report

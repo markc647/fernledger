@@ -34,18 +34,25 @@ test('reads the same storage key as the app', () => {
   assert.deepEqual(run({ stored: null }).keysRead, [TEXT_SIZE_STORAGE_KEY])
 })
 
-for (const stored of [null, '', 'a', 'a-plus', 'a-plus-plus', 'A+', 'huge']) {
+// 'a', 'a-plus' and 'a-plus-plus' are what the first control (A / A+ / A++) saved: they still read as Medium, Large and Large.
+for (const stored of [null, '', 'small', 'medium', 'large', 'a', 'a-plus', 'a-plus-plus', 'A+', 'huge', 'constructor', '__proto__']) {
   test(`stored ${JSON.stringify(stored)} sets what text-size.ts picks`, () => {
     assert.equal(run({ stored }).attribute, parseTextSize(stored))
   })
 }
 
+test('a size saved by the first control reads as Large, or Medium for A', () => {
+  assert.equal(run({ stored: 'a-plus' }).attribute, 'large')
+  assert.equal(run({ stored: 'a-plus-plus' }).attribute, 'large')
+  assert.equal(run({ stored: 'a' }).attribute, 'medium')
+})
+
 test('uses the standard size when storage is blocked', () => {
-  assert.equal(run({ stored: null, storageThrows: true }).attribute, 'a')
+  assert.equal(run({ stored: null, storageThrows: true }).attribute, 'medium')
 })
 
 test('uses the standard size when there is no storage object', () => {
-  assert.equal(run({ stored: null, noStorage: true }).attribute, 'a')
+  assert.equal(run({ stored: null, noStorage: true }).attribute, 'medium')
 })
 
 for (const { value, percent } of TEXT_SIZES) {

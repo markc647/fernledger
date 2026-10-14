@@ -9,7 +9,7 @@ import { parseTransactionSearch, type TransactionSearch } from '@/lib/transactio
 export const Route = createFileRoute('/transactions')({
   component: Transactions,
   validateSearch: parseTransactionSearch,
-  staticData: { nav: { label: 'Transactions', order: 10 } },
+  staticData: { nav: { label: 'All Transactions', group: 'transactions', order: 10 } },
 })
 
 function Transactions() {

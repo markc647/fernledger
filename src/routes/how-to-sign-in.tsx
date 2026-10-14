@@ -6,7 +6,7 @@ import { settingsQuery } from '@/lib/settings'
 
 export const Route = createFileRoute('/how-to-sign-in')({
   component: HowToSignIn,
-  staticData: { nav: { label: 'How to sign in', order: 86 } },
+  staticData: { nav: { label: 'How to sign in', group: 'help', order: 86 } },
 })
 
 /**

@@ -1,36 +1,25 @@
-import { useEffect, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { deviceStorage, loadTextSize, saveTextSize, TEXT_SIZES, type TextSize } from '@/lib/text-size'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { TEXT_SIZES, type TextSize } from '@/lib/text-size'
 
 /**
- * A / A+ / A++ text size. The choice is remembered on this device only. If the browser blocks storage the choice still
- * applies until the page closes. public/text-size-init.js applies the saved size before first paint.
+ * The text size: Small (14px), Medium (16px, the default) and Large (20px). Which is chosen, and remembering it, is `useTextSize` (src/lib/use-text-size.ts), in the
+ * layout, so the group in the header and the one in a phone's menu show the same choice. Each button is named in full ("Large text") and starts with the word it shows.
  */
-export function TextSizeControl() {
-  const [size, setSize] = useState<TextSize>(() => loadTextSize(deviceStorage()))
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-text-size', size)
-  }, [size])
-
-  const choose = (value: TextSize) => {
-    setSize(value)
-    saveTextSize(value, deviceStorage())
-  }
-
+export function TextSizeControl({ size, onChange, className }: { size: TextSize; onChange: (size: TextSize) => void; className?: string }) {
   return (
-    <div role="group" aria-label="Text size" className="flex flex-wrap gap-1">
-      {TEXT_SIZES.map(({ value, label }) => (
-        <Button
-          key={value}
-          size="touch"
-          variant={size === value ? 'default' : 'outline'}
-          aria-pressed={size === value}
-          onClick={() => choose(value)}
-        >
+    <ToggleGroup
+      type="single"
+      value={size}
+      // A toggle group lets you un-choose the chosen item (an empty value); one size is always chosen.
+      onValueChange={(value) => value && onChange(value as TextSize)}
+      aria-label="Text size"
+      className={className}
+    >
+      {TEXT_SIZES.map(({ value, label, name }) => (
+        <ToggleGroupItem key={value} value={value} aria-label={name} className="flex-1">
           {label}
-        </Button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </ToggleGroup>
   )
 }

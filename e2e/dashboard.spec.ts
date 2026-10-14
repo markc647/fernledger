@@ -3,6 +3,7 @@ import { drawn, LINE, NET_WORTH, netWorth, SPENT, spending, stubNetWorth, stubSp
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
+import { chooseTextSize, mainNav, navLink, openNavGroup } from './shell-helpers'
 
 // The Dashboard (where the Admin lands), the Summary (where a Member does) and the Charts, against the real Worker. The light and dark projects share one local
 // database, so each has two Accounts of its own, and its own months of Transactions (2004, which no other spec uses: June for light and September for dark,
@@ -76,7 +77,6 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
 
 const dollars = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
-const sizeButton = (page: Page, name: 'A' | 'A+' | 'A++') => page.getByRole('group', { name: 'Text size' }).getByRole('button', { name, exact: true })
 
 /**
  * A section's live region: the one status element it has, on the page before anything happens and empty, so that what it comes to say is a change a screen reader
@@ -161,10 +161,11 @@ test('the Admin lands on the Dashboard: their tools, every part of the Summary, 
   await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
 
   // The navigation calls the Admin's landing page the Dashboard, and has no separate Summary.
-  const nav = page.getByRole('navigation', { name: 'Main' })
+  const nav = mainNav(page)
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('aria-current', 'page')
   await expect(nav.getByRole('link', { name: 'Summary' })).toHaveCount(0)
-  await expect(nav.getByRole('link', { name: 'Charts' })).toBeVisible()
+  await openNavGroup(page, 'Reports') // which opens the sidebar too, if this width keeps it as the icon rail
+  await expect(navLink(page, 'Charts')).toBeVisible()
 
   // The Admin's tools lead to the Admin's pages.
   const tools = page.getByRole('region', { name: 'Your tools' })
@@ -223,8 +224,7 @@ test('the button that shows net worth is a touch target with a clear name, works
   const show = region.getByRole('button', { name: 'Show net worth', exact: true })
   await expect(show).toBeVisible()
   expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44)
-  await sizeButton(page, 'A++').click()
-  await expect(sizeButton(page, 'A++')).toHaveAttribute('aria-pressed', 'true')
+  await chooseTextSize(page, 'Large')
   const { live, element } = await liveRegion(region)
 
   await show.focus()
@@ -247,7 +247,7 @@ test('a Member lands on the Summary, which leads to the Charts, and sees none of
   await stubNetWorth(page)
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Summary' })).toBeVisible()
-  const nav = page.getByRole('navigation', { name: 'Main' })
+  const nav = mainNav(page)
   await expect(nav.getByRole('link', { name: 'Summary' })).toHaveAttribute('aria-current', 'page')
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Your tools' })).toHaveCount(0)
@@ -478,8 +478,7 @@ test('the charts have no WCAG 2.2 AA violations in this theme, with their data, 
     await page.setViewportSize(viewport)
     await page.goto('/charts')
     await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
-    await sizeButton(page, 'A++').click()
-    await expect(sizeButton(page, 'A++')).toHaveAttribute('aria-pressed', 'true')
+    await chooseTextSize(page, 'Large')
     await chooseDates(page, from, to)
     await drawn(netWorth(page), LINE)
     await drawn(spending(page), new RegExp(`^Bar chart of the 3 Categories that spent the most in ${words}`))

@@ -13,7 +13,7 @@ import { saveSettings, SettingsRejected, settingsQuery, type Settings } from '@/
 
 export const Route = createFileRoute('/settings')({
   component: SettingsScreen,
-  staticData: { nav: { label: 'Settings', adminOnly: true, order: 90 } },
+  staticData: { nav: { label: 'Settings', group: 'setup', adminOnly: true, order: 90 } },
 })
 
 const FIELD_LABELS: Record<keyof Settings, string> = {

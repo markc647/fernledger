@@ -12,7 +12,7 @@ import { budgetsQuery, categoriesQuery } from '@/lib/queries'
 
 export const Route = createFileRoute('/categories')({
   component: Categories,
-  staticData: { nav: { label: 'Categories', order: 40 } },
+  staticData: { nav: { label: 'Categories', group: 'setup', order: 40 } },
 })
 
 type Category = { id: number; name: string; kind: CategoryKind }

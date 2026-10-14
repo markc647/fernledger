@@ -21,50 +21,59 @@ const blockedStorage = () => ({
 })
 
 describe('the three sizes', () => {
-  it('are A, A+ and A++, smallest first', () => {
-    expect(TEXT_SIZES.map((size) => size.label)).toEqual(['A', 'A+', 'A++'])
+  it('are Small, Medium and Large, smallest first', () => {
+    expect(TEXT_SIZES.map((size) => size.label)).toEqual(['Small', 'Medium', 'Large'])
   })
-  it('never go below the 16px body size the README promises', () => {
-    for (const size of TEXT_SIZES) expect(size.percent).toBeGreaterThanOrEqual(100)
-    expect(TEXT_SIZES[0].percent).toBe(100)
+  it('each have a name of their own that starts with the word on the button', () => {
+    expect(TEXT_SIZES.map((size) => size.name)).toEqual(['Small text', 'Medium text', 'Large text'])
+    for (const size of TEXT_SIZES) expect(size.name.startsWith(size.label)).toBe(true) // the visible label is in the accessible name (WCAG 2.5.3)
   })
-  it('grow in steps big enough to notice', () => {
-    expect(TEXT_SIZES.map((size) => size.percent)).toEqual([100, 115, 130])
+  it('are 14px, 16px and 20px on a 16px browser, and Medium is the 16px body size the README promises', () => {
+    expect(TEXT_SIZES.map((size) => (size.percent / 100) * 16)).toEqual([14, 16, 20])
+    expect(TEXT_SIZES.find((size) => size.percent === 100)?.value).toBe('medium')
   })
 })
 
 describe('parseTextSize', () => {
   it('accepts each saved value', () => {
-    expect(parseTextSize('a')).toBe('a')
-    expect(parseTextSize('a-plus')).toBe('a-plus')
-    expect(parseTextSize('a-plus-plus')).toBe('a-plus-plus')
+    expect(parseTextSize('small')).toBe('small')
+    expect(parseTextSize('medium')).toBe('medium')
+    expect(parseTextSize('large')).toBe('large')
   })
-  it('falls back to A for anything else', () => {
-    for (const raw of [null, '', 'A', 'huge', '130', 'a-plus-plus-plus']) expect(parseTextSize(raw)).toBe('a')
+  it('reads what the A / A+ / A++ control saved: A is Medium, and A+ and A++ are Large', () => {
+    expect(parseTextSize('a')).toBe('medium')
+    expect(parseTextSize('a-plus')).toBe('large')
+    expect(parseTextSize('a-plus-plus')).toBe('large')
+  })
+  it('falls back to Medium for anything else', () => {
+    for (const raw of [null, '', 'A', 'Small', 'huge', '130', 'a-plus-plus-plus']) expect(parseTextSize(raw)).toBe('medium')
   })
 })
 
 describe('loadTextSize and saveTextSize', () => {
   it('remember the choice on this device', () => {
     const storage = fakeStorage()
-    expect(saveTextSize('a-plus', storage)).toBe(true)
-    expect(storage.getItem(TEXT_SIZE_STORAGE_KEY)).toBe('a-plus')
-    expect(loadTextSize(storage)).toBe('a-plus')
+    expect(saveTextSize('small', storage)).toBe(true)
+    expect(storage.getItem(TEXT_SIZE_STORAGE_KEY)).toBe('small')
+    expect(loadTextSize(storage)).toBe('small')
   })
-  it('start at A when nothing is saved', () => {
-    expect(loadTextSize(fakeStorage())).toBe('a')
+  it('read a size the old control saved', () => {
+    expect(loadTextSize(fakeStorage({ [TEXT_SIZE_STORAGE_KEY]: 'a-plus' }))).toBe('large')
   })
-  it('start at A when the saved value is junk', () => {
-    expect(loadTextSize(fakeStorage({ [TEXT_SIZE_STORAGE_KEY]: 'enormous' }))).toBe('a')
+  it('start at Medium when nothing is saved', () => {
+    expect(loadTextSize(fakeStorage())).toBe('medium')
   })
-  it('fall back to A when storage is blocked, without throwing', () => {
-    expect(loadTextSize(blockedStorage())).toBe('a')
+  it('start at Medium when the saved value is junk', () => {
+    expect(loadTextSize(fakeStorage({ [TEXT_SIZE_STORAGE_KEY]: 'enormous' }))).toBe('medium')
+  })
+  it('fall back to Medium when storage is blocked, without throwing', () => {
+    expect(loadTextSize(blockedStorage())).toBe('medium')
   })
   it('report, without throwing, that a choice could not be saved when storage is blocked', () => {
-    expect(saveTextSize('a-plus-plus', blockedStorage())).toBe(false)
+    expect(saveTextSize('large', blockedStorage())).toBe(false)
   })
-  it('fall back to A when there is no storage object at all', () => {
-    expect(loadTextSize(undefined)).toBe('a')
-    expect(saveTextSize('a-plus', undefined)).toBe(false)
+  it('fall back to Medium when there is no storage object at all', () => {
+    expect(loadTextSize(undefined)).toBe('medium')
+    expect(saveTextSize('large', undefined)).toBe(false)
   })
 })

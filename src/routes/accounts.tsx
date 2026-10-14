@@ -9,7 +9,7 @@ import { api } from '@/lib/api'
 
 export const Route = createFileRoute('/accounts')({
   component: Accounts,
-  staticData: { nav: { label: 'Accounts', order: 30 } },
+  staticData: { nav: { label: 'Accounts', group: 'setup', order: 30 } },
 })
 
 function Accounts() {

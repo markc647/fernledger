@@ -65,6 +65,35 @@
   --radius-2xl: calc(var(--radius) * 1.8);
 }
 
+/* How the sidebar's sheet comes and goes on a phone (src/components/ui/sheet.tsx): a slide, and the fade of what is behind it. A dozen lines here rather than the
+   tw-animate-css package the stock Sheet needs. Under reduced motion (below) they take no time, but still end, which is what lets the sheet leave the page. */
+@theme {
+  --animate-sheet-in: sheet-in 200ms ease-out;
+  --animate-sheet-out: sheet-out 150ms ease-in forwards;
+  --animate-fade-in: fade-in 200ms ease-out;
+  --animate-fade-out: fade-out 150ms ease-in forwards;
+  @keyframes sheet-in {
+    from {
+      translate: -100% 0;
+    }
+  }
+  @keyframes sheet-out {
+    to {
+      translate: -100% 0;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+}
+
 /* shadcn/ui neutral theme. Two deliberate changes from the stock tokens, both for WCAG AA
    (scripts/theme-contrast.test.mjs pins them): --muted-foreground and --ring. */
 :root {
@@ -101,14 +130,19 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
+  /* The shell: the site header and the sidebar are a tinted surface that the page's raised panel sits on, and the current page is a white pill with a hairline ring.
+     The sidebar's text, its pill and the focus ring on both are pinned in scripts/theme-contrast.test.mjs. */
+  --sidebar: oklch(0.955 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-accent: oklch(1 0 0);
+  --sidebar-accent-foreground: oklch(0.145 0 0);
+  --sidebar-border: oklch(0.88 0 0);
   --sidebar-ring: var(--ring);
+  /* The site header's height (src/components/site-header.tsx). In rem, so it grows with the text size. The sidebar sits below it, and a page scrolled to
+     an element leaves room for it (below), so the sticky header never covers what has focus (WCAG 2.4.11). */
+  --header-height: 3rem;
 }
 
 .dark {
@@ -139,11 +173,11 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(0.19 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent: oklch(0.3 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: var(--ring);
@@ -156,20 +190,26 @@
   html {
     @apply font-sans;
     color-scheme: light;
+    /* The page's scrollbar comes with a long page and goes with a short one. Without a place kept for it the page is a scrollbar's width wider on a short page, and
+       what is centred in it jumps a few pixels sideways as you go from one to the other. Painted as the shell, so the place is not a pale strip beside the header. */
+    scrollbar-gutter: stable;
+    background-color: var(--sidebar);
+    /* Room for the sticky header when the browser scrolls something into view, so tabbing down a page never leaves the focus under it. */
+    scroll-padding-top: var(--header-height);
   }
   html.dark {
     color-scheme: dark;
   }
-  /* The A / A+ / A++ control (src/lib/text-size.ts). Everything is sized in rem, so it all scales together, and the
-     percentage is of the browser's own text size, so a larger browser setting is respected. */
-  html[data-text-size="a"] {
+  /* The Small / Medium / Large control (src/lib/text-size.ts): 14px, 16px and 20px on a browser set to 16px. Everything is sized in rem, so it all scales together,
+     and the percentage is of the browser's own text size, so a larger browser setting is respected. Medium is the default, and the 16px body text the README promises. */
+  html[data-text-size="small"] {
+    font-size: 87.5%;
+  }
+  html[data-text-size="medium"] {
     font-size: 100%;
   }
-  html[data-text-size="a-plus"] {
-    font-size: 115%;
-  }
-  html[data-text-size="a-plus-plus"] {
-    font-size: 130%;
+  html[data-text-size="large"] {
+    font-size: 125%;
   }
   body {
     @apply bg-background text-foreground;
@@ -225,13 +265,13 @@
     --chart-3: oklch(0.398 0.07 227.392);
     --chart-4: oklch(0.828 0.189 84.429);
     --chart-5: oklch(0.769 0.188 70.08);
-    --sidebar: oklch(0.985 0 0);
+    --sidebar: oklch(0.955 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-accent: oklch(1 0 0);
+    --sidebar-accent-foreground: oklch(0.145 0 0);
+    --sidebar-border: oklch(0.88 0 0);
     --sidebar-ring: var(--ring);
   }
 }
@@ -296,15 +336,29 @@
   }
 }
 
+/* The shell is app chrome: the page's raised panel and its background mean nothing on paper (browsers leave backgrounds out of a printout anyway). The sidebar and the
+   site header are hidden with `print:hidden` where they are written. */
+@media print {
+  html {
+    background-color: transparent;
+  }
+}
+
 /* Windows high contrast (forced colours). The browser swaps our colours for the reader's palette, which drops
-   box-shadow focus rings and background-only states, so give both a border or outline that survives. */
+   box-shadow focus rings and background-only states, so give both a border or outline that survives. Every control says it has focus with an outline
+   of its own as well (Button, the toggle group, the sidebar's rows), so this is the safety net for the rest, not the only thing between a keyboard user and
+   a page they can't see their place on. */
 @media (forced-colors: active) {
   :focus-visible {
     outline: 2px solid Highlight;
     outline-offset: 2px;
   }
+  /* A chosen text size, a pressed button, and the current page: in the sidebar a row with a fill and a hairline (both dropped), anywhere else a link. The breadcrumb's
+     current page is a span in the header, bold, and is left as it is. */
   [aria-pressed="true"],
-  [aria-current="page"] {
+  [role="radio"][aria-checked="true"],
+  a[aria-current="page"],
+  [data-sidebar^="menu"][data-active="true"] {
     forced-color-adjust: none;
     background-color: Highlight;
     color: HighlightText;

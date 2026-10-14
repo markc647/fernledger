@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { calendarOf, clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { navigateTo } from './shell-helpers'
 
 // The light and dark projects share one local database, so each makes entries of its own, with values no earlier run used.
 const nzToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(new Date())
@@ -40,7 +41,7 @@ for (const role of ['admin', 'member'] as const) {
     const { first, second, account } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, role)
     await page.goto('/')
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Change Log' }).click()
+    await navigateTo(page, 'Change Log', 'Help')
     await expect(page.getByRole('heading', { level: 1, name: 'Change Log' })).toBeVisible()
 
     // Newest first: the Import was made last.

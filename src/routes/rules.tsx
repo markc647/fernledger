@@ -16,7 +16,7 @@ import { dollarsForInput, readDollars, ruleConditions, ruleResult, type RuleView
 
 export const Route = createFileRoute('/rules')({
   component: Rules,
-  staticData: { nav: { label: 'Rules', adminOnly: true, order: 45 } },
+  staticData: { nav: { label: 'Rules', group: 'setup', adminOnly: true, order: 45 } },
 })
 
 /** The Rules in use, in the order they are checked. */
@@ -651,7 +651,7 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
         </div>
 
         <div>
-          {/* The longest label here. A Button does not wrap by default; at 320px and text size A++ this one is wider than the form around it, so it may wrap. */}
+          {/* The longest label here. A Button does not wrap by default; at 320px and text size Large this one is wider than the form around it, so it may wrap. */}
           <Button type="button" size="touch" variant="outline" className="max-w-full py-1 whitespace-normal" disabled={check.isPending} onClick={onCheck}>
             Check how many match
           </Button>

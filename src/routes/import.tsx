@@ -20,7 +20,7 @@ import { ImportStopped, runImport, type ImportSummary, type LostTransaction } fr
 
 export const Route = createFileRoute('/import')({
   component: ImportScreen,
-  staticData: { nav: { label: 'Import', adminOnly: true, order: 20 } },
+  staticData: { nav: { label: 'Import', group: 'transactions', adminOnly: true, order: 20 } },
 })
 
 type Step =

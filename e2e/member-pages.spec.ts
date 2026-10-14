@@ -1,5 +1,6 @@
 import type { APIRequestContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { navigateTo } from './shell-helpers'
 
 // Ticket 30: the pages every Member can open (About your data, How to sign in) and the Home Screen app. Axe runs on both
 // pages in both themes (the project is the theme), for a Member and for the Admin; the zoom test in display.spec.ts
@@ -28,10 +29,9 @@ test.describe('navigation', () => {
     test(`a ${role} has both pages in the navigation, and they open`, async ({ page, context }) => {
       await signInAs(context, role)
       await page.goto('/')
-      const nav = page.getByRole('navigation', { name: 'Main' })
-      await nav.getByRole('link', { name: 'About your data' }).click()
+      await navigateTo(page, 'About your data', 'Help')
       await expect(page.getByRole('heading', { level: 1, name: 'About your data' })).toBeVisible()
-      await nav.getByRole('link', { name: 'How to sign in' }).click()
+      await navigateTo(page, 'How to sign in', 'Help')
       await expect(page.getByRole('heading', { level: 1, name: 'How to sign in' })).toBeVisible()
     })
   }

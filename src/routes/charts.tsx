@@ -3,7 +3,7 @@ import Charts from '@/components/charts/charts'
 
 export const Route = createFileRoute('/charts')({
   component: ChartsPage,
-  staticData: { nav: { label: 'Charts', order: 5 } },
+  staticData: { nav: { label: 'Charts', group: 'reports', order: 55 } },
 })
 
 /** Trends for every Member: how net worth has changed, and where the money has gone in a period they choose. The Admin has the same charts on the Dashboard. */

@@ -39,6 +39,14 @@ const pairs = [
   ['muted-foreground', 'background', 4.5],
   ['muted-foreground', 'muted', 4.5],
   ['ring', 'background', 3],
+  // The shell (src/components/site-header.tsx, app-sidebar.tsx): text on the tinted header and sidebar, on the current page's pill and under the pointer, the breadcrumb's
+  // group and the footer's role (muted text on the tint), and the focus ring on the tint and on the pill.
+  ['sidebar-foreground', 'sidebar', 4.5],
+  ['sidebar-accent-foreground', 'sidebar-accent', 4.5],
+  ['sidebar-foreground', 'sidebar-accent', 4.5],
+  ['muted-foreground', 'sidebar', 4.5],
+  ['ring', 'sidebar', 3],
+  ['ring', 'sidebar-accent', 3],
   // Money in/out and statuses are text on the page or a card (the Amount and Status components).
   ...['success', 'warning', 'danger'].flatMap((fg) => [[fg, 'background', 4.5], [fg, 'card', 4.5], [fg, 'muted', 4.5]]),
   // The line and the bars of the charts (src/components/charts) are graphics that carry meaning: 3:1 against the page and a card (1.4.11).

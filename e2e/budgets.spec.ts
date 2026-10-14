@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { navigateTo } from './shell-helpers'
 
 // The Budgets page and the Summary's Budget vs actual, against the real Worker. A Budget is for this NZ month, so the test finds
 // out which month that is the way the Worker does (Pacific/Auckland) and imports a Transaction dated its first day. The light and
@@ -47,7 +48,7 @@ test.describe.configure({ mode: 'serial' })
 test('the Admin sets, changes and ends a Budget, the Summary compares it with spending, and the Change Log records each', async ({ page, context, baseURL }, testInfo) => {
   const { name } = await seed(context, baseURL!, testInfo.project.name)
   await page.goto('/')
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Budgets' }).click()
+  await navigateTo(page, 'Budgets', 'Set up')
   await expect(page.getByRole('heading', { level: 1, name: 'Budgets' })).toBeVisible()
   await expect(page.getByText(`This month is ${monthWords}, in New Zealand time.`)).toBeVisible()
   await expect(page.getByText('Each month stands alone')).toBeVisible()
@@ -79,7 +80,7 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await noAxeViolations(page)
 
   // The Dashboard (the Admin's Summary): $43.21 spent of $100.00, with the status as an icon and words.
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Dashboard' }).click()
+  await navigateTo(page, 'Dashboard')
   await expect(page.getByRole('heading', { level: 2, name: 'Budget vs actual' })).toBeVisible()
   await expect(widgetRow(page, name)).toContainText('$100.00')
   await expect(widgetRow(page, name)).toContainText('$43.21')

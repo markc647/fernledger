@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { mainNav, navigateTo } from './shell-helpers'
 
 /** The light and dark projects share one local database, so each test imports a Transaction of its own, dated to sort first. */
 async function seedTransaction(context: BrowserContext, baseURL: string, projectName: string) {
@@ -41,7 +42,7 @@ test('the Admin sets an Override and a Note, the Transaction leaves the Uncatego
   await expect(page.getByRole('status').filter({ hasText: `Saved ${description}.` })).toBeVisible()
   await expect(rowFor(page, description)).toHaveCount(0)
 
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Transactions' }).click()
+  await navigateTo(page, 'All Transactions', 'Transactions')
   const row = rowFor(page, description)
   await expect(row).toContainText('Groceries')
   await expect(row).toContainText('Override')
@@ -56,7 +57,7 @@ test('the Admin sets an Override and a Note, the Transaction leaves the Uncatego
 test('a Member sees Categories and Notes but cannot change them', async ({ page, context, baseURL }, testInfo) => {
   const description = await seedTransaction(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')
-  const nav = page.getByRole('navigation', { name: 'Main' })
+  const nav = mainNav(page)
 
   await page.goto('/transactions')
   await expect(page.getByRole('columnheader', { name: 'Category' })).toBeVisible()
@@ -66,7 +67,9 @@ test('a Member sees Categories and Notes but cannot change them', async ({ page,
   await expect(nav.getByRole('link', { name: 'Uncategorised' })).toHaveCount(0)
   await noAxeViolations(page)
 
-  await nav.getByRole('link', { name: 'Categories' }).click()
+  // The sidebar has no Set up group for a Member, but the page is still theirs to read, by its address.
+  await expect(nav.getByRole('button', { name: 'Set up' })).toHaveCount(0)
+  await page.goto('/categories')
   await expect(page.getByRole('heading', { level: 1, name: 'Categories' })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'Groceries', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: /^(Rename|Select kind|Remove)/ })).toHaveCount(0)

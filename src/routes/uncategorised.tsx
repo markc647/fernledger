@@ -13,7 +13,7 @@ export const Route = createFileRoute('/uncategorised')({
     const { sort, dir, page } = parseTransactionSearch(raw)
     return { sort, dir, page }
   },
-  staticData: { nav: { label: 'Uncategorised', adminOnly: true, order: 15 } },
+  staticData: { nav: { label: 'Uncategorised', group: 'transactions', adminOnly: true, order: 15 } },
 })
 
 function Uncategorised() {
