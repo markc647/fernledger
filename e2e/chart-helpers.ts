@@ -17,10 +17,33 @@ export const drawn = async (region: ReturnType<typeof netWorth>, name: RegExp) =
   return figure
 }
 
-/** Net worth is not asked for until the button is pressed (it reads every Transaction, ADR 0004): presses it, and waits for the line. */
+// Neither chart is asked for until its button is pressed (each reads every Transaction it covers, ADR 0004): these press it, and wait for the picture.
+export const pressShowNetWorth = (page: Page) => netWorth(page).getByRole('button', { name: 'Show net worth' }).click()
+export const pressShowSpending = (page: Page) => spending(page).getByRole('button', { name: 'Show spending' }).click()
 export const showNetWorth = async (page: Page) => {
-  await netWorth(page).getByRole('button', { name: 'Show net worth' }).click()
+  await pressShowNetWorth(page)
   return drawn(netWorth(page), LINE)
+}
+export const showSpending = async (page: Page, name: RegExp = /^Bar chart of the/) => {
+  await pressShowSpending(page)
+  return drawn(spending(page), name)
+}
+
+/** Answers the net worth request with `NET_WORTH`, and keeps the address of each one the page makes: the list stays empty until the page asks. */
+export async function spyNetWorth(page: Page) {
+  const asked: string[] = []
+  await page.route(/\/api\/charts\/net-worth/, (route) => {
+    asked.push(route.request().url())
+    return route.fulfill({ json: NET_WORTH })
+  })
+  return asked
+}
+
+/** The same for spending, which the test gives its own answer with `stubSpending`: the address of each request the page makes. */
+export function spySpending(page: Page) {
+  const asked: string[] = []
+  page.on('request', (request) => request.url().includes('/api/charts/spending') && asked.push(request.url()))
+  return asked
 }
 
 // What the Worker answers when the charts ask: a made-up net worth of three months, and made-up spending. Whatever range the page asks for gets the same answer.

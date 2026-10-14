@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { drawn, SPENT, showNetWorth, spending, stubNetWorth, stubSpending } from './chart-helpers'
+import { SPENT, showNetWorth, showSpending, stubNetWorth, stubSpending } from './chart-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { changeDeviceScheme, mainNav, openHeaderControls, openNavGroup, signOutLink, themeToggle } from './shell-helpers'
 
@@ -16,7 +16,7 @@ for (const { role, path, heading } of pages) {
   test(`${heading} page as ${role} has no WCAG 2.2 AA violations`, async ({ page, context }, testInfo) => {
     await signInAs(context, role)
     // The Summary and the Dashboard are where the charts are, and the Worker refuses to add up net worth for more than 49 Accounts, which the specs that share this database can
-    // reach. So the charts are stubbed and drawn before the scan (net worth when its button is pressed), and it scans the pictures and not the refusal that a long run of specs
+    // reach. So the charts are stubbed and drawn before the scan (each when its button is pressed), and it scans the pictures and not the refusal that a long run of specs
     // would put in their place.
     const charts = path === '/'
     if (charts) {
@@ -27,7 +27,7 @@ for (const { role, path, heading } of pages) {
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
     if (charts) {
       await showNetWorth(page)
-      await drawn(spending(page), /^Bar chart of the 3 Categories/)
+      await showSpending(page, /^Bar chart of the 3 Categories/)
     }
     // The project's theme must really be showing, or the scan would not be testing it.
     await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))

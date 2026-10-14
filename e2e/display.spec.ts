@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
-import { netWorth as netWorthRegion, spending as spendingRegion } from './chart-helpers'
+import { netWorth as netWorthRegion, pressShowNetWorth, pressShowSpending, spending as spendingRegion } from './chart-helpers'
+import { dateField } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import {
   chooseTextSize,
@@ -333,39 +334,57 @@ test.describe('zoom', () => {
     }
   }
 
-  // The Summary with its longest content: long Account names, big amounts, a warning with its explanation, and a
-  // Transaction with a long description. The data is stubbed, so the test needs nothing in the database.
+  // The Summary with its longest content: long Account names, big amounts, a warning with its explanation, and a Transaction with a long description (the cards of Balance checks,
+  // Balances and Recent transactions), and Budget vs actual's longest. The data is stubbed, so the tests need nothing in the database.
+  const stubLongBalances = async (page: Page) => {
+    const longName = 'Example everyday account for the household bills and groceries'
+    await page.route('**/api/balances', (route) =>
+      route.fulfill({
+        json: {
+          accounts: [
+            { accountId: 1, accountName: longName, balanceCents: -123456789, asOfDate: '2026-10-08' },
+            { accountId: 2, accountName: 'Example savings', balanceCents: null, asOfDate: null },
+          ],
+        },
+      }),
+    )
+    await page.route('**/api/balance-checks', (route) =>
+      route.fulfill({
+        json: {
+          differences: [{ accountId: 1, accountName: longName, asOfDate: '2026-10-08', since: '2026-09-30', differenceCents: -123456789 }],
+          accounts: [{ accountId: 1, accountName: longName, asOfDate: '2026-10-08', status: 'differs' }],
+        },
+      }),
+    )
+    await page.route(/\/api\/transactions\?/, (route) =>
+      route.fulfill({
+        json: {
+          total: null,
+          transactions: [{ id: 1, accountId: 1, accountName: longName, date: '2026-10-08', description: 'EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN', bankType: 'EFTPOS', amountCents: -123456789 }],
+        },
+      }),
+    )
+  }
+  const stubLongBudget = (page: Page) =>
+    page.route(/\/api\/budgets\/vs-actual/, (route) =>
+      route.fulfill({
+        json: {
+          month: '2026-10',
+          rows: [
+            { categoryId: 1, categoryName: 'Health and medical costs for the household and the long-term care fees', budgetCents: 123456789, spentCents: 234567890 },
+            { categoryId: 2, categoryName: 'Groceries', budgetCents: 80000, spentCents: 80000 },
+            { categoryId: 3, categoryName: 'Fuel', budgetCents: 100000000000, spentCents: -123456789 },
+          ],
+          otherCents: 123456789012,
+          uncategorisedCents: -123456789012,
+        },
+      }),
+    )
   for (const { name, width, height } of zoomLevels) {
     for (const size of ['Medium', 'Large'] as const) {
       test(`/ with a Balance Check warning at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
-        const longName = 'Example everyday account for the household bills and groceries'
-        await page.route('**/api/balances', (route) =>
-          route.fulfill({
-            json: {
-              accounts: [
-                { accountId: 1, accountName: longName, balanceCents: -123456789, asOfDate: '2026-10-08' },
-                { accountId: 2, accountName: 'Example savings', balanceCents: null, asOfDate: null },
-              ],
-            },
-          }),
-        )
-        await page.route('**/api/balance-checks', (route) =>
-          route.fulfill({
-            json: {
-              differences: [{ accountId: 1, accountName: longName, asOfDate: '2026-10-08', since: '2026-09-30', differenceCents: -123456789 }],
-              accounts: [{ accountId: 1, accountName: longName, asOfDate: '2026-10-08', status: 'differs' }],
-            },
-          }),
-        )
-        await page.route(/\/api\/transactions\?/, (route) =>
-          route.fulfill({
-            json: {
-              total: null,
-              transactions: [{ id: 1, accountId: 1, accountName: longName, date: '2026-10-08', description: 'EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN', bankType: 'EFTPOS', amountCents: -123456789 }],
-            },
-          }),
-        )
+        await stubLongBalances(page)
         await page.setViewportSize({ width, height })
         await page.goto('/')
         await chooseTextSize(page, size)
@@ -500,21 +519,7 @@ test.describe('zoom', () => {
     for (const size of ['Medium', 'Large'] as const) {
       test(`/ with Budget vs actual at its longest at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
-        const longName = 'Health and medical costs for the household and the long-term care fees'
-        await page.route(/\/api\/budgets\/vs-actual/, (route) =>
-          route.fulfill({
-            json: {
-              month: '2026-10',
-              rows: [
-                { categoryId: 1, categoryName: longName, budgetCents: 123456789, spentCents: 234567890 },
-                { categoryId: 2, categoryName: 'Groceries', budgetCents: 80000, spentCents: 80000 },
-                { categoryId: 3, categoryName: 'Fuel', budgetCents: 100000000000, spentCents: -123456789 },
-              ],
-              otherCents: 123456789012,
-              uncategorisedCents: -123456789012,
-            },
-          }),
-        )
+        await stubLongBudget(page)
         await page.setViewportSize({ width, height })
         await page.goto('/')
         await chooseTextSize(page, size)
@@ -540,8 +545,8 @@ test.describe('zoom', () => {
     }
   }
 
-  // The charts with their longest content, on the Summary (a Member's) and on the Dashboard (the Admin's): ten years of months, big amounts, Accounts
-  // and Categories with long names, a Category below zero, and the figures open. The charts' data is stubbed, so this needs nothing in the database.
+  // The charts with their longest content: ten years of months, big amounts, Accounts and Categories with long names, a Category below zero, and the figures open. The Summary
+  // and the Dashboard are the same cards (SummaryCards), so these run on the Dashboard only. The charts' data is stubbed, so this needs nothing in the database.
   const longChartName = 'Health and medical costs for the household and the long-term care fees'
   const stubCharts = async (page: Page) => {
     await page.route(/\/api\/charts\/net-worth/, (route) =>
@@ -570,61 +575,26 @@ test.describe('zoom', () => {
       }),
     )
   }
-  for (const role of ['member', 'admin'] as const) {
-    for (const { name, width, height } of zoomLevels) {
-      for (const size of ['Medium', 'Large'] as const) {
-        test(`/ with long charts (${role}) at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
-          await signInAs(context, role)
-          await stubCharts(page)
-          await page.setViewportSize({ width, height })
-          await page.goto('/')
-          await chooseTextSize(page, size)
-          const netWorth = netWorthRegion(page)
-          const spending = spendingRegion(page)
-          // Net worth is drawn when it is asked for.
-          await netWorth.getByRole('button', { name: 'Show net worth' }).click()
-          await expect(netWorth.getByRole('img', { name: /^Line chart of net worth by month/ }).locator('svg.recharts-surface')).toBeVisible()
-          await expect(spending.getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
-          await expect(netWorth).toContainText('These Accounts are not in the total:')
-          await expect(netWorth).toContainText('its balance stays the same after that')
-          await netWorth.getByText('Show the figures').click()
-          await expect(spending).toContainText('The chart shows the biggest 12 Categories. The table has the other 2 too.')
-          await expect(spending).toContainText('$1,234,567.89 back')
-          // Measure only once the size is applied and the buttons have finished their width transition.
-          await expectTextSize(page, size)
-          await settle(page)
-          const { scrollWidth, clientWidth } = await page.evaluate(() => ({
-            scrollWidth: document.documentElement.scrollWidth,
-            clientWidth: document.documentElement.clientWidth,
-          }))
-          expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
-          expect(await outsideItsCard(page)).toEqual([])
-          // The pictures fit the window too, and keep a size worth reading: no chart is squeezed to nothing.
-          for (const svg of await page.locator('[data-slot="chart"] svg.recharts-surface').all()) {
-            const box = await svg.boundingBox()
-            expect(box!.width).toBeLessThanOrEqual(clientWidth)
-            expect(box!.width).toBeGreaterThan(100)
-          }
-        })
-      }
-    }
-  }
-
-  // The Dashboard as the Admin lands on it, net worth not yet asked for: its explanation and its button (a touch target that may wrap), beside spending drawn from long
-  // data. The charts' data is stubbed, so this needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
     for (const size of ['Medium', 'Large'] as const) {
-      test(`/ with the Show net worth button at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+      test(`/ with long charts at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         await stubCharts(page)
         await page.setViewportSize({ width, height })
         await page.goto('/')
         await chooseTextSize(page, size)
         const netWorth = netWorthRegion(page)
-        const button = netWorth.getByRole('button', { name: 'Show net worth' })
-        await expect(button).toBeVisible()
-        await expect(netWorth).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
-        await expect(spendingRegion(page).getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
+        const spending = spendingRegion(page)
+        // Each chart is drawn when it is asked for.
+        await pressShowNetWorth(page)
+        await pressShowSpending(page)
+        await expect(netWorth.getByRole('img', { name: /^Line chart of net worth by month/ }).locator('svg.recharts-surface')).toBeVisible()
+        await expect(spending.getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
+        await expect(netWorth).toContainText('These Accounts are not in the total:')
+        await expect(netWorth).toContainText('its balance stays the same after that')
+        await netWorth.getByText('Show the figures').click()
+        await expect(spending).toContainText('The chart shows the biggest 12 Categories. The table has the other 2 too.')
+        await expect(spending).toContainText('$1,234,567.89 back')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
         await settle(page)
@@ -634,11 +604,94 @@ test.describe('zoom', () => {
         }))
         expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
         expect(await outsideItsCard(page)).toEqual([])
-        const box = await button.boundingBox()
-        expect(box!.width).toBeLessThanOrEqual(clientWidth)
-        expect(box!.height).toBeGreaterThanOrEqual(44)
+        // The pictures fit the window too, and keep a size worth reading: no chart is squeezed to nothing.
+        for (const svg of await page.locator('[data-slot="chart"] svg.recharts-surface').all()) {
+          const box = await svg.boundingBox()
+          expect(box!.width).toBeLessThanOrEqual(clientWidth)
+          expect(box!.width).toBeGreaterThan(100)
+        }
       })
     }
+  }
+
+  // The Dashboard as the Admin lands on it, neither chart yet asked for: each card's explanation, its choice and its button (a touch target that may wrap). The charts' data is
+  // stubbed, so this needs nothing in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['Medium', 'Large'] as const) {
+      test(`/ with the Show net worth and Show spending buttons at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await stubCharts(page)
+        await page.setViewportSize({ width, height })
+        await page.goto('/')
+        await chooseTextSize(page, size)
+        const netWorth = netWorthRegion(page)
+        const button = netWorth.getByRole('button', { name: 'Show net worth' })
+        const spendButton = spendingRegion(page).getByRole('button', { name: 'Show spending' })
+        await expect(button).toBeVisible()
+        await expect(spendButton).toBeVisible()
+        await expect(netWorth).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
+        await expect(spendingRegion(page)).toContainText('Spending is not read until you ask for it, because working it out reads every Transaction in the period you choose.')
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expectTextSize(page, size)
+        await settle(page)
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        expect(await outsideItsCard(page)).toEqual([])
+        for (const target of [button, spendButton]) {
+          const box = await target.boundingBox()
+          expect(box!.width).toBeLessThanOrEqual(clientWidth)
+          expect(box!.height).toBeGreaterThanOrEqual(44)
+        }
+      })
+    }
+  }
+
+  // Every card at its longest where the grid has columns. The zoom widths above are all one column, so a card that is too narrow for what is in it only when it shares a row
+  // is caught here: at 1440px wide at the default text size (a third, two thirds and halves of a row), and at 1920px at the largest, where the text is larger and so are the
+  // cards' contents. The spending period is chosen as dates, which gives that card its two date fields as well.
+  for (const { name, width, height, size } of [
+    { name: '1440x900', width: 1440, height: 900, size: 'Medium' },
+    { name: '1920x1080', width: 1920, height: 1080, size: 'Large' },
+  ] as const) {
+    test(`/ with every card at its longest has nothing sticking out of its card at ${name} and text size ${size}`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await stubCharts(page)
+      await stubLongBalances(page)
+      await stubLongBudget(page)
+      await page.setViewportSize({ width, height })
+      await page.goto('/')
+      await chooseTextSize(page, size)
+      await pressShowNetWorth(page)
+      await pressShowSpending(page)
+      await expect(netWorthRegion(page).getByRole('img', { name: /^Line chart of net worth by month/ }).locator('svg.recharts-surface')).toBeVisible()
+      await expect(spendingRegion(page).getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
+      await netWorthRegion(page).getByText('Show the figures').click()
+      await spendingRegion(page).getByLabel('Period', { exact: true }).selectOption('custom')
+      await expect(dateField(spendingRegion(page), 'From')).toBeVisible()
+      await expect(dateField(spendingRegion(page), 'To')).toBeVisible()
+      await expect(page.getByRole('region', { name: 'Balance checks' })).toContainText('Balance differs from bank by $1,234,567.89 since Wed 30 Sept 2026')
+      await expect(page.getByRole('region', { name: 'Budget vs actual' })).toContainText('Spending outside Budgets')
+      await expect(page.getByRole('region', { name: 'Recent transactions' })).toContainText('EXAMPLE SHOP WITH A LONG ENOUGH NAME')
+      await expectTextSize(page, size)
+      await settle(page)
+      // The grid has its columns here: Balance checks and Balances share a row, and so do the two charts. If it did not, this would be the one-column test again.
+      const row = async (a: string, b: string) => {
+        const first = (await page.getByRole('main').getByRole('region', { name: a }).boundingBox())!
+        const second = (await page.getByRole('main').getByRole('region', { name: b }).boundingBox())!
+        return { sameTop: Math.abs(first.y - second.y) < 2, beside: second.x > first.x + first.width - 1 }
+      }
+      expect(await row('Balance checks', 'Balances')).toEqual({ sameTop: true, beside: true })
+      expect(await row('Net worth over time', 'Spending by Category')).toEqual({ sameTop: true, beside: true })
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      expect(await outsideItsCard(page)).toEqual([])
+    })
   }
 
   // A Transaction's details with every field filled in and long values, and the Admin's edit panel open: the longest text
@@ -1196,6 +1249,22 @@ test.describe('forced colours (Windows high contrast)', () => {
     expect(drawn.fill).not.toBe(drawn.track)
     expect(drawn.edge).toBeGreaterThan(0)
     expect(drawn.edgeStyle).toBe('solid')
+  })
+
+  // The stock Card's edge is a ring, which is a box-shadow, and Windows high contrast throws box-shadows away: a card of the Summary has a border as well (DashboardCard), so
+  // it still has an edge.
+  test('keeps the edge of a card of the Summary: a border, not only the shadow ring', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.emulateMedia({ forcedColors: 'active' })
+    await page.goto('/')
+    const card = page.locator('[data-slot="card"]').first()
+    await expect(card).toBeVisible()
+    const edge = await card.evaluate((el) => {
+      const style = getComputedStyle(el)
+      return { width: parseFloat(style.borderTopWidth), style: style.borderTopStyle }
+    })
+    expect(edge.width).toBeGreaterThan(0)
+    expect(edge.style).toBe('solid')
   })
 })
 
