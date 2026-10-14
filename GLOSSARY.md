@@ -157,11 +157,11 @@ The page every Member lands on, except the Admin, who lands on the Dashboard: a 
 _Avoid_: Home page
 
 **Dashboard**:
-The page the Admin lands on: a card of shortcuts to the work only the Admin does (Import, Uncategorised, Rules, Categories, Budgets, Settings), then every card of the Summary, including the Charts, of which spending by Category is drawn at once and net worth waits for the reader to ask for it (it reads every Transaction). Where the Summary is for a Member, the Dashboard is for the Admin; the address is the same and the Admin's navigation calls it the Dashboard.
+The page the Admin lands on: a card of shortcuts to the work only the Admin does (Import, Uncategorised, Rules, Categories, Budgets, Settings), then every card of the Summary, including the Charts. Where the Summary is for a Member, the Dashboard is for the Admin; the address is the same and the Admin's navigation calls it the Dashboard.
 _Avoid_: Home page, admin panel
 
 **Charts**:
-The two cards of the Summary and the Dashboard that draw trends: net worth over time, and spending by Category for a period. Each chart is a picture of figures that are also written out in a table. There is no Charts page of their own; its old address goes to the Summary.
+The two cards of the Summary and the Dashboard that draw trends: net worth over time, and spending by Category for a period. Each chart is a picture of figures that are also written out in a table, and each waits for the reader to ask for it (it reads every Transaction).
 _Avoid_: Graphs, analytics
 
 **Net worth**:
