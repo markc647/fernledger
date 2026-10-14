@@ -165,7 +165,7 @@ The breach checklist is in [docs/security.md](docs/security.md#if-something-goes
 ### What it can't protect against
 
 - **Your Cloudflare account is the master key.** Anyone who controls it controls your data. The setup guide requires two-factor authentication on it, and as few account members as possible.
-- **Each Member's email is their key.** If someone's inbox is compromised, so is their access. Use Google or Microsoft sign-in with MFA for stronger protection.
+- **Each Member's email is their key.** If someone's inbox is compromised, so is their access, so each Member should protect their email with two-factor authentication.
 - **No app-level encryption.** We rely on Cloudflare's encryption at rest. Encrypting inside the app wouldn't add real protection, because the key would live in the same Worker as the data, and it would make search and reports much harder.
 - **Cloudflare can technically access data in your account,** as with any cloud host. See Cloudflare's [privacy policy](https://www.cloudflare.com/privacypolicy/).
 - **A file you download is on your own.** Once a CSV export is saved, it has no sign-in, can be read by anyone who has it, and isn't in the Change Log. Keep it somewhere private, and delete it when you're done.
