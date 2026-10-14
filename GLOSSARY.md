@@ -153,19 +153,19 @@ _Avoid_: Report
 ## Viewing
 
 **Summary**:
-The page every Member lands on, except the Admin, who lands on the Dashboard: the balance of each Account, Budget vs actual for this month, the newest Transactions and any Balance Check warnings, with a link to the Charts. The Dashboard has all of these parts too.
+The page every Member lands on, except the Admin, who lands on the Dashboard: a grid of cards with the balance of each Account, Budget vs actual for this month, the newest Transactions, any Balance Check warnings and the Charts. The Dashboard has all of these cards too.
 _Avoid_: Home page
 
 **Dashboard**:
-The page the Admin lands on: shortcuts to the work only the Admin does (Import, Uncategorised, Rules, Categories, Budgets, Settings), then every part of the Summary, then the Charts, of which spending by Category is drawn at once and net worth waits for the Admin to ask for it (it reads every Transaction). Where the Summary is for a Member, the Dashboard is for the Admin; the address is the same and the Admin's navigation calls it the Dashboard.
+The page the Admin lands on: a card of shortcuts to the work only the Admin does (Import, Uncategorised, Rules, Categories, Budgets, Settings), then every card of the Summary, including the Charts, of which spending by Category is drawn at once and net worth waits for the reader to ask for it (it reads every Transaction). Where the Summary is for a Member, the Dashboard is for the Admin; the address is the same and the Admin's navigation calls it the Dashboard.
 _Avoid_: Home page, admin panel
 
 **Charts**:
-The page any Member can open, and the part of the Dashboard, that draws trends: net worth over time, and spending by Category for a period. Each chart is a picture of figures that are also written out in a table.
+The two cards of the Summary and the Dashboard that draw trends: net worth over time, and spending by Category for a period. Each chart is a picture of figures that are also written out in a table. There is no Charts page of their own; its old address goes to the Summary.
 _Avoid_: Graphs, analytics
 
 **Net worth**:
-The money in the tracked Accounts added up at the end of each month, worked out from each Account's balance history. Only the money in those Accounts: a loan to or from someone whose account isn't tracked shows as a fall or a rise, and assets or investments entered by hand are not part of it (README, What it doesn't do). Months before an Account's first Transaction are an estimate. The Charts page and the Dashboard draw it; the Reports page's balances over time lists each Account's own.
+The money in the tracked Accounts added up at the end of each month, worked out from each Account's balance history. Only the money in those Accounts: a loan to or from someone whose account isn't tracked shows as a fall or a rise, and assets or investments entered by hand are not part of it (README, What it doesn't do). Months before an Account's first Transaction are an estimate. The Charts on the Summary and the Dashboard draw it; the Reports page's balances over time lists each Account's own.
 _Avoid_: Total balance, wealth
 
 ## Configuration
