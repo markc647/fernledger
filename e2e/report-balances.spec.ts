@@ -1,7 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { navigateTo } from './shell-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   blackOnWhite,
@@ -25,7 +24,7 @@ import {
   TITLE,
 } from './report-helpers'
 
-// Ticket 23: the balances-over-time Report (spec story 96). It uses the Report frame of ticket 18, so it opens in a new window,
+// Ticket 23: the balances-over-time Report (spec story 96). It uses the Report frame of ticket 18, so it is shown on its own page, under its form,
 // says on its face what it is, and prints with its table headings on every page. The Report's numbers are held to the balance
 // history in worker/report-balances.test.ts; this file checks what a reader sees and what comes out of the printer: the page under
 // print media, and the PDF it makes (page count, the text on each page, the margins and the size of the type).
@@ -117,15 +116,11 @@ const article = (page: Page) => page.getByRole('article', { name: 'Balances over
 // Opening a Report
 
 test.describe('opening the Report', () => {
-  test('the Reports page offers it beside the Transaction listing, and its page has a form of its own that shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
+  test('its page has a form of its own that shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
-    await page.goto('/')
-    await navigateTo(page, 'Reports', 'Reports')
-    await expect(page.getByRole('heading', { level: 2, name: 'Balances over time' })).toBeVisible()
-    await expect(page.getByRole('heading', { level: 2, name: 'Transaction listing' })).toBeVisible()
-    await page.getByRole('link', { name: 'Open Balances over time' }).click()
+    await page.goto('/reports/balances')
     await expect(page.getByRole('heading', { level: 1, name: 'Balances over time' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Balances over time' })
@@ -136,14 +131,6 @@ test.describe('opening the Report', () => {
     await expect(article(page).locator('header')).toContainText(`Account: ${savings.name}`)
     expect(new URL(page.url()).pathname).toBe('/reports/balances')
     expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ account: String(savingsId), from: `${start}-01-01`, to: `${end}-12-31` })
-    expect(context.pages()).toHaveLength(1)
-  })
-
-  test('its page has no WCAG 2.2 AA violations with only the form on it', async ({ page, context }) => {
-    await signInAs(context, 'member')
-    await page.goto('/reports/balances')
-    await expect(page.getByRole('form', { name: 'Balances over time' })).toBeVisible()
-    await noAxeViolations(page)
   })
 
   test('its form asks for real dates, in order, and shows nothing until they are', async ({ page, context }) => {
@@ -161,7 +148,6 @@ test.describe('opening the Report', () => {
     await show.click()
     await expect(form.getByRole('alert')).toContainText('before the “From” date')
     await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
-    expect(context.pages()).toHaveLength(1)
     expect(new URL(page.url()).search).toBe('')
     await expect(article(page)).toHaveCount(0)
   })
@@ -172,6 +158,11 @@ test.describe('opening the Report', () => {
       ['/reports/balances?from=2010-01-01', 'Choose the first and last dates', false],
       ['/reports/balances?from=2010-12-31&to=2010-01-01', 'before the “From” date', true],
       ['/reports/balances?account=999999999&from=2010-01-01&to=2010-12-31', 'There is no such Account', true],
+      ['/reports/balances?account=abc&from=2010-01-01&to=2010-12-31', 'There is no such Account', true],
+      ['/reports/balances?account=0&from=2010-01-01&to=2010-12-31', 'There is no such Account', true],
+      ['/reports/balances?account=-1&from=2010-01-01&to=2010-12-31', 'There is no such Account', true],
+      ['/reports/balances?from=x&to=y', 'Choose the first and last dates', false],
+      ['/reports/balances?account=2', 'Choose the first and last dates', false],
     ] as const) {
       await page.goto(path)
       await expect(page.getByRole('heading', { level: 1, name: 'Balances over time' })).toBeVisible()

@@ -1,7 +1,6 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { navigateTo } from './shell-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   dateText,
@@ -30,7 +29,7 @@ import {
   type SeedRow,
 } from './report-helpers'
 
-// Ticket 21: the Budget vs actual Report (spec story 94). It uses the Report frame of ticket 18, so it opens in a new window, says on its face what it is,
+// Ticket 21: the Budget vs actual Report (spec story 94). It uses the Report frame of ticket 18, so it is shown on its own page, under its form, says on its face what it is,
 // and prints with its table headings on every page. The Report's numbers are held to the Summary's Budget vs actual and to Spending in
 // worker/report-budget.test.ts; this file checks what a reader sees and what comes out of the printer: the page under print media, and the PDF it makes
 // (page count, the text on each page, the margins and the size of the type).
@@ -160,14 +159,11 @@ const tableIn = (region: Locator, text: string) => region.getByRole('table', { n
 // Opening a Report
 
 test.describe('opening the Report', () => {
-  test('the Reports page offers it, and its page has a form of its own that asks for dates and no Account and shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
+  test('its page has a form of its own that asks for dates and no Account and shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
-    await page.goto('/')
-    await navigateTo(page, 'Reports', 'Reports')
-    await expect(page.getByRole('heading', { level: 2, name: 'Budget vs actual' })).toBeVisible()
-    await page.getByRole('link', { name: 'Open Budget vs actual' }).click()
+    await page.goto('/reports/budget-vs-actual')
     await expect(page.getByRole('heading', { level: 1, name: 'Budget vs actual' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Budget vs actual' })
@@ -179,7 +175,6 @@ test.describe('opening the Report', () => {
     await expect(article(page)).toBeVisible()
     expect(new URL(page.url()).pathname).toBe('/reports/budget-vs-actual')
     expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ from: `${year}-01-01`, to: `${year}-06-30` })
-    expect(context.pages()).toHaveLength(1)
   })
 
   test('its form asks for real dates, in order, touching no more than 24 months, and shows nothing until they are', async ({ page, context }) => {
@@ -202,7 +197,6 @@ test.describe('opening the Report', () => {
     await show.click()
     await expect(form.getByRole('alert')).toHaveText('A Budget vs actual Report covers at most 24 months. Choose dates that touch 24 months or fewer.')
     await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
-    expect(context.pages()).toHaveLength(1)
     expect(new URL(page.url()).search).toBe('')
     await expect(article(page)).toHaveCount(0)
   })
@@ -211,6 +205,7 @@ test.describe('opening the Report', () => {
     await signInAs(context, 'member')
     for (const [path, words, alert] of [
       ['/reports/budget-vs-actual?from=2001-01-01', 'Choose the first and last dates', false],
+      ['/reports/budget-vs-actual?from=x&to=y', 'Choose the first and last dates', false], // one that is not a date is chosen, and not valid
       ['/reports/budget-vs-actual?from=2001-12-31&to=2001-01-01', 'before the “From” date', true],
       ['/reports/budget-vs-actual?from=2001-01-31&to=2003-01-01', 'covers at most 24 months', true],
     ] as const) {

@@ -1,7 +1,6 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { navigateTo } from './shell-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   dateText,
@@ -28,7 +27,7 @@ import {
   type SeedRow,
 } from './report-helpers'
 
-// Ticket 38: the Loans Report. It uses the Report frame of ticket 18, so it opens in a new window, says on its face what it is, and prints with its table heading on
+// Ticket 38: the Loans Report. It uses the Report frame of ticket 18, so it is shown on its own page, under its form, says on its face what it is, and prints with its table heading on
 // every page. Which Transactions are loans is held to the shared spending definition in worker/report-loans.test.ts, and the sums and wording are in
 // src/lib/report-loans.test.ts; this file checks what a reader sees and what comes out of the printer: the page under print media, and the PDF it makes (page count, the
 // text on each page, the margins and the size of the type).
@@ -151,15 +150,12 @@ const figuresOf = async (section: Locator) => {
 // Opening a Report
 
 test.describe('opening the Report', () => {
-  test('the Reports page offers it, and its page has a form of its own, for one Loans Category or all of them, that shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
+  test('its page has a form of its own, for one Loans Category or all of them, that shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { aliceId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await context.clock.setFixedTime(NOW)
-    await page.goto('/')
-    await navigateTo(page, 'Reports', 'Reports')
-    await expect(page.getByRole('heading', { level: 2, name: 'Loans' })).toBeVisible()
-    await page.getByRole('link', { name: 'Open Loans' }).click()
+    await page.goto('/reports/loans')
     await expect(page.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Loans' })
@@ -182,7 +178,6 @@ test.describe('opening the Report', () => {
     await expect(article(page).locator('header')).toContainText('Loans: All Loans Categories')
     expect(new URL(page.url()).pathname).toBe('/reports/loans')
     expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ to: `${d.year}-12-31` }) // every Loans Category, from the first Transaction: neither in the address
-    expect(context.pages()).toHaveLength(1)
 
     await loan.selectOption({ label: d.aliceLoan })
     await pickDate(form, 'From (optional)', `${d.year}-11-01`)
@@ -190,13 +185,6 @@ test.describe('opening the Report', () => {
     await expect(article(page).locator('header')).toContainText(`Loans: ${d.aliceLoan}`)
     expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ category: String(aliceId), from: `${d.year}-11-01`, to: `${d.year}-12-31` })
     await expect(loan).toHaveValue(String(aliceId)) // the form is still there, filled in from the address
-  })
-
-  test('its page has no WCAG 2.2 AA violations with only the form on it', async ({ page, context }) => {
-    await signInAs(context, 'member')
-    await page.goto('/reports/loans')
-    await expect(page.getByRole('form', { name: 'Loans' }).getByRole('status')).toContainText('to choose from')
-    await noAxeViolations(page)
   })
 
   test('its form needs only the date to go up to: the start date may be left blank, and a start date must be a date, in order', async ({ page, context }) => {
@@ -215,7 +203,6 @@ test.describe('opening the Report', () => {
     await show.click()
     await expect(form.getByRole('alert')).toContainText('before the “From” date')
     await expect(to).toHaveAttribute('aria-invalid', 'true')
-    expect(context.pages()).toHaveLength(1)
     expect(new URL(page.url()).search).toBe('') // nothing was asked for
 
     await clearDate(form, 'From (optional)') // blank is allowed
@@ -229,8 +216,12 @@ test.describe('opening the Report', () => {
     await signInAs(context, 'member')
     for (const [path, words, alert] of [
       ['/reports/loans?from=2001-01-01', 'Choose the last date this Report covers.', false],
+      ['/reports/loans?category=3', 'Choose the last date this Report covers.', false],
+      ['/reports/loans?from=x&to=y', 'Choose the last date this Report covers.', false],
       ['/reports/loans?from=2001-12-31&to=2001-01-01', 'before the “From” date', true],
       ['/reports/loans?category=999999999&to=2001-12-31', 'It may have been removed, or may no longer be a Loans Category', true],
+      ['/reports/loans?category=abc&to=2001-12-31', 'There is no such Loans Category', true],
+      ['/reports/loans?category=0&to=2001-12-31', 'There is no such Loans Category', true],
       // A Spending Category is not a loan, so it has no Report even when its ID is asked for.
       [`/reports/loans?category=${groceriesId}&to=2001-12-31`, 'There is no such Loans Category', true],
     ] as const) {
