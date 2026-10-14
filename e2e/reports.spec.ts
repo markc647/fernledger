@@ -283,7 +283,8 @@ test.describe('on screen', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible() // the page's heading, above the form: the only h1 on screen
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
     const header = report.locator('header')
-    await expect(header.getByText('Transaction listing', { exact: true })).toBeVisible() // the title block says it too, as text: on paper it is the Report's own h1
+    await expect(header.getByRole('heading')).toHaveCount(0) // the title block says it too, but as text on screen: on paper it is the Report's own h1
+    await expect(header.locator('p[aria-hidden="true"]')).toHaveText('Transaction listing')
     await expect(header).toContainText("Mum's finances")
     await expect(header).toContainText(`Account: ${savings.name} (${savings.number})`) // the bank's number is beside the name
     await expect(header).toContainText(`Dates: ${first} to ${last}`)
