@@ -82,6 +82,11 @@ describe('parseLoansSearch', () => {
     expect(parseLoansSearch({ category: '1234567890' })).toEqual({})
     expect(parseLoansSearch({})).toEqual({})
   })
+
+  it('says every key, as undefined when it is blank, because the router lays it over the address: a missing `from=` would stay a blank date', () => {
+    expect(Object.keys(parseLoansSearch({ category: '', from: '', to: '2026-10-31' })).sort()).toEqual(['category', 'from', 'to'])
+    expect({ from: '', ...parseLoansSearch({ from: '' }) }.from).toBeUndefined()
+  })
 })
 
 describe('the page and the cap', () => {

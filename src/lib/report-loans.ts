@@ -141,8 +141,7 @@ export function totalLoans(sections: LoanSection[]) {
 /** What the Loans Report's address holds: the Loans Category (all of them when left out) and the dates, both ends included. A start date is optional. */
 export type LoansSearch = { category?: number; from?: string; to?: string }
 
-/** Reads the address's search parameters (already parsed by the router) into a LoansSearch. Anything that isn't valid is left out rather than refused. */
+/** Reads the address's search parameters (already parsed by the router) into a LoansSearch. Anything blank or not valid is left out rather than refused, as `undefined` (see `parseReportSearch`). */
 export function parseLoansSearch(raw: Record<string, unknown>): LoansSearch {
-  const search = { category: searchId(raw.category), from: searchDate(raw.from), to: searchDate(raw.to) }
-  return Object.fromEntries(Object.entries(search).filter(([, value]) => value !== undefined))
+  return { category: searchId(raw.category), from: searchDate(raw.from), to: searchDate(raw.to) }
 }

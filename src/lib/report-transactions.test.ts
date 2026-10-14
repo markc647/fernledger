@@ -150,4 +150,12 @@ describe('parseReportSearch', () => {
     expect(parseReportSearch({ account: -1, from: '1999-12-31', to: '2101-01-01' })).toEqual({})
     expect(parseReportSearch({})).toEqual({})
   })
+
+  // The router lays what a route validates over the address's own search, so a key that is left out brings back the address's text (`account=`, which an earlier form sent
+  // for every Account, would be an Account that does not exist, and a blank `from` would be a date).
+  it('says every key, as undefined when it is blank or not valid, so the address\'s own text is not left in its place', () => {
+    expect(Object.keys(parseReportSearch({ account: '', from: '', to: '2026-10-31' })).sort()).toEqual(['account', 'from', 'to'])
+    expect(Object.keys(parseReportSearch({ account: 'x' })).sort()).toEqual(['account', 'from', 'to'])
+    expect({ account: '', ...parseReportSearch({ account: '' }) }.account).toBeUndefined() // laid over the address, as the router does
+  })
 })

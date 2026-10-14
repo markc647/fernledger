@@ -194,8 +194,11 @@ export const searchId = (value: unknown) => {
 /** A date in an address: a real date within the years the API accepts, or nothing. */
 export const searchDate = (value: unknown) => (typeof value === 'string' && isSearchDate(value) ? value : undefined)
 
-/** Reads the address's search parameters (already parsed by the router) into a ReportSearch. Anything that isn't valid is left out rather than refused. */
+/**
+ * Reads the address's search parameters (already parsed by the router) into a ReportSearch. Anything that is blank or isn't valid is left out rather than refused: it is
+ * `undefined`, and not missing, because the router lays what a route validates over the address's own search, so a missing key would leave the address's text in its place
+ * (`account=`, which an earlier form sent for every Account, would be an Account that does not exist).
+ */
 export function parseReportSearch(raw: Record<string, unknown>): ReportSearch {
-  const search = { account: searchId(raw.account), from: searchDate(raw.from), to: searchDate(raw.to) }
-  return Object.fromEntries(Object.entries(search).filter(([, value]) => value !== undefined))
+  return { account: searchId(raw.account), from: searchDate(raw.from), to: searchDate(raw.to) }
 }
