@@ -6,20 +6,28 @@ import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/co
 import { CappedNotice, TransactionListing } from '@/components/transaction-listing'
 import { reportListingQuery } from '@/lib/queries'
 import { parseReportSearch } from '@/lib/report-transactions'
+import { REPORTS } from '@/lib/reports'
 
 // The Report lives in its address (?account=2&from=2026-10-01&to=2026-10-31), so it can be reopened or sent on, and the
-// Transactions page and the Reports page open it by link. It opens in a new window (target="_blank" with rel="noopener").
+// Transactions page and the Reports page link to it. The form is on the page with the Report.
 export const Route = createFileRoute('/reports_/transactions')({
   component: TransactionListingReport,
   validateSearch: parseReportSearch,
+  staticData: { nav: { label: REPORTS.transactions.name, parent: '/reports' } },
 })
 
-const NAME = 'Transaction listing'
+const NAME = REPORTS.transactions.name
 
 function TransactionListingReport() {
   const search = Route.useSearch()
   return (
-    <ReportGate name={NAME} search={search} form={<TransactionListingForm defaults={search} />} noAccounts="There are no Accounts yet, so there is nothing to list.">
+    <ReportGate
+      name={NAME}
+      about={REPORTS.transactions.about}
+      search={search}
+      form={<TransactionListingForm defaults={search} />}
+      noAccounts="There are no Accounts yet, so there is nothing to list."
+    >
       {(scope) => <Listing scope={scope} />}
     </ReportGate>
   )

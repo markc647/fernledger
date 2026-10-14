@@ -151,7 +151,7 @@ const figuresOf = async (section: Locator) => {
 // Opening a Report
 
 test.describe('opening the Report', () => {
-  test('the Reports page offers it with a form of its own, for one Loans Category or all of them, and opens it in a new window', async ({ page, context, baseURL }, testInfo) => {
+  test('the Reports page offers it, and its page has a form of its own, for one Loans Category or all of them, that shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { aliceId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
@@ -159,6 +159,8 @@ test.describe('opening the Report', () => {
     await page.goto('/')
     await navigateTo(page, 'Reports', 'Reports')
     await expect(page.getByRole('heading', { level: 2, name: 'Loans' })).toBeVisible()
+    await page.getByRole('link', { name: 'Open Loans' }).click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Loans' })
     await expect(form).toContainText('Leave From blank to begin at the first Transaction')
@@ -176,56 +178,57 @@ test.describe('opening the Report', () => {
     await expectDate(form, 'To', '2026-10-08')
     await expectDate(form, 'From (optional)', '')
     await pickDate(form, 'To', `${d.year}-12-31`)
-    const [all] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
-    await expect(all.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
-    expect(new URL(all.url()).pathname).toBe('/reports/loans')
-    expect(Object.fromEntries(new URL(all.url()).searchParams)).toEqual({ category: '', from: '', to: `${d.year}-12-31` })
-    await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible() // the Reports page is still where it was
+    await form.getByRole('button', { name: 'Show Report' }).click()
+    await expect(article(page).locator('header')).toContainText('Loans: All Loans Categories')
+    expect(new URL(page.url()).pathname).toBe('/reports/loans')
+    expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ to: `${d.year}-12-31` }) // every Loans Category, from the first Transaction: neither in the address
+    expect(context.pages()).toHaveLength(1)
 
     await loan.selectOption({ label: d.aliceLoan })
     await pickDate(form, 'From (optional)', `${d.year}-11-01`)
-    const [one] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
-    await expect(one.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
-    expect(Object.fromEntries(new URL(one.url()).searchParams)).toEqual({ category: String(aliceId), from: `${d.year}-11-01`, to: `${d.year}-12-31` })
+    await form.getByRole('button', { name: 'Show Report' }).click()
+    await expect(article(page).locator('header')).toContainText(`Loans: ${d.aliceLoan}`)
+    expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ category: String(aliceId), from: `${d.year}-11-01`, to: `${d.year}-12-31` })
+    await expect(loan).toHaveValue(String(aliceId)) // the form is still there, filled in from the address
   })
 
-  test('the Reports page has no WCAG 2.2 AA violations with all its forms on it', async ({ page, context }) => {
+  test('its page has no WCAG 2.2 AA violations with only the form on it', async ({ page, context }) => {
     await signInAs(context, 'member')
-    await page.goto('/reports')
-    await expect(page.getByRole('form')).toHaveCount(6)
+    await page.goto('/reports/loans')
     await expect(page.getByRole('form', { name: 'Loans' }).getByRole('status')).toContainText('to choose from')
     await noAxeViolations(page)
   })
 
   test('its form needs only the date to go up to: the start date may be left blank, and a start date must be a date, in order', async ({ page, context }) => {
     await signInAs(context, 'member')
-    await page.goto('/reports')
+    await page.goto('/reports/loans')
     const form = page.getByRole('form', { name: 'Loans' })
-    const open = form.getByRole('button', { name: 'Open Report in a new window' })
+    const show = form.getByRole('button', { name: 'Show Report' })
     const to = dateField(form, 'To')
 
     await clearDate(form, 'To') // it starts at today
-    await open.click()
+    await show.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a To date.') // not "Choose a From date."
     await pickDate(form, 'To', '2001-12-31')
     await pickDate(form, 'From (optional)', '2001-12-31')
     await pickDate(form, 'To', '2001-01-01')
-    await open.click()
+    await show.click()
     await expect(form.getByRole('alert')).toContainText('before the “From” date')
     await expect(to).toHaveAttribute('aria-invalid', 'true')
-    await expect(page.getByRole('form', { name: 'Transaction listing' }).getByRole('alert')).toHaveCount(0) // the other forms are untouched
     expect(context.pages()).toHaveLength(1)
+    expect(new URL(page.url()).search).toBe('') // nothing was asked for
 
     await clearDate(form, 'From (optional)') // blank is allowed
-    const [report] = await Promise.all([context.waitForEvent('page'), open.click()])
-    await expect(report.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
+    await show.click()
+    await expect(form.getByRole('alert')).toHaveCount(0)
+    await expect.poll(() => Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ to: '2001-01-01' })
   })
 
   test('an address without the date to go up to, with dates the wrong way round, or with no such Loans Category explains itself and offers the form', async ({ page, context, baseURL }, testInfo) => {
     const { groceriesId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     for (const [path, words, alert] of [
-      ['/reports/loans', 'Choose the last date this Report covers.', false],
+      ['/reports/loans?from=2001-01-01', 'Choose the last date this Report covers.', false],
       ['/reports/loans?from=2001-12-31&to=2001-01-01', 'before the “From” date', true],
       ['/reports/loans?category=999999999&to=2001-12-31', 'It may have been removed, or may no longer be a Loans Category', true],
       // A Spending Category is not a loan, so it has no Report even when its ID is asked for.
@@ -234,9 +237,27 @@ test.describe('opening the Report', () => {
       await page.goto(path)
       await expect(page.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
       await expect(page.getByRole(alert ? 'alert' : 'status').filter({ hasText: words })).toBeVisible()
-      await expect(page.getByRole('button', { name: 'Open Report in a new window' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Show Report' })).toBeVisible()
       await expect(article(page)).toHaveCount(0) // no Report is made without a Loans Category and the date
     }
+  })
+
+  test('an address from before the form was on the page, with a blank Loan and a blank From, is the Report of every Loans Category from the first Transaction', async ({ page, context, baseURL }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    await page.goto(`/reports/loans?category=&from=&to=${d.year}-12-31`) // what the form used to send for All loans and no start date
+    await expect(article(page).locator('header')).toContainText('Loans: All Loans Categories')
+    await expect(page.getByRole('alert')).toHaveCount(0)
+  })
+
+  test('its page with nothing in the address is the form alone, with no complaint that nothing is chosen', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/reports/loans')
+    await expect(page.getByRole('form', { name: 'Loans' })).toBeVisible()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('status').filter({ hasText: /^Choose the / })).toHaveCount(0)
+    await expect(article(page)).toHaveCount(0)
   })
 
   test('says there are no Loans Categories yet, and links to where to make one, when there are none', async ({ page, context }) => {
@@ -283,7 +304,7 @@ test.describe('on screen', () => {
     await page.goto(address(null, null, `${d.year}-12-31`))
 
     const report = article(page)
-    await expect(report.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible() // the page's heading, above the form: the Report's own title is text on screen and the h1 on paper
     const header = report.locator('header')
     await expect(header).toContainText("Mum's finances")
     await expect(header).toContainText('Loans: All Loans Categories')

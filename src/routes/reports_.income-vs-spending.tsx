@@ -7,21 +7,24 @@ import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/co
 import { tooManyIncomeMonths } from '@/lib/income-vs-spending'
 import { reportIncomeVsSpendingQuery } from '@/lib/queries'
 import { parseReportSearch } from '@/lib/report-transactions'
+import { REPORTS } from '@/lib/reports'
 
 // Like the other Reports, this one lives in its address (?account=2&from=2026-01-01&to=2026-12-31, the Account left out for all of them), so it can be reopened
-// or sent on. It opens in a new window from the Reports page (target="_blank" with rel="noopener").
+// or sent on. The form is on the page with the Report.
 export const Route = createFileRoute('/reports_/income-vs-spending')({
   component: IncomeVsSpendingPage,
   validateSearch: parseReportSearch,
+  staticData: { nav: { label: REPORTS.incomeVsSpending.name, parent: '/reports' } },
 })
 
-const NAME = 'Income vs spending by month'
+const NAME = REPORTS.incomeVsSpending.name
 
 function IncomeVsSpendingPage() {
   const search = Route.useSearch()
   return (
     <ReportGate
       name={NAME}
+      about={REPORTS.incomeVsSpending.about}
       search={search}
       form={<IncomeVsSpendingForm defaults={search} />}
       noAccounts="There are no Accounts yet, so there is no income or spending."

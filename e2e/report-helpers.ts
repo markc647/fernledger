@@ -164,12 +164,18 @@ export async function expectNoTextUnder12pt(page: Page, article: Locator, atLeas
   expect(parseFloat(cell)).toBeGreaterThanOrEqual(16)
 }
 
-/** Printed, a Report is just the Report: no app header, navigation, buttons or links. */
+/**
+ * Printed, a Report is just the Report: no app header, navigation, buttons or links, and none of the page above it, which is for the screen (its heading, what the Report holds and
+ * its form). The Report's own title is then the page's one h1; on screen the page's heading is.
+ */
 export async function expectJustTheReport(page: Page) {
   await expect(page.getByRole('banner')).toBeHidden()
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeHidden()
   await expect(page.getByRole('button')).toHaveCount(0) // hidden elements are not in the accessibility tree
   await expect(page.getByRole('link')).toHaveCount(0)
+  await expect(page.getByRole('form')).toHaveCount(0)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
+  await expect(page.getByRole('article').getByRole('heading', { level: 1 })).toHaveCount(1)
   await expect(page.getByText('In the print window')).toBeHidden()
 }
 

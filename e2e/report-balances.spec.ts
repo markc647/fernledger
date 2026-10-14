@@ -117,7 +117,7 @@ const article = (page: Page) => page.getByRole('article', { name: 'Balances over
 // Opening a Report
 
 test.describe('opening the Report', () => {
-  test('the Reports page offers it beside the Transaction listing, each with a form of its own, and opens it in a new window', async ({ page, context, baseURL }, testInfo) => {
+  test('the Reports page offers it beside the Transaction listing, and its page has a form of its own that shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
@@ -125,55 +125,58 @@ test.describe('opening the Report', () => {
     await navigateTo(page, 'Reports', 'Reports')
     await expect(page.getByRole('heading', { level: 2, name: 'Balances over time' })).toBeVisible()
     await expect(page.getByRole('heading', { level: 2, name: 'Transaction listing' })).toBeVisible()
+    await page.getByRole('link', { name: 'Open Balances over time' }).click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Balances over time' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Balances over time' })
     await form.getByLabel('Account').selectOption({ label: savings.name })
     await pickDate(form, 'From', `${start}-01-01`)
     await pickDate(form, 'To', `${end}-12-31`)
-    const [popup] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
-    await expect(popup.getByRole('heading', { level: 1, name: 'Balances over time' })).toBeVisible()
-    expect(new URL(popup.url()).pathname).toBe('/reports/balances')
-    expect(Object.fromEntries(new URL(popup.url()).searchParams)).toEqual({ account: String(savingsId), from: `${start}-01-01`, to: `${end}-12-31` })
-    await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible() // the Reports page is still where it was
-  })
-
-  test('the Reports page has no WCAG 2.2 AA violations with all its forms on it', async ({ page, context }) => {
-    await signInAs(context, 'member')
-    await page.goto('/reports')
-    await expect(page.getByRole('form')).toHaveCount(6)
-    await noAxeViolations(page)
-  })
-
-  test('its form asks for real dates, in order, and opens nothing until they are', async ({ page, context }) => {
-    await signInAs(context, 'member')
-    await page.goto('/reports')
-    const form = page.getByRole('form', { name: 'Balances over time' })
-    const open = form.getByRole('button', { name: 'Open Report in a new window' })
-
-    await open.click()
-    await expect(form.getByRole('alert')).toHaveText('Choose a From date.')
-    await pickDate(form, 'From', '2010-12-31')
-    await open.click()
-    await expect(form.getByRole('alert')).toHaveText('Choose a To date.')
-    await pickDate(form, 'To', '2010-01-01')
-    await open.click()
-    await expect(form.getByRole('alert')).toContainText('before the “From” date')
-    await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
-    await expect(page.getByRole('form', { name: 'Transaction listing' }).getByRole('alert')).toHaveCount(0) // the other form is untouched
+    await form.getByRole('button', { name: 'Show Report' }).click()
+    await expect(article(page).locator('header')).toContainText(`Account: ${savings.name}`)
+    expect(new URL(page.url()).pathname).toBe('/reports/balances')
+    expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ account: String(savingsId), from: `${start}-01-01`, to: `${end}-12-31` })
     expect(context.pages()).toHaveLength(1)
   })
 
-  test('an address without dates, with dates the wrong way round, or with no such Account explains itself and offers the form', async ({ page, context }) => {
+  test('its page has no WCAG 2.2 AA violations with only the form on it', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/reports/balances')
+    await expect(page.getByRole('form', { name: 'Balances over time' })).toBeVisible()
+    await noAxeViolations(page)
+  })
+
+  test('its form asks for real dates, in order, and shows nothing until they are', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/reports/balances')
+    const form = page.getByRole('form', { name: 'Balances over time' })
+    const show = form.getByRole('button', { name: 'Show Report' })
+
+    await show.click()
+    await expect(form.getByRole('alert')).toHaveText('Choose a From date.')
+    await pickDate(form, 'From', '2010-12-31')
+    await show.click()
+    await expect(form.getByRole('alert')).toHaveText('Choose a To date.')
+    await pickDate(form, 'To', '2010-01-01')
+    await show.click()
+    await expect(form.getByRole('alert')).toContainText('before the “From” date')
+    await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
+    expect(context.pages()).toHaveLength(1)
+    expect(new URL(page.url()).search).toBe('')
+    await expect(article(page)).toHaveCount(0)
+  })
+
+  test('an address with only some dates, dates the wrong way round, or no such Account explains itself and offers the form', async ({ page, context }) => {
     await signInAs(context, 'member')
     for (const [path, words, alert] of [
-      ['/reports/balances', 'Choose the first and last dates', false],
+      ['/reports/balances?from=2010-01-01', 'Choose the first and last dates', false],
       ['/reports/balances?from=2010-12-31&to=2010-01-01', 'before the “From” date', true],
       ['/reports/balances?account=999999999&from=2010-01-01&to=2010-12-31', 'There is no such Account', true],
     ] as const) {
       await page.goto(path)
       await expect(page.getByRole('heading', { level: 1, name: 'Balances over time' })).toBeVisible()
-      await expect(page.getByRole(alert ? 'alert' : 'status')).toContainText(words)
-      await expect(page.getByRole('button', { name: 'Open Report in a new window' })).toBeVisible()
+      await expect(page.getByRole(alert ? 'alert' : 'status').filter({ hasText: words })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Show Report' })).toBeVisible()
       await expect(article(page)).toHaveCount(0) // no Report is made without an Account and dates
     }
   })
@@ -208,7 +211,7 @@ test.describe('on screen', () => {
     await page.goto(address(savingsId, `${start}-01-01`, `${end}-12-31`))
 
     const report = article(page)
-    await expect(report.getByRole('heading', { level: 1, name: 'Balances over time' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: 'Balances over time' })).toBeVisible() // the page's heading, above the form: the Report's own title is text on screen and the h1 on paper
     const header = report.locator('header')
     await expect(header).toContainText("Mum's finances")
     await expect(header).toContainText(`Account: ${savings.name} (${savings.number})`) // the bank's number is beside the name

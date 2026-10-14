@@ -6,20 +6,22 @@ import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/co
 import { SpendingByCategoryReport } from '@/components/spending-report'
 import { reportSpendingQuery } from '@/lib/queries'
 import { parseReportSearch } from '@/lib/report-transactions'
+import { REPORTS } from '@/lib/reports'
 
 // Like the other Reports, this one lives in its address (?account=2&from=2026-10-01&to=2026-10-31, the Account left out for all of them), so it can
-// be reopened or sent on. It opens in a new window from the Reports page (target="_blank" with rel="noopener").
+// be reopened or sent on. The form is on the page with the Report.
 export const Route = createFileRoute('/reports_/spending')({
   component: SpendingReport,
   validateSearch: parseReportSearch,
+  staticData: { nav: { label: REPORTS.spending.name, parent: '/reports' } },
 })
 
-const NAME = 'Spending by Category'
+const NAME = REPORTS.spending.name
 
 function SpendingReport() {
   const search = Route.useSearch()
   return (
-    <ReportGate name={NAME} search={search} form={<SpendingForm defaults={search} />} noAccounts="There are no Accounts yet, so there is no spending.">
+    <ReportGate name={NAME} about={REPORTS.spending.about} search={search} form={<SpendingForm defaults={search} />} noAccounts="There are no Accounts yet, so there is no spending.">
       {(scope) => <Spending scope={scope} account={search.account} />}
     </ReportGate>
   )

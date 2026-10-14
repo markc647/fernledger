@@ -6,21 +6,24 @@ import { ReportFrame } from '@/components/report-frame'
 import { BackToReports, Needs, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
 import { reportLoansQuery } from '@/lib/queries'
 import { parseLoansSearch, type LoansSearch } from '@/lib/report-loans'
+import { REPORTS } from '@/lib/reports'
 
-// The Report lives in its address (?category=3&from=2026-01-01&to=2026-10-31), so it can be reopened or sent on, and the Reports page opens it by link. It opens in a
-// new window (target="_blank" with rel="noopener"). Without a category it is every Loans Category; without `from` it begins at the first Transaction.
+// The Report lives in its address (?category=3&from=2026-01-01&to=2026-10-31), so it can be reopened or sent on, and the Reports page links to the page. The form is on the
+// page with the Report. Without a category it is every Loans Category; without `from` it begins at the first Transaction.
 export const Route = createFileRoute('/reports_/loans')({
   component: LoansReportPage,
   validateSearch: parseLoansSearch,
+  staticData: { nav: { label: REPORTS.loans.name, parent: '/reports' } },
 })
 
-const NAME = 'Loans'
+const NAME = REPORTS.loans.name
 
 function LoansReportPage() {
   const search = Route.useSearch()
   return (
     <ReportGate
       name={NAME}
+      about={REPORTS.loans.about}
       search={{ ...(search.from === undefined ? {} : { from: search.from }), ...(search.to === undefined ? {} : { to: search.to }) }}
       fromOptional
       form={<LoansForm defaults={search} />}
@@ -42,10 +45,10 @@ function Loans({ scope, search }: { scope: ReportScope; search: LoansSearch }) {
   const { available, listing } = loans.data!
 
   if (available === 0) {
-    return <Needs name={NAME} form={<LoansForm defaults={search} />} message="There are no Loans Categories to report on yet." />
+    return <Needs message="There are no Loans Categories to report on yet." />
   }
   if (listing.sections.length === 0) {
-    return <Needs name={NAME} form={<LoansForm defaults={search} />} alert message="There is no such Loans Category. It may have been removed, or may no longer be a Loans Category. Choose one below." />
+    return <Needs alert message="There is no such Loans Category. It may have been removed, or may no longer be a Loans Category. Choose one in the form above." />
   }
   const chosen = search.category === undefined ? null : listing.sections[0]!
   return (

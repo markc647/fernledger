@@ -39,7 +39,7 @@ function Transactions() {
           </>
         ) : (
           <>
-            To print Transactions as a Report, set a From and To date and search, or <Link to="/reports" className="underline underline-offset-4">choose dates on the Reports page</Link>.
+            To print Transactions as a Report, set a From and To date and search, or <Link to="/reports/transactions" className="underline underline-offset-4">choose dates on the Transaction listing Report's page</Link>.
           </>
         )}
       </p>

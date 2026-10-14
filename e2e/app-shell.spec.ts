@@ -78,8 +78,13 @@ test.describe('layout', () => {
     await expect(trail.getByRole('listitem')).toHaveText(['Dashboard']) // a page of its own has no group
     await page.goto('/transactions')
     await expect(trail.getByRole('listitem')).toHaveText(['Transactions', 'All Transactions'])
-    await page.goto('/reports/spending') // a page under Reports is Reports
+    await page.goto('/reports')
     await expect(trail.getByRole('listitem')).toHaveText(['Reports', 'Reports'])
+    await page.goto('/reports/spending') // a Report is a page of Reports: named in the trail, with Reports marked in the sidebar
+    await expect(trail.getByRole('listitem')).toHaveText(['Reports', 'Spending by Category'])
+    await expect(trail.locator('[aria-current="page"]')).toHaveText('Spending by Category')
+    await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
+    await expect(navLink(page, 'Reports')).toHaveAttribute('data-active', 'true')
   })
 
   test('is one skip link, then the header, then the sidebar, then the page, and the skip link goes to the page', async ({ page }) => {
