@@ -71,6 +71,7 @@ test.describe('text size', () => {
     const targets = [
       ...(['A', 'A+', 'A++'] as const).map((name) => sizeButton(page, name)),
       ...(await page.getByRole('navigation', { name: 'Main' }).getByRole('link').all()),
+      page.getByRole('link', { name: 'Sign out' }),
     ]
     expect(targets.length).toBeGreaterThan(3)
     for (const target of targets) {
@@ -131,6 +132,7 @@ test.describe('zoom', () => {
       const nav = page.getByRole('navigation', { name: 'Main' })
       await expect(nav.getByRole('link', { name: 'Settings' })).toBeVisible()
       await expect(nav.getByRole('link', { name: 'Change Log' })).toBeVisible()
+      await expect(page.getByRole('banner').getByRole('link', { name: 'Sign out' })).toBeVisible()
       const { scrollWidth, innerWidth } = await page.evaluate(() => ({
         scrollWidth: document.documentElement.scrollWidth,
         innerWidth: window.innerWidth,
@@ -1057,6 +1059,33 @@ test.describe('header', () => {
     await expect(page.getByRole('banner').getByText('Fernledger', { exact: true })).toBeVisible()
     await expect(page).toHaveTitle('Fernledger')
   })
+
+  // Sign out is in the wrapping group of header controls (src/routes/__root.tsx). On a narrow screen it must not be cut off at the edge or broken over two lines. The 44px size
+  // and the lack of sideways scrolling are held by the touch-target test and the 320px header test above.
+  for (const { width, size } of [
+    { width: 375, size: 'A' },
+    { width: 320, size: 'A++' },
+  ] as const) {
+    test(`Sign out stays whole and inside the screen at ${width}px and text size ${size}`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.setViewportSize({ width, height: 640 })
+      await page.goto('/')
+      await sizeButton(page, size).click()
+      await expect(sizeButton(page, size)).toHaveAttribute('aria-pressed', 'true')
+      await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+      const link = page.getByRole('banner').getByRole('link', { name: 'Sign out' })
+      await expect(link).toBeVisible()
+      const box = await link.boundingBox()
+      expect(box!.x).toBeGreaterThanOrEqual(0)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width)
+      const lines = await link.evaluate((element) => {
+        const range = document.createRange()
+        range.selectNodeContents(element)
+        return range.getClientRects().length
+      })
+      expect(lines).toBe(1)
+    })
+  }
 })
 
 // ---------------------------------------------------------------------------------------------------------------
