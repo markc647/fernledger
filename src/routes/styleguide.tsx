@@ -45,7 +45,7 @@ function DateSamples() {
         </label>
         <DatePicker id="sample-date" labelId="sample-date-label" value={date} onChange={setDate} />
         <p className="mt-1 text-muted-foreground">
-          Stored as <span data-testid="sample-date-stored">{date}</span>
+          The Date is stored as {date}
         </p>
       </div>
       <div>
@@ -54,7 +54,7 @@ function DateSamples() {
         </label>
         <DatePicker id="sample-optional" labelId="sample-optional-label" value={optional} onChange={setOptional} />
         <p className="mt-1 text-muted-foreground">
-          Stored as <span data-testid="sample-optional-stored">{optional || 'nothing'}</span>
+          The Optional date is stored as {optional || 'nothing'}
         </p>
       </div>
       <div>
@@ -63,7 +63,7 @@ function DateSamples() {
         </label>
         <DatePicker id="sample-bounded" labelId="sample-bounded-label" value={bounded} onChange={setBounded} min="2026-10-10" max="2026-10-20" />
         <p className="mt-1 text-muted-foreground">
-          Stored as <span data-testid="sample-bounded-stored">{bounded}</span>
+          The limited date is stored as {bounded}
         </p>
       </div>
     </div>

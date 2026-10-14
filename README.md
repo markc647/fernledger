@@ -256,7 +256,7 @@ Fernledger is often used by families where some members are older, and by people
 - **Colour is never the only signal.** Amounts carry a sign, and statuses carry an icon and words. Red and green are chosen to stay distinguishable for colour-blind users. Contrast meets AA in both light and dark themes.
 - **Respects your device:** follows your light/dark setting, reduced-motion preference and Windows high-contrast mode.
 - **A calm home page for Members:** read-only Members land on a simple Summary. It shows each account's balance, this month's spending against budget, recent transactions and any balance warnings; when the data was last updated will join them. The charts and filters are one click away. A chart is a picture of figures that are also written out in a table, so a screen reader and a printout have them, and it is drawn at once rather than moving. Its colours keep 3:1 against the page in both themes, and in Windows high-contrast mode it is drawn in your text colour.
-- **Phones and tablets:** large touch targets (at least 44px), and tables become cards on narrow screens. Tested on iPad Safari and Android.
+- **Phones and tablets:** large touch targets (at least 44px; the days of a calendar are 44px, and shrink to about 39px on a 320px-wide screen so that seven fit), and tables become cards on narrow screens. Tested on iPad Safari and Android.
 - **Printed reports for any reader:** at least 12pt text, black on white, page numbers ("Page 2 of 5"), table headings repeated on every page, and a header showing the account, date range and who generated the report and when. Page numbers ("Page 2 of 5") are printed by Chrome and Edge 131 and later; other browsers number pages only in their own header and footer, if that is turned on (see [Reports](#reports)).
 - **Help signing in:** a one-page printable "How to sign in" guide for family members.
 
@@ -324,6 +324,7 @@ Only the latest release receives fixes. Please stay current.
 | UI | React, [shadcn/ui](https://ui.shadcn.com), Tailwind | Clean neutral look, light/dark, accessible components |
 | Tables | [TanStack Table](https://tanstack.com/table) | Sorting, filtering and paging for transaction lists |
 | Charts | [Recharts](https://recharts.org) via shadcn Charts | Matches the UI theme |
+| Dates | [react-day-picker](https://daypicker.dev) via shadcn Calendar, with [Radix Popover](https://www.radix-ui.com/primitives/docs/components/popover) | A calendar to choose a date from, with the keyboard, a screen reader and a phone; loaded when one is first opened |
 | Routing/data | TanStack Router + Query | Typed routes, caching |
 | Tests | Vitest + Cloudflare's Workers test pool | Business logic and SQL tested against a real local D1 |
 | Browser tests | [Playwright](https://playwright.dev) | Accessibility (axe), print layouts, and phone/tablet layouts in a real browser |

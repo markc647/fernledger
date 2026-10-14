@@ -13,8 +13,8 @@ export const isRealDate = (value: unknown) => {
   return day <= (month === 2 && !leap ? 28 : DAYS_IN_MONTH[month - 1]!)
 }
 
-// The years a search by date accepts. Bounded so nzDayStart and nextDay never see a year they can't handle (a date input
-// emits partial years such as 0002 while one is typed). The browser's date inputs use the same bounds (src/lib/date-range.ts).
+// The years a search by date accepts. Bounded so nzDayStart and nextDay never see a year they can't handle (an address typed by
+// hand can hold any year). The browser's date pickers use the same bounds (src/lib/date-range.ts).
 export const MIN_QUERY_DATE = '2000-01-01'
 export const MAX_QUERY_DATE = '2100-12-31'
 

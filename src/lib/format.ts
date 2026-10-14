@@ -1,3 +1,5 @@
+import { isoDateParts } from './iso-date'
+
 // How money and dates read on screen. Money is integer NZD cents and dates are NZ dates (Pacific/Auckland);
 // every screen formats through here so they all read the same (README: Accessibility, "Plain language").
 
@@ -42,11 +44,10 @@ const asCalendarDate = dayFormat('UTC')
 
 /** An NZ calendar date as stored ("2026-10-08"), such as a Transaction's date: "Thu 8 Oct 2026". Never shifted by a time zone. */
 export function formatDate(isoDate: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate)
-  const date = match && new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
-  // A date such as 30 February rolls over into March; reject it rather than show a different day.
-  if (!match || date!.toISOString().slice(0, 10) !== isoDate) throw new RangeError('Dates are YYYY-MM-DD')
-  return readDay(asCalendarDate, date!)
+  // A date such as 30 February would roll over into March; refuse it rather than show a different day.
+  const parts = isoDateParts(isoDate)
+  if (!parts) throw new RangeError('Dates are YYYY-MM-DD')
+  return readDay(asCalendarDate, new Date(Date.UTC(parts.year, parts.month - 1, parts.day)))
 }
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']

@@ -198,7 +198,8 @@ function CutoverForm({ id, name, cutoverDate }: { id: number; name: string; cuto
           id={inputId}
           labelId={`${inputId}-label`}
           value={value}
-          className="w-auto border-foreground/60 dark:border-foreground/60"
+          clearable={false} // the Clear button beside it clears and saves
+          className="w-auto border-foreground/60"
           onChange={(date) => {
             setValue(date)
             save.reset()

@@ -5,7 +5,7 @@ import { DatePicker } from '@/components/date-picker'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Button } from '@/components/ui/button'
 import { changeFields, type ChangeRow } from '@/lib/change-log'
-import { MAX_DATE, MIN_DATE, outOfRange } from '@/lib/date-range'
+import { MAX_DATE, MIN_DATE } from '@/lib/date-range'
 import { formatDateTime } from '@/lib/format'
 import { CHANGE_LOG_PAGE_SIZE, changeLogQuery, type ChangeLogFilters } from '@/lib/queries'
 
@@ -26,9 +26,7 @@ const columnsFor = ({ showBefore, showAfter }: { showBefore: boolean; showAfter:
 function ChangeLog() {
   const [filters, setFilters] = useState(NO_FILTERS)
   const [page, setPage] = useState(0)
-  const backwards = filters.from !== '' && filters.to !== '' && filters.from > filters.to
-  const searchable = !backwards && !outOfRange(filters.from) && !outOfRange(filters.to)
-  const { data, error, isFetching } = useQuery({ ...changeLogQuery(filters, page), placeholderData: keepPreviousData, enabled: searchable })
+  const { data, error, isFetching } = useQuery({ ...changeLogQuery(filters, page), placeholderData: keepPreviousData })
   const filtered = filters.type !== '' || filters.from !== '' || filters.to !== ''
   // An entry from before types were recorded has none; it shows no type rather than a made-up one.
   const typeLabel = (id: string | null) => (id === null ? null : (data?.types.find((t) => t.id === id)?.label ?? null))
@@ -97,11 +95,7 @@ function ChangeLog() {
         )}
       </form>
 
-      {backwards ? (
-        <p role="alert" className="mt-4 font-medium">
-          The “To” date is before the “From” date. Change one of them to see the Change Log.
-        </p>
-      ) : error ? (
+      {error ? (
         <p role="alert" className="mt-4">Fernledger couldn't load the Change Log. Reload the page to try again.</p>
       ) : !data ? (
         <p role="status" className="mt-4">Loading…</p>

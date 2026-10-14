@@ -102,7 +102,7 @@ describe('formatDate (an NZ calendar date such as a Transaction date)', () => {
     expect(formatDate('2026-04-05')).toBe('Sun 5 Apr 2026') // NZDT ends
   })
   it('refuses anything that is not a real YYYY-MM-DD date, without echoing it', () => {
-    for (const bad of ['', '8 Oct 2026', '2026-10-8', '2026-02-30', '2026-13-01', '2026-10-08T00:00:00Z']) {
+    for (const bad of ['', '8 Oct 2026', '2026-10-8', '2026-02-30', '2026-13-01', '2026-10-08T00:00:00Z', '0099-01-01']) {
       expect(() => formatDate(bad)).toThrow(RangeError)
       expect(() => formatDate(bad)).toThrow(/^[^\d]*$/)
     }
