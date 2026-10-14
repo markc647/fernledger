@@ -5,6 +5,7 @@ import { DatePicker } from '@/components/date-picker'
 import { LiveStatus } from '@/components/live-status'
 import { ResponsiveTable } from '@/components/responsive-table'
 import { Spent } from '@/components/spent'
+import { DashboardCard } from '@/components/summary/dashboard-card'
 import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { Select } from '@/components/ui/select'
 import { UNCATEGORISED_SPENDING } from '@/lib/budgets'
@@ -71,41 +72,41 @@ export function SpendingByCategory() {
   const message = error || (!data && problem) ? '' : !data ? 'Loading spending…' : updating ? 'Updating spending…' : 'Spending has loaded.'
 
   return (
-    <section aria-labelledby="spending-heading" aria-busy={isFetching}>
-      <h2 id="spending-heading" className="mb-3 text-xl font-semibold">
-        Spending by Category
-      </h2>
+    <DashboardCard headingId="spending-heading" title="Spending by Category" span="half" busy={isFetching}>
       <LiveStatus message={message} />
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div>
-          <label htmlFor={`${id}-period`} className="block font-medium">
-            Period
-          </label>
-          <Select id={`${id}-period`} value={choice} onChange={(event) => pick(event.target.value)}>
-            {PERIODS.map((period) => (
-              <option key={period} value={period}>
-                {PERIOD_LABELS[period]}
-              </option>
+      {/* The three choices sit in a row when this card has the room for them (a card can be a third of the page's width or all of it) and stack when it has not. */}
+      <div className="@container">
+        <div className="grid gap-4 @lg:grid-cols-3">
+          <div>
+            <label htmlFor={`${id}-period`} className="block font-medium">
+              Period
+            </label>
+            <Select id={`${id}-period`} value={choice} onChange={(event) => pick(event.target.value)}>
+              {PERIODS.map((period) => (
+                <option key={period} value={period}>
+                  {PERIOD_LABELS[period]}
+                </option>
+              ))}
+              <option value="custom">Choose dates…</option>
+            </Select>
+          </div>
+          {choice === 'custom' &&
+            (['from', 'to'] as const).map((field) => (
+              <div key={field}>
+                <label id={`${id}-${field}-label`} htmlFor={`${id}-${field}`} className="block font-medium">
+                  {field === 'from' ? 'From' : 'To'}
+                </label>
+                <DatePicker
+                  id={`${id}-${field}`}
+                  labelId={`${id}-${field}-label`}
+                  value={field === 'from' ? from : to}
+                  aria-invalid={problem?.field === field}
+                  aria-describedby={problem?.field === field ? `${id}-problem` : undefined}
+                  onChange={field === 'from' ? setFrom : setTo}
+                />
+              </div>
             ))}
-            <option value="custom">Choose dates…</option>
-          </Select>
         </div>
-        {choice === 'custom' &&
-          (['from', 'to'] as const).map((field) => (
-            <div key={field}>
-              <label id={`${id}-${field}-label`} htmlFor={`${id}-${field}`} className="block font-medium">
-                {field === 'from' ? 'From' : 'To'}
-              </label>
-              <DatePicker
-                id={`${id}-${field}`}
-                labelId={`${id}-${field}-label`}
-                value={field === 'from' ? from : to}
-                aria-invalid={problem?.field === field}
-                aria-describedby={problem?.field === field ? `${id}-problem` : undefined}
-                onChange={field === 'from' ? setFrom : setTo}
-              />
-            </div>
-          ))}
       </div>
       {problem && (
         <p id={`${id}-problem`} role="alert" className="mt-3 font-medium text-destructive">
@@ -161,6 +162,6 @@ export function SpendingByCategory() {
           </div>
         </div>
       )}
-    </section>
+    </DashboardCard>
   )
 }

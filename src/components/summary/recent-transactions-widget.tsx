@@ -2,17 +2,15 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Amount } from '@/components/amount'
 import { ResponsiveTable } from '@/components/responsive-table'
+import { DashboardCard } from '@/components/summary/dashboard-card'
 import { formatDate } from '@/lib/format'
 import { recentTransactionsQuery } from '@/lib/queries'
 
-/** Summary widget: the newest few Transactions across every Account. */
+/** Summary card: the newest few Transactions across every Account. */
 export function RecentTransactionsWidget() {
   const { data, error } = useQuery(recentTransactionsQuery)
   return (
-    <section aria-labelledby="recent-heading">
-      <h2 id="recent-heading" className="mb-3 text-xl font-semibold">
-        Recent transactions
-      </h2>
+    <DashboardCard headingId="recent-heading" title="Recent transactions">
       {error ? (
         <p role="alert">Fernledger couldn't load the recent Transactions. Reload the page to try again.</p>
       ) : !data ? (
@@ -40,6 +38,6 @@ export function RecentTransactionsWidget() {
           )}
         </>
       )}
-    </section>
+    </DashboardCard>
   )
 }

@@ -5,7 +5,7 @@ import { noBalanceHint, noBalanceReason } from './balance-check'
 import { isSearchDate, lastDay } from './date-range'
 import { formatBalance, formatDate, formatMonth } from './format'
 
-// The words and choices of the charts (the Dashboard and the Charts page). The numbers come from the Worker (worker/net-worth.ts,
+// The words and choices of the charts (the cards of the Summary and the Dashboard). The numbers come from the Worker (worker/net-worth.ts,
 // worker/spending-by-category.ts) and are shown as they arrive: this file chooses which to draw and how to say what they are. It adds up no money.
 
 export type { NetWorthRange, SpendingCategory, SpendingPeriod }
@@ -19,14 +19,14 @@ export const PERIOD_LABELS: Record<SpendingPeriod, string> = {
 }
 export const PERIODS = Object.keys(PERIOD_LABELS) as SpendingPeriod[]
 
-/** The ranges of months net worth can be drawn for, in the order they are offered. The Dashboard draws the first. */
+/** The ranges of months net worth can be drawn for, in the order they are offered. It is first drawn for the first. */
 export const NET_WORTH_RANGE_LABELS: Record<NetWorthRange, string> = {
   '24-months': 'Last 24 months',
   '5-years': 'Last 5 years',
   all: 'All history',
 }
 export const NET_WORTH_RANGES = Object.keys(NET_WORTH_RANGE_LABELS) as NetWorthRange[]
-export const DASHBOARD_NET_WORTH_RANGE: NetWorthRange = '24-months'
+export const DEFAULT_NET_WORTH_RANGE: NetWorthRange = '24-months'
 
 /** The most Categories drawn as bars. More would not fit a phone's screen, and the table lists them all. */
 export const CHART_BARS = 12

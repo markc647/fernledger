@@ -1,19 +1,9 @@
-import { createFileRoute } from '@tanstack/react-router'
-import Charts from '@/components/charts/charts'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
+// There is no Charts page: its two charts are cards on the Summary (and the Dashboard). The address stays, for a bookmark or a link made when there was one, and goes to the
+// page that has them now. It is no page of its own, so it is not in the sidebar.
 export const Route = createFileRoute('/charts')({
-  component: ChartsPage,
-  staticData: { nav: { label: 'Charts', group: 'reports', order: 55 } },
+  beforeLoad: () => {
+    throw redirect({ to: '/', replace: true })
+  },
 })
-
-/** Trends for every Member: how net worth has changed, and where the money has gone in a period they choose. The Admin has the same charts on the Dashboard. */
-function ChartsPage() {
-  return (
-    <>
-      <h1 className="text-2xl font-semibold">Charts</h1>
-      <div className="mt-6">
-        <Charts choosableRange />
-      </div>
-    </>
-  )
-}
