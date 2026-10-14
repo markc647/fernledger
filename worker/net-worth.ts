@@ -18,8 +18,11 @@ import { REPORT_HISTORY, type HistoryRow } from './report-balances'
 export const NET_WORTH_RANGES = ['24-months', '5-years', 'all'] as const
 export type NetWorthRange = (typeof NET_WORTH_RANGES)[number]
 
-/** The range a request that names none gets, and the one the Dashboard asks for. */
-export const DEFAULT_NET_WORTH_RANGE: NetWorthRange = '24-months'
+/**
+ * The range a request that names none gets, and the one the Summary and the Dashboard first ask for: the page's own `DEFAULT_NET_WORTH_RANGE` (src/lib/charts.ts) is typed from this
+ * one's literal, through the generated API types, so the two cannot differ without the page failing to compile.
+ */
+export const DEFAULT_NET_WORTH_RANGE = '24-months' satisfies NetWorthRange
 
 /** The query string: the range, which a refusal names. */
 export const netWorthQuery = z.object({ range: z.optional(z.enum(NET_WORTH_RANGES)) })

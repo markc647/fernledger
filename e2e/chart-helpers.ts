@@ -1,9 +1,9 @@
 import type { Page } from '@playwright/test'
 import { expect } from './fixtures'
 
-// What a spec needs to look at the Charts (the Charts page and the Dashboard's charts) with answers of its own, whatever the shared database holds: a net worth the Worker
+// What a spec needs to look at the charts (cards of the Summary and the Dashboard) with answers of its own, whatever the shared database holds: a net worth the Worker
 // refuses for having more than 49 Accounts (worker/net-worth.ts) draws nothing. The specs that look at the charts stub both answers and wait for the pictures
-// (dashboard.spec.ts, shell.spec.ts).
+// (dashboard.spec.ts, display.spec.ts, shell.spec.ts).
 
 export const netWorth = (page: Page) => page.getByRole('region', { name: 'Net worth over time' })
 export const spending = (page: Page) => page.getByRole('region', { name: 'Spending by Category' })
@@ -15,6 +15,35 @@ export const drawn = async (region: ReturnType<typeof netWorth>, name: RegExp) =
   await expect(figure).toBeVisible()
   await expect(figure.locator('svg.recharts-surface')).toBeVisible()
   return figure
+}
+
+// Neither chart is asked for until its button is pressed (each reads every Transaction it covers, ADR 0004): these press it, and wait for the picture.
+export const pressShowNetWorth = (page: Page) => netWorth(page).getByRole('button', { name: 'Show net worth' }).click()
+export const pressShowSpending = (page: Page) => spending(page).getByRole('button', { name: 'Show spending' }).click()
+export const showNetWorth = async (page: Page) => {
+  await pressShowNetWorth(page)
+  return drawn(netWorth(page), LINE)
+}
+export const showSpending = async (page: Page, name: RegExp = /^Bar chart of the/) => {
+  await pressShowSpending(page)
+  return drawn(spending(page), name)
+}
+
+/** Answers the net worth request with `NET_WORTH`, and keeps the address of each one the page makes: the list stays empty until the page asks. */
+export async function spyNetWorth(page: Page) {
+  const asked: string[] = []
+  await page.route(/\/api\/charts\/net-worth/, (route) => {
+    asked.push(route.request().url())
+    return route.fulfill({ json: NET_WORTH })
+  })
+  return asked
+}
+
+/** The same for spending, which the test gives its own answer with `stubSpending`: the address of each request the page makes. */
+export function spySpending(page: Page) {
+  const asked: string[] = []
+  page.on('request', (request) => request.url().includes('/api/charts/spending') && asked.push(request.url()))
+  return asked
 }
 
 // What the Worker answers when the charts ask: a made-up net worth of three months, and made-up spending. Whatever range the page asks for gets the same answer.

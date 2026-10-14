@@ -158,7 +158,7 @@ test.describe('the sidebar navigation', () => {
     expect(await outline(page)).toEqual([
       'Dashboard',
       'Transactions: All Transactions, Uncategorised, Import',
-      'Reports: Reports, Charts',
+      'Reports: Reports',
       'Set up: Accounts, Categories, Rules, Budgets, Settings',
       'Help: Change Log, About your data, How to sign in',
     ])
@@ -172,7 +172,7 @@ test.describe('the sidebar navigation', () => {
     expect(await outline(page)).toEqual([
       'Summary',
       'Transactions: All Transactions',
-      'Reports: Reports, Charts, Accounts',
+      'Reports: Reports, Accounts',
       'Help: Change Log, About your data, How to sign in',
     ])
     await expect(navGroup(page, 'Set up')).toHaveCount(0)
@@ -221,12 +221,12 @@ test.describe('the sidebar navigation', () => {
     await expect(transactions).toHaveAttribute('aria-expanded', 'true')
     await expect(reports).toHaveAttribute('aria-expanded', 'false')
     await expect(navLink(page, 'Uncategorised')).toBeVisible()
-    await expect(navLink(page, 'Charts')).toHaveCount(0) // a shut group has no links to tab through
+    await expect(navLink(page, 'Reports')).toHaveCount(0) // a shut group has no links to tab through
 
     await reports.click()
     await expect(reports).toHaveAttribute('aria-expanded', 'true')
     await expect(reports).toHaveAttribute('aria-controls', /.+/) // it says which list it opens, while there is one
-    await expect(navLink(page, 'Charts')).toBeVisible()
+    await expect(navLink(page, 'Reports')).toBeVisible()
     await expect(transactions).toHaveAttribute('aria-expanded', 'true') // one group opening does not shut another
 
     await transactions.click()
@@ -321,7 +321,7 @@ test.describe('the sidebar collapses to an icon rail', () => {
     await navGroup(page, 'Reports').click()
     await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
-    await expect(navLink(page, 'Charts')).toBeVisible()
+    await expect(navLink(page, 'Reports')).toBeVisible()
     await noAxeViolations(page)
   })
 
