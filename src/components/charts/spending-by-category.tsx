@@ -1,11 +1,12 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { DatePicker } from '@/components/date-picker'
 import { LiveStatus } from '@/components/live-status'
 import { ResponsiveTable } from '@/components/responsive-table'
 import { Spent } from '@/components/spent'
 import { DashboardCard } from '@/components/summary/dashboard-card'
+import { Button } from '@/components/ui/button'
 import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { Select } from '@/components/ui/select'
 import { UNCATEGORISED_SPENDING } from '@/lib/budgets'
@@ -45,16 +46,29 @@ type Choice = SpendingPeriod | 'custom'
 /**
  * Spending by Category for a period the reader chooses: bars for the biggest Categories and a table of them all (worker/spending-by-category.ts, so what is
  * Spending is the same as in Budget vs actual and a Report of it: Transfers, Pending Transactions, Income and Loans are left out, and Uncategorised is counted).
- * The figures come from the Worker as they are shown.
+ * The figures come from the Worker as they are shown. The card does not ask the Worker until the reader presses "Show spending", because it reads every Transaction in
+ * the period (ADR 0004) and the Summary is where everyone lands; the period is chosen beside the button, before or after.
  */
 export function SpendingByCategory() {
   const id = useId()
   const [choice, setChoice] = useState<Choice>('this-month')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
-  const problem = choice === 'custom' ? datesProblem(from, to) : null
+  const [requested, setRequested] = useState(false)
+  const heading = useRef<HTMLHeadingElement>(null)
+  // Dates that cannot be asked about are explained once the reader has asked, not while they are still choosing them.
+  const problem = requested && choice === 'custom' ? datesProblem(from, to) : null
   const request = choice === 'custom' ? { from, to } : { period: choice }
-  const { data, error, isPlaceholderData, isFetching } = useQuery({ ...spendingByCategoryQuery(request), enabled: problem === null, placeholderData: keepPreviousData })
+  const { data, error, isPlaceholderData, isFetching } = useQuery({
+    ...spendingByCategoryQuery(request),
+    enabled: requested && (choice !== 'custom' || datesProblem(from, to) === null),
+    placeholderData: keepPreviousData,
+  })
+  // Pressing the button removes it, so focus goes to the heading it sits under, which is where the reader is told what is happening and then where the chart is.
+  const ask = () => {
+    setRequested(true)
+    heading.current?.focus()
+  }
 
   const pick = (value: string) => {
     // Choosing dates starts from the ones on the screen, so the chart stays as it is until a date is changed.
@@ -69,51 +83,55 @@ export function SpendingByCategory() {
   // The period on the screen is the old one only while the new one is being asked for: with dates that cannot be asked about, nothing is updating and it stays as it is.
   const updating = isPlaceholderData && isFetching
   // What a screen reader is told as it happens, in a region that is on the page from the start (a change is announced, an arrival often is not).
-  const message = error || (!data && problem) ? '' : !data ? 'Loading spending…' : updating ? 'Updating spending…' : 'Spending has loaded.'
+  const message = !requested || error || (!data && problem) ? '' : !data ? 'Loading spending…' : updating ? 'Updating spending…' : 'Spending has loaded.'
 
   return (
-    <DashboardCard headingId="spending-heading" title="Spending by Category" span="half" busy={isFetching}>
+    <DashboardCard headingId="spending-heading" headingRef={heading} title="Spending by Category" span="half" busy={isFetching}>
       <LiveStatus message={message} />
-      {/* The three choices sit in a row when this card has the room for them (a card can be a third of the page's width or all of it) and stack when it has not. */}
-      <div className="@container">
-        <div className="grid gap-4 @lg:grid-cols-3">
-          <div>
-            <label htmlFor={`${id}-period`} className="block font-medium">
-              Period
-            </label>
-            <Select id={`${id}-period`} value={choice} onChange={(event) => pick(event.target.value)}>
-              {PERIODS.map((period) => (
-                <option key={period} value={period}>
-                  {PERIOD_LABELS[period]}
-                </option>
-              ))}
-              <option value="custom">Choose dates…</option>
-            </Select>
-          </div>
-          {choice === 'custom' &&
-            (['from', 'to'] as const).map((field) => (
-              <div key={field}>
-                <label id={`${id}-${field}-label`} htmlFor={`${id}-${field}`} className="block font-medium">
-                  {field === 'from' ? 'From' : 'To'}
-                </label>
-                <DatePicker
-                  id={`${id}-${field}`}
-                  labelId={`${id}-${field}-label`}
-                  value={field === 'from' ? from : to}
-                  aria-invalid={problem?.field === field}
-                  aria-describedby={problem?.field === field ? `${id}-problem` : undefined}
-                  onChange={field === 'from' ? setFrom : setTo}
-                />
-              </div>
+      {!requested && <p className="mb-3">Spending is not read until you ask for it, because working it out reads every Transaction in the period you choose.</p>}
+      {/* The choices sit in a row with the button when this card has the room, and wrap when it has not (a card can be a third of the page's width or all of it). */}
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-[1_1_10rem]">
+          <label htmlFor={`${id}-period`} className="block font-medium">
+            Period
+          </label>
+          <Select id={`${id}-period`} value={choice} onChange={(event) => pick(event.target.value)}>
+            {PERIODS.map((period) => (
+              <option key={period} value={period}>
+                {PERIOD_LABELS[period]}
+              </option>
             ))}
+            <option value="custom">Choose dates…</option>
+          </Select>
         </div>
+        {choice === 'custom' &&
+          (['from', 'to'] as const).map((field) => (
+            <div key={field} className="min-w-0 flex-[1_1_10rem]">
+              <label id={`${id}-${field}-label`} htmlFor={`${id}-${field}`} className="block font-medium">
+                {field === 'from' ? 'From' : 'To'}
+              </label>
+              <DatePicker
+                id={`${id}-${field}`}
+                labelId={`${id}-${field}-label`}
+                value={field === 'from' ? from : to}
+                aria-invalid={problem?.field === field}
+                aria-describedby={problem?.field === field ? `${id}-problem` : undefined}
+                onChange={field === 'from' ? setFrom : setTo}
+              />
+            </div>
+          ))}
+        {!requested && (
+          <Button type="button" size="touch" onClick={ask}>
+            Show spending
+          </Button>
+        )}
       </div>
       {problem && (
         <p id={`${id}-problem`} role="alert" className="mt-3 font-medium text-destructive">
           {problem.message}
         </p>
       )}
-      {error ? (
+      {!requested ? null : error ? (
         <p role="alert" className="mt-4">
           Fernledger couldn't load the spending. Choose the period again, or reload the page to try again.
         </p>

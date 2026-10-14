@@ -15,8 +15,7 @@ const TOOLS = [
 
 /**
  * Where the Admin lands: a card of the shortcuts to the work only the Admin does, then every card the Summary shows every Member (`SummaryCards`, so the two cannot disagree),
- * of which spending by Category is drawn at once and net worth waits for a button, because working it out reads every Transaction (ADR 0004). A Member lands on the Summary,
- * which has all of these but the tools.
+ * of which the two charts each wait for a button, because working them out reads every Transaction (ADR 0004). A Member lands on the Summary, which has all of these but the tools.
  */
 export function Dashboard({ me }: { me: { email: string; role: Role } }) {
   return (

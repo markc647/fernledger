@@ -36,8 +36,8 @@ const LOADED = 'Net worth has loaded.'
 /**
  * Net worth over time, a card of the Summary and the Dashboard: the money in the Accounts added up at the end of each month (worker/net-worth.ts). The line is a picture of the figures
  * under "Show the figures", which a screen reader and a printout use. The figures come from the Worker as they are shown. The card does not ask the Worker until the reader presses
- * "Show net worth", because working it out reads every Transaction of every Account (ADR 0004) and the Summary is where everyone lands. It then draws the last 24 months, and the
- * reader can choose a longer range, which reads exactly as much.
+ * "Show net worth", because working it out reads every Transaction of every Account (ADR 0004) and the Summary is where everyone lands. The range (the last 24 months, 5 years or
+ * all history) is chosen beside the button, before or after, and reads exactly as much whichever it is.
  */
 export function NetWorthChart() {
   const id = useId()
@@ -57,16 +57,10 @@ export function NetWorthChart() {
   return (
     <DashboardCard headingId="net-worth-heading" headingRef={heading} title="Net worth over time" span="half" busy={requested && (isPlaceholderData || (!data && !error))}>
       <LiveStatus message={message} />
-      {!requested && (
-        <>
-          <p className="mb-3">Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.</p>
-          <Button type="button" size="touch" onClick={request}>
-            Show net worth
-          </Button>
-        </>
-      )}
-      {requested && (
-        <div className="mb-3 max-w-xs">
+      {!requested && <p className="mb-3">Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.</p>}
+      {/* The range is chosen before net worth is drawn as well as after, because every range reads the same (so choosing first costs one read, not two): the choice sits beside the button. */}
+      <div className="mb-3 flex flex-wrap items-end gap-x-4 gap-y-3">
+        <div className="max-w-xs min-w-0 flex-[1_1_10rem]">
           <label htmlFor={`${id}-range`} className="block font-medium">
             Range
           </label>
@@ -78,7 +72,12 @@ export function NetWorthChart() {
             ))}
           </Select>
         </div>
-      )}
+        {!requested && (
+          <Button type="button" size="touch" onClick={request}>
+            Show net worth
+          </Button>
+        )}
+      </div>
       {!requested ? null : error ? (
         <p role="alert">Fernledger couldn't load net worth. Reload the page to try again.</p>
       ) : !data ? (

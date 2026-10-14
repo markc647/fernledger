@@ -8,8 +8,8 @@ import { RecentTransactionsWidget } from '@/components/summary/recent-transactio
 
 /**
  * Everything the Summary shows, as a grid of cards, in the order it is read: anything that needs a second look first (Balance checks), how the Accounts stand, this month against
- * Budget, the charts, and the newest Transactions last, as a table. The Member's Summary and the Admin's Dashboard are both this, so they cannot disagree; the Dashboard puts its own
- * cards (`children`) before them.
+ * Budget, the newest Transactions, and last the charts, which read the most and so each wait for a button. The Member's Summary and the Admin's Dashboard are both this, so they
+ * cannot disagree; the Dashboard puts its own cards (`children`) before them.
  */
 export function SummaryCards({ children }: { children?: ReactNode }) {
   return (
@@ -18,8 +18,8 @@ export function SummaryCards({ children }: { children?: ReactNode }) {
       <BalanceWarningsWidget />
       <BalancesWidget />
       <BudgetVsActualWidget />
-      <LazyCharts />
       <RecentTransactionsWidget />
+      <LazyCharts />
     </SummaryGrid>
   )
 }
