@@ -58,8 +58,8 @@ function pagesFor<To extends string>(entries: NavEntry<To>[], role: Role | undef
     .sort((a, b) => (a.order ?? DEFAULT_ORDER) - (b.order ?? DEFAULT_ORDER) || a.label.localeCompare(b.label))
 }
 
-/** The links this reader sees, in order, each by the label this reader sees it by. */
-export const navFor = <To extends string>(entries: NavEntry<To>[], role: Role | undefined) => pagesFor(entries, role, false)
+/** The links this reader sees, in order, each by the label this reader sees it by: the pages with a row in the sidebar, and not those that belong to one of them (`parent`). */
+export const navFor = <To extends string>(entries: NavEntry<To>[], role: Role | undefined) => pagesFor(entries, role, false).filter((page) => !page.parent)
 
 /** What the sidebar shows: a link on its own, or a group of links under a label. */
 export type NavSection<To extends string = string> =
@@ -85,25 +85,26 @@ const covers = (to: string, pathname: string) => (to === '/' ? pathname === '/' 
 /**
  * Where a page is, for the breadcrumb and for which group opens: the group (none for a link on its own) and the page, from the longest address that covers `pathname`. It
  * looks through every page, not only those in this reader's sidebar, so a Member who arrives at Budgets from the Summary is told it is in Set up, though their sidebar has no such group.
- * A page that belongs to another (`parent`) is named as itself, in its parent's group, and `to` is its parent's, because that is the row the sidebar marks.
+ * A page that belongs to another (`parent`) is named as itself, in its parent's group, and `to` is its parent's, because that is the row the sidebar marks; `parent` says so, for
+ * the breadcrumb to link its group to that page.
  */
-export function trailFor<To extends string>(entries: NavEntry<To>[], role: Role | undefined, pathname: string): { group?: string; groupId?: NavGroupId; page?: string; to?: string } {
-  type Place = { group?: string; groupId?: NavGroupId; page: string; to: string }
+export function trailFor<To extends string>(
+  entries: NavEntry<To>[],
+  role: Role | undefined,
+  pathname: string,
+): { group?: string; groupId?: NavGroupId; page?: string; to?: string; parent?: string } {
   const pages = pagesFor(entries, role, true)
-  const inSidebar = new Map<string, Place>()
+  // The sidebar's pages: where each is, which is its group, if it has one.
+  const placeOf = new Map<string, { group?: string; groupId?: NavGroupId; to: string }>()
   for (const section of sectionsOf(pages, role, true)) {
-    const items = section.kind === 'link' ? [{ to: section.to, label: section.label }] : section.items
-    for (const { to, label } of items) inSidebar.set(to, section.kind === 'link' ? { page: label, to } : { group: section.label, groupId: section.id, page: label, to })
+    if (section.kind === 'link') placeOf.set(section.to, { to: section.to })
+    else for (const { to } of section.items) placeOf.set(to, { group: section.label, groupId: section.id, to })
   }
-  // Every address that can say where a page is, with the place it names: the sidebar's own, and the pages that belong to one of them.
-  const candidates: [string, Place][] = [...inSidebar]
+  // The page whose address is the longest that covers `pathname` is the one it is; it is where its parent is, if it has one, and where it is itself if it does not.
+  let best: (typeof pages)[number] | undefined
   for (const page of pages) {
-    const parent = page.parent === undefined ? undefined : inSidebar.get(page.parent)
-    if (parent) candidates.push([page.to, { ...parent, page: page.label }])
+    if (placeOf.has(page.parent ?? page.to) && covers(page.to, pathname) && (!best || page.to.length > best.to.length)) best = page
   }
-  let best: [string, Place] | undefined
-  for (const candidate of candidates) {
-    if (covers(candidate[0], pathname) && (!best || candidate[0].length > best[0].length)) best = candidate
-  }
-  return best?.[1] ?? {}
+  if (!best) return {}
+  return { ...placeOf.get(best.parent ?? best.to)!, page: best.label, ...(best.parent === undefined ? undefined : { parent: best.parent }) }
 }

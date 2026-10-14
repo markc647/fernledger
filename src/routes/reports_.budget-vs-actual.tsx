@@ -16,14 +16,13 @@ export const Route = createFileRoute('/reports_/budget-vs-actual')({
   staticData: { nav: { label: REPORTS.budgetVsActual.name, parent: '/reports' } },
 })
 
-const NAME = REPORTS.budgetVsActual.name
+const REPORT = REPORTS.budgetVsActual
 
 function BudgetVsActualReport() {
   const search = Route.useSearch()
   return (
     <ReportGate
-      name={NAME}
-      about={REPORTS.budgetVsActual.about}
+      report={REPORT}
       search={search}
       form={<BudgetVsActualForm defaults={search} />}
       noAccounts="There are no Accounts yet, so there is no spending to compare with Budgets."
@@ -46,7 +45,7 @@ function Budgets({ scope }: { scope: ReportScope }) {
 
   return (
     <ReportFrame
-      name={NAME}
+      name={REPORT.name}
       accounts={scope.accountsText}
       accountsInTitle={scope.accountsInTitle}
       from={report.covers.from}

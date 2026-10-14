@@ -16,15 +16,14 @@ export const Route = createFileRoute('/reports_/loans')({
   staticData: { nav: { label: REPORTS.loans.name, parent: '/reports' } },
 })
 
-const NAME = REPORTS.loans.name
+const REPORT = REPORTS.loans
 
 function LoansReportPage() {
   const search = Route.useSearch()
   return (
     <ReportGate
-      name={NAME}
-      about={REPORTS.loans.about}
-      search={{ ...(search.from === undefined ? {} : { from: search.from }), ...(search.to === undefined ? {} : { to: search.to }) }}
+      report={REPORT}
+      search={{ from: search.from, to: search.to }}
       fromOptional
       form={<LoansForm defaults={search} />}
       noAccounts="There are no Accounts yet, so there is no loan to list."
@@ -53,7 +52,7 @@ function Loans({ scope, search }: { scope: ReportScope; search: LoansSearch }) {
   const chosen = search.category === undefined ? null : listing.sections[0]!
   return (
     <ReportFrame
-      name={NAME}
+      name={REPORT.name}
       accounts={scope.accountsText}
       accountsInTitle={chosen ? chosen.name : 'All loans'}
       from={search.from ?? null}

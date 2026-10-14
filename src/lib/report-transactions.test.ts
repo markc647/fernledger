@@ -145,17 +145,16 @@ describe('parseReportSearch', () => {
     expect(parseReportSearch({ account: '2' })).toEqual({ account: 2 }) // the router has usually parsed it to a number; a string works too
   })
 
-  it('leaves out anything that is not valid rather than refusing the page', () => {
-    expect(parseReportSearch({ account: 'x', from: '2026-02-30', to: 'soon' })).toEqual({})
-    expect(parseReportSearch({ account: -1, from: '1999-12-31', to: '2101-01-01' })).toEqual({})
-    expect(parseReportSearch({})).toEqual({})
+  // The router lays what a route validates over the address's own search, so a key that is left out brings back the address's text (`account=`, which an earlier form sent
+  // for every Account, would be an Account that does not exist, and a blank `from` would be a date): every key is there, as undefined when it is left out.
+  it('leaves out what is blank and a date that is not valid, rather than refusing the page', () => {
+    expect(parseReportSearch({ account: '', from: '', to: '2026-10-31' })).toStrictEqual({ account: undefined, from: undefined, to: '2026-10-31' })
+    expect(parseReportSearch({ from: '2026-02-30', to: 'soon' })).toStrictEqual({ account: undefined, from: undefined, to: undefined })
+    expect(parseReportSearch({ from: '1999-12-31', to: '2101-01-01' })).toStrictEqual({ account: undefined, from: undefined, to: undefined })
+    expect(parseReportSearch({})).toStrictEqual({ account: undefined, from: undefined, to: undefined })
   })
 
-  // The router lays what a route validates over the address's own search, so a key that is left out brings back the address's text (`account=`, which an earlier form sent
-  // for every Account, would be an Account that does not exist, and a blank `from` would be a date).
-  it('says every key, as undefined when it is blank or not valid, so the address\'s own text is not left in its place', () => {
-    expect(Object.keys(parseReportSearch({ account: '', from: '', to: '2026-10-31' })).sort()).toEqual(['account', 'from', 'to'])
-    expect(Object.keys(parseReportSearch({ account: 'x' })).sort()).toEqual(['account', 'from', 'to'])
-    expect({ account: '', ...parseReportSearch({ account: '' }) }.account).toBeUndefined() // laid over the address, as the router does
+  it('makes an Account that is named but is not valid one that does not exist, so the page says so and does not widen to every Account', () => {
+    for (const named of ['x', 'abc', '0', 0, -1, '-1', '1234567890', 1_000_000_000]) expect(parseReportSearch({ account: named }).account, String(named)).toBe(0)
   })
 })

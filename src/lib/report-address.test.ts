@@ -30,20 +30,27 @@ describe('reportHref', () => {
 
 describe('isSameReport', () => {
   const here = (search: string, pathname = '/reports/spending') => ({ pathname, search })
+  const READS = ['account', 'from', 'to']
 
-  it('is true for the page that is open with the same choices, whatever order they come in or how they are written', () => {
-    expect(isSameReport('/reports/spending?account=2&from=2026-01-01&to=2026-12-31', here('?to=2026-12-31&account=2&from=2026-01-01'))).toBe(true)
-    expect(isSameReport('/reports/spending', here(''))).toBe(true)
+  it('is true for the page that is open with the same choices, whatever order they come in', () => {
+    expect(isSameReport('/reports/spending?account=2&from=2026-01-01&to=2026-12-31', here('?to=2026-12-31&account=2&from=2026-01-01'), READS)).toBe(true)
+    expect(isSameReport('/reports/spending', here(''), READS)).toBe(true)
   })
 
   it('does not count a blank choice, which an address from an earlier form (or a bookmark of one) has', () => {
-    expect(isSameReport('/reports/spending?from=2026-01-01&to=2026-12-31', here('?account=&from=2026-01-01&to=2026-12-31'))).toBe(true)
+    expect(isSameReport('/reports/spending?from=2026-01-01&to=2026-12-31', here('?account=&from=2026-01-01&to=2026-12-31'), READS)).toBe(true)
+  })
+
+  it('does not count a choice the Report does not read: a Budget has no Account', () => {
+    const budget = ['from', 'to']
+    expect(isSameReport('/reports/budget-vs-actual?from=2026-01-01&to=2026-12-31', here('?account=2&from=2026-01-01&to=2026-12-31', '/reports/budget-vs-actual'), budget)).toBe(true)
+    expect(isSameReport('/reports/budget-vs-actual?from=2026-01-01&to=2026-12-31', here('?account=2&from=2026-01-01&to=2026-11-30', '/reports/budget-vs-actual'), budget)).toBe(false)
   })
 
   it('is false when a choice, a page or a choice\'s presence differs', () => {
-    expect(isSameReport('/reports/spending?from=2026-01-01&to=2026-12-31', here('?from=2026-01-01&to=2026-11-30'))).toBe(false)
-    expect(isSameReport('/reports/spending?from=2026-01-01&to=2026-12-31', here('?from=2026-01-01&to=2026-12-31', '/reports/loans'))).toBe(false)
-    expect(isSameReport('/reports/spending?from=2026-01-01&to=2026-12-31', here('?from=2026-01-01&to=2026-12-31&account=2'))).toBe(false)
-    expect(isSameReport('/reports/spending?from=2026-01-01&to=2026-12-31&account=2', here('?from=2026-01-01&to=2026-12-31'))).toBe(false)
+    expect(isSameReport('/reports/spending?from=2026-01-01&to=2026-12-31', here('?from=2026-01-01&to=2026-11-30'), READS)).toBe(false)
+    expect(isSameReport('/reports/spending?from=2026-01-01&to=2026-12-31', here('?from=2026-01-01&to=2026-12-31', '/reports/loans'), READS)).toBe(false)
+    expect(isSameReport('/reports/spending?from=2026-01-01&to=2026-12-31', here('?from=2026-01-01&to=2026-12-31&account=2'), READS)).toBe(false)
+    expect(isSameReport('/reports/spending?from=2026-01-01&to=2026-12-31&account=2', here('?from=2026-01-01&to=2026-12-31'), READS)).toBe(false)
   })
 })

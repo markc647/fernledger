@@ -114,8 +114,9 @@ export function ReportFrame({
   return (
     <Identity.Provider value={identity}>
       <div className="print:hidden">
-        {/* Said once the Report is there: a Report that was asked for on the page above appears under the form, where a screen reader is not looking. */}
-        <LiveStatus message={`${name} Report is ready, below the form.`} />
+        {/* Said once the Report is there, and again when it is read again: a Report that was asked for on the page above appears under the form, where a screen reader is not
+            looking. A new one for each reading (its key), since its words are the same. */}
+        <LiveStatus key={generatedAt} message={`${name} Report is ready, below the form.`} />
       </div>
       <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 print:hidden">
         <Button size="touch" onClick={() => window.print()}>
@@ -133,7 +134,7 @@ export function ReportFrame({
           <p aria-hidden="true" className="mt-1 text-2xl font-semibold print:hidden">
             {name}
           </p>
-          <h1 id="report-title" className="mt-1 hidden text-2xl font-semibold print:block print:text-[20pt]">
+          <h1 className="mt-1 hidden text-2xl font-semibold print:block print:text-[20pt]">
             {name}
           </h1>
           <dl className="mt-3 grid gap-1">

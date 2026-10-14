@@ -16,14 +16,13 @@ export const Route = createFileRoute('/reports_/transactions')({
   staticData: { nav: { label: REPORTS.transactions.name, parent: '/reports' } },
 })
 
-const NAME = REPORTS.transactions.name
+const REPORT = REPORTS.transactions
 
 function TransactionListingReport() {
   const search = Route.useSearch()
   return (
     <ReportGate
-      name={NAME}
-      about={REPORTS.transactions.about}
+      report={REPORT}
       search={search}
       form={<TransactionListingForm defaults={search} />}
       noAccounts="There are no Accounts yet, so there is nothing to list."
@@ -44,7 +43,7 @@ function Listing({ scope }: { scope: ReportScope }) {
 
   return (
     <ReportFrame
-      name={NAME}
+      name={REPORT.name}
       accounts={scope.accountsText}
       accountsInTitle={scope.accountsInTitle}
       from={scope.from}

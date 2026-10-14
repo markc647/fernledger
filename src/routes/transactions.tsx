@@ -22,7 +22,7 @@ function Transactions() {
     <>
       <h1 className="text-2xl font-semibold">Transactions</h1>
       <p className="mt-2">Search and filter every Transaction, and open one to see all of its details.</p>
-      {/* The Report lists the whole Account and dates, whatever the other filters say, so it carries only those. It is a page for paper, so it opens in a new window. */}
+      {/* The Report lists the whole Account and dates, whatever the other filters say, so it carries only those. It opens in a new window, so the table, filtered as it is, is still where it was. */}
       <p className="mt-2">
         {search.from && search.to ? (
           <>

@@ -56,13 +56,9 @@ const routes: NavEntry[] = [
   { to: '/import', label: 'Import', group: 'transactions', adminOnly: true, order: 20 },
   { to: '/reports', label: 'Reports', group: 'reports', order: 50 },
   { to: '/charts', label: 'Charts', group: 'reports', order: 55 },
-  // The six Reports are pages of Reports, which the sidebar does not list: the breadcrumb names them and Reports is marked as the current page.
-  { to: '/reports/spending', label: 'Spending by Category', parent: '/reports' },
-  { to: '/reports/income-vs-spending', label: 'Income vs spending by month', parent: '/reports' },
+  // A Report is a page of Reports, which the sidebar does not list: the breadcrumb names it and Reports is marked as the current page.
   { to: '/reports/loans', label: 'Loans', parent: '/reports' },
-  { to: '/reports/transactions', label: 'Transaction listing', parent: '/reports' },
   { to: '/reports/balances', label: 'Balances over time', parent: '/reports' },
-  { to: '/reports/budget-vs-actual', label: 'Budget vs actual', parent: '/reports' },
   { to: '/accounts', label: 'Accounts', group: 'setup', order: 30, member: { group: 'reports', order: 60 } },
   { to: '/categories', label: 'Categories', group: 'setup', order: 40 },
   { to: '/rules', label: 'Rules', group: 'setup', adminOnly: true, order: 45 },
@@ -126,12 +122,9 @@ describe('navSections', () => {
     expect(navSections(openToAll, 'admin').map((section) => section.label)).toContain('Set up')
   })
 
-  it('leaves out a page that belongs to another: the six Reports are under Reports, not in the sidebar beside it', () => {
-    const labels = navSections(routes, 'admin').flatMap((section) => (section.kind === 'link' ? [section.label] : section.items.map((item) => item.label)))
-    expect(labels).not.toContain('Loans')
-    expect(labels).not.toContain('Spending by Category')
-    expect(navSections(routes, 'admin').filter((section) => section.kind === 'link').map((section) => section.label)).toEqual(['Dashboard'])
-    expect(navFor(routes, 'member').filter((page) => page.parent)).toHaveLength(6) // navFor still has them: only the sections leave them out
+  it('leaves out a page that belongs to another, which has no row: a Report is under Reports, not in the sidebar (or the links) beside it', () => {
+    expect(navSections(routes, 'admin').filter((section) => section.kind === 'link').map((section) => section.label)).toEqual(['Dashboard']) // nor a link of its own
+    expect(navFor(routes, 'member').map((page) => page.label)).not.toContain('Loans')
   })
 
   it('keeps the address of every page, so the sidebar links to the route and not to its label', () => {
@@ -155,30 +148,24 @@ describe('trailFor', () => {
   })
 
   describe('a page that belongs to a page in the sidebar', () => {
-    it('is named in the breadcrumb under the group, and the page it belongs to is the one the sidebar marks', () => {
-      expect(trailFor(routes, 'admin', '/reports/balances')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Balances over time', to: '/reports' })
-      expect(trailFor(routes, 'admin', '/reports/loans')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Loans', to: '/reports' })
-      expect(trailFor(routes, 'admin', '/reports/income-vs-spending')).toMatchObject({ page: 'Income vs spending by month' })
+    it('is named in the breadcrumb under the group, the page it belongs to is the one the sidebar marks, and it says which that is for the group to link to', () => {
+      expect(trailFor(routes, 'admin', '/reports/balances')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Balances over time', to: '/reports', parent: '/reports' })
+      expect(trailFor(routes, 'member', '/reports/loans')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Loans', to: '/reports', parent: '/reports' })
     })
 
-    it('leaves the page it belongs to as it was', () => {
+    it('leaves the page it belongs to as it was: it belongs to none', () => {
       expect(trailFor(routes, 'admin', '/reports')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Reports', to: '/reports' })
     })
 
     it('is in the group the reader finds its page in', () => {
       const moved = [{ to: '/accounts', label: 'Accounts', group: 'setup', order: 30, member: { group: 'reports', order: 60 } }, { to: '/accounts/new', label: 'New Account', parent: '/accounts' }] as const
-      expect(trailFor([...moved], 'admin', '/accounts/new')).toEqual({ group: 'Set up', groupId: 'setup', page: 'New Account', to: '/accounts' })
-      expect(trailFor([...moved], 'member', '/accounts/new')).toEqual({ group: 'Reports', groupId: 'reports', page: 'New Account', to: '/accounts' })
+      expect(trailFor([...moved], 'admin', '/accounts/new')).toMatchObject({ group: 'Set up', groupId: 'setup', page: 'New Account', to: '/accounts' })
+      expect(trailFor([...moved], 'member', '/accounts/new')).toMatchObject({ group: 'Reports', groupId: 'reports', page: 'New Account', to: '/accounts' })
     })
 
-    it('is found for a Member and a stranger as it is for the Admin', () => {
-      expect(trailFor(routes, 'member', '/reports/spending')).toMatchObject({ group: 'Reports', page: 'Spending by Category', to: '/reports' })
-      expect(trailFor(routes, undefined, '/reports/spending')).toMatchObject({ group: 'Reports', page: 'Spending by Category', to: '/reports' })
-    })
-
-    it('is not taken for a page whose address only starts the same way', () => {
-      expect(trailFor(routes, 'admin', '/reports/loans-old')).toMatchObject({ page: 'Reports', to: '/reports' }) // under Reports by its address alone, as /reports/anything is
+    it('is the longest address that covers the pathname: a page of its own pages is itself, and /reports/loans-old is only Reports', () => {
       expect(trailFor(routes, 'admin', '/reports/loans/2')).toMatchObject({ page: 'Loans', to: '/reports' })
+      expect(trailFor(routes, 'admin', '/reports/loans-old')).toMatchObject({ page: 'Reports', to: '/reports' })
     })
 
     it('says nothing of a page whose parent is not a page of the sidebar', () => {

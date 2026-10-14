@@ -11,12 +11,18 @@ export function reportHref(page: string, fields: Iterable<[string, FormDataEntry
   return search === '' ? page : `${page}?${search}`
 }
 
-/** What a page's search says, as its choices in a fixed order, so the same choices written in another order, or with a blank one (an earlier form sent `account=`), are the same. */
-const choicesIn = (search: URLSearchParams) =>
-  JSON.stringify([...search].filter(([, value]) => value !== '').sort(([a, x], [b, y]) => (a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0)))
+/** What a page's search says of the choices the Report reads (`choices`), in a fixed order: the same choices in another order, a blank one (an earlier form sent `account=`) and one the Report does not read are the same. */
+function choicesIn(search: URLSearchParams, choices: readonly string[]) {
+  const read = new URLSearchParams([...search].filter(([name, value]) => value !== '' && choices.includes(name)))
+  read.sort()
+  return read.toString()
+}
 
-/** Whether `href` (from `reportHref`) is the Report that is open now: the same page with the same choices. Asking for it again is a request to read it again. */
-export function isSameReport(href: string, open: { pathname: string; search: string }): boolean {
+/**
+ * Whether `href` (from `reportHref`) is the Report that is open now: the same page with the same choices, of the `choices` that Report reads (src/lib/reports.ts), so a Budget
+ * address with an `account` in it, which a Budget leaves out, is the same Report. Asking for it again is a request to read it again.
+ */
+export function isSameReport(href: string, open: { pathname: string; search: string }, choices: readonly string[]): boolean {
   const [page = '', search = ''] = href.split('?')
-  return page === open.pathname && choicesIn(new URLSearchParams(search)) === choicesIn(new URLSearchParams(open.search))
+  return page === open.pathname && choicesIn(new URLSearchParams(search), choices) === choicesIn(new URLSearchParams(open.search), choices)
 }

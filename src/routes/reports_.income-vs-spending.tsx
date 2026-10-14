@@ -17,14 +17,13 @@ export const Route = createFileRoute('/reports_/income-vs-spending')({
   staticData: { nav: { label: REPORTS.incomeVsSpending.name, parent: '/reports' } },
 })
 
-const NAME = REPORTS.incomeVsSpending.name
+const REPORT = REPORTS.incomeVsSpending
 
 function IncomeVsSpendingPage() {
   const search = Route.useSearch()
   return (
     <ReportGate
-      name={NAME}
-      about={REPORTS.incomeVsSpending.about}
+      report={REPORT}
       search={search}
       form={<IncomeVsSpendingForm defaults={search} />}
       noAccounts="There are no Accounts yet, so there is no income or spending."
@@ -47,7 +46,7 @@ function IncomeVsSpending({ scope, account }: { scope: ReportScope; account: num
   // The title block lists the Accounts; the table's heading, which is repeated on every printed page, says "All Accounts" rather than list them each time.
   const accountsInHeading = account === undefined ? 'All Accounts' : scope.accountsText
   return (
-    <ReportFrame name={NAME} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={report.dataUpdatedAt}>
+    <ReportFrame name={REPORT.name} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={report.dataUpdatedAt}>
       <IncomeVsSpendingReport report={report.data!} accounts={accountsInHeading} />
       <BackToReports />
     </ReportFrame>

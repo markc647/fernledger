@@ -75,17 +75,14 @@ describe('parseLoansSearch', () => {
     expect(parseLoansSearch({ category: 3, to: '2026-10-31' })).toEqual({ category: 3, to: '2026-10-31' })
   })
 
-  it('leaves out what is blank or not valid, rather than refusing it: all loans, from the first Transaction', () => {
-    expect(parseLoansSearch({ category: '', from: '', to: '2026-10-31' })).toEqual({ to: '2026-10-31' })
-    expect(parseLoansSearch({ category: 'x', from: '2026-02-30', to: '1999-12-31' })).toEqual({})
-    expect(parseLoansSearch({ category: '0' })).toEqual({})
-    expect(parseLoansSearch({ category: '1234567890' })).toEqual({})
-    expect(parseLoansSearch({})).toEqual({})
+  it('leaves out what is blank, and a date that is not valid, rather than refusing it: all loans, from the first Transaction (every key is there, as undefined: the router lays them over the address)', () => {
+    expect(parseLoansSearch({ category: '', from: '', to: '2026-10-31' })).toStrictEqual({ category: undefined, from: undefined, to: '2026-10-31' })
+    expect(parseLoansSearch({ from: '2026-02-30', to: '1999-12-31' })).toStrictEqual({ category: undefined, from: undefined, to: undefined })
+    expect(parseLoansSearch({})).toStrictEqual({ category: undefined, from: undefined, to: undefined })
   })
 
-  it('says every key, as undefined when it is blank, because the router lays it over the address: a missing `from=` would stay a blank date', () => {
-    expect(Object.keys(parseLoansSearch({ category: '', from: '', to: '2026-10-31' })).sort()).toEqual(['category', 'from', 'to'])
-    expect({ from: '', ...parseLoansSearch({ from: '' }) }.from).toBeUndefined()
+  it('makes a Category that is named but is not valid one that does not exist, so the page says so and does not list every loan', () => {
+    for (const named of ['x', 'abc', '0', 0, -1, '1234567890']) expect(parseLoansSearch({ category: named }).category, String(named)).toBe(0)
   })
 })
 

@@ -16,12 +16,12 @@ export const Route = createFileRoute('/reports_/balances')({
   staticData: { nav: { label: REPORTS.balances.name, parent: '/reports' } },
 })
 
-const NAME = REPORTS.balances.name
+const REPORT = REPORTS.balances
 
 function BalancesReport() {
   const search = Route.useSearch()
   return (
-    <ReportGate name={NAME} about={REPORTS.balances.about} search={search} form={<BalancesForm defaults={search} />} noAccounts="There are no Accounts yet, so there are no balances.">
+    <ReportGate report={REPORT} search={search} form={<BalancesForm defaults={search} />} noAccounts="There are no Accounts yet, so there are no balances.">
       {(scope) => <Balances scope={scope} />}
     </ReportGate>
   )
@@ -37,7 +37,7 @@ function Balances({ scope }: { scope: ReportScope }) {
   if (waiting) return waiting
 
   return (
-    <ReportFrame name={NAME} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={balances.dataUpdatedAt}>
+    <ReportFrame name={REPORT.name} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={balances.dataUpdatedAt}>
       <BalancesOverTime sections={balances.data!} />
       <BackToReports />
     </ReportFrame>
