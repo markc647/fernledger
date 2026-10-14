@@ -156,7 +156,7 @@ We're as clear about the limits as about the protections. The full threat model 
 - **Protection against cross-site attacks:** changes must come from the app's own address with a JSON body. Strict security headers are set: a Content Security Policy, no framing, no referrer.
 - **Safe exports:** CSV cells that would run as spreadsheet formulas, such as a payee named `=HYPERLINK(…)`, are defused with an apostrophe (see CSV export under [What it does](#what-it-does)).
 - **Quiet logs:** logs contain only IDs, counts and error types, never transactions, tokens or emails. A test enforces this.
-- **Nothing calls home:** no analytics, telemetry, email or third-party scripts. The only calls out are Akahu's (if you use Sync) and your own Cloudflare account's, for the sign-in check and, if you add its token, the D1 usage bar (ADR 0010).
+- **Nothing calls home:** no analytics, telemetry, email or third-party scripts.
 
 ### If something goes wrong
 

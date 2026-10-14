@@ -171,7 +171,7 @@ What you do by hand afterwards:
 - **Delete the Worker**, which also deletes the secrets it holds: `npx wrangler delete`.
 - **Delete the Access application:** Zero Trust → Access → Applications → Fernledger.
 - **Revoke Akahu access, only if you used Akahu Sync.** README ("Leaving Fernledger") says how.
-- **Revoke the usage token, only if you made one for the [D1 usage bar](#d1-usage-bar-optional):** Manage account → Account API tokens. Deleting the Worker does not revoke it.
+- **Revoke the D1 usage token, only if you made one** for the [D1 usage bar](#d1-usage-bar-optional). README ("Leaving Fernledger") says how.
 - **Decide what to do with the final backup folder.**
 
 ## Cloudflare Access (one-time, by hand)
@@ -230,11 +230,11 @@ README ([What it does](../README.md#what-it-does)) says what the bar shows. D1 F
    ```
 
    Both are needed. With one, or neither, the bar stays off and Setup needed (Settings, and the Rules page) names what is missing. If your login reaches more than one Cloudflare account, set `CLOUDFLARE_ACCOUNT_ID` first so Wrangler puts the secrets on the right Worker, as in [Create the resources and deploy](#create-the-resources-and-deploy).
-4. **Check:** open **Rules**. Under "Apply the Rules to all Transactions", **Free database allowance** shows rows read and rows written today, a Low, Medium or High badge for each, and when the allowance starts again in NZ time (00:00 UTC, about midday or 1 pm). The figures are for the whole account, not only Fernledger, and run a few minutes behind, so a number that hasn't moved yet after an Import or a run is normal. The page reads them when it opens and when a run of the Rules finishes, pauses or is stopped; it doesn't poll.
+4. **Check:** open **Rules**. Under "Apply the Rules to all Transactions", **Free database allowance** shows rows read and rows written today, a Low, Medium or High badge for each, and when the allowance starts again in NZ time (00:00 UTC, about midday or 1 pm). The figures are for the whole account, not only Fernledger, and run a few minutes behind, so a number that hasn't moved yet after an Import or a run is normal. The page reads them when it opens, when a run of the Rules finishes, pauses or is stopped, when the free plan refuses a step, and when you choose **Check again**; it doesn't poll. The first time, compare them with Cloudflare's own (D1 in the dashboard, your database, **Metrics**, for today in UTC): the bar asks for today's UTC date, which Cloudflare's documentation shows in its examples but does not state outright for this dataset.
 
-If the page says **Usage unavailable**, Cloudflare did not give the figures. Check that the token has Account Analytics Read and belongs to the account whose ID you gave. The Worker log has one line saying which kind of failure it was, with no message and none of your values: `d1-usage.refused` (Cloudflare rejected the token or the account ID), `d1-usage.failed` (it could not be reached, was slow, or answered with an error) or `d1-usage.unreadable` (it answered with something unexpected). The bar never stops the app: only the Admin can see it, and the Rules, Imports and everything else carry on without it.
+If the page says **Usage unavailable**, it says why. **Cloudflare refused the token or the account ID**, or **found no such account for this token**: `CF_ACCOUNT_ID` must be the account the token belongs to, and the token needs Account Analytics: Read. Otherwise Cloudflare could not be reached or answered with something unexpected, and **Check again** is the answer unless it keeps happening. The Worker log has one line for the kind of failure, with no message and none of your values: `d1-usage.refused` (a 401 or 403), `d1-usage.no-account` (an answer with no account), `d1-usage.failed` (not reached, too slow, or any other error status) or `d1-usage.unreadable` (not the two figures, including an answer that carries errors). The bar never stops the app: only the Admin can see it, and the Rules, Imports and everything else carry on without it.
 
-**Turning it off:** `npx wrangler secret delete CF_ANALYTICS_TOKEN`, then revoke the token under **Manage account → Account API tokens**. Deleting the Worker deletes its secrets but not the token, so revoke it in the dashboard when you [leave Fernledger](#leaving-fernledger-teardown).
+**Turning it off:** `npx wrangler secret delete CF_ANALYTICS_TOKEN`, then revoke the token ([README: Leaving Fernledger](../README.md#leaving-fernledger)).
 
 ## Update pull requests
 

@@ -31,7 +31,7 @@ function emptyBucketInstructions(bucket) {
   ].join('\n')
 }
 
-// What the script can't do for you. The Akahu step depends on whether you ever used Akahu Sync (ADR 0008).
+// What the script can't do for you. The Akahu step depends on whether you ever used Akahu Sync (ADR 0008), and the D1 usage token on whether you made one (ADR 0010).
 function remainingSteps() {
   return [
     '',
@@ -39,6 +39,7 @@ function remainingSteps() {
     '  - Delete the Worker, which also deletes the secrets it holds: npx wrangler delete',
     '  - Delete the Access application: Cloudflare Zero Trust > Access > Applications > Fernledger.',
     '  - If you used Akahu Sync, revoke Fernledger\'s access in your Akahu account (README: "Leaving Fernledger"). With CSV Imports only, skip this.',
+    '  - If you made a token for the D1 usage bar, revoke it: Cloudflare dashboard > Manage account > Account API tokens (README: "Leaving Fernledger"). Deleting the Worker does not revoke it.',
     '  - Keep or destroy the final backup folder as you see fit. It holds every Transaction.',
   ].join('\n')
 }
