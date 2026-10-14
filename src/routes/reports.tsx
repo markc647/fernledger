@@ -20,9 +20,10 @@ function Reports() {
       <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {Object.values(REPORTS).map((report) => (
           <li key={report.to} className="flex">
-            <Card className="w-full">
+            {/* The stock Card, as the Summary's cards (src/components/summary/dashboard-card.tsx) use it: text at the page's size, and a border as well as the ring, which Windows high contrast removes. */}
+            <Card className="w-full min-w-0 overflow-visible border text-base ring-0">
               <CardHeader>
-                <CardTitle className="text-xl leading-snug">
+                <CardTitle className="text-xl font-semibold">
                   <h2>{report.name}</h2>
                 </CardTitle>
                 <CardDescription className="text-base">{report.summary}</CardDescription>
