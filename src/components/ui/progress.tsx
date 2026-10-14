@@ -2,7 +2,7 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 
 // A progress bar written by hand in shadcn's style (its slots, its track and fill), not copied from the CLI: shadcn's is a Radix primitive, and a
-// div with four ARIA attributes does not need a dependency (AGENTS.md). The track and the fill are separate elements, so a colour goes on the
+// div with four ARIA attributes does not need a dependency (CODING_STANDARDS.md, Dependencies). The track and the fill are separate elements, so a colour goes on the
 // fill (`indicatorClassName`) and the track keeps its own. Name it with `aria-label` or `aria-labelledby`, and say its value in words with `valueText`.
 function Progress({
   className,
