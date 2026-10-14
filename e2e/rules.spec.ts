@@ -540,6 +540,244 @@ test('a Member does not see the Rules page, and the API refuses their changes', 
   await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Rules' })).toHaveCount(0)
   await noAxeViolations(page)
 
+  // The D1 usage figures are the Admin's alone, whether or not they are set up (here they are not). (Asked before the refused write below:
+  // that one is sent without a body, and Vite's local server then drops the next request on its connection, as settings.spec.ts says.)
+  const usage = await context.request.get('/api/d1-usage')
+  expect(usage.status()).toBe(403)
+  expect(await usage.json()).toEqual({ error: 'Admin only' })
+
   const refused = await context.request.post('/api/rules', { headers: { Origin: baseURL! }, data: { textContains: 'example', transfer: true } })
   expect(refused.status()).toBe(403)
+})
+
+// The D1 usage bar (worker/d1-usage.ts, src/components/d1-usage-bar.tsx). Local development has no CF_ANALYTICS_TOKEN or CF_ACCOUNT_ID, so the
+// real Worker answers Not set up; the "on" tests stub what the Worker would send, so nothing here reaches Cloudflare.
+const usageOn = { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] }
+const usageFigures = (over: Record<string, unknown> = {}) => ({
+  rowsRead: 1_234_567,
+  rowsWritten: 4_321,
+  readLimit: 5_000_000,
+  writeLimit: 100_000,
+  resetsAt: '2026-10-15T00:00:00.000Z',
+  ...over,
+})
+const usagePanel = (page: Page) => page.getByRole('region', { name: 'Free database allowance' })
+const meterFor = (page: Page, label: 'Database rows read today' | 'Database rows written today') => usagePanel(page).getByRole('group', { name: label })
+
+/** The colours of the theme's own tokens as the browser computes them for a background, so the check is right in the dark theme as well. */
+const tokenColours = (page: Page, names: string[]) =>
+  page.evaluate((tokens) => {
+    const resolve = (name: string) => {
+      const probe = document.createElement('div')
+      probe.style.backgroundColor = `var(--${name})`
+      document.body.append(probe)
+      const colour = getComputedStyle(probe).backgroundColor
+      probe.remove()
+      return colour
+    }
+    return Object.fromEntries(tokens.map((name) => [name, resolve(name)]))
+  }, names)
+
+test.describe('the D1 usage bar', () => {
+  test('is off until the Deployer sets it up: the Admin is told how, no usage is asked for, and nothing is shown as an error', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    const asked: string[] = []
+    page.on('request', (request) => request.url().includes('/api/d1-usage') && asked.push(request.url()))
+    await page.goto('/rules')
+
+    const panel = usagePanel(page)
+    await expect(panel).toContainText('Optional: you only need this to use the D1 usage bar.')
+    await expect(panel).toContainText('Setup needed: the Cloudflare analytics token. Add it as the Worker secret CF_ANALYTICS_TOKEN.')
+    await expect(panel).toContainText('Setup needed: the Cloudflare account ID. Add it as the Worker secret CF_ACCOUNT_ID.')
+    await expect(panel).toContainText('The steps are in docs/setup.md, under "D1 usage bar (optional)".')
+    await expect(panel.getByRole('progressbar')).toHaveCount(0)
+    await expect(panel.getByRole('alert')).toHaveCount(0)
+    await expect(panel.getByRole('button')).toHaveCount(0)
+    await noAxeViolations(page)
+    expect(asked).toEqual([])
+  })
+
+  // Two runs show every level on both bars: the read bar Medium and then Low, the written bar High (past the end of its allowance) and then Low.
+  for (const { runs, figures, reads, writes } of [
+    {
+      runs: 'Medium on the rows read and High on the rows written',
+      figures: { rowsRead: 2_750_000, rowsWritten: 105_000 },
+      reads: { level: 'Medium', percent: 55, drawn: 55, token: 'warning', text: '2,750,000 of 5,000,000 rows read' },
+      writes: { level: 'High', percent: 105, drawn: 100, token: 'danger', text: '105,000 of 100,000 rows written' }, // the bar stops at its end
+    },
+    {
+      runs: 'Low on both',
+      figures: { rowsRead: 1_234_567, rowsWritten: 4_321 },
+      reads: { level: 'Low', percent: 24, drawn: 24, token: 'success', text: '1,234,567 of 5,000,000 rows read' },
+      writes: { level: 'Low', percent: 4, drawn: 4, token: 'success', text: '4,321 of 100,000 rows written' },
+    },
+  ]) {
+    test(`shows ${runs}: each badge sits with its own bar, and the bar's fill is the level's colour while its track keeps its own`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+      await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures(figures) }))
+      await page.goto('/rules')
+
+      const colours = await tokenColours(page, ['success', 'warning', 'danger', 'muted'])
+      for (const [label, meter] of [
+        ['Database rows read today', reads],
+        ['Database rows written today', writes],
+      ] as const) {
+        const group = meterFor(page, label)
+        // The badge is in the same group as its bar and its figures.
+        await expect(group.getByText(meter.level, { exact: true })).toBeVisible()
+        await expect(group.getByText(`${meter.text} · ${meter.percent}%`)).toBeVisible()
+        const bar = group.getByRole('progressbar', { name: label })
+        await expect(bar).toHaveAttribute('aria-valuenow', String(meter.drawn))
+        await expect(bar).toHaveAttribute('aria-valuetext', `${meter.text}, ${meter.percent}%`)
+        // The fill is the level's colour (the theme's own token) and the track keeps its own.
+        expect(await bar.locator('[data-slot="progress-indicator"]').evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(colours[meter.token])
+        expect(await bar.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(colours.muted)
+      }
+      // Said once, for both bars.
+      await expect(usagePanel(page).getByText('The allowance starts again on Thu 15 Oct 2026, 1:00 pm, New Zealand time.')).toBeVisible()
+      await expect(usagePanel(page).getByText('These figures are for the whole Cloudflare account, not only Fernledger, and run a few minutes behind.')).toBeVisible()
+      await noAxeViolations(page)
+    })
+  }
+
+  test.describe('read again when a run ends, and not otherwise', () => {
+    // Each answer is a little further on, as the account's day is while a run uses it.
+    const answers = [usageFigures(), usageFigures({ rowsRead: 2_750_000 }), usageFigures({ rowsRead: 4_200_000 }), usageFigures({ rowsRead: 4_500_000 })]
+    const stubUsage = async (page: Page, asked: { count: number }) => {
+      await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+      await page.route('**/api/d1-usage', (route) => route.fulfill({ json: answers[Math.min(asked.count++, answers.length - 1)] }))
+    }
+    const readsText = (page: Page, text: string) => usagePanel(page).getByText(text)
+
+    test('when a run pauses, and when a run finishes, and not at each step before', async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      const asked = { count: 0 }
+      await stubUsage(page, asked)
+      for (const { job, before, after } of [
+        { job: runningJob({ paused: true, doneRows: 10_000, percent: 50 }), before: '1,234,567 of 5,000,000 rows read · 24%', after: '2,750,000 of 5,000,000 rows read · 55%' },
+        { job: runningJob({ status: 'done', doneRows: 20_000, percent: 100, finishedAt: '2026-10-11T02:09:00.000Z' }), before: '4,200,000 of 5,000,000 rows read · 84%', after: '4,500,000 of 5,000,000 rows read · 90%' },
+      ]) {
+        const first = asked.count
+        // The first step is a step like any other (the run is going and not done); the next waits to be let go, and ends the run as the job says.
+        let open = () => {}
+        const opened = new Promise<void>((resolve) => (open = resolve))
+        let steps = 0
+        await page.route('**/api/rules/rerun/step', async (route) => {
+          if (steps++ === 0) return route.fulfill({ json: { job: runningJob({ doneRows: 8_000, percent: 40 }) } })
+          await opened
+          return route.fulfill({ json: { job } })
+        })
+        await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
+        await page.goto('/rules')
+
+        await expect(readsText(page, before)).toBeVisible()
+        await expect(page.getByText('Looked at 8,000 of up to 20,000 Transactions (40%).')).toBeVisible()
+        await expect.poll(() => steps).toBe(2) // the run is going: the first step was answered, the second is waiting
+        expect(asked.count).toBe(first + 1) // ...and the usage was read when the panel showed, not for the step
+
+        open()
+        await expect(readsText(page, after)).toBeVisible()
+        expect(asked.count).toBe(first + 2)
+        await page.unroute('**/api/rules/rerun/step')
+        await page.unroute('**/api/rules/rerun')
+      }
+    })
+
+    test('when the Admin stops a run', async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      const asked = { count: 0 }
+      await stubUsage(page, asked)
+      await page.route('**/api/rules/rerun/step', () => new Promise(() => {}))
+      await page.route('**/api/rules/rerun/stop', (route) => route.fulfill({ json: { job: runningJob({ status: 'stopped', doneRows: 7_000, percent: 35, finishedAt: '2026-10-11T02:07:00.000Z' }) } }))
+      await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
+      await page.goto('/rules')
+      await expect(readsText(page, '1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
+
+      await page.getByRole('button', { name: 'Stop applying the Rules' }).click()
+      await expect(readsText(page, '2,750,000 of 5,000,000 rows read · 55%')).toBeVisible()
+      expect(asked.count).toBe(2)
+    })
+
+    test.describe('and the free plan refuses a step', () => {
+      test.use({ expectedStatuses: [429] })
+
+      test('when the free plan refuses a step because the day is used up', async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        const asked = { count: 0 }
+        await stubUsage(page, asked)
+        // The step is refused once the figures from before it are on the page (it would otherwise be refused before the page knew the feature is on).
+        let open = () => {}
+        const opened = new Promise<void>((resolve) => (open = resolve))
+        await page.route('**/api/rules/rerun/step', async (route) => {
+          await opened
+          await route.fulfill({ status: 429, json: { error: 'Daily limit reached' } })
+        })
+        await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
+        await page.goto('/rules')
+        await expect(readsText(page, '1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
+
+        open()
+        await expect(page.getByRole('alert').filter({ hasText: 'used up the database allowance' })).toBeVisible()
+        await expect(readsText(page, '2,750,000 of 5,000,000 rows read · 55%')).toBeVisible()
+        expect(asked.count).toBe(2)
+      })
+    })
+  })
+
+  test.describe('when Cloudflare cannot give the figures', () => {
+    test.use({ expectedStatuses: [502] })
+
+    test('says why and what to check, still lets the Rules be applied, and shows the figures when asked again', async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+      let asked = 0
+      await page.route('**/api/d1-usage', (route) =>
+        asked++ === 0 ? route.fulfill({ status: 502, json: { error: 'Usage unavailable', reason: 'no-account' } }) : route.fulfill({ json: usageFigures() }),
+      )
+      await page.goto('/rules')
+
+      const panel = usagePanel(page)
+      const note = panel.getByRole('status').filter({ hasText: 'Usage unavailable.' })
+      await expect(note).toContainText('Cloudflare found no such account for this token.')
+      await expect(note).toContainText('CF_ACCOUNT_ID must be the account the token belongs to, and the token needs Account Analytics: Read.')
+      await expect(note).toContainText('The steps are in docs/setup.md, under "D1 usage bar (optional)".')
+      await expect(panel.getByRole('progressbar')).toHaveCount(0)
+      await expect(rerunButton(page)).toBeEnabled()
+      await noAxeViolations(page)
+
+      await panel.getByRole('button', { name: 'Check again' }).click()
+      await expect(panel.getByText('1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
+      await expect(panel.getByText('Usage unavailable.')).toHaveCount(0)
+      expect(asked).toBe(2)
+      await noAxeViolations(page)
+    })
+
+    test('after figures, a refresh that fails takes them down rather than leaving them as today, and asking again brings them back', async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+      let asked = 0
+      await page.route('**/api/d1-usage', (route) => {
+        const n = asked++
+        return n === 1 ? route.fulfill({ status: 502, json: { error: 'Usage unavailable', reason: 'unreachable' } }) : route.fulfill({ json: usageFigures(n === 0 ? {} : { rowsRead: 3_000_000 }) })
+      })
+      await page.route('**/api/rules/rerun/step', () => new Promise(() => {}))
+      await page.route('**/api/rules/rerun/stop', (route) => route.fulfill({ json: { job: runningJob({ status: 'stopped', doneRows: 7_000, percent: 35, finishedAt: '2026-10-11T02:07:00.000Z' }) } }))
+      await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
+      await page.goto('/rules')
+      const panel = usagePanel(page)
+      await expect(panel.getByText('1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
+
+      // The run ends, the page reads the figures again, and Cloudflare cannot give them.
+      await page.getByRole('button', { name: 'Stop applying the Rules' }).click()
+      await expect(panel.getByRole('status').filter({ hasText: 'Usage unavailable.' })).toContainText('Cloudflare could not be reached just now')
+      await expect(panel.getByRole('progressbar')).toHaveCount(0)
+      await expect(panel.getByText('1,234,567 of 5,000,000 rows read')).toHaveCount(0)
+
+      await panel.getByRole('button', { name: 'Check again' }).click()
+      await expect(panel.getByText('3,000,000 of 5,000,000 rows read · 60%')).toBeVisible()
+      await expect(panel.getByText('Usage unavailable.')).toHaveCount(0)
+      expect(asked).toBe(3)
+    })
+  })
 })

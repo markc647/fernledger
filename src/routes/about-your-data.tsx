@@ -21,8 +21,10 @@ export const Route = createFileRoute('/about-your-data')({
 function AboutYourData() {
   const { data: me, isError: meFailed } = useQuery(meQuery)
   const { data: settings, isError: settingsFailed } = useQuery(settingsQuery)
-  const { data: features } = useQuery(featuresQuery)
+  const { data: features, isPending: featuresPending } = useQuery(featuresQuery)
   const akahu = features?.find((feature) => feature.id === 'akahu-sync')
+  // 'on' and 'off' are what the Worker said; 'unknown' is when it could not say. The promise below is not written until it has said one or the other.
+  const usageFigures = !features ? 'unknown' : features.find((feature) => feature.id === 'd1-usage')?.enabled === true ? 'on' : 'off'
   // Until both have arrived there is nothing to show for the two Settings: a Member must not read the neutral line
   // for a moment before the Admin's own words replace it, and the Admin's guidance needs the role.
   const ready = me && settings
@@ -90,9 +92,8 @@ function AboutYourData() {
             <strong className="font-semibold">Behind the scenes.</strong> Cloudflare hosts Fernledger, and whoever looks after the Cloudflare account it runs in can reach the data directly. As with any online service, Cloudflare can technically access what it hosts.
           </li>
         </ul>
-        <p>
-          Fernledger sends your data to no one else. It contacts no one but Akahu (only if this Fernledger uses Akahu Sync) and, to check a sign-in, your own Cloudflare Access. It has no analytics, tracking or email.
-        </p>
+        {/* ADR 0010: the promise names every outbound call, so it says so when the optional D1 usage bar is on. It waits for the Worker to say whether it is, so it is never written untrue; if the Worker cannot say, it is worded to be true either way. */}
+        {!featuresPending && <p>{`Fernledger sends your data to no one else. ${contacts[usageFigures]} It has no analytics, tracking or email.`}</p>}
         <p>
           A file saved from Fernledger, such as a CSV export of Transactions, is outside all of this. See{' '}
           <a href="https://github.com/markc647/fernledger#what-it-cant-protect-against" className="underline underline-offset-4">
@@ -125,6 +126,14 @@ function AboutYourData() {
       </Section>
     </article>
   )
+}
+
+// Who Fernledger contacts (ADR 0010), by whether the optional D1 usage bar is on. Each is a whole sentence and each is true when it is shown.
+const AKAHU_ONLY_IF = 'It contacts no one but Akahu (only if this Fernledger uses Akahu Sync)'
+const contacts = {
+  off: `${AKAHU_ONLY_IF} and, to check a sign-in, your own Cloudflare Access.`,
+  on: `${AKAHU_ONLY_IF} and your own Cloudflare account: its Access, to check a sign-in, and its usage figures, which whoever runs Fernledger has turned on for the Admin's Rules page. Asking for those sends no Transactions, Notes or other data of yours.`,
+  unknown: `${AKAHU_ONLY_IF} and your own Cloudflare account: its Access, to check a sign-in, and, if whoever runs Fernledger has turned it on, its usage figures for the Admin's Rules page.`,
 }
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {

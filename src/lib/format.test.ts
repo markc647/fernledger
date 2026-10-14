@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { formatAmount, formatAxisDollars, formatBalance, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, formatMonthShort, moneyLabel, nzDate } from './format'
+import { formatAmount, formatAxisDollars, formatBalance, formatCount, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, formatMonthShort, moneyLabel, nzDate } from './format'
+
+describe('formatCount (a number of things that is not money)', () => {
+  it.each([
+    [0, '0'],
+    [999, '999'],
+    [1_000, '1,000'],
+    [1_234_567, '1,234,567'],
+    [5_000_000, '5,000,000'],
+  ])('writes %i as "%s"', (count, text) => {
+    expect(formatCount(count)).toBe(text)
+  })
+
+  it('does not throw on a figure that is not a count, because it runs while a page renders', () => {
+    for (const odd of [1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) expect(() => formatCount(odd)).not.toThrow()
+  })
+})
 
 describe('formatDateAtTime (when a Report was generated)', () => {
   it.each([

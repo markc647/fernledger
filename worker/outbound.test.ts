@@ -1,21 +1,26 @@
-import { createScheduledController } from 'cloudflare:test'
+import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BACKUP_CRON } from './backup'
 import { app } from './app'
 import worker from './index'
 
-// Seam 1, privacy promise: the app contacts no one but Akahu (only if you use Sync) and, to check a sign-in, your own
-// Cloudflare Access (README: Security and privacy; ADR 0010).
+// Seam 1, privacy promise: the app contacts no one but Akahu (only if you use Sync) and your own Cloudflare account: its
+// Access, to check a sign-in, and, only if you set a token for it, its D1 usage figures (README: Security and privacy; ADR 0010).
 // Every request below goes through the real Worker with `fetch` replaced by a recorder that refuses to answer, so
 // a code path that makes an outbound call shows up here as a host that isn't allowed.
 //
 // Allowed host: the Deployer's own Cloudflare Access team domain. Verifying a sign-in fetches its public keys. That is
-// the Deployer's own sign-in service, not a third party, and it is the only call the app makes today. Anything else,
-// GitHub in particular, fails this test. Akahu Sync is not built yet; when it is, its host is added here together with
-// an exercise that reaches it, not by widening the list in passing.
+// the Deployer's own sign-in service, not a third party. Anything else, GitHub in particular, fails this test.
+// The one other address is Cloudflare's GraphQL Analytics API, which the D1 usage bar asks for the account's own usage
+// (worker/d1-usage.ts). It is not in ALLOWED_HOSTS: only the tests that set CF_ANALYTICS_TOKEN and CF_ACCOUNT_ID may see
+// it, as exactly this URL, once, from the one route that asks. With the secrets unset nothing may reach it.
+// Akahu Sync is not built yet; when it is, its host is added here together with an exercise that reaches it, not by
+// widening the list in passing.
 const ACCESS_HOST = env.ACCESS_TEAM_DOMAIN!
 const ALLOWED_HOSTS = [ACCESS_HOST]
+const CLOUDFLARE_API_URL = 'https://api.cloudflare.com/client/v4/graphql'
+const USAGE_SECRETS = { CF_ANALYTICS_TOKEN: 'cf_token_SECRET_VALUE_1', CF_ACCOUNT_ID: 'account_SECRET_VALUE_2' }
 
 // Same as `triggers.crons` in wrangler.jsonc; scripts/wrangler-config.test.mjs fails if the two differ.
 const CRONS = ['0 18 * * *', '0 22 * * *', BACKUP_CRON]
@@ -34,12 +39,16 @@ afterEach(() => vi.unstubAllGlobals())
 
 const hostsContacted = () => [...new Set(attempts.map((url) => new URL(url).host))]
 
-async function call(path: string, opts: { method?: string; body?: unknown } = {}) {
+/** One request as the Admin. With `secrets` the Worker runs with them set, which needs `worker.fetch` (CODING_STANDARDS.md: Tests). */
+async function call(path: string, opts: { method?: string; body?: unknown } = {}, secrets?: Partial<Env>) {
   const headers: Record<string, string> = { Cookie: 'fernledger_dev_as=admin' }
   if (opts.body !== undefined) Object.assign(headers, { Origin: origin, 'Content-Type': 'application/json' })
-  return exports.default.fetch(
-    new Request(`${origin}${path}`, { method: opts.method ?? 'GET', headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) }),
-  )
+  const request = new Request(`${origin}${path}`, { method: opts.method ?? 'GET', headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) })
+  if (!secrets) return exports.default.fetch(request)
+  const ctx = createExecutionContext()
+  const res = await worker.fetch!(request as never, { ...env, ...secrets }, ctx)
+  await waitOnExecutionContext(ctx)
+  return res
 }
 
 // Every route the app declares, as Hono lists them, with the request that exercises it. A route added without an entry
@@ -120,6 +129,8 @@ const EXERCISES: Exercise[] = [
   { route: 'GET /api/me', path: () => '/api/me' },
   { route: 'GET /api/settings', path: () => '/api/settings' },
   { route: 'GET /api/features', path: () => '/api/features' },
+  // The D1 usage bar: with no secrets it answers Not set up (503) and goes nowhere. Only the run below that sets both reaches Cloudflare's API.
+  { route: 'GET /api/d1-usage', path: () => '/api/d1-usage' },
   { route: 'GET /api/accounts', path: () => '/api/accounts' },
   { route: 'GET /api/change-log', path: () => '/api/change-log' },
   { route: 'GET /api/transactions', path: () => '/api/transactions?text=example&from=2026-01-01&sort=amount&dir=asc&transfers=exclude' },
@@ -136,6 +147,36 @@ const EXERCISES: Exercise[] = [
 // Not routes of their own: an unknown API path, and anything outside /api (the static assets).
 const OTHER_PATHS = ['/api/no-such-route', '/not-api']
 
+/** Runs every exercise above, in order, as the Admin, with the Worker's secrets as given (none, if not). */
+async function exerciseEveryRoute(secrets?: Partial<Env>) {
+  // The database keeps what an earlier test in this file wrote, and the exercises start from none (a Transfer's pairing, an Account's history).
+  // The starter Categories and the Settings stay: the exercises add and remove their own.
+  const tables = ['carry_over', 'balance_checks', 'budgets', 'rules', 'transactions', 'accounts', 'change_log', 'data_migration_progress']
+  await env.DB.batch(tables.map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  let accountId = 0
+  for (const { route, path, opts } of EXERCISES) {
+    const res = await call(path(accountId), typeof opts === 'function' ? opts(accountId) : opts, secrets)
+    if (route === 'POST /api/imports/chunks') {
+      expect(res.status).toBe(200)
+      accountId = ((await (await call('/api/accounts')).json()) as { id: number }[])[0].id
+      made.transactionId = ((await (await call('/api/transactions')).json()) as { transactions: { id: number }[] }).transactions[0].id
+    }
+    if (route === 'POST /api/categories') {
+      expect(res.status).toBe(201)
+      made.categoryId = ((await res.json()) as { id: number }).id
+    }
+    if (route === 'POST /api/rules') {
+      expect(res.status).toBe(201)
+      made.ruleId = ((await res.json()) as { id: number }).id
+    }
+    // Each exercise must reach its handler's success path, or it proves nothing about that route. (Clear-history refuses a small history.)
+    // The usage route is Not set up (503) without its secrets, and with them it reaches its call, which the recorder refuses: Usage unavailable (502).
+    if (route === 'GET /api/d1-usage') expect(res.status, route).toBe(secrets ? 502 : 503)
+    else if (route !== 'POST /api/imports/clear-history') expect(res.status, route).toBeLessThan(400)
+  }
+  for (const path of OTHER_PATHS) await call(path, {}, secrets)
+}
+
 describe('outbound calls', () => {
   it('exercises every route the app declares', () => {
     const declared = new Set(app.routes.filter((r) => r.method !== 'ALL').map((r) => `${r.method} ${r.path}`))
@@ -147,35 +188,31 @@ describe('outbound calls', () => {
     expect(hostsContacted().filter((host) => !ALLOWED_HOSTS.includes(host))).toEqual(['github.com'])
   })
 
-  // One request per route (about 0.5 s alone), but the full suite runs many workerd instances at once and this test has
-  // taken over 5 s on a busy machine, so it has a longer limit than the 5 s default. It is a load allowance, not a slow route.
+  // One request per route (about 0.5 s alone), but the full suite runs many workerd instances at once and these tests have
+  // taken over 5 s on a busy machine, so they have a longer limit than the 5 s default. It is a load allowance, not a slow route.
   it('makes none from any route, signed in as the Admin', { timeout: 30_000 }, async () => {
-    let accountId = 0
-    for (const { route, path, opts } of EXERCISES) {
-      const res = await call(path(accountId), typeof opts === 'function' ? opts(accountId) : opts)
-      if (route === 'POST /api/imports/chunks') {
-        expect(res.status).toBe(200)
-        accountId = ((await (await call('/api/accounts')).json()) as { id: number }[])[0].id
-        made.transactionId = ((await (await call('/api/transactions')).json()) as { transactions: { id: number }[] }).transactions[0].id
-      }
-      if (route === 'POST /api/categories') {
-        expect(res.status).toBe(201)
-        made.categoryId = ((await res.json()) as { id: number }).id
-      }
-      if (route === 'POST /api/rules') {
-        expect(res.status).toBe(201)
-        made.ruleId = ((await res.json()) as { id: number }).id
-      }
-      // Each exercise must reach its handler's success path, or it proves nothing about that route. (Clear-history refuses a small history.)
-      if (route !== 'POST /api/imports/clear-history') expect(res.status, route).toBeLessThan(400)
-    }
-    for (const path of OTHER_PATHS) await call(path)
+    await exerciseEveryRoute()
 
     expect(attempts).toEqual([])
   })
 
   it('makes none from the scheduled handler, on any cron', async () => {
     for (const cron of CRONS) await worker.scheduled!(createScheduledController({ cron, scheduledTime: new Date('2026-10-11T15:00:00Z') }), env)
+
+    expect(attempts).toEqual([])
+  })
+
+  // The D1 usage bar's token is the Deployer's own, and with it set the Worker asks Cloudflare's GraphQL Analytics API for the account's
+  // usage (ADR 0010). That is one call to one address, from the one route that exists for it: every route is run again with both secrets
+  // set, and the recorder must see that URL once and nothing else.
+  it('with the D1 usage secrets set, contacts only api.cloudflare.com/client/v4/graphql, once, from the usage route', { timeout: 30_000 }, async () => {
+    await exerciseEveryRoute(USAGE_SECRETS)
+
+    expect(attempts).toEqual([CLOUDFLARE_API_URL])
+  })
+
+  it('with the D1 usage secrets set, makes none from the scheduled handler, on any cron', async () => {
+    for (const cron of CRONS) await worker.scheduled!(createScheduledController({ cron, scheduledTime: new Date('2026-10-11T15:00:00Z') }), { ...env, ...USAGE_SECRETS })
 
     expect(attempts).toEqual([])
   })

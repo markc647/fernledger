@@ -130,6 +130,39 @@ test.describe('About your data', () => {
     await expect(section(page, 'Who can see it')).toContainText('no one but Akahu (only if this Fernledger uses Akahu Sync) and, to check a sign-in, your own Cloudflare Access')
   })
 
+  test('names the Cloudflare account call as well, only when the D1 usage bar is on, and not before the Worker has said (ADR 0010)', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/about-your-data')
+    // Off, as it is here: the promise is the older, shorter one.
+    await expect(section(page, 'Who can see it')).toContainText('no one but Akahu (only if this Fernledger uses Akahu Sync) and, to check a sign-in, your own Cloudflare Access.')
+    await expect(section(page, 'Who can see it')).not.toContainText('usage figures')
+
+    // Held until the Worker has said whether it is on, so the sentence is never written untrue.
+    let say = () => {}
+    const said = new Promise<void>((resolve) => (say = resolve))
+    await page.route('**/api/features', async (route) => {
+      await said
+      await route.fulfill({ json: { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] } })
+    })
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'Who can see it' })).toBeVisible()
+    await expect(page.getByText('Fernledger sends your data to no one else.')).toHaveCount(0)
+    say()
+    const seen = section(page, 'Who can see it')
+    await expect(seen).toContainText('no one but Akahu (only if this Fernledger uses Akahu Sync) and your own Cloudflare account: its Access, to check a sign-in, and its usage figures')
+    await expect(seen).toContainText('sends no Transactions, Notes or other data of yours')
+    await expect(seen).toContainText('It has no analytics, tracking or email.')
+    await noAxeViolations(page)
+
+    // If the Worker cannot say (a body that isn't JSON fails the query without a failed request), the sentence is worded to be true either way.
+    await page.unroute('**/api/features')
+    await page.route('**/api/features', (route) => route.fulfill({ contentType: 'application/json', body: 'not json' }))
+    await page.reload()
+    // (The query tries again a few times before it gives up, so this takes about seven seconds.)
+    await expect(seen).toContainText('and, if whoever runs Fernledger has turned it on, its usage figures for the Admin', { timeout: 20_000 })
+    await expect(seen).not.toContainText('sends no Transactions')
+  })
+
   test('says whether Akahu Sync is set up, from what the Worker reports', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/about-your-data')

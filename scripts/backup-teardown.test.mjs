@@ -428,6 +428,19 @@ test('teardown revokes Akahu access by instructions only, and only if Akahu Sync
   assert.ok(!account.calls().some((c) => argsScanned(c).join(' ').toLowerCase().includes('akahu')), 'no command touches Akahu')
 })
 
+test('teardown says to revoke the D1 usage token by instructions only, and only if one was made (ADR 0010)', () => {
+  const account = fakeAccount()
+
+  const r = teardown(account, 'fernledger\n')
+
+  assert.match(r.out, /If you made a token for the D1 usage bar, revoke it/)
+  assert.match(r.out, /Account API tokens/)
+  assert.match(r.out, /Deleting the Worker does not revoke it/)
+  // It is the person's to do: no command the script runs goes near Cloudflare's token API or the analytics API (the SQL a call carries is not scanned, as above).
+  const argsScanned = (call) => call.args.filter((arg, i) => !['--command', '--sql'].includes(call.args[i - 1]) && !/^--(command|sql)=/.test(arg))
+  assert.ok(!account.calls().some((c) => /tokens|analytics|graphql/i.test(argsScanned(c).join(' '))), 'no command touches the token')
+})
+
 test('teardown needs the account confirmed, and fails closed without a terminal or --yes', () => {
   const account = fakeAccount()
 
