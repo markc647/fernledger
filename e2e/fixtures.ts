@@ -16,16 +16,19 @@ const FAILED_REQUEST = /^Failed to load resource: the server responded with a st
  * Every test fails on any console error, uncaught error or Content-Security-Policy violation, so the UI is proven
  * to work under the real headers (public/_headers for assets, the Worker for /api) and not only in a dev server.
  * A test that expects a request to fail on purpose (a Transaction that doesn't exist) lists the status in
- * `test.use({ expectedStatuses: [404] })`; any other failed request still fails it.
+ * `test.use({ expectedStatuses: [404] })`; any other failed request still fails it. A test that makes something fail on purpose in a way that is not a status (a script
+ * that cannot be fetched, which the browser and React both log) lists what it expects in `expectedConsoleErrors`, as pieces of the message (strings, because Playwright reads an array whose second item is an object as a fixture's value and its options).
  */
-export const test = base.extend<{ expectedStatuses: number[] }>({
+export const test = base.extend<{ expectedStatuses: number[]; expectedConsoleErrors: string[] }>({
   expectedStatuses: [[], { option: true }],
-  page: async ({ page, expectedStatuses }, use) => {
+  expectedConsoleErrors: [[], { option: true }],
+  page: async ({ page, expectedStatuses, expectedConsoleErrors }, use) => {
     const problems: string[] = []
     page.on('console', (message) => {
       if (message.type() !== 'error') return
       const failed = FAILED_REQUEST.exec(message.text())
       if (failed && expectedStatuses.includes(Number(failed[1]))) return
+      if (expectedConsoleErrors.some((expected) => message.text().includes(expected))) return
       problems.push(`console: ${message.text()}`)
     })
     page.on('pageerror', (error) => problems.push(`uncaught: ${error.message}`))

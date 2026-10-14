@@ -5,7 +5,7 @@ import { DEFAULT_NET_WORTH_RANGE, netWorthQuery, readNetWorth } from './net-wort
 import { readSpendingByCategory } from './spending-by-category'
 import { validate } from './validate'
 
-// The numbers behind the charts (the Dashboard and the Charts page). Read-only, so every Member can use them; the guard in app.ts already
+// The numbers behind the charts (the cards of the Summary and the Dashboard). Read-only, so every Member can use them; the guard in app.ts already
 // refuses a change from anyone but the Admin. Net worth is balance history added up (net-worth.ts) and spending is spending.ts's (spending-by-category.ts).
 export const charts = new Hono<AppEnv>()
   // The tracked Accounts' balances added up at the end of each month, for the range asked for (the last 24 months when none is).

@@ -110,11 +110,11 @@ test.describe('the pages', () => {
 })
 
 test.describe('the sidebar', () => {
-  test('lists the Reports page and Charts under Reports for the Admin, and none of the six Reports', async ({ page, context }) => {
+  test('lists only the Reports page under Reports for the Admin, and none of the six Reports', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/reports/loans')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
-    await expect(reportsLinks(page)).toHaveText(['Reports', 'Charts'])
+    await expect(reportsLinks(page)).toHaveText(['Reports'])
     await expect(navLink(page, 'Loans')).toHaveCount(0)
   })
 
@@ -122,6 +122,6 @@ test.describe('the sidebar', () => {
     await signInAs(context, 'member')
     await page.goto('/reports/balances')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
-    await expect(reportsLinks(page)).toHaveText(['Reports', 'Charts', 'Accounts'])
+    await expect(reportsLinks(page)).toHaveText(['Reports', 'Accounts'])
   })
 })

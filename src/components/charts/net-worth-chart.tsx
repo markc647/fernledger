@@ -1,15 +1,15 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import { useId, useRef, useState } from 'react'
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 import { Amount } from '@/components/amount'
 import { LiveStatus } from '@/components/live-status'
 import { ResponsiveTable } from '@/components/responsive-table'
-import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
+import { DashboardCard } from '@/components/summary/dashboard-card'
 import { Button } from '@/components/ui/button'
+import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { Select } from '@/components/ui/select'
 import {
-  DASHBOARD_NET_WORTH_RANGE,
+  DEFAULT_NET_WORTH_RANGE,
   NET_WORTH_ABOUT,
   NET_WORTH_RANGE_LABELS,
   NET_WORTH_RANGES,
@@ -33,19 +33,16 @@ const LOADING = 'Loading net worth. It reads every Transaction, so it can take a
 const UPDATING = 'Updating net worth…'
 const LOADED = 'Net worth has loaded.'
 
-const linkStyle = 'underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
-
 /**
- * Net worth over time: the money in the Accounts added up at the end of each month (worker/net-worth.ts). The line is a picture of the figures under "Show the
- * figures", which a screen reader and a printout use. The figures come from the Worker as they are shown. The Charts page (`choosable`) draws it at once and lets the
- * reader choose a range. The Dashboard (`onRequest`) does not ask the Worker until the reader presses "Show net worth", because working it out reads every Transaction,
- * and then draws the last 24 months.
+ * Net worth over time, a card of the Summary and the Dashboard: the money in the Accounts added up at the end of each month (worker/net-worth.ts). The line is a picture of the figures
+ * under "Show the figures", which a screen reader and a printout use. The figures come from the Worker as they are shown. The card does not ask the Worker until the reader presses
+ * "Show net worth", because working it out reads every Transaction of every Account (ADR 0004) and the Summary is where everyone lands. The range (the last 24 months, 5 years or
+ * all history) is chosen beside the button, before or after, and reads exactly as much whichever it is.
  */
-export function NetWorthChart({ choosable = false, onRequest = false }: { choosable?: boolean; onRequest?: boolean }) {
+export function NetWorthChart() {
   const id = useId()
-  const [chosen, setChosen] = useState<NetWorthRange>(DASHBOARD_NET_WORTH_RANGE)
-  const [requested, setRequested] = useState(!onRequest)
-  const range = choosable ? chosen : DASHBOARD_NET_WORTH_RANGE
+  const [range, setRange] = useState<NetWorthRange>(DEFAULT_NET_WORTH_RANGE)
+  const [requested, setRequested] = useState(false)
   const { data, error, isPlaceholderData } = useQuery({ ...netWorthQuery(range), enabled: requested, placeholderData: keepPreviousData })
   const figures = useOpenForPrint()
   const heading = useRef<HTMLHeadingElement>(null)
@@ -58,30 +55,16 @@ export function NetWorthChart({ choosable = false, onRequest = false }: { choosa
   // What a screen reader is told as it happens, in a region that is on the page from the start (a change is announced, an arrival often is not).
   const message = !requested || error ? '' : !data ? LOADING : isPlaceholderData ? UPDATING : LOADED
   return (
-    <section aria-labelledby="net-worth-heading" aria-busy={requested && (isPlaceholderData || (!data && !error))}>
-      <h2 id="net-worth-heading" ref={heading} tabIndex={-1} className="mb-3 text-xl font-semibold outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-        Net worth over time
-      </h2>
+    <DashboardCard headingId="net-worth-heading" headingRef={heading} title="Net worth over time" span="half" busy={requested && (isPlaceholderData || (!data && !error))}>
       <LiveStatus message={message} />
-      {!requested && (
-        <>
-          <p className="mb-3">Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.</p>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <Button type="button" size="touch" onClick={request}>
-              Show net worth
-            </Button>
-            <Link to="/charts" className={`inline-flex min-h-11 items-center ${linkStyle}`}>
-              Open the Charts page for longer ranges
-            </Link>
-          </div>
-        </>
-      )}
-      {choosable && (
-        <div className="mb-3 max-w-xs">
+      {!requested && <p className="mb-3">Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.</p>}
+      {/* The range is chosen before net worth is drawn as well as after, because every range reads the same (so choosing first costs one read, not two): the choice sits beside the button. */}
+      <div className="mb-3 flex flex-wrap items-end gap-x-4 gap-y-3">
+        <div className="max-w-xs min-w-0 flex-[1_1_10rem]">
           <label htmlFor={`${id}-range`} className="block font-medium">
             Range
           </label>
-          <Select id={`${id}-range`} value={chosen} onChange={(event) => setChosen(event.target.value as NetWorthRange)}>
+          <Select id={`${id}-range`} value={range} onChange={(event) => setRange(event.target.value as NetWorthRange)}>
             {NET_WORTH_RANGES.map((value) => (
               <option key={value} value={value}>
                 {NET_WORTH_RANGE_LABELS[value]}
@@ -89,7 +72,12 @@ export function NetWorthChart({ choosable = false, onRequest = false }: { choosa
             ))}
           </Select>
         </div>
-      )}
+        {!requested && (
+          <Button type="button" size="touch" onClick={request}>
+            Show net worth
+          </Button>
+        )}
+      </div>
       {!requested ? null : error ? (
         <p role="alert">Fernledger couldn't load net worth. Reload the page to try again.</p>
       ) : !data ? (
@@ -134,16 +122,7 @@ export function NetWorthChart({ choosable = false, onRequest = false }: { choosa
               </ChartContainer>
             </ChartFigure>
           </div>
-          {choosable ? (
-            range === 'all' && <p className="mt-2 text-muted-foreground">Every month Fernledger holds, which can make a long line.</p>
-          ) : (
-            <p className="mt-2 text-muted-foreground">
-              The last 24 months.{' '}
-              <Link to="/charts" className={linkStyle}>
-                Longer ranges are on the Charts page.
-              </Link>
-            </p>
-          )}
+          {range === 'all' && <p className="mt-2 text-muted-foreground">Every month Fernledger holds, which can make a long line.</p>}
           <details ref={figures} className="mt-3">
             <summary className="min-h-11 cursor-pointer py-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">Show the figures</summary>
             <ResponsiveTable
@@ -169,7 +148,7 @@ export function NetWorthChart({ choosable = false, onRequest = false }: { choosa
           <NotCounted accounts={data.notCounted} />
         </>
       )}
-    </section>
+    </DashboardCard>
   )
 }
 

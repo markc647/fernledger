@@ -55,7 +55,6 @@ const routes: NavEntry[] = [
   { to: '/uncategorised', label: 'Uncategorised', group: 'transactions', adminOnly: true, order: 15 },
   { to: '/import', label: 'Import', group: 'transactions', adminOnly: true, order: 20 },
   { to: '/reports', label: 'Reports', group: 'reports', order: 50 },
-  { to: '/charts', label: 'Charts', group: 'reports', order: 55 },
   // A Report is a page of Reports, which the sidebar does not list: the breadcrumb names it and Reports is marked as the current page.
   { to: '/reports/loans', label: 'Loans', parent: '/reports' },
   { to: '/reports/balances', label: 'Balances over time', parent: '/reports' },
@@ -78,7 +77,7 @@ describe('navSections', () => {
     expect(outline('admin')).toEqual([
       'Dashboard',
       'Transactions: All Transactions, Uncategorised, Import',
-      'Reports: Reports, Charts',
+      'Reports: Reports',
       'Set up: Accounts, Categories, Rules, Budgets, Settings',
       'Help: Change Log, About your data, How to sign in',
     ])
@@ -88,7 +87,7 @@ describe('navSections', () => {
     expect(outline('member')).toEqual([
       'Summary',
       'Transactions: All Transactions',
-      'Reports: Reports, Charts, Accounts',
+      'Reports: Reports, Accounts',
       'Help: Change Log, About your data, How to sign in',
     ])
   })
@@ -175,7 +174,7 @@ describe('trailFor', () => {
 
   it('does not take a page whose address only starts the same way', () => {
     expect(trailFor(routes, 'admin', '/transactions-old')).toEqual({})
-    expect(trailFor(routes, 'admin', '/chartsy')).toEqual({})
+    expect(trailFor(routes, 'admin', '/reportsy')).toEqual({})
   })
 
   it('does not take "/" for every page', () => {

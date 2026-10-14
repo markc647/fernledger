@@ -22,7 +22,7 @@ export type SpendingByCategory = SpendingRange & {
 }
 
 /**
- * The one order for Spending Categories, so the Dashboard and a Report put the same figures in the same order: the most spent first (so a Category that
+ * The one order for Spending Categories, so the Summary's chart and a Report put the same figures in the same order: the most spent first (so a Category that
  * took in more than it paid out is last), and among equal amounts the named Categories by name, ignoring capitals and accents (`en-NZ`), with Uncategorised after
  * them and a Category's ID the last tiebreak, which settles two with one name.
  */

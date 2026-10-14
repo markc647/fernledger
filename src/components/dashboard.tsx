@@ -1,9 +1,6 @@
 import { Link } from '@tanstack/react-router'
-import { LazyCharts } from '@/components/charts/lazy-charts'
-import { BalanceWarningsWidget } from '@/components/summary/balance-warnings-widget'
-import { BalancesWidget } from '@/components/summary/balances-widget'
-import { BudgetVsActualWidget } from '@/components/summary/budget-vs-actual-widget'
-import { RecentTransactionsWidget } from '@/components/summary/recent-transactions-widget'
+import { DashboardCard } from '@/components/summary/dashboard-card'
+import { SummaryCards } from '@/components/summary/summary-cards'
 import { roleLabel, type Role } from '@/lib/role'
 
 // The Admin's tools, in the order the work usually goes: bring Transactions in, give them Categories, and set what they may spend.
@@ -17,9 +14,8 @@ const TOOLS = [
 ] as const
 
 /**
- * Where the Admin lands: the shortcuts to the work only the Admin does, then everything the Summary shows every Member (it is the same widgets, so the
- * two cannot disagree), then the charts: spending by Category is drawn at once, and net worth waits for a button, because working it out reads every Transaction
- * (ADR 0004). A Member lands on the Summary, which has the charts one click away.
+ * Where the Admin lands: a card of the shortcuts to the work only the Admin does, then every card the Summary shows every Member (`SummaryCards`, so the two cannot disagree),
+ * of which the two charts each wait for a button, because working them out reads every Transaction (ADR 0004). A Member lands on the Summary, which has all of these but the tools.
  */
 export function Dashboard({ me }: { me: { email: string; role: Role } }) {
   return (
@@ -28,17 +24,14 @@ export function Dashboard({ me }: { me: { email: string; role: Role } }) {
       <p className="mt-2">
         Signed in as {me.email} ({roleLabel(me.role)}).
       </p>
-      <div className="mt-6 grid gap-8">
-        <section aria-labelledby="tools-heading">
-          <h2 id="tools-heading" className="mb-3 text-xl font-semibold">
-            Your tools
-          </h2>
-          <ul className="grid gap-3 sm:grid-cols-2">
+      <SummaryCards>
+        <DashboardCard headingId="tools-heading" title="Your tools">
+          <ul className="grid gap-3 @2xl/summary:grid-cols-2 @4xl/summary:grid-cols-3">
             {TOOLS.map((tool) => (
               <li key={tool.to}>
                 <Link
                   to={tool.to}
-                  className="block min-h-11 rounded-xl border bg-card p-4 text-card-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  className="block h-full min-h-11 rounded-lg border p-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
                   <span className="block font-semibold underline underline-offset-4">{tool.name}</span>
                   <span className="mt-1 block text-muted-foreground">{tool.about}</span>
@@ -46,13 +39,8 @@ export function Dashboard({ me }: { me: { email: string; role: Role } }) {
               </li>
             ))}
           </ul>
-        </section>
-        <BalanceWarningsWidget />
-        <BalancesWidget />
-        <BudgetVsActualWidget />
-        <RecentTransactionsWidget />
-        <LazyCharts />
-      </div>
+        </DashboardCard>
+      </SummaryCards>
     </>
   )
 }

@@ -112,7 +112,7 @@ describe('what a screen reader is told', () => {
 })
 
 describe('net worth\'s ranges', () => {
-  it('offers each range the Worker knows, the Dashboard\'s first, with words for it', () => {
+  it('offers each range the Worker knows, the one drawn first, with words for it', () => {
     expect(NET_WORTH_RANGES).toEqual(['24-months', '5-years', 'all'])
     expect(NET_WORTH_RANGES.map((range) => NET_WORTH_RANGE_LABELS[range])).toEqual(['Last 24 months', 'Last 5 years', 'All history'])
   })
