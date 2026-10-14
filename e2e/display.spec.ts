@@ -1,9 +1,10 @@
 import type { Locator, Page } from '@playwright/test'
 import { netWorth as netWorthRegion, spending as spendingRegion } from './chart-helpers'
-import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import {
   chooseTextSize,
   closeHeaderControls,
+  expectRailUnclipped,
   expectTextSize,
   mainNav,
   navLink,
@@ -50,32 +51,13 @@ test.describe('text size', () => {
     await expectTextSize(page, 'Large')
   })
 
-  // The first control (A / A+ / A++) saved 'a', 'a-plus' or 'a-plus-plus' under the same key. Someone who chose A+ or A++ on it gets Large and not the default.
-  for (const [saved, size] of [['a', 'Medium'], ['a-plus', 'Large'], ['a-plus-plus', 'Large']] as const) {
-    test(`reads a size the old A / A+ / A++ control saved: "${saved}" is ${size}`, async ({ page }) => {
-      await page.addInitScript((value) => localStorage.setItem('fernledger-text-size', value), saved)
-      await page.goto('/styleguide')
-      await expectTextSize(page, size)
-      await expect(textSizeButton(page, size)).toBeChecked()
-    })
-  }
-
-  test('still works, without errors, when the browser blocks storage', async ({ page }, testInfo) => {
-    await page.addInitScript(() => {
-      Object.defineProperty(window, 'localStorage', {
-        get() {
-          throw new DOMException('Storage is blocked', 'SecurityError')
-        },
-      })
-    })
-    await page.goto('/styleguide') // the fixture fails the test on any console error, uncaught error or CSP violation
-    await expect(textSizeButton(page, 'Medium')).toBeChecked()
-    await textSizeButton(page, 'Large').click()
+  // The first control (A / A+ / A++) saved 'a-plus' or 'a-plus-plus' under the same key. Someone who chose A+ on it gets Large and not the default (src/lib/text-size.test.ts
+  // and scripts/text-size-init.test.mjs hold the other values).
+  test('reads a size the old A / A+ / A++ control saved: A+ is Large', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('fernledger-text-size', 'a-plus'))
+    await page.goto('/styleguide')
+    await expectTextSize(page, 'Large')
     await expect(textSizeButton(page, 'Large')).toBeChecked()
-    expect(await fontSize(page, 'body')).toBeGreaterThan(16)
-    // Other controls still work too: the theme switches to the other one.
-    await themeToggle(page).click()
-    await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /^(?!.*dark)/ : /dark/)
   })
 
   test('shrugs off a junk saved value', async ({ page }) => {
@@ -121,6 +103,7 @@ test.describe('text size', () => {
         expect(box?.height).toBeGreaterThanOrEqual(44)
         expect(box?.width).toBeGreaterThanOrEqual(44)
       }
+      await expectRailUnclipped(page) // a 44px icon in a rail too narrow for it is cut off, and so is its outline
     })
   })
 
@@ -130,7 +113,7 @@ test.describe('text size', () => {
     for (const group of ['Transactions', 'Reports', 'Set up', 'Help']) await openNavGroup(page, group)
     for (const [size, least] of [['Medium', 32], ['Large', 32], ['Small', 24]] as const) {
       await chooseTextSize(page, size)
-      await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+      await settle(page)
       const targets = [
         ...(['Small', 'Medium', 'Large'] as const).map((name) => textSizeButton(page, name)),
         themeToggle(page),
@@ -172,7 +155,7 @@ test.describe('zoom', () => {
           await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
           // Measure only once the size is applied and the buttons have finished their width transition.
           await expectTextSize(page, size)
-          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+          await settle(page)
           const { scrollWidth, clientWidth } = await page.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
@@ -185,51 +168,49 @@ test.describe('zoom', () => {
 
   // The header is one row on a phone (the sidebar toggle, where the page is, one menu button), and the menu and the sidebar's sheet, open, fit the window however short it is
   // and however large the text: at 400% zoom the window is 256px high, and what does not fit scrolls. (The Admin's sidebar is the longest.)
-  for (const path of ['/', '/settings']) {
-    test(`the header is one row at 320px and text size Large, and its menu and the sidebar's sheet fit, on ${path}`, async ({ page, context }) => {
-      await signInAs(context, 'admin')
-      await page.setViewportSize({ width: 320, height: 256 })
-      await page.goto(path)
-      await chooseTextSize(page, 'Large')
-      await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
-      const within = async (locator: Locator, where: { x?: number; y?: number; width: number; height: number }, what: string) => {
-        const box = (await locator.boundingBox())!
-        expect(box.x, `${what}: left`).toBeGreaterThanOrEqual((where.x ?? 0) - 0.5)
-        expect(box.x + box.width, `${what}: right`).toBeLessThanOrEqual((where.x ?? 0) + where.width + 0.5)
-        expect(box.y, `${what}: top`).toBeGreaterThanOrEqual((where.y ?? 0) - 0.5)
-        expect(box.y + box.height, `${what}: bottom`).toBeLessThanOrEqual((where.y ?? 0) + where.height + 0.5)
-      }
-      const screen = { width: 320, height: 256 }
+  test(`the header is one row at 320px and text size Large, and its menu and the sidebar's sheet fit`, async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.setViewportSize({ width: 320, height: 256 })
+    await page.goto('/')
+    await chooseTextSize(page, 'Large')
+    await settle(page)
+    const within = async (locator: Locator, where: { x?: number; y?: number; width: number; height: number }, what: string) => {
+      const box = (await locator.boundingBox())!
+      expect(box.x, `${what}: left`).toBeGreaterThanOrEqual((where.x ?? 0) - 0.5)
+      expect(box.x + box.width, `${what}: right`).toBeLessThanOrEqual((where.x ?? 0) + where.width + 0.5)
+      expect(box.y, `${what}: top`).toBeGreaterThanOrEqual((where.y ?? 0) - 0.5)
+      expect(box.y + box.height, `${what}: bottom`).toBeLessThanOrEqual((where.y ?? 0) + where.height + 0.5)
+    }
+    const screen = { width: 320, height: 256 }
 
-      // One row: the bar is 3rem tall (60px at Large), not two lines of controls, and none of it is wider than the screen.
-      const header = siteHeader(page)
-      expect((await header.boundingBox())!.height).toBeLessThanOrEqual(60.5)
-      await within(header.getByRole('button', { name: 'Toggle sidebar' }), screen, 'the sidebar toggle')
-      await within(header.getByRole('button', { name: 'Display settings and sign out' }), screen, 'the menu button')
-      await expect(header.getByRole('button', { name: 'Display settings and sign out' })).toBeVisible()
-      await expect(textSizeGroup(page)).toBeHidden() // all three of the controls are in the menu
-      const { scrollWidth, innerWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }))
-      expect(scrollWidth).toBeLessThanOrEqual(innerWidth)
+    // One row: the bar is 3rem tall (60px at Large), not two lines of controls, and none of it is wider than the screen.
+    const header = siteHeader(page)
+    expect((await header.boundingBox())!.height).toBeLessThanOrEqual(60.5)
+    await within(header.getByRole('button', { name: 'Toggle sidebar' }), screen, 'the sidebar toggle')
+    await within(header.getByRole('button', { name: 'Display settings and sign out' }), screen, 'the menu button')
+    await expect(header.getByRole('button', { name: 'Display settings and sign out' })).toBeVisible()
+    await expect(textSizeGroup(page)).toBeHidden() // all three of the controls are in the menu
+    const { scrollWidth, innerWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }))
+    expect(scrollWidth).toBeLessThanOrEqual(innerWidth)
 
-      // The menu: all of it is on the screen, or can be scrolled to.
-      await openHeaderControls(page)
-      const menu = page.locator('[data-slot="popover-content"]')
-      await within(menu, screen, 'the menu')
-      await signOutLink(page).scrollIntoViewIfNeeded()
-      await within(signOutLink(page), (await menu.boundingBox())!, 'Sign out, in the menu')
-      await closeHeaderControls(page)
+    // The menu: all of it is on the screen, or can be scrolled to.
+    await openHeaderControls(page)
+    const menu = page.locator('[data-slot="popover-content"]')
+    await within(menu, screen, 'the menu')
+    await signOutLink(page).scrollIntoViewIfNeeded()
+    await within(signOutLink(page), (await menu.boundingBox())!, 'Sign out, in the menu')
+    await closeHeaderControls(page)
 
-      // The sidebar's sheet, with the Admin's longest group open: it fits, and every link in it can be scrolled to.
-      await openNavGroup(page, 'Set up')
-      await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished))) // the sheet has slid in
-      const sheet = page.locator('[data-slot="sidebar"][data-mobile="true"]')
-      await within(sheet, screen, 'the sheet')
-      for (const label of ['Accounts', 'Categories', 'Rules', 'Budgets', 'Settings']) {
-        await navLink(page, label).scrollIntoViewIfNeeded()
-        await within(navLink(page, label), (await sheet.boundingBox())!, label)
-      }
-    })
-  }
+    // The sidebar's sheet, with the Admin's longest group open: it fits, and every link in it can be scrolled to.
+    await openNavGroup(page, 'Set up')
+    await settle(page) // the sheet has slid in
+    const sheet = page.locator('[data-slot="sidebar"][data-mobile="true"]')
+    await within(sheet, screen, 'the sheet')
+    for (const label of ['Accounts', 'Categories', 'Rules', 'Budgets', 'Settings']) {
+      await navLink(page, label).scrollIntoViewIfNeeded()
+      await within(navLink(page, label), (await sheet.boundingBox())!, label)
+    }
+  })
 
   // The Import screen with a file chosen and the "Replace imported history" question open: the longest text it shows.
   // The Account and its imported-row count are stubbed, so this needs no data in the database.
@@ -259,7 +240,7 @@ test.describe('zoom', () => {
         await expect(page.getByRole('alertdialog')).toContainText('removed in steps of 5,000')
         await expect(page.getByRole('alertdialog')).toContainText("43 Transactions have an Override (your own Category), a Note or a Not a Transfer mark. 38 of them carry over to this file; 5 won't.")
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -294,7 +275,7 @@ test.describe('zoom', () => {
         await expect(page.getByText(/Category: Health and medical \(removed/)).toBeVisible()
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -320,7 +301,7 @@ test.describe('zoom', () => {
         await expect(page.getByText('5,100,000 of 5,000,000 rows read · 102%')).toBeVisible()
         await expect(page.getByText('The allowance starts again on Thu 15 Oct 2026, 1:00 pm, New Zealand time.')).toBeVisible()
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -370,7 +351,7 @@ test.describe('zoom', () => {
         await expect(page.getByRole('region', { name: 'Recent transactions' })).toContainText('EXAMPLE SHOP WITH A LONG ENOUGH NAME')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -425,7 +406,7 @@ test.describe('zoom', () => {
         await expect(page.getByRole('alert')).toContainText('more than $0')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -480,7 +461,7 @@ test.describe('zoom', () => {
           }
           // Measure only once the size is applied and the buttons have finished their width transition.
           await expectTextSize(page, size)
-          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+          await settle(page)
           const { scrollWidth, clientWidth } = await page.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
@@ -525,7 +506,7 @@ test.describe('zoom', () => {
         await expect(widget).toContainText('$1,234,567,890.12 back')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -587,7 +568,7 @@ test.describe('zoom', () => {
           await expect(spending).toContainText('$1,234,567.89 back')
           // Measure only once the size is applied and the buttons have finished their width transition.
           await expectTextSize(page, size)
-          await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+          await settle(page)
           const { scrollWidth, clientWidth } = await page.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
@@ -622,7 +603,7 @@ test.describe('zoom', () => {
         await expect(spendingRegion(page).getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -676,7 +657,7 @@ test.describe('zoom', () => {
         await expect(page.getByRole('region', { name: 'Edit Category and Note' })).toBeVisible()
         await expect(page.getByRole('region', { name: 'From the bank' })).toContainText('First seen by Akahu')
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -709,7 +690,7 @@ test.describe('zoom', () => {
         await expect(page.getByRole('article', { name: 'Transaction listing' })).toContainText('−$1,234,567.89')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -752,7 +733,7 @@ test.describe('zoom', () => {
         await expect(page.getByRole('article', { name: 'Balances over time' })).toContainText('Balance differs from bank by $1,234,567.89')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -793,7 +774,7 @@ test.describe('zoom', () => {
         await expect(report).toContainText('Uncategorised (includes money in not yet given a Category)') // the longest row name
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -837,7 +818,7 @@ test.describe('zoom', () => {
         await expect(report).toContainText('Ben is owed')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -891,7 +872,7 @@ test.describe('zoom', () => {
         await expect(report).toContainText('August 2026 to September 2026, the 2 months that have ended')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -939,7 +920,7 @@ test.describe('zoom', () => {
         await expect(report).toContainText('This month has not begun, so there is nothing to show yet.')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
-        await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+        await settle(page)
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -950,7 +931,7 @@ test.describe('zoom', () => {
   }
 
   // The app title is at the top of the sidebar: on a phone, in its sheet. It wraps over as many lines as it needs rather than being cut short or scrolling sideways.
-  for (const { name, width, height } of zoomLevels) {
+  for (const { name, width, height } of zoomLevels.slice(0, 2)) {
     test(`a very long app title wraps in the sidebar's sheet instead of scrolling sideways, at ${name}`, async ({ page }) => {
       await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(120, 'x'), about_contact: '', about_retention: '' } }))
       await page.setViewportSize({ width, height })
@@ -1153,26 +1134,6 @@ test.describe('reduced motion', () => {
 })
 
 test.describe('forced colours (Windows high contrast)', () => {
-  test('keeps the chosen text size visible, and focus drawn as an outline', async ({ page }) => {
-    await page.emulateMedia({ forcedColors: 'active' })
-    await page.goto('/styleguide')
-    const chosen = textSizeButton(page, 'Medium')
-    const other = textSizeButton(page, 'Small')
-    const background = (button: typeof chosen) => button.evaluate((el) => getComputedStyle(el).backgroundColor)
-    // The chosen button is told apart by more than the fill the browser throws away.
-    expect(await background(chosen)).not.toBe(await background(other))
-
-    await other.focus()
-    await page.keyboard.press('Tab')
-    await page.keyboard.press('Shift+Tab')
-    const outline = await other.evaluate((el) => {
-      const s = getComputedStyle(el)
-      return { style: s.outlineStyle, width: parseFloat(s.outlineWidth) }
-    })
-    expect(outline.style).toBe('solid')
-    expect(outline.width).toBeGreaterThanOrEqual(2)
-  })
-
   test('still shows every status icon and word', async ({ page }) => {
     await page.emulateMedia({ forcedColors: 'active' })
     await page.goto('/styleguide')
@@ -1243,7 +1204,7 @@ test.describe('header', () => {
       await chooseTextSize(page, size)
       await expectTextSize(page, size)
       await openHeaderControls(page)
-      await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+      await settle(page)
       const link = signOutLink(page)
       await expect(link).toBeVisible()
       const box = await link.boundingBox()

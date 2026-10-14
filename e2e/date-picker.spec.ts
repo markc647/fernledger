@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 import { calendarOf, clearDate, dateField, expectDate, pickDate } from './date-helpers'
-import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
 import { chooseTextSize } from './shell-helpers'
 
@@ -192,7 +192,7 @@ test('it has no WCAG 2.2 AA violations closed, open, and open on a phone at the 
     await dateField(page, 'Date').click()
     const calendar = calendarOf(page)
     await arrived(page)
-    await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+    await settle(page)
     const box = (await calendar.boundingBox())!
     expect(box.x, 'its left edge is on the screen').toBeGreaterThanOrEqual(0)
     expect(box.x + box.width, 'its right edge is on the screen').toBeLessThanOrEqual(viewport.width)

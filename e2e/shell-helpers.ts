@@ -40,11 +40,14 @@ export async function closeHeaderControls(page: Page) {
   }
 }
 
-/** The text size buttons, wherever this width has them (the open menu on a phone). To a screen reader a single-choice toggle group is a group of radio buttons. */
-export const textSizeGroup = (page: Page) => page.getByRole('radiogroup', { name: 'Text size' })
+/** The text size buttons, wherever this width has them (the open menu on a phone): a group of three radio buttons. */
+export const textSizeGroup = (page: Page) => page.getByRole('group', { name: 'Text size' })
 
-/** One of the text size buttons, by the word on it. */
+/** One of the text size buttons (a radio button), by the word on it. */
 export const textSizeButton = (page: Page, size: TextSizeName) => textSizeGroup(page).getByRole('radio', { name: `${size} text`, exact: true })
+
+/** What a text size button looks like: the radio button is invisible and on top, and the word beside it is drawn, filled when it is chosen and outlined when it has focus. */
+export const textSizeLabel = (page: Page, size: TextSizeName) => textSizeButton(page, size).locator('xpath=following-sibling::span')
 
 /** Chooses a text size, opening the phone's menu to do it and putting it away after. */
 export async function chooseTextSize(page: Page, size: TextSizeName) {
@@ -56,6 +59,31 @@ export async function chooseTextSize(page: Page, size: TextSizeName) {
 
 /** The text size that is applied to the page, which is what every layout measurement depends on. */
 export const expectTextSize = (page: Page, size: TextSizeName) => expect(page.locator('html')).toHaveAttribute('data-text-size', TEXT_SIZE_VALUE[size])
+
+/** Makes the browser refuse `localStorage`, as private modes and blocked site data do: reading it throws. For a spec of what still works without it. */
+export const blockStorage = (page: Page) =>
+  page.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', {
+      get() {
+        throw new DOMException('Storage is blocked', 'SecurityError')
+      },
+    })
+  })
+
+/**
+ * Changes the device's light or dark setting, and waits until the page has heard of it and had a frame to draw what it does with it, so a spec can say that the page did
+ * not move (there is nothing to wait for otherwise) as well as that it did.
+ */
+export async function changeDeviceScheme(page: Page, scheme: 'light' | 'dark') {
+  // Listening first (awaited, so it is there before the change), and read after.
+  await page.evaluate(() => {
+    const query = matchMedia('(prefers-color-scheme: dark)')
+    const heard = new Promise<void>((resolve) => query.addEventListener('change', () => requestAnimationFrame(() => resolve()), { once: true }))
+    Object.assign(window, { __deviceSchemeHeard: heard, __deviceSchemeQuery: query }) // the query is kept, or it may be collected, and its listener with it
+  })
+  await page.emulateMedia({ colorScheme: scheme })
+  await page.evaluate(() => (window as unknown as { __deviceSchemeHeard: Promise<void> }).__deviceSchemeHeard)
+}
 
 /** The Sign out link, in the header's bar or in its open menu. */
 export const signOutLink = (page: Page) => page.getByRole('link', { name: 'Sign out' })
@@ -84,6 +112,21 @@ export async function openNavGroup(page: Page, group: string) {
   const trigger = navGroup(page, group)
   if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click()
   await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+}
+
+/**
+ * Every icon of the collapsed sidebar, and the 2px outline round the one with focus, are inside the part of the sidebar that does not cut things off. (A 44px icon in a rail too
+ * narrow for it is cut off, and a box measured with `boundingBox` does not say so: it is the whole box, cut or not.)
+ */
+export async function expectRailUnclipped(page: Page) {
+  const content = (await page.locator('[data-slot="sidebar-content"]').boundingBox())!
+  const rows = [...(await mainNav(page).getByRole('button').all()), ...(await mainNav(page).getByRole('link').all())]
+  expect(rows.length).toBeGreaterThan(4)
+  for (const row of rows) {
+    const box = (await row.boundingBox())!
+    expect(box.x, 'room for its outline on the left').toBeGreaterThanOrEqual(content.x + 2 - 0.5)
+    expect(box.x + box.width, 'room for its outline on the right').toBeLessThanOrEqual(content.x + content.width - 2 + 0.5)
+  }
 }
 
 /** A page's link in the sidebar, by its label there. Only in the page once its group is open. */

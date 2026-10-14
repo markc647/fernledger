@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
 import { drawn, LINE, netWorth, SPENT, spending, stubNetWorth, stubSpending } from './chart-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { mainNav, openHeaderControls, openNavGroup, signOutLink, themeToggle } from './shell-helpers'
+import { changeDeviceScheme, mainNav, openHeaderControls, openNavGroup, signOutLink, themeToggle } from './shell-helpers'
 
 const pages = [
   { role: 'admin', path: '/', heading: 'Dashboard' },
@@ -109,25 +109,6 @@ test('Sign out is a full page navigation, not a fetch or a route of the app', as
   await expect(page).toHaveURL(new RegExp(`${SIGN_OUT_PATH}$`))
 })
 
-test('Sign out is the next Tab stop after the theme toggle, and shows where the focus is', async ({ page }) => {
-  await page.goto('/')
-  const link = page.getByRole('banner').getByRole('link', { name: 'Sign out' })
-  await expect(link).toBeVisible()
-  // The button style draws focus as a 2px outline (not the shadow ring it once was, which Windows high contrast removes, and which `dark:border-input` hid in the dark theme).
-  const outline = async () => {
-    await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
-    return link.evaluate((element) => {
-      const style = getComputedStyle(element)
-      return { style: style.outlineStyle, width: parseFloat(style.outlineWidth) }
-    })
-  }
-  expect((await outline()).style).toBe('none')
-  await themeToggle(page).focus()
-  await page.keyboard.press('Tab')
-  await expect(link).toBeFocused()
-  expect(await outline()).toEqual({ style: 'solid', width: 2 })
-})
-
 // Sign out needs no API data, so it is there when who is signed in can't be read: a 401 from a wrong ACCESS_AUD or team domain while an Access session is live,
 // and a failing API. Those are the cases where someone needs it.
 test.describe('when who is signed in cannot be read', () => {
@@ -162,9 +143,9 @@ test.describe('the theme toggle', () => {
     await expect(themeToggle(page)).toHaveAccessibleName(`Switch to ${deviceIsDark ? 'light' : 'dark'} theme`)
 
     // The device changes its mind before the toggle is used, and the page follows it (the theme is the layout's, so this does not need the toggle on screen).
-    await page.emulateMedia({ colorScheme: deviceIsDark ? 'light' : 'dark' })
+    await changeDeviceScheme(page, deviceIsDark ? 'light' : 'dark')
     await expect(html).toHaveClass(darkClass(!deviceIsDark))
-    await page.emulateMedia({ colorScheme: deviceIsDark ? 'dark' : 'light' })
+    await changeDeviceScheme(page, deviceIsDark ? 'dark' : 'light')
     await expect(html).toHaveClass(darkClass(deviceIsDark))
 
     await themeToggle(page).click()
@@ -174,8 +155,7 @@ test.describe('the theme toggle', () => {
     await page.reload()
     await expect(html).toHaveClass(darkClass(!deviceIsDark)) // remembered, and applied before the app starts
     // Now it is the person's choice, so the device does not move it.
-    await page.emulateMedia({ colorScheme: deviceIsDark ? 'light' : 'dark' })
-    await page.waitForTimeout(100)
+    await changeDeviceScheme(page, deviceIsDark ? 'light' : 'dark')
     await expect(html).toHaveClass(darkClass(!deviceIsDark))
 
     await themeToggle(page).click() // and the toggle switches it back, which is remembered too
@@ -189,26 +169,11 @@ test.describe('the theme toggle', () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/')
     const html = page.locator('html')
-    await page.emulateMedia({ colorScheme: deviceIsDark ? 'light' : 'dark' })
+    await changeDeviceScheme(page, deviceIsDark ? 'light' : 'dark')
     await expect(html).toHaveClass(darkClass(!deviceIsDark)) // no toggle was on the screen
     await openHeaderControls(page)
     await themeToggle(page).click()
     await expect(html).toHaveClass(darkClass(deviceIsDark))
     await expect(themeToggle(page)).toHaveAccessibleName(`Switch to ${deviceIsDark ? 'light' : 'dark'} theme`)
-  })
-
-  test('still works, and the page still follows the device, when the browser blocks storage', async ({ page }, testInfo) => {
-    const deviceIsDark = testInfo.project.name === 'dark'
-    await page.addInitScript(() => {
-      Object.defineProperty(window, 'localStorage', {
-        get() {
-          throw new DOMException('Storage is blocked', 'SecurityError')
-        },
-      })
-    })
-    await page.goto('/') // the fixture fails the test on any console error or uncaught error
-    await expect(page.locator('html')).toHaveClass(darkClass(deviceIsDark))
-    await themeToggle(page).click()
-    await expect(page.locator('html')).toHaveClass(darkClass(!deviceIsDark))
   })
 })

@@ -1,4 +1,4 @@
-import { expect, signInAs, test } from './fixtures'
+import { expect, settle, signInAs, test } from './fixtures'
 
 // The page does not jump sideways when a scrollbar comes and goes. Its own file because headless Chromium hides scrollbars, which would make this test pass whatever the page
 // did, so it launches the browser with them back (`launchOptions` can only be set for a whole file), and checks that it has.
@@ -11,7 +11,7 @@ test('does not move the page sideways between a short page (Import) and a long o
   const where = async (path: string) => {
     await page.goto(path)
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
-    await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)))
+    await settle(page)
     return page.evaluate(() => ({
       heading: document.querySelector('h1')!.getBoundingClientRect().x,
       signOut: document.querySelector<HTMLElement>('header a[href="/cdn-cgi/access/logout"]')!.getBoundingClientRect().right,

@@ -178,9 +178,9 @@ test('a Member sees Transactions and Accounts but no Import and no rename', asyn
   await expect(nav.getByRole('link', { name: 'Import' })).toHaveCount(0) // the Transactions group is open here, so this is a link that is not there
   await noAxeViolations(page)
 
-  // A Member has no Set up group in the sidebar, but Accounts is still theirs to read, by its address.
+  // A Member has no Set up group in the sidebar, but Accounts is theirs to read: it is among their Reports.
   await expect(nav.getByRole('button', { name: 'Set up' })).toHaveCount(0)
-  await page.goto('/accounts')
+  await navigateTo(page, 'Accounts', 'Reports')
   await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toBeVisible()
   await expect(page.getByRole('cell', { name: numberWith(suffixes(testInfo).small) })).toBeVisible()
   await expect(page.getByRole('button', { name: /^Rename/ })).toHaveCount(0)
