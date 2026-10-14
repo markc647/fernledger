@@ -113,12 +113,17 @@ describe('formatDate (an NZ calendar date such as a Transaction date)', () => {
     expect(formatDate('2028-02-29')).toBe('Tue 29 Feb 2028')
     expect(formatDate('2028-03-01')).toBe('Wed 1 Mar 2028')
   })
+  it('shows a year before 1000 as it is, since the Worker takes any real date', () => {
+    expect(formatDate('0500-01-01')).toBe('Fri 1 Jan 500')
+    expect(formatDate('0100-03-01')).toBe('Mon 1 Mar 100')
+    expect(() => formatDate('0100-02-29')).toThrow(RangeError) // 100 is not a leap year
+  })
   it('does not move on days where the clocks change', () => {
     expect(formatDate('2026-09-27')).toBe('Sun 27 Sept 2026') // NZDT starts
     expect(formatDate('2026-04-05')).toBe('Sun 5 Apr 2026') // NZDT ends
   })
   it('refuses anything that is not a real YYYY-MM-DD date, without echoing it', () => {
-    for (const bad of ['', '8 Oct 2026', '2026-10-8', '2026-02-30', '2026-13-01', '2026-10-08T00:00:00Z']) {
+    for (const bad of ['', '8 Oct 2026', '2026-10-8', '2026-02-30', '2026-13-01', '2026-10-08T00:00:00Z', '0099-01-01']) {
       expect(() => formatDate(bad)).toThrow(RangeError)
       expect(() => formatDate(bad)).toThrow(/^[^\d]*$/)
     }

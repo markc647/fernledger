@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test'
+import { calendarOf, clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 // The light and dark projects share one local database, so each makes entries of its own, with values no earlier run used.
@@ -81,30 +82,52 @@ test('the Change Log can be filtered by type and by date', async ({ page, contex
   await expect(page.getByRole('listitem').filter({ hasText: 'Settings change' })).toHaveCount(0)
 
   // The type and dates combine; nothing was changed in 2030.
-  await page.getByLabel('From', { exact: true }).fill('2030-01-01')
-  await page.getByLabel('To', { exact: true }).fill('2030-12-31')
+  await pickDate(page, 'From', '2030-01-01')
+  await pickDate(page, 'To', '2030-12-31')
   await expect(page.getByText('No changes match these filters.')).toBeVisible()
   await noAxeViolations(page)
 
   // Today (NZ), both ends included, brings today's Import back.
-  await page.getByLabel('From', { exact: true }).fill(nzToday())
-  await page.getByLabel('To', { exact: true }).fill(nzToday())
+  await pickDate(page, 'From', nzToday())
+  await pickDate(page, 'To', nzToday())
   await expect(imported).toBeVisible()
   await expect(changed).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Clear filters' }).click()
   await expect(page.getByLabel('Type', { exact: true })).toHaveValue('')
-  await expect(page.getByLabel('From', { exact: true })).toHaveValue('')
+  await expectDate(page, 'From', '')
+  await expectDate(page, 'To', '')
   await expect(imported).toBeVisible()
   await expect(changed).toBeVisible()
 })
 
-test('a range that ends before it starts is explained, not searched', async ({ page, context }) => {
+test('a range that ends before it starts cannot be chosen: the other date limits the days and the years', async ({ page, context }) => {
   await signInAs(context, 'member')
   await page.goto('/change-log')
   await expect(page.getByRole('heading', { level: 1, name: 'Change Log' })).toBeVisible()
-  await page.getByLabel('From', { exact: true }).fill('2026-10-09')
-  await page.getByLabel('To', { exact: true }).fill('2026-10-08')
-  await expect(page.getByRole('alert')).toContainText('before the “From” date')
+  await pickDate(page, 'From', '2026-10-09')
+  await pickDate(page, 'To', '2026-10-20')
+  const calendar = calendarOf(page)
+
+  // The To date: nothing before the From date, in the days, the months or the years.
+  await dateField(page, 'To').click()
+  await expect(calendar.locator('td[data-day="2026-10-08"] button')).toBeDisabled()
+  await expect(calendar.locator('td[data-day="2026-10-09"] button')).toBeEnabled()
+  await expect(calendar.getByLabel('Choose the Month').locator('option', { hasText: 'September' })).toBeDisabled()
+  await expect(calendar.getByLabel('Choose the Year').locator('option').first()).toHaveText('2026')
+  await page.keyboard.press('Escape')
+  await expect(calendar).toBeHidden()
+
+  // The From date: nothing after the To date.
+  await dateField(page, 'From').click()
+  await expect(calendar.locator('td[data-day="2026-10-20"] button')).toBeEnabled()
+  await expect(calendar.locator('td[data-day="2026-10-21"] button')).toBeDisabled()
+  await expect(calendar.getByLabel('Choose the Month').locator('option', { hasText: 'November' })).toBeDisabled()
+  await expect(calendar.getByLabel('Choose the Year').locator('option').last()).toHaveText('2026')
+  await page.keyboard.press('Escape')
+
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await clearDate(page, 'To')
+  await expectDate(page, 'To', '')
   await noAxeViolations(page)
 })

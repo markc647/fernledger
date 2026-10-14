@@ -12,6 +12,9 @@ const buttonVariants = cva(
         default: 'bg-primary text-primary-foreground hover:bg-primary/80',
         outline:
           'border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50',
+        ghost: 'hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50',
+        // Looks like the app's Input and Select, for a button that opens a choice of a value (DatePicker): the same border and fill, in both themes.
+        field: 'justify-between border-input bg-background text-start font-normal whitespace-normal hover:bg-muted aria-expanded:bg-muted',
       },
       size: {
         default: 'h-8 gap-1.5 px-2.5',

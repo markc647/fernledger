@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { drawn, LINE, NET_WORTH, netWorth, SPENT, spending, stubNetWorth, stubSpending } from './chart-helpers'
+import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 
@@ -112,8 +113,8 @@ const liveHistory = (page: Page, heading: string) => page.evaluate((id) => (wind
 /** Shows spending between two dates, as the person who chooses dates does. */
 async function chooseDates(page: Page, from: string, to: string) {
   await spending(page).getByLabel('Period', { exact: true }).selectOption('custom')
-  await spending(page).getByLabel('From', { exact: true }).fill(from)
-  await spending(page).getByLabel('To', { exact: true }).fill(to)
+  await pickDate(spending(page), 'From', from)
+  await pickDate(spending(page), 'To', to)
 }
 
 /**
@@ -423,17 +424,17 @@ test('a period the Worker names is asked for by name, and a mistake in the dates
   await region.getByLabel('Period', { exact: true }).selectOption('custom')
   const requests: string[] = []
   page.on('request', (request) => request.url().includes('/api/charts/spending') && requests.push(request.url()))
-  await region.getByLabel('From', { exact: true }).fill('2034-06-30')
-  await region.getByLabel('To', { exact: true }).fill('2034-06-01')
+  await pickDate(region, 'From', '2034-06-30')
+  await pickDate(region, 'To', '2034-06-01')
   await expect(region.getByRole('alert')).toHaveText('The “To” date is before the “From” date. Change one of them to see the chart.')
-  await expect(region.getByLabel('To', { exact: true })).toHaveAttribute('aria-invalid', 'true')
+  await expect(dateField(region, 'To')).toHaveAttribute('aria-invalid', 'true')
   expect(requests).toEqual([])
   // The old period stays on the screen as it was, and is not "updating" or busy: nothing is being asked for.
   await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toHaveCount(0)
   await expect(region).toHaveAttribute('aria-busy', 'false')
 
   // Putting them right asks, and the explanation goes.
-  await region.getByLabel('To', { exact: true }).fill('2034-06-30')
+  await pickDate(region, 'To', '2034-06-30')
   await expect(region.getByRole('alert')).toHaveCount(0)
   await expect.poll(() => requests.some((url) => url.includes('from=2034-06-30') && url.includes('to=2034-06-30'))).toBe(true)
 })

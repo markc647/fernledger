@@ -1,12 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useId, useState, type ReactNode } from 'react'
+import { DatePicker } from '@/components/date-picker'
 import { LiveStatus } from '@/components/live-status'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { isLoansKind } from '@/lib/category-kinds'
-import { MAX_DATE, MIN_DATE, isSearchDate } from '@/lib/date-range'
+import { isSearchDate } from '@/lib/date-range'
 import { nzDate } from '@/lib/format'
 import { MAX_INCOME_MONTHS, tooManyIncomeMonths } from '@/lib/income-vs-spending'
 import { accountsQuery, categoriesQuery } from '@/lib/queries'
@@ -116,19 +116,17 @@ function ReportForm({
         {chooser}
         {(['from', 'to'] as const).map((field) => (
           <div key={field}>
-            <label htmlFor={`${id}-${field}`} className="block font-medium">
+            <label id={`${id}-${field}-label`} htmlFor={`${id}-${field}`} className="block font-medium">
               {field === 'from' ? (fromOptional ? 'From (optional)' : 'From') : 'To'}
             </label>
-            <Input
+            <DatePicker
               id={`${id}-${field}`}
+              labelId={`${id}-${field}-label`}
               name={field}
-              type="date"
-              min={MIN_DATE}
-              max={MAX_DATE}
               value={field === 'from' ? from : to}
               aria-invalid={problem?.field === field}
               aria-describedby={problem?.field === field ? `${id}-problem` : undefined}
-              onChange={(event) => (field === 'from' ? setFrom : setTo)(event.target.value)}
+              onChange={field === 'from' ? setFrom : setTo}
             />
           </div>
         ))}
