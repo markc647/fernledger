@@ -23,6 +23,7 @@ const AROUND_THE_CHANGES = [
   '2026-03-08', '2026-11-01', // the United States
   '2026-03-29', '2026-10-25', // Europe
   '2026-12-31', '2027-01-01', '2028-02-29', '2000-01-01', '2100-12-31',
+  '0500-06-15', '0100-01-01', // years before 1000, which an Import or a Cutover Date can hold
 ]
 
 function inZone(zone, expectedOffset, check) {

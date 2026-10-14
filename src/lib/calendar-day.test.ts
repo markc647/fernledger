@@ -10,6 +10,13 @@ describe('dayOf (a stored date as a calendar day)', () => {
     expect([day.getFullYear(), day.getMonth(), day.getDate()]).toEqual([2026, 9, 8])
   })
 
+  it('reads a year before 1000 as it is, and writes it back with four digits', () => {
+    const day = dayOf('0500-06-15')!
+    expect([day.getFullYear(), day.getMonth(), day.getDate()]).toEqual([500, 5, 15])
+    expect(isoDateOf(day)).toBe('0500-06-15')
+    expect(isoDateOf(dayOf('0100-01-01')!)).toBe('0100-01-01')
+  })
+
   it.each(['', '2026-02-30', '2026-13-01', '8/10/2026', '0099-01-01'])('is nothing for %j', (date) => {
     expect(dayOf(date)).toBeUndefined()
   })

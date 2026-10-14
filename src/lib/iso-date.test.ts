@@ -6,7 +6,7 @@ describe('isoDateParts (a stored date, if it is one)', () => {
     expect(isoDateParts('2026-10-08')).toEqual({ year: 2026, month: 10, day: 8 })
   })
 
-  it.each(['2000-02-29', '2024-02-29', '2028-02-29', '2000-01-01', '2100-12-31', '1000-01-01'])('accepts %s', (date) => {
+  it.each(['2000-02-29', '2024-02-29', '2028-02-29', '2000-01-01', '2100-12-31', '1000-01-01', '0500-06-15', '0100-01-01'])('accepts %s', (date) => {
     expect(isoDateParts(date)).toBeDefined()
   })
 
@@ -22,7 +22,7 @@ describe('isoDateParts (a stored date, if it is one)', () => {
     ['a month without its zero', '2026-1-01'],
     ['a day without its zero', '2026-10-8'],
     ['a two-digit year', '26-10-08'],
-    ['a year below 1000, which Date would read as another year', '0099-01-01'],
+    ['a year below 100, which Date would read as another year', '0099-01-01'],
     ['a date with a time', '2026-10-08T00:00:00Z'],
     ['spaces around it', ' 2026-10-08'],
     ['slashes', '2026/10/08'],
