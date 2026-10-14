@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { drawn, LINE, netWorth, SPENT, spending, stubNetWorth, stubSpending } from './chart-helpers'
+import { drawn, SPENT, showNetWorth, spending, stubNetWorth, stubSpending } from './chart-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { changeDeviceScheme, mainNav, openHeaderControls, openNavGroup, signOutLink, themeToggle } from './shell-helpers'
 
@@ -7,7 +7,6 @@ const pages = [
   { role: 'admin', path: '/', heading: 'Dashboard' },
   { role: 'admin', path: '/settings', heading: 'Settings' },
   { role: 'member', path: '/', heading: 'Summary' },
-  { role: 'member', path: '/charts', heading: 'Charts' },
   { role: 'member', path: '/styleguide', heading: 'Styleguide' },
 ] as const
 
@@ -16,16 +15,18 @@ const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
 for (const { role, path, heading } of pages) {
   test(`${heading} page as ${role} has no WCAG 2.2 AA violations`, async ({ page, context }, testInfo) => {
     await signInAs(context, role)
-    // The Charts page draws net worth at once, and the Worker refuses to add up more than 49 Accounts, which the specs that share this database can reach. So the
-    // charts are stubbed and drawn before the scan, and it scans the pictures and not the refusal that a long run of specs would put in their place.
-    if (path === '/charts') {
+    // The Summary and the Dashboard are where the charts are, and the Worker refuses to add up net worth for more than 49 Accounts, which the specs that share this database can
+    // reach. So the charts are stubbed and drawn before the scan (net worth when its button is pressed), and it scans the pictures and not the refusal that a long run of specs
+    // would put in their place.
+    const charts = path === '/'
+    if (charts) {
       await stubNetWorth(page)
       await stubSpending(page, SPENT, 16_050)
     }
     await page.goto(path)
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
-    if (path === '/charts') {
-      await drawn(netWorth(page), LINE)
+    if (charts) {
+      await showNetWorth(page)
       await drawn(spending(page), /^Bar chart of the 3 Categories/)
     }
     // The project's theme must really be showing, or the scan would not be testing it.

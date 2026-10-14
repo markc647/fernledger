@@ -1,11 +1,11 @@
 import type { BrowserContext, Page } from '@playwright/test'
-import { drawn, LINE, NET_WORTH, netWorth, SPENT, spending, stubNetWorth, stubSpending } from './chart-helpers'
+import { drawn, LINE, NET_WORTH, netWorth, SPENT, showNetWorth, spending, stubNetWorth, stubSpending } from './chart-helpers'
 import { dateField, pickDate } from './date-helpers'
-import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 import { chooseTextSize, mainNav, navLink, openNavGroup } from './shell-helpers'
 
-// The Dashboard (where the Admin lands), the Summary (where a Member does) and the Charts, against the real Worker. The light and dark projects share one local
+// The Dashboard (where the Admin lands) and the Summary (where a Member does), which are a grid of cards with the charts on two of them, against the real Worker. The light and dark projects share one local
 // database, so each has two Accounts of its own, and its own months of Transactions (2004, which no other spec uses: June for light and September for dark,
 // with the month before each for a second point on the net worth line), so the amounts below are the only ones in the dates a test asks about and nothing from
 // another spec can pair with them as a Transfer. They are older than every other spec's Transactions on purpose: the Summary's newest five and the first
@@ -79,7 +79,7 @@ const dollars = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents)
 const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
 
 /**
- * A section's live region: the one status element it has, on the page before anything happens and empty, so that what it comes to say is a change a screen reader
+ * A card's live region: the one status element it has, on the page before anything happens and empty, so that what it comes to say is a change a screen reader
  * announces. Returns it with its element, to check afterwards that it is still the same element and still on the page.
  */
 const liveRegion = async (region: ReturnType<typeof netWorth>) => {
@@ -92,7 +92,7 @@ const LOADING_NET_WORTH = 'Loading net worth. It reads every Transaction, so it 
 
 type Live = { __live: Record<string, string[]> }
 /**
- * Records every text a section's status region comes to have, from the moment it is first on the page (the page's scripts run before anything is drawn). A section
+ * Records every text a card's status region comes to have, from the moment it is first on the page (the page's scripts run before anything is drawn). A card
  * that loads as soon as it is shown has no moment a test can stop at to see its region empty, so the test reads the history afterwards: empty, then loading, then loaded.
  * A page's commit and the effect that fills the region can run in one task (a bigger layout around the page does it), and an observer is told of both together, after the
  * region already has its words. So the first time it sees a region it looks for a change inside the region among the changes it is told of: that change is the words
@@ -103,10 +103,10 @@ const watchLiveRegions = (page: Page) =>
     const seen: Record<string, string[]> = {}
     ;(window as unknown as Live).__live = seen
     new MutationObserver((records) => {
-      for (const section of document.querySelectorAll('section[aria-labelledby]')) {
-        const live = section.querySelector(':scope > [role="status"]')
+      for (const card of document.querySelectorAll('[role="region"][aria-labelledby]')) {
+        const live = card.querySelector('[role="status"]')
         if (!live) continue
-        const history = (seen[section.getAttribute('aria-labelledby')!] ??= [])
+        const history = (seen[card.getAttribute('aria-labelledby')!] ??= [])
         if (history.length === 0 && records.some((record) => record.target === live || record.target.parentNode === live)) history.push('')
         if (history.at(-1) !== live.textContent) history.push(live.textContent ?? '')
       }
@@ -151,7 +151,7 @@ const balancesNow = async (context: BrowserContext) => {
 
 test.describe.configure({ mode: 'serial' })
 
-test('the Admin lands on the Dashboard: their tools, every part of the Summary, then the charts, with net worth waiting to be asked for', async ({ page, context, baseURL }, testInfo) => {
+test('the Admin lands on the Dashboard: their tools, every card of the Summary, with the charts among them and net worth waiting to be asked for', async ({ page, context, baseURL }, testInfo) => {
   await seed(context, baseURL!, testInfo.project.name)
   const netWorthRequests: string[] = []
   await page.route(/\/api\/charts\/net-worth/, (route) => {
@@ -169,7 +169,8 @@ test('the Admin lands on the Dashboard: their tools, every part of the Summary, 
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('aria-current', 'page')
   await expect(nav.getByRole('link', { name: 'Summary' })).toHaveCount(0)
   await openNavGroup(page, 'Reports') // which opens the sidebar too, if this width keeps it as the icon rail
-  await expect(navLink(page, 'Charts')).toBeVisible()
+  await expect(navLink(page, 'Reports')).toBeVisible()
+  await expect(navLink(page, 'Charts')).toHaveCount(0) // the charts are cards on this page
 
   // The Admin's tools lead to the Admin's pages.
   const tools = page.getByRole('region', { name: 'Your tools' })
@@ -186,32 +187,33 @@ test('the Admin lands on the Dashboard: their tools, every part of the Summary, 
   await expect(show).toBeVisible()
   const { live, element } = await liveRegion(region)
   await expect(region).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
-  await expect(region.getByRole('link', { name: 'Open the Charts page for longer ranges' })).toHaveAttribute('href', '/charts')
+  await expect(region.getByRole('combobox')).toHaveCount(0) // the choice of range comes with the line
   await expect(region.locator('svg.recharts-surface')).toHaveCount(0)
   expect(netWorthRequests, 'net worth is asked for only when the button is pressed').toEqual([])
 
-  // The Summary's parts come first, in the Summary's order, and the charts after them.
+  // The tools come first, then the Summary's cards in the Summary's order, each a region named by its heading (an h2 under the page's h1), and the newest Transactions last.
   const headings = [
     'Your tools',
     'Balance checks',
     'Balances',
     'Budget vs actual',
-    'Recent transactions',
     'Net worth over time',
     'Spending by Category',
+    'Recent transactions',
   ]
   expect(await page.getByRole('main').getByRole('heading', { level: 2 }).allInnerTexts()).toEqual(headings)
+  for (const heading of headings) await expect(page.getByRole('main').getByRole('region', { name: heading }).locator('[data-slot="card-title"] h2')).toHaveText(heading)
+  await expect(page.getByRole('main').locator('[data-slot="card"]')).toHaveCount(headings.length)
   await noAxeViolations(page) // the page with the button
 
-  // Pressing it asks once, tells the reader what is happening, and draws the last 24 months, with no choice of range (the Charts page has it).
+  // Pressing it asks once, tells the reader what is happening, and draws the last 24 months, with a choice of a longer range now that it is drawn.
   await show.click()
   await expect(region.getByRole('heading', { level: 2, name: 'Net worth over time' })).toBeFocused() // focus stays where the button was
   await drawn(region, LINE)
   await expect(live).toHaveText('Net worth has loaded.') // the words arrive in the region that was already there, which is what is announced
   expect(await element.evaluate((el) => el.isConnected)).toBe(true)
   await expect(region.getByRole('button', { name: 'Show net worth' })).toHaveCount(0)
-  await expect(region.getByRole('combobox')).toHaveCount(0)
-  await expect(region.getByRole('link', { name: 'Longer ranges are on the Charts page.' })).toHaveAttribute('href', '/charts')
+  await expect(region.getByLabel('Range', { exact: true })).toHaveValue('24-months')
   expect(netWorthRequests).toHaveLength(1)
   expect(new URL(netWorthRequests[0]!).searchParams.get('range')).toBe('24-months')
   expect(await page.getByRole('main').getByRole('heading', { level: 2 }).allInnerTexts()).toEqual(headings)
@@ -246,23 +248,117 @@ test('the button that shows net worth is a touch target with a clear name, works
   expect(net.asked).toHaveLength(1)
 })
 
-test('a Member lands on the Summary, which leads to the Charts, and sees none of the Admin\'s tools', async ({ page, context }) => {
+test('a Member lands on the Summary, which has the charts and the same cards as the Dashboard, and sees none of the Admin\'s tools', async ({ page, context }) => {
   await signInAs(context, 'member')
-  await stubNetWorth(page)
+  const netWorthRequests: string[] = []
+  await page.route(/\/api\/charts\/net-worth/, (route) => {
+    netWorthRequests.push(route.request().url())
+    return route.fulfill({ json: NET_WORTH })
+  })
+  await stubSpending(page, SPENT, 16_050)
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Summary' })).toBeVisible()
   const nav = mainNav(page)
   await expect(nav.getByRole('link', { name: 'Summary' })).toHaveAttribute('aria-current', 'page')
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Your tools' })).toHaveCount(0)
-  // The Summary draws no chart itself; it leads to them.
-  await expect(page.locator('svg.recharts-surface')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'See the charts' })).toHaveCount(0) // no page of charts to lead to: they are here
 
-  await page.getByRole('region', { name: 'Charts' }).getByRole('link', { name: 'See the charts' }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Charts' })).toBeVisible()
-  await expect(nav.getByRole('link', { name: 'Charts' })).toHaveAttribute('aria-current', 'page')
-  await drawn(netWorth(page), LINE)
-  await expect(spending(page)).toBeVisible()
+  // Spending is drawn at once. Net worth waits to be asked for, as it does for the Admin: the Summary is where everyone lands, and it reads every Transaction (ADR 0004).
+  await drawn(spending(page), /^Bar chart of the 3 Categories/)
+  await expect(netWorth(page).getByRole('button', { name: 'Show net worth' })).toBeVisible()
+  // The Dashboard's cards less its tools, in the same order.
+  expect(await page.getByRole('main').getByRole('heading', { level: 2 }).allInnerTexts()).toEqual([
+    'Balance checks',
+    'Balances',
+    'Budget vs actual',
+    'Net worth over time',
+    'Spending by Category',
+    'Recent transactions',
+  ])
+  expect(netWorthRequests).toEqual([])
+  await showNetWorth(page)
+  expect(netWorthRequests).toHaveLength(1)
+})
+
+// The grid's columns come from the room the page has, in rem, so they follow the text size: the same window has fewer at Large than at Medium. Small, Medium and Large are 14px, 16px and 20px.
+test('the cards are a single column on a phone, and share rows when the page has the room, whatever the text size', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  await stubNetWorth(page)
+  await stubSpending(page, SPENT, 16_050)
+  const names = ['Your tools', 'Balance checks', 'Balances', 'Budget vs actual', 'Net worth over time', 'Spending by Category', 'Recent transactions'] as const
+  const boxes = async () => {
+    await settle(page) // the sidebar and the buttons have finished their width transition
+    const found: Record<string, { x: number; y: number; width: number; height: number }> = {}
+    for (const name of names) found[name] = (await page.getByRole('main').getByRole('region', { name }).boundingBox())!
+    return found
+  }
+  /** Every card on a row of its own, as wide as the page, one under the next. */
+  const expectOneColumn = async (what: string) => {
+    const card = await boxes()
+    for (const [index, name] of names.entries()) {
+      expect(Math.abs(card[name]!.x - card[names[0]]!.x), `${what}: ${name} starts where the first card does`).toBeLessThan(2)
+      expect(Math.abs(card[name]!.width - card[names[0]]!.width), `${what}: ${name} is as wide as the first card`).toBeLessThan(2)
+      if (index > 0) expect(card[name]!.y, `${what}: ${name} is under the card before it`).toBeGreaterThanOrEqual(card[names[index - 1]!]!.y + card[names[index - 1]!]!.height - 1)
+    }
+  }
+  const settled = async (size: 'Small' | 'Medium' | 'Large') => {
+    await chooseTextSize(page, size)
+    await drawn(spending(page), /^Bar chart of the 3 Categories/)
+    await expect(page.getByRole('region', { name: 'Balances' }).getByRole('table').or(page.getByRole('region', { name: 'Balances' }).getByRole('list'))).toBeVisible()
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/')
+  await settled('Medium')
+  let card = await boxes()
+  const row = (a: string, b: string) => Math.abs(card[a]!.y - card[b]!.y) < 2 && card[b]!.x > card[a]!.x + card[a]!.width - 1
+  // Balance checks (a third of a row) beside Balances (two thirds); the two charts side by side, the same width; the tools, Budget vs actual and the newest Transactions across the whole row.
+  expect(row('Balance checks', 'Balances')).toBe(true)
+  expect(card['Balances']!.width).toBeGreaterThan(card['Balance checks']!.width * 1.8)
+  expect(row('Net worth over time', 'Spending by Category')).toBe(true)
+  expect(Math.abs(card['Net worth over time']!.width - card['Spending by Category']!.width)).toBeLessThan(2)
+  for (const name of ['Your tools', 'Budget vs actual', 'Recent transactions']) expect(card[name]!.width, `${name} takes the whole row`).toBeGreaterThan(card['Net worth over time']!.width * 1.9)
+  expect(card['Balance checks']!.y).toBeGreaterThanOrEqual(card['Your tools']!.y + card['Your tools']!.height - 1)
+  expect(card['Budget vs actual']!.y).toBeGreaterThanOrEqual(card['Balances']!.y + card['Balances']!.height - 1)
+  expect(card['Net worth over time']!.y).toBeGreaterThanOrEqual(card['Budget vs actual']!.y + card['Budget vs actual']!.height - 1)
+  expect(card['Recent transactions']!.y).toBeGreaterThanOrEqual(card['Net worth over time']!.y + card['Net worth over time']!.height - 1)
+
+  await settled('Small') // smaller text leaves the same window more room
+  card = await boxes()
+  expect(row('Balance checks', 'Balances')).toBe(true)
+  expect(row('Net worth over time', 'Spending by Category')).toBe(true)
+
+  await settled('Large') // and larger text less: the same window cannot hold a card and a half of it beside another
+  await expectOneColumn('1440px wide at Large')
+
+  await settled('Medium')
+  await page.setViewportSize({ width: 800, height: 900 }) // the sidebar is the icon rail, and the page is narrower than a row of two cards can use
+  await expectOneColumn('800px wide')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expectOneColumn('a phone')
+  const { scrollWidth, innerWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }))
+  expect(scrollWidth).toBeLessThanOrEqual(innerWidth)
+})
+
+test('the old Charts address goes to the page that has the charts now, for a Member and for the Admin, and is in no sidebar', async ({ page, context }) => {
+  for (const [role, heading] of [['member', 'Summary'], ['admin', 'Dashboard']] as const) {
+    await signInAs(context, role)
+    await page.goto('/charts')
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+    expect(new URL(page.url()).pathname).toBe('/')
+    await expect(netWorth(page)).toBeVisible()
+    await expect(spending(page)).toBeVisible()
+    await openNavGroup(page, 'Reports')
+    await expect(navLink(page, 'Charts')).toHaveCount(0)
+    await expect(mainNav(page).getByRole('link', { name: 'Summary' }).or(mainNav(page).getByRole('link', { name: 'Dashboard' }))).toHaveAttribute('aria-current', 'page')
+  }
+  // A bookmark with more on the end of it goes the same way, and Back does not trap the reader on the address that redirects.
+  await page.goto('/transactions')
+  await page.goto('/charts?range=5-years')
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/')
+  await page.goBack()
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/transactions')
 })
 
 test('a Member\'s Summary and the Dashboard have the same Balances, so the Dashboard cannot disagree with the Summary', async ({ page, context, baseURL }, testInfo) => {
@@ -286,7 +382,8 @@ test('net worth, as the Worker adds it up from every Account, is the Balances\' 
   const total = await balancesNow(context)
   const answer = (await (await context.request.get('/api/charts/net-worth?range=24-months')).json()) as { tooManyAccounts: { count: number; limit: number } | null }
   await signInAs(context, 'member')
-  await page.goto('/charts')
+  await page.goto('/')
+  await netWorth(page).getByRole('button', { name: 'Show net worth' }).click()
 
   if (answer.tooManyAccounts) {
     // Too many Accounts in the shared database for a total to be honest: the page says so and draws nothing, which is the Worker's rule (worker/charts.test.ts).
@@ -306,9 +403,9 @@ test('net worth, as the Worker adds it up from every Account, is the Balances\' 
 test('net worth is drawn as a line, and says what it is: only the money in these Accounts, with the months before an Account\'s history an estimate', async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
-  await page.goto('/charts')
+  await page.goto('/')
 
-  const figure = await drawn(netWorth(page), LINE)
+  const figure = await showNetWorth(page)
   await expect(figure.locator('path.recharts-line-curve')).toHaveAttribute('d', /^M[\d.]+/)
   expect(await figure.getAttribute('aria-label')).toContain('It was $10,000.00 at the end of August 2026 and $10,800.00 on Wed 7 Oct 2026.')
   await expect(netWorth(page)).toContainText("Only the money in these Accounts, added up at the end of each month from the bank balances Fernledger holds. A loan to or from someone whose account isn't tracked shows as a fall or a rise.")
@@ -317,16 +414,20 @@ test('net worth is drawn as a line, and says what it is: only the money in these
   await expect(netWorth(page)).not.toContainText('Loans Report')
 })
 
-test('the Charts page lets the reader choose how far back net worth goes, and the page is busy while it asks', async ({ page, context }) => {
+test('the Summary lets the reader choose how far back net worth goes once it is drawn, and the card is busy while it asks', async ({ page, context }) => {
   await signInAs(context, 'member')
   await watchLiveRegions(page)
   // Each answer waits for the test to let it go, so the cues are there for as long as the test looks at them, the first answer as well as the second.
   const net = await holdAnswers(page, /\/api\/charts\/net-worth/, (url) => ({ ...NET_WORTH, range: url.searchParams.get('range') }))
   const asked = () => net.asked.map((url) => url.searchParams.get('range'))
-  await page.goto('/charts')
+  await page.goto('/')
   const region = netWorth(page)
-  const live = region.getByRole('status') // the one live region the section keeps on the page
+  const live = region.getByRole('status') // the one live region the card keeps on the page
   const element = (await live.elementHandle())!
+  await expect(region).toHaveAttribute('aria-busy', 'false') // nothing is asked for until the button is pressed
+  await expect(live).toHaveText('')
+  expect(asked()).toEqual([])
+  await region.getByRole('button', { name: 'Show net worth' }).click()
   await expect(region).toHaveAttribute('aria-busy', 'true') // the first load
   await expect(live).toHaveText(LOADING_NET_WORTH)
   await net.release()
@@ -354,8 +455,8 @@ test('the Charts page lets the reader choose how far back net worth goes, and th
 test('net worth\'s figures open from the keyboard, and the control is a touch target', async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
-  await page.goto('/charts')
-  await drawn(netWorth(page), LINE)
+  await page.goto('/')
+  await showNetWorth(page)
   const summary = netWorth(page).getByText('Show the figures')
   expect((await summary.boundingBox())?.height).toBeGreaterThanOrEqual(44)
   await summary.focus()
@@ -368,8 +469,8 @@ test('net worth\'s figures open from the keyboard, and the control is a touch ta
 test('net worth\'s figures are in the printout, though the disclosure is closed on the screen', async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
-  await page.goto('/charts')
-  await drawn(netWorth(page), LINE)
+  await page.goto('/')
+  await showNetWorth(page)
   await expect(netWorth(page).getByRole('table')).toBeHidden()
 
   const pages = await readPdf(await page.pdf({ format: 'A4' }))
@@ -384,8 +485,7 @@ test('spending by Category for dates the reader chooses leaves out the Transfer,
   const { words, from, to } = dataFor(testInfo.project.name)
   await seed(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')
-  await stubNetWorth(page)
-  await page.goto('/charts')
+  await page.goto('/')
   await chooseDates(page, from, to)
 
   const table = spending(page).getByRole('table', { name: `Spending by Category in ${words}` })
@@ -411,8 +511,7 @@ test('spending by Category for dates the reader chooses leaves out the Transfer,
 
 test('a period the Worker names is asked for by name, and a mistake in the dates is explained and not asked about', async ({ page, context }) => {
   await signInAs(context, 'member')
-  await stubNetWorth(page)
-  await page.goto('/charts')
+  await page.goto('/')
   const region = spending(page)
   await expect(region.getByRole('combobox', { name: 'Period' })).toHaveValue('this-month')
 
@@ -445,12 +544,11 @@ test('a period the Worker names is asked for by name, and a mistake in the dates
 
 test('spending is marked busy from its first load, and the old period is marked as old while a new one is asked for', async ({ page, context }) => {
   await signInAs(context, 'member')
-  await stubNetWorth(page)
   await watchLiveRegions(page)
   const answers = await holdAnswers(page, /\/api\/charts\/spending\?/, () => ({ from: '2026-10-01', to: '2026-10-31', totalCents: 16_050, categories: SPENT })) // held, so the cues can be seen: the first answer as well as the second
-  await page.goto('/charts')
+  await page.goto('/')
   const region = spending(page)
-  const live = region.getByRole('status') // the one live region the section keeps on the page
+  const live = region.getByRole('status') // the one live region the card keeps on the page
   const element = (await live.elementHandle())!
 
   await expect(region).toHaveAttribute('aria-busy', 'true') // the first load
@@ -480,11 +578,11 @@ test('the charts have no WCAG 2.2 AA violations in this theme, with their data, 
   await stubNetWorth(page)
   for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
-    await page.goto('/charts')
+    await page.goto('/')
     await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
     await chooseTextSize(page, 'Large')
     await chooseDates(page, from, to)
-    await drawn(netWorth(page), LINE)
+    await showNetWorth(page)
     await drawn(spending(page), new RegExp(`^Bar chart of the 3 Categories that spent the most in ${words}`))
     await expect(spending(page).locator('.recharts-bar-rectangle')).toHaveCount(3) // the bars are in, as well as the figure
     await netWorth(page).getByText('Show the figures').click() // the table is part of what is scanned
@@ -498,10 +596,11 @@ test('the chart colours are the theme\'s, drawn in the text colour when Windows 
   await seed(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')
   await stubNetWorth(page)
-  await page.goto('/charts')
+  await page.goto('/')
   const line = netWorth(page).locator('path.recharts-line-curve')
   const bar = spending(page).locator('.recharts-bar-rectangle path').first()
   await chooseDates(page, from, to)
+  await showNetWorth(page)
   await expect(line).toBeVisible()
   await expect(bar).toBeVisible()
 
@@ -536,7 +635,7 @@ test('hovering a bar or a point says what it is, in the same words as the figure
   await signInAs(context, 'member')
   await stubNetWorth(page)
   await stubSpending(page, SPENT, 16_050)
-  await page.goto('/charts')
+  await page.goto('/')
   await drawn(spending(page), /^Bar chart of the 3 Categories/)
 
   await spending(page).locator('.recharts-bar-rectangle').nth(1).hover()
@@ -544,7 +643,7 @@ test('hovering a bar or a point says what it is, in the same words as the figure
   await expect(tip).toContainText('Groceries')
   await expect(tip).toContainText('$45.50')
 
-  await drawn(netWorth(page), LINE)
+  await showNetWorth(page)
   const picture = netWorth(page).locator('svg.recharts-surface')
   const size = await picture.boundingBox()
   await picture.hover({ position: { x: size!.width - 40, y: size!.height / 2 } }) // scrolls to it first: hovering the bar scrolled the page
@@ -555,7 +654,8 @@ test.describe('when the answers are not the usual ones', () => {
   test('says so when net worth has more Accounts than can be added up, and when some are left out or stop early', async ({ page, context }) => {
     await signInAs(context, 'member')
     await stubNetWorth(page, { range: '24-months', counted: [], notCounted: [], points: [], tooManyAccounts: { count: 52, limit: 49 } })
-    await page.goto('/charts')
+    await page.goto('/')
+    await netWorth(page).getByRole('button', { name: 'Show net worth' }).click()
     await expect(netWorth(page)).toContainText("Net worth can't be drawn for this many Accounts. It works for up to 49, and this Fernledger has 52, so it shows nothing rather than a total that leaves some out.")
     await expect(netWorth(page).locator('svg.recharts-surface')).toHaveCount(0)
     await expect(netWorth(page)).not.toContainText(/\bwe\b/i)
@@ -576,6 +676,7 @@ test.describe('when the answers are not the usual ones', () => {
     })
     await page.reload()
     const region = netWorth(page)
+    await region.getByRole('button', { name: 'Show net worth' }).click()
     await expect(region).toContainText('These Accounts are not in the total:')
     await expect(region.getByRole('listitem').filter({ hasText: 'Example credit card' })).toHaveText('Example credit card: No bank balance yet. The Admin can import a bank file to give it one.')
     await expect(region.getByRole('listitem').filter({ hasText: 'Example savings' })).toHaveText(
@@ -594,7 +695,8 @@ test.describe('when the answers are not the usual ones', () => {
     await signInAs(context, 'member')
     await stubNetWorth(page, { range: '24-months', counted: [], notCounted: [], points: [], tooManyAccounts: null })
     await stubSpending(page, [], 0)
-    await page.goto('/charts')
+    await page.goto('/')
+    await netWorth(page).getByRole('button', { name: 'Show net worth' }).click()
     await expect(netWorth(page)).toContainText('There are no Accounts yet, so there is no net worth to draw.')
     await expect(spending(page)).toContainText('Nothing was spent in October 2026.')
     await expect(spending(page).locator('svg.recharts-surface')).toHaveCount(0)
@@ -602,10 +704,9 @@ test.describe('when the answers are not the usual ones', () => {
 
   test('draws no bar for Categories that took money back or broke even, says so, and lists each, a fully refunded one as $0.00', async ({ page, context }) => {
     await signInAs(context, 'member')
-    await stubNetWorth(page)
     // Fuel took back more than it spent; Groceries spent $40.00 and had it all refunded; Uncategorised had a payment and the same money back.
     await stubSpending(page, [{ categoryId: 2, name: 'Fuel', cents: -2500 }, { categoryId: 3, name: 'Groceries', cents: 0 }, { categoryId: null, name: 'Uncategorised', cents: 0 }], -2500)
-    await page.goto('/charts')
+    await page.goto('/')
 
     const region = spending(page)
     await expect(region).toContainText('Nothing was spent above zero in October 2026: every Category took back as much as it spent, or more. The table shows what came back.')
@@ -628,7 +729,8 @@ test.describe('when the answers are not the usual ones', () => {
       await signInAs(context, 'member')
       await page.route(/\/api\/charts\/net-worth/, (route) => route.fulfill({ status: 500, json: { error: 'Something went wrong' } }))
       await page.route(/\/api\/charts\/spending\?/, (route) => route.fulfill({ status: 500, json: { error: 'Something went wrong' } }))
-      await page.goto('/charts')
+      await page.goto('/')
+      await netWorth(page).getByRole('button', { name: 'Show net worth' }).click()
       await expect(netWorth(page).getByRole('alert')).toHaveText("Fernledger couldn't load net worth. Reload the page to try again.")
       await expect(spending(page).getByRole('alert')).toContainText("Fernledger couldn't load the spending.")
     })

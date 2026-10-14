@@ -22,6 +22,28 @@ import {
 const fontSize = (page: Page, selector: string) =>
   page.locator(selector).first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
 
+/**
+ * What sticks out of the side of the card it is in, by the card's heading and a name for the element. A card does not hide what overflows it (DashboardCard), so a long word or a wide
+ * table that does not fit its column shows here, as well as in sideways scrolling of the page, which a card cell narrower than the page would not cause.
+ */
+const outsideItsCard = (page: Page) =>
+  page.evaluate(() => {
+    const found: string[] = []
+    for (const card of document.querySelectorAll('[data-slot="card"]')) {
+      const edge = card.getBoundingClientRect()
+      for (const el of card.querySelectorAll('*')) {
+        const box = el.getBoundingClientRect()
+        // Not what is not drawn (a closed disclosure's contents, the tooltip that waits for a pointer) or what is out of the flow on purpose (text for a screen reader).
+        if (el.getClientRects().length === 0 || box.width === 0 || getComputedStyle(el).visibility === 'hidden' || el.closest('.sr-only')) continue
+        if (box.left < edge.left - 1 || box.right > edge.right + 1) {
+          found.push(`${card.querySelector('h2')?.textContent}: ${el.tagName.toLowerCase()} ${(el.textContent ?? '').slice(0, 30)}`)
+          break
+        }
+      }
+    }
+    return found
+  })
+
 // ---------------------------------------------------------------------------------------------------------------
 // Text size (Small / Medium / Large)
 
@@ -142,7 +164,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/charts', '/settings', '/styleguide', '/transactions', '/change-log', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/income-vs-spending', '/reports/loans']
+  const pages = ['/', '/settings', '/styleguide', '/transactions', '/change-log', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/income-vs-spending', '/reports/loans']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -357,6 +379,7 @@ test.describe('zoom', () => {
           clientWidth: document.documentElement.clientWidth,
         }))
         expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        expect(await outsideItsCard(page)).toEqual([])
       })
     }
   }
@@ -512,11 +535,12 @@ test.describe('zoom', () => {
           clientWidth: document.documentElement.clientWidth,
         }))
         expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        expect(await outsideItsCard(page)).toEqual([])
       })
     }
   }
 
-  // The charts with their longest content, on the Charts page (a Member's) and on the Dashboard (the Admin's): ten years of months, big amounts, Accounts
+  // The charts with their longest content, on the Summary (a Member's) and on the Dashboard (the Admin's): ten years of months, big amounts, Accounts
   // and Categories with long names, a Category below zero, and the figures open. The charts' data is stubbed, so this needs nothing in the database.
   const longChartName = 'Health and medical costs for the household and the long-term care fees'
   const stubCharts = async (page: Page) => {
@@ -546,19 +570,19 @@ test.describe('zoom', () => {
       }),
     )
   }
-  for (const { path, role } of [{ path: '/charts', role: 'member' }, { path: '/', role: 'admin' }] as const) {
+  for (const role of ['member', 'admin'] as const) {
     for (const { name, width, height } of zoomLevels) {
       for (const size of ['Medium', 'Large'] as const) {
-        test(`${path} with long charts (${role}) at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        test(`/ with long charts (${role}) at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
           await signInAs(context, role)
           await stubCharts(page)
           await page.setViewportSize({ width, height })
-          await page.goto(path)
+          await page.goto('/')
           await chooseTextSize(page, size)
           const netWorth = netWorthRegion(page)
           const spending = spendingRegion(page)
-          // The Dashboard draws net worth when it is asked to; the Charts page draws it at once.
-          if (path === '/') await netWorth.getByRole('button', { name: 'Show net worth' }).click()
+          // Net worth is drawn when it is asked for.
+          await netWorth.getByRole('button', { name: 'Show net worth' }).click()
           await expect(netWorth.getByRole('img', { name: /^Line chart of net worth by month/ }).locator('svg.recharts-surface')).toBeVisible()
           await expect(spending.getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
           await expect(netWorth).toContainText('These Accounts are not in the total:')
@@ -574,6 +598,7 @@ test.describe('zoom', () => {
             clientWidth: document.documentElement.clientWidth,
           }))
           expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+          expect(await outsideItsCard(page)).toEqual([])
           // The pictures fit the window too, and keep a size worth reading: no chart is squeezed to nothing.
           for (const svg of await page.locator('[data-slot="chart"] svg.recharts-surface').all()) {
             const box = await svg.boundingBox()
@@ -585,8 +610,8 @@ test.describe('zoom', () => {
     }
   }
 
-  // The Dashboard as the Admin lands on it, net worth not yet asked for: its explanation, its button (a touch target that may wrap) and its link to the Charts page, beside
-  // spending drawn from long data. The charts' data is stubbed, so this needs nothing in the database.
+  // The Dashboard as the Admin lands on it, net worth not yet asked for: its explanation and its button (a touch target that may wrap), beside spending drawn from long
+  // data. The charts' data is stubbed, so this needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
     for (const size of ['Medium', 'Large'] as const) {
       test(`/ with the Show net worth button at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
@@ -599,7 +624,6 @@ test.describe('zoom', () => {
         const button = netWorth.getByRole('button', { name: 'Show net worth' })
         await expect(button).toBeVisible()
         await expect(netWorth).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
-        await expect(netWorth.getByRole('link', { name: 'Open the Charts page for longer ranges' })).toBeVisible()
         await expect(spendingRegion(page).getByRole('img', { name: /^Bar chart of the 12 Categories/ }).locator('svg.recharts-surface')).toBeVisible()
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
@@ -609,6 +633,7 @@ test.describe('zoom', () => {
           clientWidth: document.documentElement.clientWidth,
         }))
         expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        expect(await outsideItsCard(page)).toEqual([])
         const box = await button.boundingBox()
         expect(box!.width).toBeLessThanOrEqual(clientWidth)
         expect(box!.height).toBeGreaterThanOrEqual(44)

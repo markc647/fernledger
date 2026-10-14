@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
 import { expect } from './fixtures'
 
-// What a spec needs to look at the Charts (the Charts page and the Dashboard's charts) with answers of its own, whatever the shared database holds: a net worth the Worker
+// What a spec needs to look at the charts (cards of the Summary and the Dashboard) with answers of its own, whatever the shared database holds: a net worth the Worker
 // refuses for having more than 49 Accounts (worker/net-worth.ts) draws nothing. The specs that look at the charts stub both answers and wait for the pictures
 // (dashboard.spec.ts, shell.spec.ts).
 
@@ -15,6 +15,12 @@ export const drawn = async (region: ReturnType<typeof netWorth>, name: RegExp) =
   await expect(figure).toBeVisible()
   await expect(figure.locator('svg.recharts-surface')).toBeVisible()
   return figure
+}
+
+/** Net worth is not asked for until the button is pressed (it reads every Transaction, ADR 0004): presses it, and waits for the line. */
+export const showNetWorth = async (page: Page) => {
+  await netWorth(page).getByRole('button', { name: 'Show net worth' }).click()
+  return drawn(netWorth(page), LINE)
 }
 
 // What the Worker answers when the charts ask: a made-up net worth of three months, and made-up spending. Whatever range the page asks for gets the same answer.
