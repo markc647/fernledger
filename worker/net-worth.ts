@@ -18,7 +18,7 @@ import { REPORT_HISTORY, type HistoryRow } from './report-balances'
 export const NET_WORTH_RANGES = ['24-months', '5-years', 'all'] as const
 export type NetWorthRange = (typeof NET_WORTH_RANGES)[number]
 
-/** The range a request that names none gets, and the one the Dashboard asks for. */
+/** The range a request that names none gets, and the one the Summary and the Dashboard first ask for. */
 export const DEFAULT_NET_WORTH_RANGE: NetWorthRange = '24-months'
 
 /** The query string: the range, which a refusal names. */
