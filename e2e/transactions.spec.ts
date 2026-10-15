@@ -153,6 +153,51 @@ test('a range that ends before it starts is explained and not searched', async (
   await expect(page.getByRole('alert')).toContainText('before the “From” date')
 })
 
+test('an address naming no such Account or Category says so, and one with blank or unknown parts still shows the list', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  for (const [address, name] of [
+    ['/transactions?account=abc', 'Account'],
+    ['/transactions?account=0', 'Account'],
+    ['/transactions?account=999999999', 'Account'],
+    ['/transactions?category=abc', 'Category'],
+    ['/transactions?category=999999999', 'Category'],
+  ] as const) {
+    await page.goto(address)
+    await expect(page.getByRole('alert'), address).toHaveText(`There is no such ${name}. Choose one in the form above.`)
+    await expect(page.getByRole('button', { name: 'Download CSV' }), address).toBeDisabled()
+    await expect(page.getByRole('link', { name: 'Download CSV' }), address).toHaveCount(0)
+  }
+  await noAxeViolations(page)
+
+  // The form shows every Account (or Category) for one that isn't an ID, and Search goes there rather than back to the alert.
+  for (const [address, key] of [
+    ['/transactions?account=abc', 'account'],
+    ['/transactions?category=abc', 'category'],
+  ] as const) {
+    await page.goto(address)
+    await expect(page.getByRole('alert'), address).toBeVisible()
+    await page.getByRole('button', { name: 'Search', exact: true }).click()
+    await expect(page, address).not.toHaveURL(new RegExp(`${key}=`))
+    await expect(page.getByRole('status').filter({ hasText: /^(Showing|There are no Transactions yet)/ }), address).toBeVisible()
+    await expect(page.getByRole('alert'), address).toHaveCount(0)
+  }
+
+  // Back to no such Account from a search that matched keeps none of that search's count.
+  await page.goto('/transactions?account=999999999')
+  await expect(page.getByRole('alert')).toBeVisible()
+  await page.getByLabel('Account', { exact: true }).selectOption({ label: 'All Accounts' })
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(page.getByText(/Transactions? match/)).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole('alert')).toHaveText('There is no such Account. Choose one in the form above.')
+  await expect(page.getByText(/Transactions? match/)).toHaveCount(0)
+
+  // Blank and unknown parts are left out, so the API is never asked with them (it would refuse the unknown ones).
+  await page.goto('/transactions?account=&category=&transfers=both&from=&to=2012-13-01&q=&sort=x&dir=up&page=0')
+  await expect(page.getByRole('status').filter({ hasText: /^(Showing|There are no Transactions yet)/ })).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
 test('Transactions sort by a column heading on a wide screen and from a menu on a narrow one', async ({ page, context, baseURL }, testInfo) => {
   const { stamp, names } = await seedFour(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')
