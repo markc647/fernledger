@@ -32,7 +32,7 @@ function AboutYourData() {
   // layout already replaces the page when `/api/me` fails; this keeps the page honest if that ever changes.)
   const failed = settingsFailed || meFailed
   return (
-    <article className="max-w-2xl text-lg leading-relaxed">
+    <article className="max-w-2xl text-base leading-relaxed">
       <h1 className="text-2xl font-semibold">About your data</h1>
       <p className="mt-3">
         This page explains how Fernledger handles the financial information in it: what it holds, who can see it, where it is kept, for how long, and who to ask.

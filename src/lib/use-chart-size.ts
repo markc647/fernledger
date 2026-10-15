@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 // What a chart needs to know about its surroundings that CSS cannot tell it: Recharts takes pixel sizes (the width of the labels beside the bars), and
 // the pixels of a rem change with the text size (src/lib/text-size.ts) and the width of the window.
 
-/** The pixel size of 1rem: the root's font size, which the Small / Medium / Large control changes by setting `data-text-size` on the page. */
+/** The pixel size of 1rem: the root's font size, which the text size control changes by setting `data-text-size` on the page. */
 export function useRem() {
   const [rem, setRem] = useState(16)
   useEffect(() => {

@@ -66,6 +66,19 @@
   --radius-2xl: calc(var(--radius) * 1.8);
 }
 
+/* One size for all text (README, Accessibility). Text that is not a heading is exactly the size the text size control chose, in every part of the page. shadcn's components say
+   `text-sm` for a menu, a button, a caption or a hint, and Tailwind's `text-sm` and `text-xs` are smaller than the page, so here they are the page's size. That keeps the
+   components stock (no edit for the app, and one that arrives with a merge cannot bring a smaller size back) and the size in one place. A heading says `text-lg`, `text-xl` or
+   `text-2xl`, which are 1.125, 1.25 and 1.5 times it, so a heading is larger than the text at every choice. A fixed size (`text-[15px]`, `text-[0.9rem]`) does not follow the
+   choice, so there are none: scripts/one-text-size.test.mjs fails on one. Printed Reports have sizes of their own, in pt (`print:text-[12pt]`), and a chart's axis text is
+   proportional to the page's. The line height is `text-base`'s. */
+@theme {
+  --text-xs: 1rem;
+  --text-xs--line-height: calc(1.5 / 1);
+  --text-sm: 1rem;
+  --text-sm--line-height: calc(1.5 / 1);
+}
+
 /* How the sidebar's sheet comes and goes on a phone (src/components/ui/sheet.tsx): a slide, and the fade of what is behind it. A dozen lines here rather than the
    tw-animate-css package the stock Sheet needs. Under reduced motion (below) they take no time, but still end, which is what lets the sheet leave the page. */
 @theme {
@@ -213,6 +226,9 @@
     font-size: 100%;
   }
   html[data-text-size="large"] {
+    font-size: 112.5%;
+  }
+  html[data-text-size="xlarge"] {
     font-size: 125%;
   }
   body {
@@ -226,9 +242,6 @@
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
-    font-size: 112.5%;
-  }
-  html[data-text-size="xlarge"] {
   ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
