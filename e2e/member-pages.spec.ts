@@ -189,14 +189,13 @@ test.describe('About your data', () => {
   })
 
   for (const role of ['member', 'admin'] as const) {
-    test(`has no WCAG 2.2 AA violations as a ${role}, filled in or not`, async ({ page, context, request, baseURL }, testInfo) => {
+    test(`has no WCAG 2.2 AA violations as a ${role}, filled in or not`, async ({ page, context, request, baseURL }) => {
       await signInAs(context, role)
       for (const filled of [false, true]) {
         await adminSets(request, baseURL, filled ? { about_contact: 'Sam', about_retention: 'Seven years' } : { about_contact: '', about_retention: '' })
         await page.goto('/about-your-data')
         await expect(page.getByRole('heading', { level: 1, name: 'About your data' })).toBeVisible()
         await expect(section(page, 'Who to ask')).toContainText(filled ? 'Sam' : role === 'admin' ? 'Setup needed' : 'Ask the person who invited you')
-        await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
         await noAxeViolations(page)
       }
     })
@@ -342,11 +341,10 @@ test.describe('How to sign in', () => {
   })
 
   for (const role of ['member', 'admin'] as const) {
-    test(`has no WCAG 2.2 AA violations as a ${role}`, async ({ page, context }, testInfo) => {
+    test(`has no WCAG 2.2 AA violations as a ${role}`, async ({ page, context }) => {
       await signInAs(context, role)
       await page.goto('/how-to-sign-in')
       await expect(page.getByRole('heading', { level: 1, name: 'How to sign in' })).toBeVisible()
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }

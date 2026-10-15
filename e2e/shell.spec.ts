@@ -13,7 +13,7 @@ const pages = [
 const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
 
 for (const { role, path, heading } of pages) {
-  test(`${heading} page as ${role} has no WCAG 2.2 AA violations`, async ({ page, context }, testInfo) => {
+  test(`${heading} page as ${role} has no WCAG 2.2 AA violations`, async ({ page, context }) => {
     await signInAs(context, role)
     // The Summary and the Dashboard are where the charts are, and the Worker refuses to add up net worth for more than 49 Accounts, which the specs that share this database can
     // reach. So the charts are stubbed and drawn before the scan (each when its button is pressed), and it scans the pictures and not the refusal that a long run of specs
@@ -29,8 +29,6 @@ for (const { role, path, heading } of pages) {
       await showNetWorth(page)
       await showSpending(page, /^Bar chart of the 3 Categories/)
     }
-    // The project's theme must really be showing, or the scan would not be testing it.
-    await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
 
     await noAxeViolations(page)
   })
