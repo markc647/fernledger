@@ -11,12 +11,14 @@ import {
   type Row as TableRow,
 } from '@tanstack/react-table'
 import type { InferResponseType } from 'hono/client'
+import { MessageSquareText } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Amount } from '@/components/amount'
 import { EditPanel } from '@/components/edit-panel'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { api } from '@/lib/api'
 import { KIND_NOTES } from '@/lib/category-kinds'
 import { formatDate } from '@/lib/format'
@@ -65,6 +67,46 @@ function CategoryCell({ row }: { row: Row }) {
     </>
   )
 }
+
+/** What a person can press or type in: a press that lands on one is not given back to the Note button. A container with `tabindex="-1"` (`main`, a status line) is not one. */
+const CONTROL = 'a[href], button, input, select, textarea, summary, [contenteditable], [tabindex]:not([tabindex="-1"])'
+
+/**
+ * The Note column: a Note is not written in the list (it can be long, and the list is for scanning), but is behind a button that opens it beside the row. A row without a Note shows nothing
+ * (a screen reader is still told, in text only it reads, as it is for the Transaction's details). The button is 44px, named for its row, and the pop-up is the app's Popover: Escape and a press
+ * outside close it, and focus goes back to the button. A press outside that lands on a control (a field, a button, a link) leaves focus there, which is where that press meant it to go; one that
+ * lands on the page itself, which takes focus for the skip link (`main`), does not count.
+ */
+function NoteCell({ row }: { row: Row }) {
+  const button = useRef<HTMLButtonElement>(null)
+  if (!row.note) return <span className="sr-only">No Note</span>
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button ref={button} variant="outline" size="touch" className="px-0" aria-label={`Read the Note on ${row.description}, ${formatDate(row.date)}`}>
+          <MessageSquareText className="size-5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        collisionPadding={8}
+        aria-label={`Note on ${row.description}`}
+        // As wide as a line of text reads well, never wider than the screen, and scrolling inside itself rather than running off a short one.
+        className="max-h-(--radix-popover-content-available-height) w-[min(22rem,calc(100vw-1rem))] overflow-y-auto overscroll-contain"
+        onCloseAutoFocus={(event) => {
+          // Radix puts focus back on the button after Escape only. A press on anything that is not a control leaves focus nowhere useful (the page, or nothing), so it goes to the button then too.
+          event.preventDefault()
+          if (!document.activeElement?.matches(CONTROL)) button.current?.focus()
+        }}
+      >
+        <p className="break-words whitespace-pre-line">{row.note}</p>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/** The Note column asks for the least room it can have, so a table gives it what its heading and the button need and no more. */
+const NOTE_COLUMN = 'w-px whitespace-nowrap'
 
 const hasFilter = (search: TransactionSearch) => search.account !== undefined || search.category !== undefined || search.transfers !== undefined || !!search.from || !!search.to || !!search.q
 
@@ -161,15 +203,7 @@ export function TransactionList({
       helper.accessor('note', {
         header: 'Note',
         enableSorting: false,
-        cell: (info) =>
-          info.getValue() ? (
-            <span className="whitespace-pre-line">{info.getValue()}</span>
-          ) : (
-            <>
-              <span aria-hidden="true">—</span>
-              <span className="sr-only">No Note</span>
-            </>
-          ),
+        cell: (info) => <NoteCell row={info.row.original} />,
       }),
       helper.accessor('amountCents', { id: 'amount', header: 'Amount', cell: (info) => <Amount cents={info.getValue()} showLabel /> }),
       ...(isAdmin
@@ -226,6 +260,8 @@ export function TransactionList({
       key: column.id,
       header: String(column.columnDef.header),
       align: column.id === 'amount' ? 'end' : 'start',
+      className: column.id === 'note' ? NOTE_COLUMN : undefined,
+      hideOnCard: column.id === 'note' ? (row) => !row.original.note : undefined,
       cell: (row) => <FlexRender cell={row.getAllCellsByColumnId()[column.id]!} />,
       sort:
         column.getCanSort() && isSortKey(column.id)

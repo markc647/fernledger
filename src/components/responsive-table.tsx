@@ -14,6 +14,8 @@ export type Column<Row> = {
   align?: 'start' | 'end'
   /** Classes for the column's heading and cells in the table (not on cards), such as `whitespace-nowrap` for a date. */
   className?: string
+  /** For a column that is empty for some rows (a Note that is not there): a row it returns true for has no line for this column on its card. The table keeps the cell, which is empty. */
+  hideOnCard?: (row: Row) => boolean
   /**
    * The column holds the grip that drags its row (see `RowElement`). In the table it is the first column, narrow, with `header` read by a screen reader and not drawn. A card has no label for it:
    * it sits at the start of the card, beside the lines. At most one column has it.
@@ -192,7 +194,7 @@ export function ResponsiveTable<Row>({
                     word) will not fit beside the label: then, at any text size, it goes under the label, and a label wider than the card wraps, rather than push the page wider.
                     Ordinary content at the usual text size is where it always was; a row changes only when its value could not fit. */}
                 {columns
-                  .filter((column) => !column.handle)
+                  .filter((column) => !column.handle && !column.hideOnCard?.(row))
                   .map((column) => (
                     <div key={column.key} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                       <dt className="text-muted-foreground">{column.header}</dt>

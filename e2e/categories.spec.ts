@@ -1,7 +1,8 @@
-import type { BrowserContext, Page } from '@playwright/test'
+import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
+import { dateText } from './report-helpers'
 import { actionsButton, chooseAction, menuAction, noAxeViolationsFromTop, openActions } from './row-actions-helpers'
-import { mainNav, navigateTo } from './shell-helpers'
+import { chooseTextSize, mainNav, navigateTo } from './shell-helpers'
 
 /** The light and dark projects share one local database, so each test imports a Transaction of its own, dated to sort first. */
 async function seedTransaction(context: BrowserContext, baseURL: string, projectName: string) {
@@ -47,7 +48,11 @@ test('the Admin sets an Override and a Note, the Transaction leaves the Uncatego
   const row = rowFor(page, description)
   await expect(row).toContainText('Groceries')
   await expect(row).toContainText('Override')
-  await expect(row).toContainText(note)
+  // The Note is behind a button, not written in the row.
+  await expect(row).not.toContainText(note)
+  await row.getByRole('button', { name: /^Read the Note on / }).click()
+  await expect(page.getByRole('dialog', { name: /^Note on / })).toContainText(note)
+  await page.keyboard.press('Escape')
   await noAxeViolationsFromTop(page)
 
   await page.goto('/change-log')
@@ -385,5 +390,154 @@ test.describe('on a phone', () => {
     await noAxeViolationsFromTop(page)
     await page.getByRole('button', { name: 'Cancel' }).click()
     await expect(actionsButton(page, 'Groceries')).toBeFocused()
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// The Note column of All Transactions and Uncategorised (src/components/transaction-list.tsx): a button that opens the Note, not the Note's words
+
+/** Two Uncategorised Transactions in the project's Account, dated to sort first, the first with the Note `noteFor(stamp)`. The stamp finds them, and is in the Note so a search can. */
+async function seedWithNote(context: BrowserContext, baseURL: string, projectName: string, noteFor: (stamp: string) => string) {
+  await signInAs(context, 'admin')
+  const stamp = `${projectName}${Date.now()}`
+  const noted = `EXAMPLE NOTESHOP ${stamp} A`
+  const plain = `EXAMPLE NOTESHOP ${stamp} B`
+  const row = (uniqueId: string, payee: string, amountCents: number) => ({ date: '2026-10-09', uniqueId, tranType: 'EFTPOS', chequeNumber: null, payee, bankMemo: 'EFTPOS', amountCents })
+  const imported = await context.request.post('/api/imports/chunks', {
+    headers: { Origin: baseURL },
+    data: {
+      account: { number: projectName === 'dark' ? '99-9999-9999999-88' : '99-9999-9999999-89' },
+      chunk: { index: 0, count: 1 },
+      file: { adapterId: 'asb', rowCount: 2, skipped: 0, from: '2026-10-09', to: '2026-10-09', ledgerBalance: { cents: 0, date: '2026-10-09' } },
+      rows: [row(`NA${stamp}`, noted, -2345), row(`NB${stamp}`, plain, -1100)],
+    },
+  })
+  expect(imported.ok()).toBe(true)
+  const found = (await (await context.request.get(`/api/transactions?q=${encodeURIComponent(stamp)}`)).json()) as { transactions: { id: number; description: string }[] }
+  const note = noteFor(stamp)
+  const saved = await context.request.put(`/api/transactions/${found.transactions.find((t) => t.description === noted)!.id}/note`, { headers: { Origin: baseURL }, data: { note } })
+  expect(saved.ok()).toBe(true)
+  return { stamp, noted, plain, note }
+}
+
+const noteButton = (scope: Page | Locator) => scope.getByRole('button', { name: /^Read the Note on / })
+const notePopup = (page: Page, description: string) => page.getByRole('dialog', { name: `Note on ${description}` })
+const dataRows = (page: Page) => page.getByRole('row').filter({ has: page.getByRole('cell') })
+
+test('a Note is a button that opens it, in All Transactions and in Uncategorised, and a row without a Note shows nothing', async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, noted, plain, note } = await seedWithNote(context, baseURL!, testInfo.project.name, (stamp) => `Receipt in the top drawer ${stamp}`)
+
+  for (const [path, heading] of [[`/transactions?q=${stamp}`, 'Transactions'], ['/uncategorised', 'Uncategorised']] as const) {
+    await page.goto(path)
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+    const row = rowFor(page, noted)
+    await expect(row).toBeVisible()
+    await expect(rowFor(page, plain)).toBeVisible()
+
+    // The Note's words are not in the page; its row has a button named for the row, and the row without a Note has none.
+    await expect(page.getByText(note)).toHaveCount(0)
+    await expect(noteButton(rowFor(page, plain))).toHaveCount(0)
+    const button = noteButton(row)
+    await expect(button).toHaveAccessibleName(`Read the Note on ${noted}, ${dateText('2026-10-09')}`)
+    const box = (await button.boundingBox())!
+    expect(box.width, `${heading}: the button is 44px wide`).toBeGreaterThanOrEqual(44)
+    expect(box.height, `${heading}: the button is 44px tall`).toBeGreaterThanOrEqual(44)
+
+    // It opens beside the button, ending where the button does, with the Note in it and focus in it.
+    await button.click()
+    const popup = notePopup(page, noted)
+    await expect(popup).toHaveText(note)
+    await expect(button).toHaveAttribute('aria-expanded', 'true')
+    await expect(popup).toBeFocused()
+    const opened = (await popup.boundingBox())!
+    expect(Math.abs(opened.x + opened.width - (box.x + box.width)), `${heading}: the pop-up ends where its button does`).toBeLessThanOrEqual(1)
+    await noAxeViolationsFromTop(page)
+
+    // Escape, a press outside it, and the keyboard each close it and leave focus on the button.
+    await page.keyboard.press('Escape')
+    await expect(popup).toBeHidden()
+    await expect(button).toBeFocused()
+    await button.click()
+    await expect(popup).toBeVisible()
+    await page.getByRole('heading', { level: 1, name: heading }).click()
+    await expect(popup).toBeHidden()
+    await expect(button).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(popup).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(popup).toBeHidden()
+    await expect(button).toBeFocused()
+  }
+
+  // Searching still finds the Note's words, though the list no longer writes them.
+  await page.goto('/transactions')
+  await page.getByRole('searchbox', { name: 'Search', exact: true }).fill(note)
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(dataRows(page)).toHaveCount(1)
+  await expect(noteButton(rowFor(page, noted))).toBeVisible()
+
+  // The column is no wider than its heading and the button (about 4.25rem), at any text size, so it is never wider than 5.5rem.
+  for (const size of ['Small', 'Medium', 'Large'] as const) {
+    await chooseTextSize(page, size)
+    const root = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))
+    const column = (await page.getByRole('columnheader', { name: 'Note' }).boundingBox())!
+    expect(column.width, `the Note column at ${size}`).toBeLessThanOrEqual(5.5 * root)
+  }
+})
+
+test('in Windows high contrast the Note button and its pop-up are drawn with borders', async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, noted } = await seedWithNote(context, baseURL!, testInfo.project.name, (stamp) => `Receipt in the top drawer ${stamp}`)
+  await page.emulateMedia({ forcedColors: 'active' }) // the reader's palette replaces the app's colours: a fill or shadow is dropped, a border and a stroke are not
+  await page.goto(`/transactions?q=${stamp}`)
+  const button = noteButton(rowFor(page, noted))
+  await button.click()
+  const popup = notePopup(page, noted)
+  await expect(popup).toBeVisible()
+  const drawn = (element: Locator) =>
+    element.evaluate((el) => {
+      const style = getComputedStyle(el)
+      return { width: parseFloat(style.borderTopWidth), style: style.borderTopStyle, colour: style.borderTopColor }
+    })
+  for (const [name, element] of [['button', button], ['pop-up', popup]] as const) {
+    const border = await drawn(element)
+    expect(border.width, `the ${name} has a border`).toBeGreaterThanOrEqual(1)
+    expect(border.style, `the ${name}'s border is a line`).toBe('solid')
+    expect(border.colour, `the ${name}'s border has a colour`).not.toBe('rgba(0, 0, 0, 0)')
+  }
+  expect(await button.locator('svg').evaluate((icon) => getComputedStyle(icon).stroke), 'the icon is drawn with a stroke').not.toBe('none')
+})
+
+test.describe('on a phone, a Note', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+  test('is a 44px button on its card, opens inside the screen even when it is one long word, and a card without one has no Note line', async ({ page, context, baseURL }, testInfo) => {
+    const { stamp, noted, plain, note } = await seedWithNote(context, baseURL!, testInfo.project.name, (stamp) => `${'Receipt'.repeat(14)} ${stamp}`)
+    await page.goto(`/transactions?q=${stamp}`)
+    await expect(page.getByRole('table')).toHaveCount(0) // cards
+    const card = page.getByRole('listitem').filter({ hasText: noted })
+    const plainCard = page.getByRole('listitem').filter({ hasText: plain })
+    await expect(plainCard).toBeVisible()
+    await expect(plainCard.getByText('Note', { exact: true })).toHaveCount(0)
+    await expect(noteButton(plainCard)).toHaveCount(0)
+    await expect(card.getByText('Note', { exact: true })).toBeVisible()
+    await expect(page.getByText(note)).toHaveCount(0)
+
+    for (const size of ['Medium', 'Large'] as const) {
+      await chooseTextSize(page, size)
+      const button = noteButton(card)
+      const box = (await button.boundingBox())!
+      expect(box.width, `${size}: the button is 44px wide`).toBeGreaterThanOrEqual(44)
+      expect(box.height, `${size}: the button is 44px tall`).toBeGreaterThanOrEqual(44)
+      await button.tap()
+      const popup = notePopup(page, noted)
+      await expect(popup).toHaveText(note)
+      const opened = (await popup.boundingBox())!
+      expect(opened.x, `${size}: its left edge is on the screen`).toBeGreaterThanOrEqual(0)
+      expect(opened.x + opened.width, `${size}: its right edge is on the screen`).toBeLessThanOrEqual(390)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `${size}: no sideways scrolling`).toBe(true)
+      await page.keyboard.press('Escape')
+      await expect(popup).toBeHidden()
+      await expect(button).toBeFocused()
+    }
   })
 })
