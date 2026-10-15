@@ -15,7 +15,7 @@ export type Column<Row> = {
   /** Classes for the column's heading and cells in the table (not on cards), such as `whitespace-nowrap` for a date. */
   className?: string
   /**
-   * The column holds the grip that drags its row (see `Row`). In the table it is the first column, narrow, with `header` read by a screen reader and not drawn. A card has no label for it:
+   * The column holds the grip that drags its row (see `RowElement`). In the table it is the first column, narrow, with `header` read by a screen reader and not drawn. A card has no label for it:
    * it sits at the start of the card, beside the lines. At most one column has it.
    */
   handle?: boolean
@@ -34,7 +34,7 @@ export type Column<Row> = {
   }
 }
 
-/** What `Row` is given: the row's key, which layout it is in, the classes the row would have had, and what goes inside (the cells, or the card's lines). */
+/** What `RowElement` is given: the row's key, which layout it is in, the classes the row would have had, and what goes inside (the cells, or the card's lines). */
 export type RowProps = { rowKey: string | number; layout: 'table' | 'cards'; className?: string; children: ReactNode }
 
 // Tailwind's `md` breakpoint. In rem, like the CSS, so a page zoomed to 200% switches layout exactly as it did.
@@ -111,6 +111,9 @@ function SortMenu<Row>({ columns }: { columns: Column<Row>[] }) {
   )
 }
 
+/** The heading and cells of a handle column: narrow, with its padding to the start. */
+const HANDLE_CELL = 'w-12 py-2 ps-2 pe-0'
+
 /** A card, when the page has not given its rows an element of their own. */
 const CardItem = ({ className, children }: RowProps) => <li className={className}>{children}</li>
 /** A row of the shadcn table, likewise. */
@@ -132,7 +135,7 @@ export function ResponsiveTable<Row>({
   className,
   printHeading,
   look = 'plain',
-  Row,
+  RowElement,
 }: {
   caption: string
   columns: Column<Row>[]
@@ -155,7 +158,7 @@ export function ResponsiveTable<Row>({
    * The element of a row, for a page that makes its rows more than a row (draggable: src/components/sortable-rows.tsx). A stable component, not one made in the page's render, which would
    * start every row again each time. It draws a `tr` (`TableRow`) or an `li` according to `layout`, and is used for the shadcn look and for cards, not for the plain table.
    */
-  Row?: ComponentType<RowProps>
+  RowElement?: ComponentType<RowProps>
 }) {
   const wide = useIsWide()
   // The caption stays on the empty state: a screen reader still hears what the missing data was.
@@ -169,7 +172,7 @@ export function ResponsiveTable<Row>({
   const align = (column: Column<Row>) => (column.align === 'end' ? 'text-end' : 'text-start')
   if (!wide) {
     const handle = columns.find((column) => column.handle)
-    const Item = Row ?? CardItem
+    const Item = RowElement ?? CardItem
     return (
       <>
         <SortMenu columns={columns} />
@@ -204,7 +207,7 @@ export function ResponsiveTable<Row>({
     )
   }
   if (look === 'shadcn') {
-    const Item = Row ?? TableItem
+    const Item = RowElement ?? TableItem
     return (
       // The box is the shadcn data table's: rounded, with a border the rows and the heading sit inside.
       <div className="overflow-hidden rounded-lg border">
@@ -217,7 +220,7 @@ export function ResponsiveTable<Row>({
                   key={column.key}
                   scope="col"
                   aria-sort={column.sort ? (column.sort.direction ?? 'none') : undefined}
-                  className={cn(column.handle ? 'w-12 py-2 ps-2 pe-0' : column.sort ? 'px-1 py-1' : 'px-3 py-2', 'font-semibold', align(column), column.className)}
+                  className={cn(column.handle ? HANDLE_CELL : column.sort ? 'px-1 py-1' : 'px-3 py-2', 'font-semibold', align(column), column.className)}
                 >
                   {column.handle ? <span className="sr-only">{column.header}</span> : column.sort ? <SortHeading column={{ ...column, sort: column.sort }} /> : column.header}
                 </TableHead>
@@ -228,7 +231,7 @@ export function ResponsiveTable<Row>({
             {rows.map((row) => (
               <Item key={getRowKey(row)} rowKey={getRowKey(row)} layout="table">
                 {columns.map((column) => (
-                  <TableCell key={column.key} className={cn(column.handle ? 'w-12 py-2 ps-2 pe-0' : 'px-3 py-2', 'whitespace-normal', align(column), column.className)}>
+                  <TableCell key={column.key} className={cn(column.handle ? HANDLE_CELL : 'px-3 py-2', 'whitespace-normal', align(column), column.className)}>
                     {column.cell(row)}
                   </TableCell>
                 ))}

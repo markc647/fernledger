@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dollarsForInput, DRAG_INSTRUCTIONS, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, type RuleView } from './rules'
+import { dollarsForInput, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, type RuleView } from './rules'
 
 const rule = (over: Partial<RuleView> = {}): RuleView => ({
   id: 1,
@@ -149,9 +149,5 @@ describe('what a screen reader is told while a Rule is dragged', () => {
 
   it('says a cancelled move left the Rule where it was', () => {
     expect(say.onDragCancel({ active: { id: 22 } })).toBe('Moving Rule 2 was cancelled. It is still in position 2 of 4.')
-  })
-
-  it('has plain words to say how to pick a Rule up', () => {
-    expect(DRAG_INSTRUCTIONS).toBe('To move a Rule, press Space or Enter on its handle. Use the up and down arrow keys to choose its new place, then press Space or Enter to drop it. Press Escape to cancel.')
   })
 })

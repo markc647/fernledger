@@ -7,7 +7,8 @@ import { cn } from '@/lib/utils'
 // classes, which need a plugin the app does not have. Built to the README's sizes, so a call site needs no override: 16px text, and an item is 44px tall. The panel has a border as
 // well as a shadow, and the highlighted item and the separator are drawn in the palette's own colours in src/index.css, because Windows high contrast removes fills and shadows.
 // The destructive item's words are the app's --danger and not the stock --destructive: on the pale red that highlights it, --destructive is 3.97:1 in the light theme, under the 4.5:1 that
-// text needs (--danger is pinned against the menu's fills in scripts/theme-contrast.test.mjs).
+// text needs. --danger on the panel is pinned in scripts/theme-contrast.test.mjs; the pale red is translucent, so the contrast of every item, resting and highlighted, as it is painted is
+// held in e2e/row-actions.spec.ts.
 
 function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />

@@ -97,10 +97,10 @@ function Categories() {
           <RemoveConfirm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message)} onCancel={() => done('', `category-${c.id}-actions`)} />
         ) : (
           <RowActions row={c.name} id={`category-${c.id}-actions`}>
-            <RowAction onSelect={() => { setNotice(''); setEditing({ action: 'rename', id: c.id }) }}>Rename</RowAction>
-            <RowAction onSelect={() => { setNotice(''); setEditing({ action: 'set-kind', id: c.id }) }}>Select kind</RowAction>
+            <RowAction run={() => { setNotice(''); setEditing({ action: 'rename', id: c.id }) }}>Rename</RowAction>
+            <RowAction run={() => { setNotice(''); setEditing({ action: 'set-kind', id: c.id }) }}>Select kind</RowAction>
             <DropdownMenuSeparator />
-            <RowAction variant="destructive" onSelect={() => { setNotice(''); setEditing({ action: 'remove', id: c.id }) }}>Remove</RowAction>
+            <RowAction variant="destructive" run={() => { setNotice(''); setEditing({ action: 'remove', id: c.id }) }}>Remove</RowAction>
           </RowActions>
         ),
     })

@@ -1,5 +1,4 @@
 import { queryOptions, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import type { UniqueIdentifier } from '@dnd-kit/core'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { Amount } from '@/components/amount'
@@ -16,7 +15,7 @@ import { formatCount, formatDate } from '@/lib/format'
 import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
 import { announcement, estimateSentence, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
-import { dollarsForInput, DRAG_INSTRUCTIONS, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, type RuleView } from '@/lib/rules'
+import { dollarsForInput, DRAG_INSTRUCTIONS, DRAG_ROLE, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, type RuleView } from '@/lib/rules'
 
 export const Route = createFileRoute('/rules')({
   component: Rules,
@@ -105,7 +104,7 @@ function AdminRules() {
   }
 
   // After a move the Rule is somewhere else in the list: keep keyboard focus on a control that still works for it (its Actions button after a Move up or Move down, its handle after a drag).
-  const moveFocus = useRef<string[] | null>(null)
+  const moveFocus = useRef<string | null>(null)
   // The order is shown as soon as it is chosen, so a Rule that was dropped stays where it was dropped while the Worker saves. If the Worker refuses it or the save fails, the order before
   // comes back, and the Worker's own order is read again (it may not be the one before, if the Rules changed meanwhile).
   const move = useMutation({
@@ -126,14 +125,16 @@ function AdminRules() {
     onError: (failure, _change, context) => {
       if (context?.before) queryClient.setQueryData(rulesQuery.queryKey, context.before)
       void queryClient.invalidateQueries({ queryKey: rulesQuery.queryKey })
-      setProblem(failure instanceof HttpError && (failure.status === 400 || failure.status === 409) ? 'The Rules have changed since this page loaded. Reload the page, then try again.' : 'That did not work. Try again.')
+      // What was said of the last change is not true of this one. (It is cleared here and not as a Rule is dropped, because taking the line away moves the table up the page under the pointer.)
+      setNotice('')
+      setProblem(failure instanceof HttpError && (failure.status === 400 || failure.status === 409) ? 'The Rules have changed since this page loaded. The list is up to date now; try again.' : 'That did not work. Try again.')
     },
   })
 
   // The controls are off while a move is in flight, so this waits until it has finished and the order on the page is the Worker's.
   useEffect(() => {
     if (!moveFocus.current || move.isPending) return
-    const target = moveFocus.current.map((id) => document.getElementById(id)).find((element) => element instanceof HTMLButtonElement && !element.disabled)
+    const target = document.getElementById(moveFocus.current)
     moveFocus.current = null
     target?.focus()
   }, [rules, move.isPending])
@@ -141,9 +142,8 @@ function AdminRules() {
   const items: Item[] = (rules ?? []).map((rule, i, all) => ({ rule, number: i + 1, first: i === 0, last: i === all.length - 1 }))
   const ids = items.map((i) => i.rule.id)
   const reorder = (next: number[], message: string, focus: string) => {
-    setNotice('')
     setProblem('')
-    moveFocus.current = [focus]
+    moveFocus.current = focus
     move.mutate({ ids: next, message: `${message} ${afterChange(runGoing)}` })
   }
   /** One place up or down: the menu's Move up and Move down. */
@@ -152,13 +152,15 @@ function AdminRules() {
     if (next) reorder(next, `Moved Rule ${item.number} ${by < 0 ? 'up' : 'down'}. It is now Rule ${item.number + by} of ${items.length}.`, `rule-${item.rule.id}-actions`)
   }
   /** A Rule dropped on another's place. */
-  const dropRule = (id: UniqueIdentifier, overId: UniqueIdentifier) => {
-    const next = moveRuleTo(ids, Number(id), Number(overId))
-    if (next) reorder(next, `Moved Rule ${ids.indexOf(Number(id)) + 1} to position ${next.indexOf(Number(id)) + 1} of ${items.length}.`, `rule-${id}-grip`)
+  const dropRule = (id: number, overId: number) => {
+    const next = moveRuleTo(ids, id, overId)
+    if (next) reorder(next, `Moved Rule ${ids.indexOf(id) + 1} to position ${next.indexOf(id) + 1} of ${items.length}.`, `rule-${id}-grip`)
   }
 
+  // With one Rule there is nothing to put in order, so no handle.
+  const handle: Column<Item>[] = [{ key: 'reorder', header: 'Reorder', handle: true, cell: (item) => <DragHandle id={`rule-${item.rule.id}-grip`} label={`Drag to reorder Rule ${item.number}`} /> }]
   const columns: Column<Item>[] = [
-    { key: 'reorder', header: 'Reorder', handle: true, cell: (item) => <DragHandle id={`rule-${item.rule.id}-grip`} label={`Drag to reorder Rule ${item.number}`} /> },
+    ...(items.length > 1 ? handle : []),
     { key: 'order', header: 'Order', className: 'whitespace-nowrap', cell: (item) => item.number },
     { key: 'when', header: 'When', cell: (item) => sentence(ruleConditions(item.rule)) },
     { key: 'then', header: 'Then', cell: (item) => ruleResult(item.rule) },
@@ -171,16 +173,16 @@ function AdminRules() {
           <RemoveConfirm item={item} runGoing={runGoing} onDone={(message) => closed(message)} onCancel={() => closed('', `rule-${item.rule.id}-actions`)} />
         ) : (
           <RowActions row={`Rule ${item.number}`} id={`rule-${item.rule.id}-actions`}>
-            <RowAction onSelect={() => { setNotice(''); setProblem(''); setEditing({ kind: 'edit', rule: item.rule }) }}>Edit</RowAction>
+            <RowAction run={() => { setNotice(''); setProblem(''); setEditing({ kind: 'edit', rule: item.rule }) }}>Edit</RowAction>
             {/* The single-pointer way to move a Rule, for anyone who cannot drag (WCAG 2.5.7). */}
-            <RowAction disabled={item.first || move.isPending} onSelect={() => moveRule(item, -1)}>
+            <RowAction disabled={item.first || move.isPending} run={() => moveRule(item, -1)}>
               Move up
             </RowAction>
-            <RowAction disabled={item.last || move.isPending} onSelect={() => moveRule(item, 1)}>
+            <RowAction disabled={item.last || move.isPending} run={() => moveRule(item, 1)}>
               Move down
             </RowAction>
             <DropdownMenuSeparator />
-            <RowAction variant="destructive" onSelect={() => { setNotice(''); setProblem(''); setRemoving(item.rule.id) }}>Remove</RowAction>
+            <RowAction variant="destructive" run={() => { setNotice(''); setProblem(''); setRemoving(item.rule.id) }}>Remove</RowAction>
           </RowActions>
         ),
     },
@@ -221,7 +223,7 @@ function AdminRules() {
         ) : (
           <>
             {items.length > 1 && <p className="mb-3">To change the order, drag a Rule by its handle, or choose Move up or Move down in its Actions menu.</p>}
-            <SortableFrame ids={ids} disabled={move.isPending} onReorder={dropRule} announcements={dragAnnouncements(ids)} instructions={DRAG_INSTRUCTIONS}>
+            <SortableFrame ids={ids} disabled={move.isPending} onReorder={dropRule} announcements={dragAnnouncements(ids)} instructions={DRAG_INSTRUCTIONS} roleDescription={DRAG_ROLE}>
               <ResponsiveTable
                 caption="Rules, in the order they are checked"
                 columns={columns}
@@ -229,7 +231,7 @@ function AdminRules() {
                 getRowKey={(item) => item.rule.id}
                 emptyMessage="There are no Rules yet. Add one above."
                 look="shadcn"
-                Row={SortableRow}
+                RowElement={SortableRow}
               />
             </SortableFrame>
           </>
@@ -410,7 +412,7 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
 
 function RemoveConfirm({ item, runGoing, onDone, onCancel }: { item: Item; runGoing: boolean; onDone: (message: string) => void; onCancel: () => void }) {
   const queryClient = useQueryClient()
-  // Opens on the safe answer. Cancelling puts focus back on the Remove button, and a removal on the message.
+  // Opens on the safe answer. Cancelling puts focus back on the row's Actions button, and a removal on the message.
   const keep = useRef<HTMLButtonElement>(null)
   useEffect(() => keep.current?.focus(), [])
   const remove = useMutation({

@@ -1,9 +1,9 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
-// shadcn/ui Table (radix-nova): the stock registry file, untrimmed, so that parallel branches which add the same file merge cleanly. Do not edit it for the app.
-// It is written by hand because the shadcn CLI does not run here; its only differences from the registry are the import of `cn` and the `"use client"` line, which a Vite app has no use for.
-// What the app needs of a table that stock does not give (text that wraps rather than runs on, a size in rem, a border that survives Windows high contrast) is put on it by its caller
+// shadcn/ui Table (radix-nova), trimmed to what the app uses (the stock `TableFooter` is left out). It is written by hand because the shadcn CLI does not run here; its only differences from
+// the registry are the import of `cn`, the `"use client"` line, which a Vite app has no use for, and that. Do not edit it for the app:
+// what the app needs of a table that stock does not give (text that wraps rather than runs on, a size in rem, a border that survives Windows high contrast) is put on it by its caller
 // (`ResponsiveTable` with `look="shadcn"`, src/components/responsive-table.tsx).
 
 function Table({ className, ...props }: React.ComponentProps<'table'>) {
@@ -20,10 +20,6 @@ function TableHeader({ className, ...props }: React.ComponentProps<'thead'>) {
 
 function TableBody({ className, ...props }: React.ComponentProps<'tbody'>) {
   return <tbody data-slot="table-body" className={cn('[&_tr:last-child]:border-0', className)} {...props} />
-}
-
-function TableFooter({ className, ...props }: React.ComponentProps<'tfoot'>) {
-  return <tfoot data-slot="table-footer" className={cn('border-t bg-muted/50 font-medium [&>tr]:last:border-b-0', className)} {...props} />
 }
 
 function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
@@ -54,4 +50,4 @@ function TableCaption({ className, ...props }: React.ComponentProps<'caption'>) 
   return <caption data-slot="table-caption" className={cn('mt-4 text-sm text-muted-foreground', className)} {...props} />
 }
 
-export { Table, TableHeader, TableBody, TableFooter, TableHead, TableRow, TableCell, TableCaption }
+export { Table, TableHeader, TableBody, TableHead, TableRow, TableCell, TableCaption }

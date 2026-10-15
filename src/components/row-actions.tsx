@@ -12,7 +12,7 @@ const Queue = createContext<RefObject<(() => void) | null> | null>(null)
 
 /**
  * `row` names the row ("Rule 3", "Groceries"), so the button says whose actions it opens, and `id` is the button's, so that a page can put focus back on it when what an action opened is
- * closed without a change. Its items are `RowAction`s, with a `DropdownMenuSeparator` before the destructive one.
+ * closed without a change. Its items are `RowAction`s (each with what it `run`s), with a `DropdownMenuSeparator` before the destructive one.
  */
 export function RowActions({ row, id, children }: { row: string; id: string; children: ReactNode }) {
   const chosen = useRef<(() => void) | null>(null)
@@ -41,14 +41,14 @@ export function RowActions({ row, id, children }: { row: string; id: string; chi
   )
 }
 
-/** An item of `RowActions`: `onSelect` runs once the menu has closed. */
-export function RowAction({ onSelect, ...props }: Omit<ComponentProps<typeof DropdownMenuItem>, 'onSelect'> & { onSelect: () => void }) {
+/** An item of `RowActions`: `run` is what it does, and it runs once the menu has closed (it is not Radix's `onSelect`, which runs while the menu is still open). */
+export function RowAction({ run, ...props }: Omit<ComponentProps<typeof DropdownMenuItem>, 'onSelect'> & { run: () => void }) {
   const chosen = useContext(Queue)
   return (
     <DropdownMenuItem
       {...props}
       onSelect={() => {
-        if (chosen) chosen.current = onSelect
+        if (chosen) chosen.current = run
       }}
     />
   )

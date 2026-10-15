@@ -93,6 +93,9 @@ export function inOrder<T extends { id: number }>(rules: T[], ids: number[]): T[
   return ids.map((id) => byId.get(id)!)
 }
 
+/** What a handle is called to a screen reader, in place of dnd-kit's "sortable" (its `aria-roledescription`): "movable Rule, Drag to reorder Rule 3, button". */
+export const DRAG_ROLE = 'movable Rule'
+
 /** How to pick a Rule up, read to a screen reader with the handle (dnd-kit's `screenReaderInstructions`). */
 export const DRAG_INSTRUCTIONS =
   'To move a Rule, press Space or Enter on its handle. Use the up and down arrow keys to choose its new place, then press Space or Enter to drop it. Press Escape to cancel.'

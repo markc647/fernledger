@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CATEGORY_SORT_WORDS, sortCategories, type CategorySort } from './category-sort'
+import { sortCategories, type CategorySort } from './category-sort'
 import type { CategoryKind } from './category-kinds'
 
 const category = (id: number, name: string, kind: CategoryKind = 'spending') => ({ id, name, kind })
@@ -52,9 +52,5 @@ describe('sorting the Categories', () => {
   it('puts Categories whose names read the same in the order of their ids, as the Worker lists them', () => {
     const rows = [category(9, 'Cafe'), category(3, 'Café'), category(5, 'CAFE')]
     expect(sortCategories(rows, { key: 'name', direction: 'ascending' }).map((row) => row.id)).toEqual([3, 5, 9])
-  })
-
-  it('has plain words for each direction', () => {
-    expect(CATEGORY_SORT_WORDS).toEqual({ ascending: 'A to Z', descending: 'Z to A' })
   })
 })
