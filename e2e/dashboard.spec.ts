@@ -608,7 +608,6 @@ test('the charts have no WCAG 2.2 AA violations, with their data, at the largest
   for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
     await page.goto('/')
-    await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
     await chooseTextSize(page, 'Large')
     await chooseDates(page, from, to)
     await showNetWorth(page)

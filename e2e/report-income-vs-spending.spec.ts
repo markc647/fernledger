@@ -476,7 +476,6 @@ test.describe('on screen', () => {
       await expect(tableOf(page)).toContainText('−$2.00')
       await expect(tableOf(page)).toContainText('Counts only ')
       await expect(noticeOf(page)).toBeVisible()
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }

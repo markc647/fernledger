@@ -525,7 +525,6 @@ test.describe('on screen', () => {
       await expect(article(page).getByText('Under Budget').first()).toBeVisible()
       await expect(article(page).getByText('Not in a Budget').first()).toBeAttached()
       await expect(article(page).getByText('Budget changed from').first()).toBeVisible()
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }

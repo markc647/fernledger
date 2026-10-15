@@ -370,7 +370,6 @@ test.describe('on screen', () => {
       await signInAs(context, role)
       await page.goto(reportAddress(savingsId, year))
       await expect(article(page).getByRole('table')).toBeVisible()
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }

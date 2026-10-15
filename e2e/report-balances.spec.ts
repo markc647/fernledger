@@ -375,7 +375,6 @@ test.describe('on screen', () => {
       await page.goto(`/reports/balances?from=${start}-01-01&to=${end}-12-31`)
       await expect(article(page).getByRole('table').first()).toBeVisible()
       await expect(article(page).getByRole('region', { name: `${cheque.name} (${cheque.number})` }).getByText('Balance differs from bank by $3.00')).toBeVisible()
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }

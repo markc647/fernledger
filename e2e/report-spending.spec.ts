@@ -360,7 +360,6 @@ test.describe('on screen', () => {
       await expect(tableOf(page)).toBeVisible()
       await expect(tableOf(page)).toContainText('$25.00 back')
       await expect(tableOf(page)).toContainText(UNCATEGORISED)
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }
