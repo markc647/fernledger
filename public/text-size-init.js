@@ -4,10 +4,13 @@
 ;(function () {
   var size = 'medium'
   try {
-    var saved = localStorage.getItem('fernledger-text-size')
-    if (saved === 'small') size = 'small'
-    // 'a-plus' and 'a-plus-plus' are what the first control (A / A+ / A++) saved; both are Large now. Its 'a' is Medium.
-    else if (saved === 'large' || saved === 'a-plus' || saved === 'a-plus-plus') size = 'large'
+    var saved = localStorage.getItem('fernledger-text-size-v2')
+    var earlier = localStorage.getItem('fernledger-text-size')
+    if (saved === 'small' || saved === 'medium' || saved === 'large' || saved === 'xlarge') size = saved
+    // Nothing is saved by the four-size control, so use what an earlier control saved: Small and Medium are the same sizes, and Large (20px) is Xtra Large now.
+    // 'a-plus' and 'a-plus-plus' are what the first control (A / A+ / A++) saved; both were 20px by then. Its 'a' is Medium.
+    else if (earlier === 'small') size = 'small'
+    else if (earlier === 'large' || earlier === 'a-plus' || earlier === 'a-plus-plus') size = 'xlarge'
   } catch {
     // Storage blocked: use the standard size.
   }

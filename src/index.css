@@ -204,8 +204,8 @@
   html.dark {
     color-scheme: dark;
   }
-  /* The Small / Medium / Large control (src/lib/text-size.ts): 14px, 16px and 20px on a browser set to 16px. Everything is sized in rem, so it all scales together,
-     and the percentage is of the browser's own text size, so a larger browser setting is respected. Medium is the default, and the 16px body text the README promises. */
+  /* The Small / Medium / Large / Xtra Large control (src/lib/text-size.ts): 14px, 16px, 18px and 20px on a browser set to 16px. Everything is sized in rem, so it all scales
+     together, and the percentage is of the browser's own text size, so a larger browser setting is respected. Medium is the default, and the 16px body text the README promises. */
   html[data-text-size="small"] {
     font-size: 87.5%;
   }
@@ -226,6 +226,9 @@
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
+    font-size: 112.5%;
+  }
+  html[data-text-size="xlarge"] {
   ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
