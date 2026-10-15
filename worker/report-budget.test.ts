@@ -8,6 +8,7 @@ import worker from './index'
 import { monthCount, monthState } from './months'
 import { budgetReport, isOver, MAX_REPORT_MONTHS, readBudgetReport, type BudgetReport } from './report-budget'
 import type { SpendingRow } from './spending'
+import { keepReport } from './test-support'
 
 // Seam 1: the Budget vs actual Report's data (GET /api/reports/budget-vs-actual), through the Worker's exported handler as the local-development Admin or a
 // read-only Member (the dev identity cookie is honoured on localhost only). The Report is Budgets and Spending put side by side for many months, so the
@@ -73,7 +74,7 @@ async function measured(path: string) {
     },
   })
   const ctx = createExecutionContext()
-  const res = await worker.fetch!(new Request(`${origin}${path}`, { headers: { Cookie: 'fernledger_dev_as=member' } }) as never, { ...env, DB: db }, ctx)
+  const res = await worker.fetch!(new Request(`${origin}${path}`, { headers: { Cookie: 'fernledger_dev_as=admin' } }) as never, { ...env, DB: db }, ctx)
   await waitOnExecutionContext(ctx)
   return { res, watched }
 }
@@ -81,7 +82,7 @@ async function measured(path: string) {
 const ids: Record<string, number> = {}
 const NAMES = ['Groceries', 'Fuel', 'Eating out', 'Travel', 'Wages and salary', 'Loans']
 
-const report = async (from: string, to: string, who: Who = 'member'): Promise<BudgetReport> => {
+const report = async (from: string, to: string, who: Who = 'admin'): Promise<BudgetReport> => {
   const res = await call(`/api/reports/budget-vs-actual?from=${from}&to=${to}`, { who })
   expect(res.status, `${from} to ${to}`).toBe(200)
   return res.json()
@@ -124,7 +125,7 @@ const rule = async (textContains: string, category: string) => {
 
 beforeEach(async () => {
   serial = 0
-  await env.DB.batch(['budgets', 'balance_checks', 'transactions', 'rules', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch(['kept_reports', 'budgets', 'balance_checks', 'transactions', 'rules', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
   await env.DB.prepare(
     "UPDATE categories SET removed_at = NULL, kind = CASE WHEN name IN ('Wages and salary', 'NZ Super and benefits', 'Interest', 'Other income') THEN 'income' WHEN name = 'Loans' THEN 'loans' ELSE 'spending' END",
   ).run()
@@ -545,8 +546,10 @@ describe('who can read the Report, and what it refuses', () => {
     return { status: res.status, body: await res.json() }
   }
 
-  it('is open to every Member and to the Admin, with the same figures, and to no one who is not signed in', async () => {
+  it('is open to the Admin, and to a Member once the Admin has kept it, with the same figures, and to no one who is not signed in', async () => {
     await seedYear()
+    expect((await call('/api/reports/budget-vs-actual?from=2026-01-01&to=2026-04-30', { who: 'member' })).status).toBe(403)
+    await keepReport('budget-vs-actual', { from: '2026-01-01', to: '2026-04-30' })
     const [member, admin] = await Promise.all([report('2026-01-01', '2026-04-30', 'member'), report('2026-01-01', '2026-04-30', 'admin')])
 
     expect(member).toEqual(admin)

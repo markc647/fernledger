@@ -2,6 +2,7 @@ import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { HISTORY } from './balances'
 import { balancesReport, REPORT_HISTORY, type BalancesReport, type HistoryRow } from './report-balances'
+import { keepReport } from './test-support'
 
 // Seam 1: the balances-over-time Report's data (GET /api/reports/balances), through the Worker's exported handler as the
 // local-development Admin or a read-only Member (the dev identity cookie is honoured on localhost only). The Report's numbers are
@@ -50,12 +51,12 @@ async function importFile(rows: unknown[], options: ImportOptions) {
 
 const accountId = async (number = savings) => (await env.DB.prepare('SELECT id FROM accounts WHERE account_number = ?').bind(number).first<{ id: number }>())!.id
 const query = (id: number, from: string, to: string) => `accountId=${id}&from=${from}&to=${to}`
-const reportFor = async (id: number, from: string, to: string, who: Who = 'member'): Promise<BalancesReport> => {
+const reportFor = async (id: number, from: string, to: string, who: Who = 'admin'): Promise<BalancesReport> => {
   const res = await call(`/api/reports/balances?${query(id, from, to)}`, { who })
   expect(res.status, `${from} to ${to}`).toBe(200)
   return res.json()
 }
-const report = async (from: string, to: string, number = savings, who: Who = 'member') => reportFor(await accountId(number), from, to, who)
+const report = async (from: string, to: string, number = savings, who: Who = 'admin') => reportFor(await accountId(number), from, to, who)
 type Point = { date: string; balanceCents: number }
 const historyOf = async (id: number): Promise<{ anchor: { asOfDate: string; balanceCents: number } | null; points: Point[] }> => (await call(`/api/balances/${id}/history`)).json()
 const history = async (number = savings) => historyOf(await accountId(number))
@@ -69,7 +70,7 @@ const SAVINGS_TO_OCT_7 = OPENING + 5000 - 1000 - 2000 - 100 + 400
 const importAllSavings = () => importFile([...july, ...august, ...october], { ledger: ['2026-10-07', SAVINGS_TO_OCT_7] })
 
 beforeEach(async () => {
-  await env.DB.batch(['balance_checks', 'transactions', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch(['kept_reports', 'balance_checks', 'transactions', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
 })
 
 const summary = (r: BalancesReport) => ({ opening: r.opening, rows: r.rows.map((row) => [row.date, row.balanceCents, row.changeCents]), closing: r.closing, change: r.changeCents })
@@ -401,9 +402,11 @@ describe('the balances Report’s request', () => {
     return { status: res.status, body: await res.json() }
   }
 
-  it('is open to every Member and to the Admin, and to no one who is not signed in', async () => {
+  it('is open to the Admin, to a Member once the Admin has kept it, and to no one who is not signed in', async () => {
     await importAllSavings()
     const id = await accountId()
+    expect((await call(`/api/reports/balances?${query(id, '2026-07-01', '2026-10-31')}`, { who: 'member' })).status).toBe(403)
+    await keepReport('balances', { from: '2026-07-01', to: '2026-10-31' })
     for (const who of ['member', 'admin'] as const) expect((await call(`/api/reports/balances?${query(id, '2026-07-01', '2026-10-31')}`, { who })).status).toBe(200)
     expect((await call(`/api/reports/balances?${query(id, '2026-07-01', '2026-10-31')}`, { who: null })).status).toBe(401)
   })

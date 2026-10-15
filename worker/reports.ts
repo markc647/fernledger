@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import type { AppEnv } from './app-env'
+import { requireKept } from './kept-reports'
 import { balancesReportQuery, readBalancesReport } from './report-balances'
 import { budgetReportQuery, readBudgetReport } from './report-budget'
 import { incomeVsSpendingQuery, readIncomeVsSpending } from './report-income-vs-spending'
@@ -9,10 +10,12 @@ import { buildReportPage, pageOf, reportQuery, toReportQuery, type ReportRow } f
 import { validate } from './validate'
 
 /**
- * The data behind the print-formatted Reports (README: Reports). Every Member can read them. Each is read a page at a time,
- * so each request stays small (ADR 0004; sizes in report-transactions.ts); the Report page puts the pages together.
+ * The data behind the print-formatted Reports (README: Reports). The Admin reads any, which is how a Report is made (the page then keeps its choices: kept-reports.ts); a Member reads
+ * only a Report the Admin has kept, so `requireKept` is in front of every route. Each is read a page at a time, so each request stays small (ADR 0004; sizes in
+ * report-transactions.ts); the Report page puts the pages together.
  */
 export const reports = new Hono<AppEnv>()
+  .use('*', requireKept)
   .get('/transactions', validate('query', reportQuery), async (c) => {
     const query = toReportQuery(c.req.valid('query'))
     const { sql, binds } = buildReportPage(query)

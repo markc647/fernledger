@@ -14,6 +14,7 @@ import { d1Usage } from './d1-usage-route'
 import { changeLogList } from './changelog-list'
 import { FEATURES, featureStatuses } from './features'
 import { imports } from './imports'
+import { keptReports } from './kept-reports'
 import { logEvent } from './log'
 import { reports } from './reports'
 import { isJson, isWrite } from './request-format'
@@ -72,6 +73,7 @@ export const app = new Hono<AppEnv>()
   .route('/api/charts', charts)
   .route('/api/d1-usage', d1Usage)
   .route('/api/imports', imports)
+  .route('/api/kept-reports', keptReports)
   .route('/api/reports', reports)
   .route('/api/rules', rules)
   .route('/api/transactions', transactions)

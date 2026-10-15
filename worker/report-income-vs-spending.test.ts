@@ -8,6 +8,7 @@ import type { BudgetReport } from './report-budget'
 import { incomeVsSpending, MAX_INCOME_MONTHS, type IncomeVsSpending } from './report-income-vs-spending'
 import { buildSpending, rollUp, type MonthlyRow, type SpendingRow } from './spending'
 import type { SpendingByCategory } from './spending-by-category'
+import { keepReport } from './test-support'
 
 // Seam 1: the income-vs-spending-by-month Report's data (GET /api/reports/income-vs-spending), through the Worker's exported handler as the local-development
 // Admin or a read-only Member (the dev identity cookie is honoured on localhost only). The Report decides nothing about what is Spending or Income: it is
@@ -17,7 +18,8 @@ import type { SpendingByCategory } from './spending-by-category'
 const origin = 'http://localhost:5173'
 type Who = 'admin' | 'member'
 
-async function call(path: string, who: Who | null = 'member') {
+// The Admin reads any Report; a Member only one that has been kept (kept-reports.test.ts).
+async function call(path: string, who: Who | null = 'admin') {
   // Without a sign-in the request comes from a host that is not localhost, where the dev identity is never honoured.
   return exports.default.fetch(new Request(`${who ? origin : 'https://app.test'}${path}`, { headers: who ? { Cookie: `fernledger_dev_as=${who}` } : {} }))
 }
@@ -50,7 +52,7 @@ const query = (over: Record<string, string | undefined> = {}) => {
   for (const [name, value] of Object.entries({ from: '2026-10-01', to: '2026-10-31', ...over })) if (value !== undefined) params.set(name, value)
   return params.toString()
 }
-async function report(over: Record<string, string | undefined> = {}, who: Who = 'member'): Promise<IncomeVsSpending> {
+async function report(over: Record<string, string | undefined> = {}, who: Who = 'admin'): Promise<IncomeVsSpending> {
   const res = await call(`/api/reports/income-vs-spending?${query(over)}`, who)
   expect(res.status, JSON.stringify(over)).toBe(200)
   return res.json()
@@ -59,7 +61,7 @@ async function report(over: Record<string, string | undefined> = {}, who: Who = 
 const lines = (r: IncomeVsSpending) => r.months.map((m) => [m.month, m.incomeCents, m.spendingCents, m.differenceCents])
 
 beforeEach(async () => {
-  await env.DB.batch(['budgets', 'transactions', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch(['kept_reports', 'budgets', 'transactions', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
   await env.DB.prepare('UPDATE categories SET removed_at = NULL').run()
   const [a, b] = await env.DB.batch([
     env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-91', 'Example everyday') RETURNING id"),
@@ -589,9 +591,10 @@ describe('the calendar, with no database (incomeVsSpending)', () => {
 })
 
 describe('who can read it, and what a request refuses', () => {
-  it('gives every Member the same Report as the Admin', async () => {
+  it('gives a Member the same Report as the Admin, once the Admin has kept it', async () => {
     await add(accountA, '2026-10-02', -4000, { override: 'Groceries' })
     await add(accountA, '2026-10-03', 9000, { override: 'Wages and salary' })
+    await keepReport('income-vs-spending', { from: '2026-10-01', to: '2026-10-31' })
     expect(await report({}, 'admin')).toEqual(await report({}, 'member'))
     expect(lines(await report({}, 'member'))).toEqual([['2026-10', 9000, 4000, 5000]])
   })
@@ -664,7 +667,7 @@ describe('what a request costs (ADR 0004)', () => {
   /** The Worker's handler with `db` standing in for D1, called directly because the test changes the Worker's env (CODING_STANDARDS.md: Tests). */
   async function requestWith(db: D1Database, over: Record<string, string | undefined> = {}) {
     const ctx = createExecutionContext()
-    const res = await worker.fetch!(new Request(`${origin}/api/reports/income-vs-spending?${query(over)}`, { headers: { Cookie: 'fernledger_dev_as=member' } }) as never, { ...env, DB: db }, ctx)
+    const res = await worker.fetch!(new Request(`${origin}/api/reports/income-vs-spending?${query(over)}`, { headers: { Cookie: 'fernledger_dev_as=admin' } }) as never, { ...env, DB: db }, ctx)
     await waitOnExecutionContext(ctx)
     return res
   }

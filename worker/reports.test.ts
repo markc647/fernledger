@@ -2,14 +2,16 @@ import { env, exports } from 'cloudflare:workers'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { REPORT_PAGE_SIZE as PAGE_REPORT_PAGE_SIZE } from '../src/lib/report-transactions'
 import { buildReportPage, REPORT_PAGE_SIZE, type ReportQuery } from './report-transactions'
+import { keepReport } from './test-support'
 import { MAX_LIMIT } from './transaction-search'
 
 // Seam 1: the Transaction listing Report's data, through the Worker's exported handler as the local-development Admin or a
-// read-only Member (the dev identity cookie is honoured on localhost only). Every Member can read it.
+// read-only Member (the dev identity cookie is honoured on localhost only). A Member can read it once the Admin has kept the Report.
 const origin = 'http://localhost:5173'
 
 type Who = 'admin' | 'member'
-async function call(path: string, who: Who = 'member') {
+// The Admin reads any Report (that is how one is made); a Member reads one that has been kept (kept-reports.test.ts), and below only that is asked of them.
+async function call(path: string, who: Who = 'admin') {
   return exports.default.fetch(new Request(`${origin}${path}`, { headers: { Cookie: `fernledger_dev_as=${who}` } }))
 }
 
@@ -60,9 +62,9 @@ beforeAll(async () => {
 })
 
 beforeEach(async () => {
-  await env.DB.batch(['transactions', 'accounts', 'change_log', 'categories'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch(['kept_reports', 'transactions', 'accounts', 'change_log', 'categories'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
   await env.DB.batch(starters.map((c) => env.DB.prepare('INSERT INTO categories (id, name) VALUES (?, ?)').bind(c.id, c.name)))
-  savings = (await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-99', 'Example savings') RETURNING id").first<{ id: number }>())!.id
+  savings =(await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-99', 'Example savings') RETURNING id").first<{ id: number }>())!.id
   cheque = (await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-98', 'Example cheque') RETURNING id").first<{ id: number }>())!.id
   n = 0
 })
@@ -140,9 +142,10 @@ describe('what a Report lists', () => {
     expect((await page()).transactions[0]).toMatchObject({ source: 'sync', bankReference: 'Ref 77', bankCounterpartyAccount: '99-9999-9999999-97', bankCardSuffix: '1234', bankParticulars: 'Rent', bankPaymentCode: 'Oct' })
   })
 
-  it('gives every Member the same Report as the Admin', async () => {
+  it('gives a Member the same Report as the Admin, once the Admin has kept it', async () => {
     await add({ note: 'A note' })
-    const res = await call(`/api/reports/transactions?${query()}`, 'admin')
+    await keepReport('transactions', { from: '2026-10-01', to: '2026-10-31' })
+    const res = await call(`/api/reports/transactions?${query()}`, 'member')
     expect(res.status).toBe(200)
     expect(((await res.json()) as Page).transactions).toEqual((await page()).transactions)
   })

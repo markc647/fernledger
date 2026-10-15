@@ -8,6 +8,7 @@ import { CATEGORY_KINDS, isLoansKind, LOANS } from './category-kinds'
 import { buildLoanOpening, LOANS_PAGE_SIZE, type LoanPage, type LoanRow } from './report-loans'
 import { buildSpending, rollUp, type SpendingRow } from './spending'
 import type { SpendingByCategory } from './spending-by-category'
+import { keepReport } from './test-support'
 
 // Seam 1: the Loans Report's data (GET /api/reports/loans), through the Worker's exported handler as the local-development Admin or a read-only Member (the dev
 // identity cookie is honoured on localhost only). It lists one Loans Category's Transactions; what a loan is comes from `isLoan` and the effective Category
@@ -16,7 +17,8 @@ import type { SpendingByCategory } from './spending-by-category'
 const origin = 'http://localhost:5173'
 type Who = 'admin' | 'member'
 
-async function call(path: string, who: Who | null = 'member') {
+// The Admin reads any Report; a Member only one that has been kept (kept-reports.test.ts).
+async function call(path: string, who: Who | null = 'admin') {
   // Without a sign-in the request comes from a host that is not localhost, where the dev identity is never honoured.
   return exports.default.fetch(new Request(`${who ? origin : 'https://app.test'}${path}`, { headers: who ? { Cookie: `fernledger_dev_as=${who}` } : {} }))
 }
@@ -51,7 +53,7 @@ const query = (over: Record<string, string | undefined> = {}) => {
   for (const [name, value] of Object.entries({ categoryId: String(ids[ALICE]), to: '2026-10-31', ...over })) if (value !== undefined) params.set(name, value)
   return params.toString()
 }
-async function page(over: Record<string, string | undefined> = {}, who: Who = 'member'): Promise<LoanPage> {
+async function page(over: Record<string, string | undefined> = {}, who: Who = 'admin'): Promise<LoanPage> {
   const res = await call(`/api/reports/loans?${query(over)}`, who)
   expect(res.status, JSON.stringify(over)).toBe(200)
   return res.json()
@@ -67,7 +69,7 @@ beforeAll(async () => {
 })
 
 beforeEach(async () => {
-  await env.DB.batch(['budgets', 'transactions', 'accounts', 'change_log', 'categories'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch(['kept_reports', 'budgets', 'transactions', 'accounts', 'change_log', 'categories'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
   await env.DB.batch(starters.map((c) => env.DB.prepare('INSERT INTO categories (id, name, kind) VALUES (?, ?, ?)').bind(c.id, c.name, c.kind)))
   for (const c of starters) ids[c.name] = c.id
   for (const name of [ALICE, BEN]) ids[name] = (await env.DB.prepare("INSERT INTO categories (name, kind) VALUES (?, 'loans') RETURNING id").bind(name).first<{ id: number }>())!.id
@@ -325,8 +327,9 @@ describe('only a Loans Category', () => {
 })
 
 describe('who can read it, and what a request refuses', () => {
-  it('gives every Member the same Report as the Admin', async () => {
+  it('gives a Member the same Report as the Admin, once the Admin has kept it', async () => {
     await add(parent, '2026-08-01', -50_000, { override: ALICE, note: 'A note' })
+    await keepReport('loans', { to: '2026-10-31' })
     expect(await page({}, 'admin')).toEqual(await page({}, 'member'))
     expect(lines(await page({}, 'member'))).toEqual([['2026-08-01', -50_000]])
   })
@@ -523,7 +526,7 @@ describe('what a request costs (ADR 0004)', () => {
   /** The Worker's handler with `db` standing in for D1, called directly because the test changes the Worker's env (CODING_STANDARDS.md: Tests). */
   async function requestWith(db: D1Database, over: Record<string, string | undefined> = {}) {
     const ctx = createExecutionContext()
-    const res = await worker.fetch!(new Request(`${origin}/api/reports/loans?${query(over)}`, { headers: { Cookie: 'fernledger_dev_as=member' } }) as never, { ...env, DB: db }, ctx)
+    const res = await worker.fetch!(new Request(`${origin}/api/reports/loans?${query(over)}`, { headers: { Cookie: 'fernledger_dev_as=admin' } }) as never, { ...env, DB: db }, ctx)
     await waitOnExecutionContext(ctx)
     return res
   }
