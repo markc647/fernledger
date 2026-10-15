@@ -379,6 +379,25 @@
     outline: 1px dashed CanvasText;
     outline-offset: -2px;
   }
+  /* A menu of a row's actions: the item that is highlighted is a fill, which the reader's palette drops, so it takes the palette's highlight (!important, because the destructive item
+     sets its own text colour as it is highlighted). The others have no box: Tailwind's `outline-hidden` is an outline in this mode, and would draw one round every item. The line between
+     items is a fill too: it is drawn in the text colour. */
+  [data-slot="dropdown-menu-item"][data-highlighted] {
+    forced-color-adjust: none;
+    background-color: Highlight !important;
+    color: HighlightText !important;
+  }
+  [data-slot="dropdown-menu-item"]:not([data-highlighted]) {
+    outline: none;
+  }
+  [data-slot="dropdown-menu-separator"] {
+    background-color: CanvasText;
+  }
+  /* A row being dragged is faded and lifted, which high contrast does not show: it is outlined as well. */
+  [data-dragging="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
   /* A chart's line and bars are drawn in theme colours, which the reader's palette may not keep. Draw them in the text colour; the
      figures beside the chart say the rest. */
   [data-slot="chart"] :is(.recharts-line-curve, .recharts-dot, .recharts-rectangle):not(.recharts-tooltip-cursor) {

@@ -3,7 +3,9 @@ import { useState } from 'react'
 import { Amount } from '@/components/amount'
 import { DatePicker } from '@/components/date-picker'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
+import { RowAction, RowActions } from '@/components/row-actions'
 import { Status } from '@/components/status'
+import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { formatDate } from '@/lib/format'
 
 // Not in the navigation. A reference for the shared display building blocks, built from made-up data, so the browser
@@ -16,6 +18,11 @@ const SAMPLE = [
   { id: 1, date: '2026-10-08', description: 'Example Supermarket', cents: -111111 },
   { id: 2, date: '2026-10-05', description: 'Example Employer wages', cents: 123456 },
   { id: 3, date: '2026-09-27', description: 'Example Power Company', cents: -888888 },
+]
+
+const CATEGORIES = [
+  { id: 1, name: 'Groceries', kind: 'Spending' },
+  { id: 2, name: 'Wages', kind: 'Income' },
 ]
 
 type SortKey = 'date' | 'description' | 'amount'
@@ -98,6 +105,36 @@ function Styleguide() {
           { key: 'date', header: 'Date', cell: (row) => formatDate(row.date), sort: sortable('date', 'descending') },
           { key: 'description', header: 'Description', cell: (row) => row.description, sort: sortable('description', 'ascending') },
           { key: 'amount', header: 'Amount', align: 'end', cell: (row) => <Amount cents={row.cents} showLabel />, sort: sortable('amount', 'ascending') },
+        ]}
+      />
+
+      <h2 className="mt-8 mb-3 text-xl font-semibold">Rows with actions</h2>
+      <p className="mb-3">
+        A table whose rows can be changed (the Rules and the Categories) is drawn with shadcn/ui's Table, <code>look="shadcn"</code>, and each row's actions are in its “⋯” menu. On a narrow screen it is cards, each with the
+        same menu.
+      </p>
+      <ResponsiveTable
+        look="shadcn"
+        caption="Sample Categories"
+        rows={CATEGORIES}
+        getRowKey={(row) => row.id}
+        columns={[
+          { key: 'name', header: 'Category', cell: (row) => row.name },
+          { key: 'kind', header: 'Kind', cell: (row) => row.kind },
+          {
+            key: 'actions',
+            header: 'Actions',
+            align: 'end',
+            cell: (row) => (
+              <RowActions row={row.name} id={`sample-${row.id}-actions`}>
+                <RowAction onSelect={() => {}}>Rename</RowAction>
+                <DropdownMenuSeparator />
+                <RowAction variant="destructive" onSelect={() => {}}>
+                  Remove
+                </RowAction>
+              </RowActions>
+            ),
+          },
         ]}
       />
 

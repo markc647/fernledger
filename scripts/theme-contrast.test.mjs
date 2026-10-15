@@ -39,6 +39,13 @@ const pairs = [
   ['muted-foreground', 'background', 4.5],
   ['muted-foreground', 'muted', 4.5],
   ['ring', 'background', 3],
+  // A menu of a row's actions (src/components/ui/dropdown-menu.tsx): its text on the panel, the highlighted item's on its fill, and the destructive item's words (--danger, not the stock
+  // --destructive, which is under 4.5:1 on the pale red that highlights it) on the panel and on the neutral highlight; and the handle that drags a row (muted text) on the panel.
+  ['popover-foreground', 'popover', 4.5],
+  ['accent-foreground', 'accent', 4.5],
+  ['danger', 'popover', 4.5],
+  ['danger', 'accent', 4.5],
+  ['muted-foreground', 'popover', 4.5],
   // The shell (src/components/site-header.tsx, app-sidebar.tsx): text on the tinted header and sidebar, on the current page's pill and under the pointer, the breadcrumb's
   // group and the footer's role (muted text on the tint), and the focus ring on the tint and on the pill.
   ['sidebar-foreground', 'sidebar', 4.5],
