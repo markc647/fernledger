@@ -226,7 +226,6 @@ test.describe('opening the Report', () => {
       ['/reports/income-vs-spending?account=abc&from=2022-01-01&to=2022-12-31', 'There is no such Account', true],
       ['/reports/income-vs-spending?account=0&from=2022-01-01&to=2022-12-31', 'There is no such Account', true],
       ['/reports/income-vs-spending?account=-1&from=2022-01-01&to=2022-12-31', 'There is no such Account', true],
-      ['/reports/income-vs-spending?from=x&to=y', 'Choose the first and last dates', false],
       ['/reports/income-vs-spending?account=2', 'Choose the first and last dates', false],
     ] as const) {
       await page.goto(path)

@@ -161,7 +161,6 @@ test.describe('opening the Report', () => {
       ['/reports/balances?account=abc&from=2010-01-01&to=2010-12-31', 'There is no such Account', true],
       ['/reports/balances?account=0&from=2010-01-01&to=2010-12-31', 'There is no such Account', true],
       ['/reports/balances?account=-1&from=2010-01-01&to=2010-12-31', 'There is no such Account', true],
-      ['/reports/balances?from=x&to=y', 'Choose the first and last dates', false],
       ['/reports/balances?account=2', 'Choose the first and last dates', false],
     ] as const) {
       await page.goto(path)

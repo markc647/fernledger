@@ -97,6 +97,17 @@ test.describe('the pages', () => {
     expect(asked).toEqual([])
   })
 
+  // The router takes out of the address what a page leaves out as not valid, so an address of nothing but dates that are not dates is the page for choosing, address and all.
+  test('an address that chooses only dates that are not dates is the page for choosing: its address loses them and nothing is said to be missing', async ({ page }) => {
+    for (const report of EXPECTED) {
+      await page.goto(`${report.path}?from=x&to=y`)
+      await expect(page.getByRole('form', { name: report.name, exact: true })).toBeVisible()
+      await expect(page).toHaveURL(new RegExp(`${report.path}$`))
+      await expect(page.getByRole('alert')).toHaveCount(0)
+      await expect(page.getByRole('status').filter({ hasText: /^Choose the / })).toHaveCount(0)
+    }
+  })
+
   // The dates are in a year that no Transaction is in, so this reads no figures; it is only that the form is filled in from them.
   test('the address of each Report from before it had a page of its own still opens it, and its form is filled in from the dates in it', async ({ page }) => {
     for (const report of EXPECTED) {

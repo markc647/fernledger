@@ -205,7 +205,6 @@ test.describe('opening the Report', () => {
     await signInAs(context, 'member')
     for (const [path, words, alert] of [
       ['/reports/budget-vs-actual?from=2001-01-01', 'Choose the first and last dates', false],
-      ['/reports/budget-vs-actual?from=x&to=y', 'Choose the first and last dates', false], // one that is not a date is chosen, and not valid
       ['/reports/budget-vs-actual?from=2001-12-31&to=2001-01-01', 'before the “From” date', true],
       ['/reports/budget-vs-actual?from=2001-01-31&to=2003-01-01', 'covers at most 24 months', true],
     ] as const) {

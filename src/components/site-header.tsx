@@ -62,7 +62,10 @@ export function SiteHeader({
                 {groupTo ? (
                   <BreadcrumbItem className="shrink-0">
                     <BreadcrumbLink asChild>
-                      <Link to={groupTo}>{group}</Link>
+                      {/* Exact, or the router marks it as the current page, which the page after it is. */}
+                      <Link to={groupTo} activeOptions={{ exact: true }}>
+                        {group}
+                      </Link>
                     </BreadcrumbLink>
                   </BreadcrumbItem>
                 ) : (

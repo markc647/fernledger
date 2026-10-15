@@ -217,7 +217,6 @@ test.describe('opening the Report', () => {
     for (const [path, words, alert] of [
       ['/reports/loans?from=2001-01-01', 'Choose the last date this Report covers.', false],
       ['/reports/loans?category=3', 'Choose the last date this Report covers.', false],
-      ['/reports/loans?from=x&to=y', 'Choose the last date this Report covers.', false],
       ['/reports/loans?from=2001-12-31&to=2001-01-01', 'before the “From” date', true],
       ['/reports/loans?category=999999999&to=2001-12-31', 'It may have been removed, or may no longer be a Loans Category', true],
       ['/reports/loans?category=abc&to=2001-12-31', 'There is no such Loans Category', true],

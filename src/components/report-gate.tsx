@@ -75,7 +75,7 @@ export function Needs({ message, alert = false }: { message: string; alert?: boo
  * Everything a Report's page does before it has anything to read, the same for every Report (CODING_STANDARDS.md, UI): it writes the page (the Report's name, what it holds and
  * `form`, the Report's own form filled in from the address), reads the Accounts, and checks the address's dates and Account. Until they are right it says, under the form, what is
  * missing. Once they are, it gives `children` the scope, and only then does the Report read its data, so a Report's own query runs once it has Accounts and dates to ask about.
- * An address that chooses nothing (no Account, Category or date, not even a blank or invalid one) is a page for choosing: the form, and no complaint that nothing is chosen.
+ * An address that chooses nothing (no Account, Category or date: the router takes a blank one, and a date that is not one, out of the address) is a page for choosing: the form, and no complaint that nothing is chosen.
  */
 export function ReportGate({
   report,
@@ -100,9 +100,9 @@ export function ReportGate({
   children: (scope: ReportScope) => ReactNode
 }) {
   const accounts = useQuery(accountsQuery)
-  // What the address says, before it was read into `search`, which holds only what was valid: a date that is not one is still something chosen.
-  const raw = useRouterState({ select: (state) => state.location.search }) as Record<string, unknown>
-  const chosen = ['account', 'category', 'from', 'to'].some((key) => raw[key] !== undefined && raw[key] !== null && raw[key] !== '')
+  // What the address chooses, which `search` does not say for a Category (the Loans page gives it only its dates).
+  const address = useRouterState({ select: (state) => state.location.search }) as Record<string, unknown>
+  const chosen = ['account', 'category', 'from', 'to'].some((key) => address[key] !== undefined && address[key] !== null && address[key] !== '')
   const page = (body: ReactNode, withForm = true) => (
     <ReportPage report={report} form={withForm && form}>
       {body}
