@@ -1159,10 +1159,10 @@ test.describe('responsive table', () => {
   test('right-aligns amounts and gives digits a fixed width', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 })
     await page.goto('/styleguide')
-    await expect(page.getByRole('table')).toBeVisible()
+    await expect(page.getByRole('table', { name: 'Sample transactions' })).toBeVisible()
     await page.evaluate(() => document.fonts.ready) // measure the real font, not the fallback it swaps from
-    const wide = page.getByRole('table').getByText('−$1,111.11')
-    const other = page.getByRole('table').getByText('−$8,888.88')
+    const wide = page.getByRole('table', { name: 'Sample transactions' }).getByText('−$1,111.11')
+    const other = page.getByRole('table', { name: 'Sample transactions' }).getByText('−$8,888.88')
     const [a, b] = [await wide.boundingBox(), await other.boundingBox()]
     // Same number of characters, different digits: equal widths means tabular figures; equal right edges, right-aligned.
     expect(a!.width).toBeCloseTo(b!.width, 1)
