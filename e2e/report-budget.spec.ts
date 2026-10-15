@@ -607,7 +607,7 @@ test.describe('printed', () => {
     await expect(page).toHaveTitle(`${TITLE} – Budget vs actual – All Accounts – ${range(year)}`)
   })
 
-  test('is black text on white paper, even from the dark theme, and an over-Budget status is black too', async ({ page }, testInfo) => {
+  test('is black text on white paper, even from the dark theme, and an over-Budget status is black too', { tag: '@theme' }, async ({ page }, testInfo) => {
     // In the dark project the page is the dark theme on screen, and must still print like this.
     await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
     await expect(article(page).getByText('Over Budget').first()).toBeVisible()

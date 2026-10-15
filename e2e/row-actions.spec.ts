@@ -4,7 +4,7 @@ import { ruleActions, ruleGrip, withRules } from './rule-helpers'
 import { actionsButton, arrowTo, menuAction, OPEN_MENU, openActions, textContrast } from './row-actions-helpers'
 import { chooseTextSize, expectTextSize } from './shell-helpers'
 
-// The "⋯" menu of a row and the handle that drags a Rule (src/components/row-actions.tsx, sortable-rows.tsx), as the reader sees them: in both themes (every test runs in both),
+// The "⋯" menu of a row and the handle that drags a Rule (src/components/row-actions.tsx, sortable-rows.tsx), as the reader sees them: in both themes (the two that look at colour are tagged @theme, which runs them in dark too),
 // with Windows high contrast, at the text sizes, and on both pages that have them. What the actions do is in rules.spec.ts, rules-reorder.spec.ts and categories.spec.ts.
 
 /** The colour a CSS value is, as the browser computes it for a property, so a token is compared in whichever colour space the theme writes it. */
@@ -31,7 +31,7 @@ const withRule = (page: Page, context: Parameters<typeof withRules>[0], baseURL:
     await body(id)
   })
 
-test('the menu, its items and the handle are drawn in the theme, and their text is at least 4.5:1 against what it is on, resting and highlighted', async ({ page, context, baseURL }, testInfo) => {
+test('the menu, its items and the handle are drawn in the theme, and their text is at least 4.5:1 against what it is on, resting and highlighted', { tag: '@theme' }, async ({ page, context, baseURL }, testInfo) => {
   await withRule(page, context, baseURL!, testInfo, async (id) => {
     const actions = ruleActions(page, id)
     // The handle and the button are graphics that carry meaning: 3:1 (1.4.11), and in practice more.
@@ -61,7 +61,7 @@ test('the menu, its items and the handle are drawn in the theme, and their text 
   })
 })
 
-test('Windows high contrast keeps the handle and the button as buttons, the highlighted item in the highlight colour, the line between items, and a Rule being dragged outlined', async ({ page, context, baseURL }, testInfo) => {
+test('Windows high contrast keeps the handle and the button as buttons, the highlighted item in the highlight colour, the line between items, and a Rule being dragged outlined', { tag: '@theme' }, async ({ page, context, baseURL }, testInfo) => {
   await withRule(page, context, baseURL!, testInfo, async (id) => {
     await page.emulateMedia({ forcedColors: 'active' })
     const highlight = await resolved(page, 'backgroundColor', 'Highlight')

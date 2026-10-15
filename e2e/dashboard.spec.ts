@@ -600,7 +600,7 @@ test('spending is marked busy from its first load, and the old period is marked 
   expect(await liveHistory(page, 'spending-heading')).toEqual(['', 'Loading spending…', 'Spending has loaded.', 'Updating spending…', 'Spending has loaded.'])
 })
 
-test('the charts have no WCAG 2.2 AA violations in this theme, with their data, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
+test('the charts have no WCAG 2.2 AA violations, with their data, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
   const { from, to, words } = dataFor(testInfo.project.name)
   await seed(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')
@@ -620,7 +620,7 @@ test('the charts have no WCAG 2.2 AA violations in this theme, with their data, 
   }
 })
 
-test('the chart colours are the theme\'s, drawn in the text colour when Windows high contrast is on, and nothing moves', async ({ page, context, baseURL }, testInfo) => {
+test('the chart colours are the theme\'s, drawn in the text colour when Windows high contrast is on, and nothing moves', { tag: '@theme' }, async ({ page, context, baseURL }, testInfo) => {
   const { from, to } = dataFor(testInfo.project.name)
   await seed(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')

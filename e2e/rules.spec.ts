@@ -710,7 +710,7 @@ test.describe('the D1 usage bar', () => {
       writes: { level: 'Low', percent: 4, drawn: 4, token: 'success', text: '4,321 of 100,000 rows written' },
     },
   ]) {
-    test(`shows ${runs}: each badge sits with its own bar, and the bar's fill is the level's colour while its track keeps its own`, async ({ page, context }) => {
+    test(`shows ${runs}: each badge sits with its own bar, and the bar's fill is the level's colour while its track keeps its own`, { tag: '@theme' }, async ({ page, context }) => {
       await signInAs(context, 'admin')
       await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
       await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures(figures) }))

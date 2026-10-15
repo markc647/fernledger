@@ -3,7 +3,7 @@ import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { navigateTo } from './shell-helpers'
 
 // Ticket 30: the pages every Member can open (About your data, How to sign in) and the Home Screen app. Axe runs on both
-// pages in both themes (the project is the theme), for a Member and for the Admin; the zoom test in display.spec.ts
+// pages, for a Member and for the Admin (without colour contrast, which a scan leaves out: see `noAxeViolations`); the zoom test in display.spec.ts
 // covers both pages too.
 
 // The Settings are shared by every test and both themes, so each test leaves the defaults behind (as settings.spec.ts does).
@@ -318,7 +318,7 @@ test.describe('How to sign in', () => {
       for (const size of sizes) expect(size).toBeGreaterThanOrEqual(16)
     })
 
-    test('is dark text on white paper, even from the dark theme', async ({ page }) => {
+    test('is dark text on white paper, even from the dark theme', { tag: '@theme' }, async ({ page }) => {
       const { text, paper } = await page.evaluate(() => {
         const rgb = (css: string) => {
           const ctx = document.createElement('canvas').getContext('2d')!
