@@ -1,25 +1,24 @@
 import type { APIRequestContext, BrowserContext, Page } from '@playwright/test'
 import { netWorth, SPENT, showNetWorth, showSpending, stubNetWorth, stubSpending } from './chart-helpers'
-import { dateField } from './date-helpers'
-import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { ensureCategory, importRows, restoreAppTitleAfterEach, type SeedRow } from './report-helpers'
+import { dateField, pickDate, thisMonth } from './date-helpers'
+import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
+import { ensureCategory, importRows, restoreAppTitleAfterEach, transactionId, type SeedRow } from './report-helpers'
 import { arrowTo, menuAction, OPEN_MENU } from './row-actions-helpers'
-import { ruleActions, withRules } from './rule-helpers'
-import { openHeaderControls, openNavGroup } from './shell-helpers'
+import { categoryId, ruleActions, runningJob, usageFigures, usageOn, withRules } from './rule-helpers'
+import { navGroup, openHeaderControls, openNavGroup, siteHeader } from './shell-helpers'
 
-// Colour contrast, measured once for the whole app, in both themes. A scan anywhere else leaves `color-contrast` out (`noAxeViolations` in fixtures.ts), so this is where text on a tint or a
-// translucent fill (a status, a notice, a badge, a selected row) is held to WCAG 2.2 AA 1.4.3 as it is painted: scripts/theme-contrast.test.mjs holds the theme's own pairs of colours, which cannot
-// see a colour mixed over another. It is tagged @theme, so the dark project runs it as well as the light one. Every page is looked at as the Admin, and as a Member where the page is not the same
-// for one, in the state that shows the most colour: with Transactions, a Transfer, Budgets that are over and under, a Balance Check warning, the charts drawn, a preview of an Import, an error and a
-// "saved" message where the page has them. What opens over a page is scanned open, as the Admin: the phone's sidebar and display menu, the calendar, a row's "⋯" menu and the Transaction edit panel.
+// Colour contrast, measured once for the whole app, in both themes (CODING_STANDARDS.md#tests). Every page is scanned with `contrast: true`, as the Admin and as a Member where the page differs,
+// in the state that shows the most colour, and what opens over a page is scanned open.
 //
-// The light and dark projects share one local database, so each has two Accounts and two Categories of its own, dated this NZ month and last (the Budgets page and the Summary are about this month).
+// The light and dark projects share one local database, so each has two Accounts and three Categories of its own, dated this NZ month and last (the Budgets page and the Summary are about this month).
 
-const thisMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7)
 const lastMonth = (() => {
   const index = Number(thisMonth.slice(0, 4)) * 12 + Number(thisMonth.slice(5, 7)) - 2
   return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}`
 })()
+/** The dates of the Reports: from the first of last month to the 28th of this one, which has a month that is not over and dates that are part of a month. */
+const RANGE = `from=${lastMonth}-01&to=${thisMonth}-28`
+const PHONE = { width: 390, height: 844 }
 
 const dataFor = (project: string) => {
   const dark = project === 'dark'
@@ -30,6 +29,7 @@ const dataFor = (project: string) => {
     // Names that no other spec's name is part of. The food Budget is $100.00 and $150.00 is spent (Over Budget); the petrol Budget is $200.00 and $20.00 is spent (Under Budget).
     food: `Contrast food ${project}`,
     petrol: `Contrast petrol ${project}`,
+    loan: `Contrast lent ${project}`,
     search: `CONTRAST ${project}`,
   }
 }
@@ -38,6 +38,7 @@ const everydayRows = (project: string): SeedRow[] => [
   { date: `${thisMonth}-01`, payee: `CONTRAST ${project} SHOP`, amountCents: -15_000, category: dataFor(project).food },
   { date: `${thisMonth}-01`, payee: `CONTRAST ${project} PUMP`, amountCents: -2_000, category: dataFor(project).petrol },
   { date: `${thisMonth}-02`, payee: `CONTRAST ${project} MYSTERY`, amountCents: -1_234 }, // Uncategorised
+  { date: `${thisMonth}-02`, payee: `CONTRAST ${project} LENT`, amountCents: -5_000, category: dataFor(project).loan }, // money lent: a Loans Category, so not spending
   { date: `${thisMonth}-02`, payee: `CONTRAST ${project} TO SAVINGS`, amountCents: -31_741 }, // the Transfer's first half; an amount no other spec uses, so nothing else pairs with it
 ]
 
@@ -46,14 +47,18 @@ const seeded = new Set<string>()
 /** The project's Categories, Budgets, two Accounts and their Transactions, with a Balance Check that differs by $5.00 and a Transfer. Safe to repeat, as the other specs' seeds are. */
 async function seed(context: BrowserContext, baseURL: string, project: string) {
   if (seeded.has(project)) return
-  const { everyday, savings, food, petrol } = dataFor(project)
+  const { everyday, savings, food, petrol, loan } = dataFor(project)
   await signInAs(context, 'admin')
-  const categories = { [food]: await ensureCategory(context, baseURL, food, 'spending'), [petrol]: await ensureCategory(context, baseURL, petrol, 'spending') }
+  const categories = {
+    [food]: await ensureCategory(context, baseURL, food, 'spending'),
+    [petrol]: await ensureCategory(context, baseURL, petrol, 'spending'),
+    [loan]: await ensureCategory(context, baseURL, loan, 'loans'),
+  }
   for (const [name, amountCents] of [[food, 10_000], [petrol, 20_000]] as const) {
     expect((await context.request.put(`/api/budgets/${categories[name]}`, { headers: { Origin: baseURL }, data: { effectiveFrom: thisMonth, amountCents } })).ok()).toBe(true)
   }
 
-  // Last month's file ends at $1,000.00; this month's adds up to $499.75 less, and the bank says $5.00 more than that.
+  // Last month's file ends at $1,000.00; this month's adds up to $549.75 less, and the bank says $5.00 more than that.
   const rows = everydayRows(project)
   const spent = rows.reduce((total, row) => total + row.amountCents, 0)
   await importRows(context, baseURL, {
@@ -75,11 +80,10 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
   seeded.add(project)
 }
 
-/** The ID of the Transaction whose description is `payee`, which the spec's own data has just the one of. */
-async function transactionId(context: BrowserContext, payee: string) {
-  const found = (await (await context.request.get(`/api/transactions?text=${encodeURIComponent(payee)}&count=false`)).json()) as { transactions: { id: number }[] }
-  expect(found.transactions).toHaveLength(1)
-  return found.transactions[0]!.id
+/** The ID of the Account called `name`, which the Reports are asked about. */
+async function accountIdOf(context: BrowserContext, name: string) {
+  const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
+  return accounts.find((account) => account.name === name)!.id
 }
 
 /** An ASB file of two new Transactions for the project's everyday Account, to choose on the Import screen and look at as a preview (it is never imported). */
@@ -103,8 +107,15 @@ function previewFile({ project, everyday }: ReturnType<typeof dataFor>) {
 type Role = 'admin' | 'member'
 const ROLES: Role[] = ['admin', 'member']
 
-/** What a page's visit has to work with: the project's data, and `scan` for each state of the page that is to be looked at (a label says which, for a failure that must be found from its message alone; `within` for an overlay). */
-type Visit = { page: Page; context: BrowserContext; role: Role; data: ReturnType<typeof dataFor>; scan: (state?: string, options?: { within?: string }) => Promise<void> }
+/** What a page's visit has to work with: the project's data, whether it is on a phone, and `scan` for each state of the page that is to be looked at (a label says which, for a failure that must be found from its message alone; `within` for an overlay). */
+type Visit = {
+  page: Page
+  context: BrowserContext
+  role: Role
+  phone: boolean
+  data: ReturnType<typeof dataFor>
+  scan: (state?: string, options?: { within?: string }) => Promise<void>
+}
 
 /** The scan of one state of a page: with colour contrast on, once the project's theme is showing (or the scan would not be testing it). A failure says which page, who and which state, as a CI run keeps no trace to look at. */
 const scanner = (page: Page, project: string, path: string, role: Role) => async (state = 'as it opens', options: { within?: string } = {}) => {
@@ -118,12 +129,14 @@ const scanner = (page: Page, project: string, path: string, role: Role) => async
 
 const heading = (page: Page, name: string) => expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
 
-// The D1 usage bar, switched on and filled so that two of its three levels are showing (Medium and High): the badges are text on a tint.
-const usageOn = { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] }
-const usageFigures = { rowsRead: 2_750_000, rowsWritten: 105_000, readLimit: 5_000_000, writeLimit: 100_000, resetsAt: '2026-10-15T00:00:00.000Z' }
-
-// `roles` is who looks at the page: both, unless the page is the same for a Member as for the Admin.
-const PAGES: { path: string; roles?: Role[]; setup?: (setup: { page: Page; request: APIRequestContext; baseURL: string }) => Promise<void>; visit: (visit: Visit) => Promise<void> }[] = [
+// `roles` is who looks at the page: both, unless the page is the same for a Member as for the Admin. `phone` adds a pass at 390px wide, as the Admin, where a table becomes cards.
+const PAGES: {
+  path: string
+  roles?: Role[]
+  phone?: boolean
+  setup?: (setup: { page: Page; request: APIRequestContext; baseURL: string }) => Promise<void>
+  visit: (visit: Visit) => Promise<void>
+}[] = [
   {
     path: '/styleguide',
     visit: async ({ page, scan }) => {
@@ -135,6 +148,7 @@ const PAGES: { path: string; roles?: Role[]; setup?: (setup: { page: Page; reque
   {
     // The Dashboard and the Summary, with both charts drawn and net worth's figures open. The charts are stubbed, as in shell.spec.ts: net worth is refused for more than 49 Accounts, which the specs that share this database can reach.
     path: '/',
+    phone: true,
     setup: async ({ page }) => {
       await stubNetWorth(page)
       await stubSpending(page, SPENT, 16_050)
@@ -153,11 +167,17 @@ const PAGES: { path: string; roles?: Role[]; setup?: (setup: { page: Page; reque
   {
     // The list, and for the Admin the edit panel of the Transfer's first half (it points to Not a Transfer), and the question that button asks (nothing is changed: the question is not answered).
     path: '/transactions',
-    visit: async ({ page, role, data, scan }) => {
+    phone: true,
+    visit: async ({ page, role, phone, data, scan }) => {
       await page.goto(`/transactions?q=${encodeURIComponent(data.search)}`)
       await heading(page, 'Transactions')
+      if (phone) {
+        await expect(page.getByText('TO SAVINGS').first()).toBeVisible() // cards, not rows
+        await scan()
+        return
+      }
       const rows = page.getByRole('row').filter({ has: page.getByRole('cell') })
-      await expect(rows).toHaveCount(6) // the five of this Account (last month's, and this month's four) and the Transfer's other half
+      await expect(rows).toHaveCount(7) // the six of this Account (last month's, and this month's five) and the Transfer's other half
       await expect(rows.filter({ hasText: 'TO SAVINGS' })).toContainText('Transfer')
       await scan()
       if (role === 'member') return
@@ -180,7 +200,7 @@ const PAGES: { path: string; roles?: Role[]; setup?: (setup: { page: Page; reque
     },
   },
   {
-    // Nothing is imported: the preview is of a file the Admin has chosen. A Member is told the screen is the Admin's.
+    // Nothing is imported: the preview is of a file the Admin has chosen, and a file that is not a bank export is explained. A Member is told the screen is the Admin's.
     path: '/import',
     visit: async ({ page, role, data, scan }) => {
       await page.goto('/import')
@@ -191,6 +211,9 @@ const PAGES: { path: string; roles?: Role[]; setup?: (setup: { page: Page; reque
         return
       }
       await scan('as it opens')
+      await page.getByLabel('Bank export file').setInputFiles({ name: 'notes.csv', mimeType: 'text/csv', buffer: Buffer.from('Date,Thing\n2026/10/01,Something\n') })
+      await expect(page.getByRole('alert')).toContainText('not a supported bank export')
+      await scan('with an error')
       await page.getByLabel('Bank export file').setInputFiles({ name: 'contrast.csv', mimeType: 'text/csv', buffer: Buffer.from(previewFile(data)) })
       await expect(page.getByRole('heading', { level: 2, name: 'Preview' })).toBeVisible()
       await expect(page.getByText('2 transactions to import')).toBeVisible()
@@ -218,7 +241,7 @@ const PAGES: { path: string; roles?: Role[]; setup?: (setup: { page: Page; reque
     },
   },
   {
-    // The same for a Member as for the Admin. Its date filters open a calendar, scanned open.
+    // The same for a Member as for the Admin. Its date filters open a calendar, scanned open with no date and then with one chosen (the first of this month, so today is on the same page).
     path: '/change-log',
     roles: ['admin'],
     visit: async ({ page, scan }) => {
@@ -229,6 +252,11 @@ const PAGES: { path: string; roles?: Role[]; setup?: (setup: { page: Page; reque
       await dateField(page, 'From').click()
       await expect(page.getByRole('dialog').getByLabel('Choose the Year')).toBeVisible() // the calendar's code is fetched when the first one is opened
       await scan('with the calendar open', { within: '[data-slot="popover-content"]' })
+      await page.keyboard.press('Escape')
+      await pickDate(page, 'From', `${thisMonth}-01`)
+      await dateField(page, 'From').click()
+      await expect(page.getByRole('dialog').getByLabel('Choose the Year')).toBeVisible()
+      await scan('with the calendar open and a date chosen', { within: '[data-slot="popover-content"]' })
     },
   },
   {
@@ -263,6 +291,55 @@ const PAGES: { path: string; roles?: Role[]; setup?: (setup: { page: Page; reque
     },
   },
   {
+    // The Everyday Account's Reports, each with a result: the listing of its Transactions with their Categories.
+    path: '/reports/transactions',
+    visit: async ({ page, context, data, scan }) => {
+      await page.goto(`/reports/transactions?account=${await accountIdOf(context, data.everyday.name)}&${RANGE}`)
+      const report = page.getByRole('article', { name: 'Transaction listing' })
+      await expect(report.getByRole('table').first()).toBeVisible()
+      await expect(report).toContainText(data.food)
+      await scan()
+    },
+  },
+  {
+    // Its balances month by month, with the $5.00 the bank disagrees by.
+    path: '/reports/balances',
+    visit: async ({ page, context, data, scan }) => {
+      await page.goto(`/reports/balances?account=${await accountIdOf(context, data.everyday.name)}&${RANGE}`)
+      const report = page.getByRole('article', { name: 'Balances over time' })
+      await expect(report.getByRole('table').first()).toBeVisible()
+      await expect(report.getByText('Balance differs from bank by $5.00').first()).toBeVisible()
+      await scan()
+    },
+  },
+  {
+    path: '/reports/spending',
+    visit: async ({ page, context, data, scan }) => {
+      await page.goto(`/reports/spending?account=${await accountIdOf(context, data.everyday.name)}&${RANGE}`)
+      const report = page.getByRole('article', { name: 'Spending by Category' })
+      await expect(report.getByRole('table', { name: 'Spending in each Category' })).toContainText(data.food)
+      await scan()
+    },
+  },
+  {
+    // The months, with the one that is not over yet and a notice for dates that are part of a month.
+    path: '/reports/income-vs-spending',
+    visit: async ({ page, context, data, scan }) => {
+      await page.goto(`/reports/income-vs-spending?account=${await accountIdOf(context, data.everyday.name)}&${RANGE}`)
+      await expect(page.getByRole('article', { name: 'Income vs spending by month' }).getByRole('table', { name: 'Income and spending by month' })).toBeVisible()
+      await scan()
+    },
+  },
+  {
+    // What is owed on the money lent from the Everyday Account.
+    path: '/reports/loans',
+    visit: async ({ page, context, data, scan }) => {
+      await page.goto(`/reports/loans?category=${await categoryId(context, data.loan)}&${RANGE}`)
+      await expect(page.getByRole('article', { name: 'Loans', exact: true }).getByRole('table', { name: `Transactions in ${data.loan}` })).toBeVisible()
+      await scan()
+    },
+  },
+  {
     // A Report with a result: the Budget vs actual Report has a status on every row, and a notice for a month that is not over and for dates that are part of a month.
     path: '/reports/budget-vs-actual',
     visit: async ({ page, data, scan }) => {
@@ -275,10 +352,11 @@ const PAGES: { path: string; roles?: Role[]; setup?: (setup: { page: Page; reque
   },
   {
     path: '/categories',
+    phone: true,
     visit: async ({ page, data, scan }) => {
       await page.goto('/categories')
       await heading(page, 'Categories')
-      await expect(page.getByRole('cell', { name: data.food, exact: true })).toBeVisible()
+      await expect(page.getByText(data.food, { exact: true }).first()).toBeVisible() // a cell, or a card on a phone
       await scan()
     },
   },
@@ -320,23 +398,73 @@ const PAGES: { path: string; roles?: Role[]; setup?: (setup: { page: Page; reque
 restoreAppTitleAfterEach() // the Settings page is saved from, and the Settings are shared by every test and both themes
 
 test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
-  for (const { path, roles = ROLES, setup, visit } of PAGES) {
-    test(`${path} has no colour contrast violations, as ${roles.length === 1 ? 'the Admin' : 'the Admin and as a Member'}`, async ({ page, context, request, baseURL }, testInfo) => {
+  for (const { path, roles = ROLES, phone, setup, visit } of PAGES) {
+    for (const onPhone of phone ? [false, true] : [false]) {
+      const who: Role[] = onPhone ? ['admin'] : roles
+      const title = `${path} has no colour contrast violations${onPhone ? ' on a phone' : ''}, as ${who.length === 1 ? 'the Admin' : 'the Admin and as a Member'}`
+      test(title, async ({ page, context, request, baseURL }, testInfo) => {
+        const project = testInfo.project.name
+        const data = dataFor(project)
+        await seed(context, baseURL!, project)
+        await setup?.({ page, request, baseURL: baseURL! })
+        if (onPhone) await page.setViewportSize(PHONE)
+        for (const role of who) {
+          await signInAs(context, role)
+          await visit({ page, context, role, phone: onPhone, data, scan: scanner(page, project, onPhone ? `${path} on a phone` : path, role) })
+        }
+      })
+    }
+  }
+
+  // The Rules page: the table of Rules (cards on a phone) and the D1 usage bar (switched on, with the Medium and High levels showing). A Member is told it is the Admin's. The Admin's Rule has its "⋯"
+  // menu opened with the keyboard, as far as Remove, whose words are red on a pale red when it is highlighted; and the page is looked at again with a run of the Rules that is paused.
+  for (const onPhone of [false, true]) {
+    test(`/rules has no colour contrast violations${onPhone ? ' on a phone' : ''}, as ${onPhone ? 'the Admin' : 'the Admin and as a Member'}`, async ({ page, context, baseURL }, testInfo) => {
       const project = testInfo.project.name
-      const data = dataFor(project)
       await seed(context, baseURL!, project)
-      await setup?.({ page, request, baseURL: baseURL! })
-      for (const role of roles) {
-        await signInAs(context, role)
-        await visit({ page, context, role, data, scan: scanner(page, project, path, role) })
-      }
+      if (onPhone) await page.setViewportSize(PHONE)
+      await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+      await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures({ rowsRead: 2_750_000, rowsWritten: 105_000 }) }))
+      await withRules(context, baseURL!, testInfo, ['CONTRAST'], async ([rule]) => {
+        try {
+          for (const role of onPhone ? (['admin'] as const) : ROLES) {
+            await signInAs(context, role)
+            await page.goto('/rules')
+            await heading(page, 'Rules')
+            if (role === 'admin') {
+              await expect(ruleActions(page, rule)).toBeVisible()
+              await expect(page.getByRole('region', { name: 'Free database allowance' }).getByRole('progressbar')).toHaveCount(2)
+            } else {
+              await expect(page.getByText('Only the Admin can use this page.')).toBeVisible()
+            }
+            const scan = scanner(page, project, onPhone ? '/rules on a phone' : '/rules', role)
+            await scan()
+            if (role === 'admin') {
+              await ruleActions(page, rule).focus()
+              await page.keyboard.press('Enter')
+              await expect(menuAction(page, 'Edit')).toBeFocused()
+              await arrowTo(page, 'Remove')
+              await scan('with the row menu open and Remove highlighted', { within: OPEN_MENU })
+              await page.keyboard.press('Escape')
+
+              await page.route('**/api/rules/rerun/step', (route) => route.fulfill({ json: { job: runningJob({ paused: true }) } }))
+              await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob({ paused: true }) } }) : route.fallback()))
+              await page.goto('/rules')
+              await expect(page.getByRole('status').filter({ hasText: 'Paused until the daily allowance resets, around midday NZ time.' })).toBeVisible()
+              await scan('with a paused run')
+            }
+          }
+        } finally {
+          await signInAs(context, 'admin') // withRules takes the Rule away as the Admin
+        }
+      })
     })
   }
 
   // What opens over a page on a phone, as the Admin: the sidebar (a sheet, with the group that has Settings open) and the menu of the display settings and Sign out. Each is scanned where it is.
   test('the phone\'s sidebar sheet has no colour contrast violations, open, as the Admin', async ({ page, context }, testInfo) => {
     await signInAs(context, 'admin')
-    await page.setViewportSize({ width: 390, height: 844 })
+    await page.setViewportSize(PHONE)
     await page.goto('/reports')
     await heading(page, 'Reports')
     await openNavGroup(page, 'Set up')
@@ -345,46 +473,38 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
 
   test('the phone\'s display settings and sign out menu has no colour contrast violations, open, as the Admin', async ({ page, context }, testInfo) => {
     await signInAs(context, 'admin')
-    await page.setViewportSize({ width: 390, height: 844 })
+    await page.setViewportSize(PHONE)
     await page.goto('/reports')
     await heading(page, 'Reports')
     await openHeaderControls(page)
     await scanner(page, testInfo.project.name, 'the phone\'s display settings menu', 'admin')('open', { within: '[data-slot="popover-content"]' })
   })
 
-  // The Rules page: the table of Rules and the D1 usage bar (switched on, with the Medium and High levels showing). A Member is told it is the Admin's. The Admin's Rule has its "⋯" menu opened last,
-  // with the keyboard, as far as Remove, whose words are red on a pale red when it is highlighted.
-  test('/rules has no colour contrast violations, as the Admin and as a Member', async ({ page, context, baseURL }, testInfo) => {
-    const project = testInfo.project.name
-    await seed(context, baseURL!, project)
-    await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
-    await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures }))
-    await withRules(context, baseURL!, testInfo, ['CONTRAST'], async ([rule]) => {
-      try {
-        for (const role of ROLES) {
-          await signInAs(context, role)
-          await page.goto('/rules')
-          await heading(page, 'Rules')
-          if (role === 'admin') {
-            await expect(ruleActions(page, rule)).toBeVisible()
-            await expect(page.getByRole('region', { name: 'Free database allowance' }).getByRole('progressbar')).toHaveCount(2)
-          } else {
-            await expect(page.getByText('Only the Admin can use this page.')).toBeVisible()
-          }
-          const scan = scanner(page, project, '/rules', role)
-          await scan()
-          if (role === 'admin') {
-            await ruleActions(page, rule).focus()
-            await page.keyboard.press('Enter')
-            await expect(menuAction(page, 'Edit')).toBeFocused()
-            await arrowTo(page, 'Remove')
-            await scan('with the row menu open and Remove highlighted', { within: OPEN_MENU })
-            await page.keyboard.press('Escape')
-          }
-        }
-      } finally {
-        await signInAs(context, 'admin') // withRules takes the Rule away as the Admin
-      }
+  // The sidebar as the icon rail, with the tooltip of the group that has focus showing.
+  test('the sidebar rail with a tooltip showing has no colour contrast violations, as the Admin', async ({ page, context }, testInfo) => {
+    await signInAs(context, 'admin')
+    await page.goto('/reports')
+    await heading(page, 'Reports')
+    await siteHeader(page).getByRole('button', { name: 'Toggle sidebar' }).click()
+    await expect(page.locator('[data-slot="sidebar"]:not([data-mobile])')).toHaveAttribute('data-state', 'collapsed')
+    await settle(page)
+    await navGroup(page, 'Help').focus()
+    await page.keyboard.press('Shift') // a key, so that focus is drawn as it is for the keyboard
+    await expect(page.getByRole('tooltip')).toHaveText('Help')
+    await scanner(page, testInfo.project.name, 'the sidebar rail', 'admin')('with the tooltip showing')
+  })
+
+  // That the sweep's own scan asks for colour contrast: it reports pale words on white (shell.spec.ts has the shared check's own option).
+  test('the sweep\'s scan reports pale text, so it does ask for colour contrast', async ({ page, context }, testInfo) => {
+    await signInAs(context, 'admin')
+    await page.goto('/styleguide')
+    await heading(page, 'Styleguide')
+    await page.evaluate(() => {
+      const faint = document.createElement('p')
+      faint.textContent = 'Pale grey words on white'
+      faint.style.cssText = 'color: #ddd; background: #fff'
+      document.querySelector('main')!.append(faint)
     })
+    await expect(scanner(page, testInfo.project.name, '/styleguide', 'admin')()).rejects.toThrow('color-contrast')
   })
 })
