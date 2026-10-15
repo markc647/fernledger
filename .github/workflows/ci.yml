@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch: # run it on any branch from the Actions tab, for the full browser suite before a merge
 
 jobs:
   check:
@@ -19,7 +20,7 @@ jobs:
       - run: npm ci
       - run: npm run check
 
-  # Browser tests (Playwright + axe, light and dark) are slower than `check`, so they run as their own job.
+  # Browser tests (Playwright + axe) are slower than `check`, so they run as their own job. All run in light; the ones tagged @theme run in dark too (playwright.config.ts).
   e2e:
     runs-on: ubuntu-latest
     steps:
