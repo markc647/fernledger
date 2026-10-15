@@ -424,7 +424,7 @@ test.describe('while the Rules are being applied', () => {
   // The 429 below is the free plan's daily allowance being used up, which the page has to explain; Chrome logs it as an error.
   test.use({ expectedStatuses: [429] })
 
-  test('the page shows how far it has got, announces a few times, says a used-up day ends at midday NZ time, and carries on by itself then', async ({ page, context }) => {
+  test('the page shows how far it has got, announces a few times, says a used-up day ends at midday NZ time, carries on by itself then, and keeps a finished run finished when a late reading arrives', async ({ page, context }) => {
     await signInAs(context, 'admin')
     // The page asks again when the day changes (00:00 UTC), so the clock is the test's to move.
     await page.clock.install({ time: new Date('2026-10-11T02:00:00Z') })
@@ -451,6 +451,7 @@ test.describe('while the Rules are being applied', () => {
     await page.route('**/api/rules/rerun', async (route) => {
       if (route.request().method() !== 'GET') return route.fallback()
       const held = holdBack
+      holdBack = null
       if (held) await held.until
       await route.fulfill({ json: { job: held ? held.job : current } })
     })
