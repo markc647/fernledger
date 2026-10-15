@@ -209,7 +209,7 @@ test('it has no WCAG 2.2 AA violations closed, open, and open on a phone at the 
   }
 })
 
-test('in Windows high contrast the chosen day is filled with the reader\'s highlight colour, which the others are not, and today is outlined', async ({ page }) => {
+test('in Windows high contrast the chosen day is filled with the reader\'s highlight colour, which the others are not, and today is outlined', { tag: '@theme' }, async ({ page }) => {
   await page.emulateMedia({ forcedColors: 'active' }) // the reader's palette replaces the app's colours, which drops a fill
   await dateField(page, 'Date').click()
   await arrived(page)

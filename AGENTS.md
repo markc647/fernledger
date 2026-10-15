@@ -12,6 +12,7 @@ Self-hosted NZ bank-account tracker on Cloudflare Workers (free plan) + D1 + R2,
 
 ## Before reporting work done
 - Run `npm run check` (lint, typecheck, tests, script tests, migration check, secret scan and its self-test). It's green when it exits 0. The first scan downloads a pinned, checksum-verified gitleaks into your user cache.
+- Run the browser specs of the pages your change affects (`npx playwright test e2e/<spec>.ts`; `E2E_PORT=<free port>` if another checkout is running them), not the full suite. Push the branch; CI runs the full suite on it.
 - `npm install` points git at `.githooks/`, whose pre-commit hook runs lint, typecheck and a staged-files secret scan.
 
 ## Hard rules
