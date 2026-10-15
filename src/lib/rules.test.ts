@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dollarsForInput, readDollars, ruleConditions, ruleResult, type RuleView } from './rules'
+import { dollarsForInput, DRAG_INSTRUCTIONS, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, type RuleView } from './rules'
 
 const rule = (over: Partial<RuleView> = {}): RuleView => ({
   id: 1,
@@ -76,5 +76,82 @@ describe('describing a Rule in words', () => {
 
   it('says when the Rule\'s Category has been removed, so the Admin knows it does nothing', () => {
     expect(ruleResult(rule({ categoryRemoved: true }))).toBe('Category: Groceries (removed, so this Rule does nothing until you choose another)')
+  })
+})
+
+describe('putting the Rules in a new order', () => {
+  const ids = [11, 12, 13, 14, 15]
+
+  it('moves a Rule to the place of the Rule it is dropped on, and the Rules between move along one', () => {
+    expect(moveRuleTo(ids, 13, 11)).toEqual([13, 11, 12, 14, 15]) // up to the top
+    expect(moveRuleTo(ids, 12, 15)).toEqual([11, 13, 14, 15, 12]) // down to the bottom
+    expect(moveRuleTo(ids, 14, 13)).toEqual([11, 12, 14, 13, 15]) // one place up
+    expect(moveRuleTo(ids, 12, 13)).toEqual([11, 13, 12, 14, 15]) // one place down
+  })
+
+  it('does not change the list it was given', () => {
+    const before = [...ids]
+    moveRuleTo(ids, 13, 11)
+    moveRuleBy(ids, 13, -1)
+    expect(ids).toEqual(before)
+  })
+
+  it('says nothing has moved (null) when a Rule is dropped on itself, or on a Rule that is not in the list', () => {
+    expect(moveRuleTo(ids, 13, 13)).toBeNull()
+    expect(moveRuleTo(ids, 13, 99)).toBeNull()
+    expect(moveRuleTo(ids, 99, 13)).toBeNull()
+  })
+
+  it('moves a Rule one place up or down, as the menu does', () => {
+    expect(moveRuleBy(ids, 13, -1)).toEqual([11, 13, 12, 14, 15])
+    expect(moveRuleBy(ids, 13, 1)).toEqual([11, 12, 14, 13, 15])
+  })
+
+  it('cannot move the first Rule up or the last one down', () => {
+    expect(moveRuleBy(ids, 11, -1)).toBeNull()
+    expect(moveRuleBy(ids, 15, 1)).toBeNull()
+    expect(moveRuleBy([7], 7, 1)).toBeNull()
+    expect(moveRuleBy(ids, 99, 1)).toBeNull()
+  })
+
+  it('puts the Rules themselves in the order of the ids, for the page to show before the Worker has answered', () => {
+    const rules = [rule({ id: 1 }), rule({ id: 2 }), rule({ id: 3 })]
+    expect(inOrder(rules, [3, 1, 2]).map((r) => r.id)).toEqual([3, 1, 2])
+    expect(inOrder(rules, [1, 2, 3])).toEqual(rules)
+  })
+
+  it('leaves the Rules as they are when the ids are not the same Rules (the order is not applied to a list it was not made from)', () => {
+    const rules = [rule({ id: 1 }), rule({ id: 2 }), rule({ id: 3 })]
+    expect(inOrder(rules, [3, 1])).toEqual(rules)
+    expect(inOrder(rules, [3, 1, 9])).toEqual(rules)
+    expect(inOrder(rules, [1, 1, 2])).toEqual(rules)
+  })
+})
+
+describe('what a screen reader is told while a Rule is dragged', () => {
+  // Rule numbers are positions: the Rule with id 21 is Rule 1, and so on.
+  const say = dragAnnouncements([21, 22, 23, 24])
+
+  it('says which Rule was picked up and where it is', () => {
+    expect(say.onDragStart({ active: { id: 23 } })).toBe('Picked up Rule 3 of 4.')
+  })
+
+  it('says which position it is over as it moves, and when it is over none', () => {
+    expect(say.onDragOver({ active: { id: 23 }, over: { id: 21 } })).toBe('Rule 3 is over position 1 of 4.')
+    expect(say.onDragOver({ active: { id: 23 }, over: null })).toBe('Rule 3 is not over a position.')
+  })
+
+  it('says where it was dropped, and that it stayed if it was dropped where it was', () => {
+    expect(say.onDragEnd({ active: { id: 23 }, over: { id: 21 } })).toBe('Dropped Rule 3 in position 1 of 4.')
+    expect(say.onDragEnd({ active: { id: 23 }, over: { id: 23 } })).toBe('Dropped Rule 3. It stays in position 3 of 4.')
+    expect(say.onDragEnd({ active: { id: 23 }, over: null })).toBe('Dropped Rule 3. It stays in position 3 of 4.')
+  })
+
+  it('says a cancelled move left the Rule where it was', () => {
+    expect(say.onDragCancel({ active: { id: 22 } })).toBe('Moving Rule 2 was cancelled. It is still in position 2 of 4.')
+  })
+
+  it('has plain words to say how to pick a Rule up', () => {
+    expect(DRAG_INSTRUCTIONS).toBe('To move a Rule, press Space or Enter on its handle. Use the up and down arrow keys to choose its new place, then press Space or Enter to drop it. Press Escape to cancel.')
   })
 })

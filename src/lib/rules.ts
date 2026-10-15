@@ -66,3 +66,49 @@ export function ruleResult(rule: Pick<RuleView, 'transfer' | 'categoryName' | 'c
   if (rule.transfer) return 'Mark as a Transfer'
   return rule.categoryRemoved ? `Category: ${rule.categoryName} (removed, so this Rule does nothing until you choose another)` : `Category: ${rule.categoryName}`
 }
+
+// Putting the Rules in order. A Rule's number is its place in the order (Rule 1 is checked first), so "Rule 3" and "position 3" are the same place. The page saves the whole new order
+// with PUT /api/rules/order, and shows it at once; these decide what the order is.
+
+/** The ids with `id` taken out and put where `overId` is (a dragged Rule takes the place of the one it is dropped on, and those between move along one), or null if nothing would move. */
+export function moveRuleTo(ids: number[], id: number, overId: number): number[] | null {
+  const from = ids.indexOf(id)
+  const to = ids.indexOf(overId)
+  if (from < 0 || to < 0 || from === to) return null
+  const next = ids.slice()
+  next.splice(to, 0, ...next.splice(from, 1))
+  return next
+}
+
+/** The ids with `id` one place up (-1) or down (1), or null at the end of the list, where it cannot go further. */
+export function moveRuleBy(ids: number[], id: number, by: -1 | 1): number[] | null {
+  const over = ids[ids.indexOf(id) + by]
+  return ids.indexOf(id) < 0 || over === undefined ? null : moveRuleTo(ids, id, over)
+}
+
+/** The Rules in the order of `ids`, if those are exactly these Rules; otherwise the Rules as they are (an order made for another list is not applied to this one). */
+export function inOrder<T extends { id: number }>(rules: T[], ids: number[]): T[] {
+  const byId = new Map(rules.map((rule) => [rule.id, rule]))
+  if (ids.length !== rules.length || new Set(ids).size !== ids.length || !ids.every((id) => byId.has(id))) return rules
+  return ids.map((id) => byId.get(id)!)
+}
+
+/** How to pick a Rule up, read to a screen reader with the handle (dnd-kit's `screenReaderInstructions`). */
+export const DRAG_INSTRUCTIONS =
+  'To move a Rule, press Space or Enter on its handle. Use the up and down arrow keys to choose its new place, then press Space or Enter to drop it. Press Escape to cancel.'
+
+type Dragged = { id: string | number }
+
+/** What a screen reader is told as a Rule is dragged, in dnd-kit's shape (`accessibility.announcements`). `ids` are the Rules in the order they are shown. */
+export function dragAnnouncements(ids: number[]) {
+  const place = (item: Dragged) => ids.indexOf(Number(item.id)) + 1
+  const of = `of ${ids.length}`
+  return {
+    onDragStart: ({ active }: { active: Dragged }) => `Picked up Rule ${place(active)} ${of}.`,
+    onDragOver: ({ active, over }: { active: Dragged; over: Dragged | null }) =>
+      over ? `Rule ${place(active)} is over position ${place(over)} ${of}.` : `Rule ${place(active)} is not over a position.`,
+    onDragEnd: ({ active, over }: { active: Dragged; over: Dragged | null }) =>
+      over && over.id !== active.id ? `Dropped Rule ${place(active)} in position ${place(over)} ${of}.` : `Dropped Rule ${place(active)}. It stays in position ${place(active)} ${of}.`,
+    onDragCancel: ({ active }: { active: Dragged }) => `Moving Rule ${place(active)} was cancelled. It is still in position ${place(active)} ${of}.`,
+  }
+}
