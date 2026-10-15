@@ -41,7 +41,7 @@ const report = (over: Partial<BudgetReport> = {}): BudgetReport => ({
 describe('parseBudgetReportSearch', () => {
   it('reads the dates and sets the Account to nothing, because a Budget is for all of them together (the router passes on an address parameter that a route leaves out, so it is set, not left out)', () => {
     expect(parseBudgetReportSearch({ account: 2, from: '2026-01-01', to: '2026-03-31' })).toStrictEqual({ account: undefined, from: '2026-01-01', to: '2026-03-31' })
-    expect(parseBudgetReportSearch({ account: '2' })).toStrictEqual({ account: undefined })
+    expect(parseBudgetReportSearch({ account: '2' })).toStrictEqual({ account: undefined, from: undefined, to: undefined }) // a blank or invalid date is set to nothing too, for the same reason
   })
 
   it('leaves out a date that is not a real one, rather than refusing the address', () => {

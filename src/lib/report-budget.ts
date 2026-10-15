@@ -21,7 +21,7 @@ export const MAX_REPORT_MONTHS = 24
  */
 export function parseBudgetReportSearch(raw: Record<string, unknown>): ReportSearch {
   const { from, to } = parseReportSearch(raw)
-  return { account: undefined, ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) }
+  return { account: undefined, from, to }
 }
 
 /** How many NZ months the dates touch, both ends included (`2026-01-15` to `2026-03-10` touch 3). The dates are real and `from` is not after `to`. The Worker's `monthCount` (worker/months.ts) counts the same, and worker/report-budget.test.ts holds the two together. */

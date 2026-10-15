@@ -1,7 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { navigateTo } from './shell-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   expectBareMargins,
@@ -22,10 +21,10 @@ import {
   TITLE,
 } from './report-helpers'
 
-// Ticket 18: the Report frame and the Transaction listing Report (spec stories 97 to 99). A Report opens in a new window, is
-// laid out for paper, and says on its face what it is, which Account and dates it covers, and who generated it and when.
-// The print layout is checked three ways: the page under print media (what the browser lays out), and the PDF it makes
-// (page count, the text on each page, the page margins and the size of the type).
+// Ticket 18: the Report frame and the Transaction listing Report (spec stories 97 to 99). A Report has a page of its own, with its form and, below it, the Report, which is laid
+// out for paper and says on its face what it is, which Account and dates it covers, and who generated it and when. The Reports page is a card for each Report, and
+// reports-pages.spec.ts checks the six pages' common ground. The print layout is checked three ways: the page under print media (what the browser lays out), and the PDF
+// it makes (page count, the text on each page, the page margins and the size of the type).
 
 test.describe.configure({ mode: 'serial' })
 
@@ -100,7 +99,7 @@ const article = (page: Page) => page.getByRole('article', { name: 'Transaction l
 
 test.describe('opening a Report', () => {
   test('the Transactions page opens it in a new window, carrying the Account and dates', async ({ page, context, baseURL }, testInfo) => {
-    const { year } = dataFor(testInfo.project.name)
+    const { year, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await page.goto(`/transactions?account=${savingsId}&from=${year}-01-01&to=${year}-12-31`)
@@ -114,68 +113,160 @@ test.describe('opening a Report', () => {
 
     const [popup] = await Promise.all([context.waitForEvent('page'), link.click()])
     await expect(popup.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible()
-    await expect(popup.getByRole('article', { name: 'Transaction listing' })).toContainText(dataFor(testInfo.project.name).savings.name)
+    await expect(popup.getByRole('article', { name: 'Transaction listing' })).toContainText(savings.name)
     await expect(page).toHaveURL(/\/transactions\?/) // the Transactions page is still where it was
   })
 
-  test('the Transactions page offers no Report until it has dates, and points to the Reports page', async ({ page, context }) => {
+  test('the Transactions page offers no Report until it has dates, and points to the Report\'s page', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/transactions')
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
-    await expect(page.getByRole('link', { name: /Transaction listing Report/ })).toHaveCount(0)
-    await page.getByRole('link', { name: 'choose dates on the Reports page' }).click()
-    await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible()
+    await expect(page.getByRole('link', { name: /Open a Transaction listing Report/ })).toHaveCount(0)
+    await page.getByRole('link', { name: "choose dates on the Transaction listing Report's page" }).click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible()
+    await expect(page.getByRole('form', { name: 'Transaction listing' })).toBeVisible()
   })
 
-  test('the Reports page is in every Member\'s navigation, and its form opens the Report in a new window', async ({ page, context, baseURL }, testInfo) => {
-    const { year, savings } = dataFor(testInfo.project.name)
+  test('its form shows the Report under it, on the same page, with the choice in the address and the form still filled in', async ({ page, context, baseURL }, testInfo) => {
+    const { year, savings, cheque, last } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
-    await page.goto('/')
-    await navigateTo(page, 'Reports', 'Reports')
-    await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible()
+    await page.setViewportSize({ width: 1280, height: 420 }) // the Report starts below the bottom of the window
+    await page.goto('/reports/transactions')
+    await expect(article(page)).toHaveCount(0) // nothing is shown until it is asked for
+    await expect(page.getByRole('alert')).toHaveCount(0)
 
-    const form = page.getByRole('form', { name: 'Transaction listing' }) // the Reports page has a form for each Report
+    const form = page.getByRole('form', { name: 'Transaction listing' })
     await form.getByLabel('Account').selectOption({ label: savings.name })
     await pickDate(form, 'From', `${year}-01-01`)
     await pickDate(form, 'To', `${year}-12-31`)
-    const [popup] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
-    await expect(popup.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible()
-    expect(Object.fromEntries(new URL(popup.url()).searchParams)).toEqual({ account: String(savingsId), from: `${year}-01-01`, to: `${year}-12-31` })
+    await form.getByRole('button', { name: 'Show Report' }).click()
+    await expect(article(page).getByRole('table', { name: `Transactions in ${savings.name}` })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0) // the page moved to the Report, which is under the form
+    await expect(article(page)).not.toContainText(cheque.name) // the one Account chosen
+    expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ account: String(savingsId), from: `${year}-01-01`, to: `${year}-12-31` })
+    await expect(form.getByLabel('Account')).toHaveValue(String(savingsId)) // the form is still where it was, filled in from the address
+    await expect(dateField(form, 'To')).toContainText(last)
+    expect(await form.evaluate((el) => el.getBoundingClientRect().top + window.scrollY)).toBeLessThan(await article(page).evaluate((el) => el.getBoundingClientRect().top + window.scrollY)) // the form is above the Report
+
+    // Another choice replaces the Report, and the Back button brings the form and the Report back together.
+    await form.getByLabel('Account').selectOption({ label: 'All Accounts' })
+    await form.getByRole('button', { name: 'Show Report' }).click()
+    await expect(article(page).getByRole('table', { name: `Transactions in ${cheque.name}` })).toBeVisible()
+    expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ from: `${year}-01-01`, to: `${year}-12-31` })
+    await page.goBack()
+    await expect(article(page).getByRole('table', { name: `Transactions in ${savings.name}` })).toBeVisible()
+    await expect(article(page)).not.toContainText(cheque.name)
+    await expect(form.getByLabel('Account')).toHaveValue(String(savingsId))
   })
 
-  test('the Reports form asks for real dates, in order, and opens nothing until they are', async ({ page, context }) => {
+  test('the Back button puts every field of the form back as the address has it, a choice that was not asked for included', async ({ page, context, baseURL }, testInfo) => {
+    const { year, savings, cheque, last } = dataFor(testInfo.project.name)
+    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
-    await page.goto('/reports')
+    await page.goto(reportAddress(savingsId, year))
+    await expect(article(page).getByRole('table')).toBeVisible()
     const form = page.getByRole('form', { name: 'Transaction listing' })
-    const open = form.getByRole('button', { name: 'Open Report in a new window' })
 
-    await open.click()
+    await pickDate(form, 'To', `${year}-06-30`)
+    await form.getByRole('button', { name: 'Show Report' }).click()
+    await expect(page).toHaveURL(new RegExp(`to=${year}-06-30`)) // the same Account, other dates
+    await form.getByLabel('Account').selectOption({ label: cheque.name }) // not asked for
+    await page.goBack()
+    await expect(page).toHaveURL(new RegExp(`to=${year}-12-31`))
+    await expect(form.getByLabel('Account')).toHaveValue(String(savingsId)) // the address's, and not the one chosen after it
+    await expect(form.getByLabel('Account').locator('option:checked')).toHaveText(savings.name)
+    await expect(dateField(form, 'To')).toContainText(last)
+  })
+
+  test('a Report opened from its address does not move the page: only asking for it on the form does', async ({ page, context, baseURL }, testInfo) => {
+    const { year } = dataFor(testInfo.project.name)
+    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    await page.setViewportSize({ width: 1280, height: 420 })
+    await page.goto(reportAddress(savingsId, year))
+    await expect(article(page).getByRole('table')).toBeVisible()
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  })
+
+  test('asking for the Report that is open again reads it again: it is a snapshot, made when it is asked for', async ({ page, context, baseURL }, testInfo) => {
+    const { year } = dataFor(testInfo.project.name)
+    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    // A reading is a number of requests: those asked (the Worker has them) and those answered (the page has them).
+    const asked: string[] = []
+    const answered: string[] = []
+    let slow = false // while it is, a request takes long enough for a second press to come in the middle of a reading
+    await page.route('**/api/reports/transactions?**', async (route) => {
+      asked.push(route.request().url())
+      if (slow) await new Promise((resolve) => setTimeout(resolve, 600))
+      await route.continue()
+    })
+    page.on('response', (response) => void (response.url().includes('/api/reports/transactions?') && answered.push(response.url())))
+    await page.goto(reportAddress(savingsId, year))
+    await expect(article(page).getByRole('table')).toBeVisible()
+    const reading = answered.length // the requests one reading takes
+    expect(reading).toBeGreaterThan(0)
+
+    const show = page.getByRole('form', { name: 'Transaction listing' }).getByRole('button', { name: 'Show Report' })
+    await show.click()
+    await expect.poll(() => answered.length).toBe(2 * reading) // the same address, asked for again, is read again
+
+    // A second press in the middle of a reading joins it, and does not start another: a Report is thousands of rows of the free plan's D1 reads (ADR 0004). Another reading
+    // would have asked for its requests by the time the first one's slow answers come, so the count of those asked, when they have been, is how many readings there were.
+    slow = true
+    await show.dblclick()
+    await expect.poll(() => answered.length).toBeGreaterThanOrEqual(3 * reading)
+    expect(asked.length).toBe(3 * reading)
+    await expect(article(page).getByRole('table')).toBeVisible()
+  })
+
+  test('the Reports form asks for real dates, in order, and shows nothing until they are', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/reports/transactions')
+    const form = page.getByRole('form', { name: 'Transaction listing' })
+    const show = form.getByRole('button', { name: 'Show Report' })
+
+    await show.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a From date.')
     await pickDate(form, 'From', '2013-12-31')
-    await open.click()
+    await show.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a To date.')
     await pickDate(form, 'To', '2013-01-01')
-    await open.click()
+    await show.click()
     await expect(form.getByRole('alert')).toContainText('before the “From” date')
     await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
-    expect(context.pages()).toHaveLength(1)
+    expect(new URL(page.url()).search).toBe('') // nothing was asked for: the address is as it was
+    await expect(article(page)).toHaveCount(0)
     await noAxeViolations(page)
   })
 
-  test('a Report address without dates, with dates the wrong way round, or with no such Account explains itself and offers the form', async ({ page, context }) => {
+  test('a Report address with only some dates, dates the wrong way round, or no such Account explains itself and offers the form', async ({ page, context }) => {
     await signInAs(context, 'member')
     for (const [address, words, alert] of [
-      ['/reports/transactions', 'Choose the first and last dates', false],
+      ['/reports/transactions?from=2013-01-01', 'Choose the first and last dates', false],
       ['/reports/transactions?from=2013-12-31&to=2013-01-01', 'before the “From” date', true],
       ['/reports/transactions?account=999999999&from=2013-01-01&to=2013-12-31', 'There is no such Account', true],
+      ['/reports/transactions?account=abc&from=2013-01-01&to=2013-12-31', 'There is no such Account', true],
+      ['/reports/transactions?account=0&from=2013-01-01&to=2013-12-31', 'There is no such Account', true],
+      ['/reports/transactions?account=-1&from=2013-01-01&to=2013-12-31', 'There is no such Account', true],
+      ['/reports/transactions?account=2', 'Choose the first and last dates', false],
     ] as const) {
       await page.goto(address)
       await expect(page.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible()
-      await expect(page.getByRole(alert ? 'alert' : 'status')).toContainText(words)
-      await expect(page.getByRole('button', { name: 'Open Report in a new window' })).toBeVisible()
+      await expect(page.getByRole(alert ? 'alert' : 'status').filter({ hasText: words })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Show Report' })).toBeVisible()
       await expect(article(page)).toHaveCount(0) // no Report is made without an Account and dates
     }
+  })
+
+  test('an address from before the form was on the page still opens its Report: a blank Account is every Account', async ({ page, context, baseURL }, testInfo) => {
+    const { year, savings } = dataFor(testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    await page.goto(`/reports/transactions?account=&from=${year}-01-01&to=${year}-12-31`)
+    await expect(article(page).getByRole('heading', { level: 2, name: savings.name })).toBeVisible()
+    await expect(page.getByRole('form', { name: 'Transaction listing' }).getByLabel('Account')).toHaveValue('')
   })
 
   test('the Print button opens the print window', async ({ page, context, baseURL }, testInfo) => {
@@ -208,8 +299,11 @@ test.describe('on screen', () => {
     await page.goto(reportAddress(savingsId, year))
 
     const report = article(page)
-    await expect(report.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible() // the page's heading, above the form: the only h1 on screen
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
     const header = report.locator('header')
+    await expect(header.getByRole('heading')).toHaveCount(0) // the title block says it too, but as text on screen: on paper it is the Report's own h1
+    await expect(header.locator('p[aria-hidden="true"]')).toHaveText('Transaction listing')
     await expect(header).toContainText("Mum's finances")
     await expect(header).toContainText(`Account: ${savings.name} (${savings.number})`) // the bank's number is beside the name
     await expect(header).toContainText(`Dates: ${first} to ${last}`)
@@ -261,11 +355,11 @@ test.describe('on screen', () => {
   })
 
   test('is a Report for a single day when the dates are the same', async ({ page, context, baseURL }, testInfo) => {
-    const { year, savings } = dataFor(testInfo.project.name)
+    const { year, first, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await page.goto(`/reports/transactions?account=${savingsId}&from=${year}-01-01&to=${year}-01-01`)
-    await expect(article(page).locator('header dd').nth(1)).toHaveText(dataFor(testInfo.project.name).first) // one date, not "to" itself
+    await expect(article(page).locator('header dd').nth(1)).toHaveText(first) // one date, not "to" itself
     await expect(article(page).getByRole('table', { name: `Transactions in ${savings.name}` }).locator('tbody tr')).toHaveCount(1)
   })
 

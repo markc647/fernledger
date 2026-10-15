@@ -12,6 +12,9 @@ const TEXT_SIZE_VALUE = { Small: 'small', Medium: 'medium', Large: 'large' } as 
 /** The sticky header across the top of the page. */
 export const siteHeader = (page: Page) => page.getByRole('banner')
 
+/** Where the page is, in the header: the group, then the page. */
+export const breadcrumb = (page: Page) => siteHeader(page).getByRole('navigation', { name: 'Breadcrumb' })
+
 /** The top of the sidebar, with the app's title: a link home. */
 export const sidebarTitle = (page: Page) => page.locator('[data-slot="sidebar-header"]')
 

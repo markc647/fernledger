@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
+import { LiveStatus } from '@/components/live-status'
+import { useReportScroll } from '@/components/report-gate'
 import { Button } from '@/components/ui/button'
 import { meQuery } from '@/lib/me'
 import { describeRange, generatedLine, reportHeading } from '@/lib/report-frame'
@@ -30,9 +32,9 @@ export function useReportIdentity() {
 /**
  * The frame every Report is printed in (README: Reports). It writes the Report's own title block, because a printout leaves
  * out the app header and the sidebar, and with them the app title: the app title from Settings, the Report's name, its Account(s) and dates, and
- * "Generated Thu 8 Oct 2026 at 3:42 pm by <the signed-in email>". A Report is a page that opens in a new window; it puts what it
- * lists in `children`, as tables (ResponsiveTable with `print:text-[12pt]` and a `printHeading` from `useReportIdentity`) and
- * headings no smaller than 12pt.
+ * "Generated Thu 8 Oct 2026 at 3:42 pm by <the signed-in email>". A Report is shown on its own page, under the form that asked for it, and
+ * is all that is printed of that page; it puts what it lists in `children`, as tables (ResponsiveTable with `print:text-[12pt]` and a
+ * `printHeading` from `useReportIdentity`) and headings no smaller than 12pt.
  *
  * On paper (src/index.css, `.report-frame`): text is black on white and at least 12pt, table headings repeat on every page,
  * and a row never splits across pages. The two lines that identify the Report come back on every page in every browser, in
@@ -97,6 +99,12 @@ export function ReportFrame({
     }
   }, [title])
 
+  // The Report has arrived (or been read again): if the form asked for it, the page moves to its top, now that the page is long enough to.
+  const scroll = useReportScroll()
+  useEffect(() => {
+    if (scroll.consume()) scroll.show()
+  }, [generatedAt, scroll])
+
   const identity = useMemo(() => (appTitle && generated ? { appTitle, name, range, generated } : null), [appTitle, name, range, generated])
 
   // Without the app title and who is signed in the printout would not say what it is or who made it, so it waits for both.
@@ -105,6 +113,11 @@ export function ReportFrame({
 
   return (
     <Identity.Provider value={identity}>
+      <div className="print:hidden">
+        {/* Said once the Report is there, and again when it is read again: a Report that was asked for on the page above appears under the form, where a screen reader is not
+            looking. A new one for each reading (its key), since its words are the same. */}
+        <LiveStatus key={generatedAt} message={`${name} Report is ready, below the form.`} />
+      </div>
       <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 print:hidden">
         <Button size="touch" onClick={() => window.print()}>
           Print or save as PDF
@@ -114,10 +127,14 @@ export function ReportFrame({
           Safari may need you to turn on the browser's headers and footers in the print dialog.
         </p>
       </div>
-      <article aria-labelledby="report-title" className="report-frame">
+      <article aria-label={name} className="report-frame">
         <header>
           <p className="text-lg font-semibold print:text-[14pt]">{appTitle}</p>
-          <h1 id="report-title" className="mt-1 text-2xl font-semibold print:text-[20pt]">
+          {/* The page's own heading, above the form, is the h1 on screen, so here the name is text (the article's label says it). On paper that heading is not there, and the name is the Report's h1. */}
+          <p aria-hidden="true" className="mt-1 text-2xl font-semibold print:hidden">
+            {name}
+          </p>
+          <h1 className="mt-1 hidden text-2xl font-semibold print:block print:text-[20pt]">
             {name}
           </h1>
           <dl className="mt-3 grid gap-1">

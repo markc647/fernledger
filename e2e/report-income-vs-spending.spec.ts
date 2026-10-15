@@ -1,7 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { navigateTo } from './shell-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   dateText,
@@ -31,7 +30,7 @@ import {
   type SeedRow,
 } from './report-helpers'
 
-// Ticket 22: the income-vs-spending-by-month Report (spec story 95). It uses the Report frame of ticket 18, so it opens in a new window, says on its face what it
+// Ticket 22: the income-vs-spending-by-month Report (spec story 95). It uses the Report frame of ticket 18, so it is shown on its own page, under its form, says on its face what it
 // is, and prints with its table heading on every page. The Report's numbers are held to the Worker's spending totals in worker/report-income-vs-spending.test.ts;
 // this file checks what a reader sees and what comes out of the printer: the page under print media, and the PDF it makes (page count, the text on each page, the
 // margins and the size of the type).
@@ -153,90 +152,86 @@ const noticeOf = (page: Page) => section(page).locator(':scope > p', { hasText: 
 // Opening a Report
 
 test.describe('opening the Report', () => {
-  test('the Reports page offers it with a form of its own, for all Accounts or one, and opens it in a new window', async ({ page, context, baseURL }, testInfo) => {
+  test('its page has a form of its own, for all Accounts or one, that shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { everydayId } = await seed(context, baseURL!, testInfo.project.name)
     const { from, to } = halfYear(d.year)
     await signInAs(context, 'member')
-    await page.goto('/')
-    await navigateTo(page, 'Reports', 'Reports')
-    await expect(page.getByRole('heading', { level: 2, name: NAME })).toBeVisible()
+    await page.goto('/reports/income-vs-spending')
+    await expect(page.getByRole('heading', { level: 1, name: NAME })).toBeVisible()
 
     const form = page.getByRole('form', { name: NAME })
     await expect(form).toContainText('one row for each month in your dates, with the income, the spending and the difference between them')
     // The form says how the dates are counted, and the most months a Report covers, since Budget vs actual's form says the opposite of the first and a different number of the second.
     await expect(form).toContainText('Your dates are counted exactly: a month they begin or end part way through counts only those dates, and the row says so.')
     await expect(form).toContainText('up to 120 months')
-    await expect(page.getByRole('heading', { level: 2, name: NAME }).locator('xpath=following-sibling::p[1]')).toContainText(NOT_COUNTED_AS_SPENDING_OR_INCOME)
+    await expect(page.getByRole('heading', { level: 1, name: NAME }).locator('xpath=following-sibling::p[1]')).toContainText(NOT_COUNTED_AS_SPENDING_OR_INCOME)
     await expect(form.getByLabel('Account')).toHaveValue('') // every Account unless one is chosen
     await pickDate(form, 'From', from)
     await pickDate(form, 'To', to)
-    const [all] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
-    await expect(all.getByRole('heading', { level: 1, name: NAME })).toBeVisible()
-    expect(new URL(all.url()).pathname).toBe('/reports/income-vs-spending')
-    expect(Object.fromEntries(new URL(all.url()).searchParams)).toEqual({ account: '', from, to })
-    await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible() // the Reports page is still where it was
+    await form.getByRole('button', { name: 'Show Report' }).click()
+    await expect(article(page).locator('header')).toContainText('Account: All Accounts: ')
+    expect(new URL(page.url()).pathname).toBe('/reports/income-vs-spending')
+    expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ from, to }) // every Account: none in the address
 
     await form.getByLabel('Account').selectOption({ label: d.everyday.name })
-    const [one] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
-    await expect(one.getByRole('heading', { level: 1, name: NAME })).toBeVisible()
-    expect(Object.fromEntries(new URL(one.url()).searchParams)).toEqual({ account: String(everydayId), from, to })
+    await form.getByRole('button', { name: 'Show Report' }).click()
+    await expect(article(page).locator('header')).toContainText(`Account: ${d.everyday.name} (${d.everyday.number})`)
+    expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ account: String(everydayId), from, to })
   })
 
-  test('the Reports page has no WCAG 2.2 AA violations with its form on it', async ({ page, context }) => {
+  test('its form asks for real dates, in order, and shows nothing until they are', async ({ page, context }) => {
     await signInAs(context, 'member')
-    await page.goto('/reports')
-    await expect(page.getByRole('form', { name: NAME })).toBeVisible()
-    await noAxeViolations(page)
-  })
-
-  test('its form asks for real dates, in order, and opens nothing until they are', async ({ page, context }) => {
-    await signInAs(context, 'member')
-    await page.goto('/reports')
+    await page.goto('/reports/income-vs-spending')
     const form = page.getByRole('form', { name: NAME })
-    const open = form.getByRole('button', { name: 'Open Report in a new window' })
+    const show = form.getByRole('button', { name: 'Show Report' })
 
-    await open.click()
+    await show.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a From date.')
     await pickDate(form, 'From', '2022-12-31')
-    await open.click()
+    await show.click()
     await expect(form.getByRole('alert')).toHaveText('Choose a To date.')
     await pickDate(form, 'To', '2022-01-01')
-    await open.click()
+    await show.click()
     await expect(form.getByRole('alert')).toContainText('before the “From” date')
     await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
-    await expect(page.getByRole('form', { name: 'Transaction listing' }).getByRole('alert')).toHaveCount(0) // the other forms are untouched
-    expect(context.pages()).toHaveLength(1)
+    expect(new URL(page.url()).search).toBe('')
+    await expect(article(page)).toHaveCount(0)
   })
 
-  test('its form refuses dates that touch more than 120 months, naming the limit, and opens nothing', async ({ page, context }) => {
+  test('its form refuses dates that touch more than 120 months, naming the limit, and shows nothing', async ({ page, context }) => {
     await signInAs(context, 'member')
-    await page.goto('/reports')
+    await page.goto('/reports/income-vs-spending')
     const form = page.getByRole('form', { name: NAME })
     await pickDate(form, 'From', '2000-01-31')
     await pickDate(form, 'To', '2010-01-01') // 121 months, though not quite ten years
-    await form.getByRole('button', { name: 'Open Report in a new window' }).click()
+    await form.getByRole('button', { name: 'Show Report' }).click()
     await expect(form.getByRole('alert')).toHaveText('An Income vs spending by month Report covers at most 120 months (10 years). Choose dates that touch 120 months or fewer.')
     await expect(dateField(form, 'To')).toHaveAttribute('aria-invalid', 'true')
-    expect(context.pages()).toHaveLength(1)
+    await expect(article(page)).toHaveCount(0)
 
-    await pickDate(form, 'To', '2009-12-01') // 120 months. This opens a Report of every Account over 2000 to 2009, which holds other specs' Transactions too: assert nothing of its figures
-    const [opened] = await Promise.all([context.waitForEvent('page'), form.getByRole('button', { name: 'Open Report in a new window' }).click()])
-    await expect(opened.getByRole('heading', { level: 1, name: NAME })).toBeVisible()
+    await pickDate(form, 'To', '2009-12-01') // 120 months. This shows a Report of every Account over 2000 to 2009, which holds other specs' Transactions too: assert nothing of its figures
+    await form.getByRole('button', { name: 'Show Report' }).click()
+    await expect(article(page)).toBeVisible()
+    await expect(form.getByRole('alert')).toHaveCount(0)
   })
 
-  test('an address without dates, with dates the wrong way round, with too many months or with no such Account explains itself and offers the form', async ({ page, context }) => {
+  test('an address with only some dates, dates the wrong way round, too many months or no such Account explains itself and offers the form', async ({ page, context }) => {
     await signInAs(context, 'member')
     for (const [path, words, alert] of [
-      ['/reports/income-vs-spending', 'Choose the first and last dates', false],
+      ['/reports/income-vs-spending?from=2022-01-01', 'Choose the first and last dates', false],
       ['/reports/income-vs-spending?from=2022-12-31&to=2022-01-01', 'before the “From” date', true],
       ['/reports/income-vs-spending?from=2000-01-01&to=2010-01-01', 'covers at most 120 months', true],
       ['/reports/income-vs-spending?account=999999999&from=2022-01-01&to=2022-12-31', 'There is no such Account', true],
+      ['/reports/income-vs-spending?account=abc&from=2022-01-01&to=2022-12-31', 'There is no such Account', true],
+      ['/reports/income-vs-spending?account=0&from=2022-01-01&to=2022-12-31', 'There is no such Account', true],
+      ['/reports/income-vs-spending?account=-1&from=2022-01-01&to=2022-12-31', 'There is no such Account', true],
+      ['/reports/income-vs-spending?account=2', 'Choose the first and last dates', false],
     ] as const) {
       await page.goto(path)
       await expect(page.getByRole('heading', { level: 1, name: NAME })).toBeVisible()
-      await expect(page.getByRole(alert ? 'alert' : 'status')).toContainText(words)
-      await expect(page.getByRole('button', { name: 'Open Report in a new window' })).toBeVisible()
+      await expect(page.getByRole(alert ? 'alert' : 'status').filter({ hasText: words })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Show Report' })).toBeVisible()
       await expect(article(page)).toHaveCount(0) // no Report is made without dates
     }
   })
@@ -291,7 +286,7 @@ test.describe('on screen', () => {
     await page.goto(address(null, from, to))
 
     const report = article(page)
-    await expect(report.getByRole('heading', { level: 1, name: NAME })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: NAME })).toBeVisible() // the page's heading, above the form: the Report's own title is text on screen and the h1 on paper
     const header = report.locator('header')
     await expect(header).toContainText("Mum's finances")
     await expect(header).toContainText('Account: All Accounts: ')

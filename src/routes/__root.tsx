@@ -68,7 +68,7 @@ function Layout() {
         onOpenChange={chooseSidebar}
         className="flex-col"
       >
-        <SiteHeader group={trail.group} page={trail.page ?? appTitle} textSize={textSize} onTextSize={chooseTextSize} theme={theme} onToggleTheme={toggleTheme} />
+        <SiteHeader group={trail.group} groupTo={trail.parent} page={trail.page ?? appTitle} textSize={textSize} onTextSize={chooseTextSize} theme={theme} onToggleTheme={toggleTheme} />
         <div className="flex flex-1">
           <AppSidebar appTitle={appTitle} sections={sections} activeTo={trail.to} roleKnown={roleKnown} email={me?.email} role={me?.role} />
           {/* On paper the page is the paper's: no margin for the sidebar (important, because the collapsed sidebar's margin is more specific), no rounded edge or shadow. */}

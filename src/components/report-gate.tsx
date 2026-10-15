@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { Link, useRouterState } from '@tanstack/react-router'
+import { createContext, useContext, useMemo, useRef, type ReactNode } from 'react'
 import { MIN_DATE } from '@/lib/date-range'
 import { accountsQuery } from '@/lib/queries'
 import { accountLabel } from '@/lib/report-frame'
 import type { ReportSearch } from '@/lib/report-transactions'
+import type { ReportInfo } from '@/lib/reports'
 
 /** An Account as the Reports read it (the Accounts API's). */
 export type ReportAccount = { id: number; name: string; accountNumber: string; cutoverDate: string | null }
@@ -21,27 +22,63 @@ export type ReportScope = {
   accountsInTitle: string
 }
 
-/** Not a Report yet: the heading, what is missing, and the form that opens the Report once it is filled in. */
-export function Needs({ name, form, message, alert = false }: { name: string; form: ReactNode; message: string; alert?: boolean }) {
+const RESULT_ID = 'report-result'
+
+/**
+ * Moving the page to the Report that was asked for, which on a phone is below the window when the form's button is pressed. The form `request`s it and moves the page at once, to
+ * where the Report will be; the Report's frame `consume`s the request when its data arrives, which is when the page is long enough to be moved to the Report's top. A request that
+ * is never answered (the Report could not be read) lasts only as long as the page does, which is as long as the form that made it.
+ */
+type ReportScroll = { request: () => void; show: () => void; consume: () => boolean }
+const ReportScrollContext = createContext<ReportScroll>({ request: () => {}, show: () => {}, consume: () => false })
+export const useReportScroll = () => useContext(ReportScrollContext)
+
+/**
+ * A Report's page: its name, what it holds and its form, and below them the Report itself, or what is missing from one. The name, the words and the form are for the screen; a
+ * printout is the Report alone (`print:hidden`), which writes its own title block (ReportFrame).
+ */
+function ReportPage({ report, form, children }: { report: ReportInfo; form: ReactNode; children: ReactNode }) {
+  const requested = useRef(false)
+  const scroll = useMemo<ReportScroll>(
+    () => ({
+      request: () => void (requested.current = true),
+      show: () => document.getElementById(RESULT_ID)?.scrollIntoView({ block: 'start' }),
+      consume: () => {
+        const asked = requested.current
+        requested.current = false
+        return asked
+      },
+    }),
+    [],
+  )
   return (
-    <>
-      <h1 className="text-2xl font-semibold">{name}</h1>
-      <p role={alert ? 'alert' : 'status'} className="mt-2">
-        {message}
-      </p>
-      <div className="mt-4">{form}</div>
-    </>
+    <ReportScrollContext.Provider value={scroll}>
+      <div className="print:hidden">
+        <h1 className="text-2xl font-semibold">{report.name}</h1>
+        <p className="mt-2">{report.about}</p>
+        {form && <div className="mt-4">{form}</div>}
+      </div>
+      {/* Always there, so the page has somewhere to move to as soon as a Report is asked for. The space above a Report is padding, not margin, so it moves with the container, and the page stops short of the sticky header (its `scroll-padding-top`) by a little more. On paper the Report starts at the page's own margin. */}
+      <div id={RESULT_ID} className={`scroll-mt-4 print:pt-0 ${children ? 'pt-8' : ''}`}>
+        {children}
+      </div>
+    </ReportScrollContext.Provider>
   )
 }
 
+/** Not a Report yet: what is missing, said under the form that asks for it. */
+export function Needs({ message, alert = false }: { message: string; alert?: boolean }) {
+  return <p role={alert ? 'alert' : 'status'}>{message}</p>
+}
+
 /**
- * Everything a Report's page does before it has anything to read, the same for every Report (CODING_STANDARDS.md, UI): it reads the
- * Accounts, checks the address's dates and Account, and until they are right says what is missing and offers `form`, the Report's own
- * form filled in from the address. Once they are, it gives `children` the scope, and only then does the Report read its data, so a
- * Report's own query runs once it has Accounts and dates to ask about.
+ * Everything a Report's page does before it has anything to read, the same for every Report (CODING_STANDARDS.md, UI): it writes the page (the Report's name, what it holds and
+ * `form`, the Report's own form filled in from the address), reads the Accounts, and checks the address's dates and Account. Until they are right it says, under the form, what is
+ * missing. Once they are, it gives `children` the scope, and only then does the Report read its data, so a Report's own query runs once it has Accounts and dates to ask about.
+ * An address that chooses nothing (no Account, Category or date: the router takes a blank one, and a date that is not one, out of the address) is a page for choosing: the form, and no complaint that nothing is chosen.
  */
 export function ReportGate({
-  name,
+  report,
   search,
   form,
   noAccounts,
@@ -49,8 +86,8 @@ export function ReportGate({
   rangeProblem,
   children,
 }: {
-  /** The Report's name, as its heading says it. */
-  name: string
+  /** The Report (src/lib/reports.ts): its name, as the heading says it, and what it holds, under the heading. */
+  report: ReportInfo
   /** What the address holds (parseReportSearch). */
   search: ReportSearch
   form: ReactNode
@@ -63,34 +100,42 @@ export function ReportGate({
   children: (scope: ReportScope) => ReactNode
 }) {
   const accounts = useQuery(accountsQuery)
-  if (accounts.error) return <p role="alert">Fernledger couldn't load the Accounts. Reload the page to try again.</p>
+  // What the address chooses, which `search` does not say for a Category (the Loans page gives it only its dates).
+  const address = useRouterState({ select: (state) => state.location.search }) as Record<string, unknown>
+  const chosen = ['account', 'category', 'from', 'to'].some((key) => address[key] !== undefined && address[key] !== null && address[key] !== '')
+  const page = (body: ReactNode, withForm = true) => (
+    <ReportPage report={report} form={withForm && form}>
+      {body}
+    </ReportPage>
+  )
+  // Without the Accounts there is nothing for the form to choose from, so the page says so once and leaves it out.
+  if (accounts.error) return page(<p role="alert">Fernledger couldn't load the Accounts. Reload the page to try again.</p>, false)
   const from = search.from ?? (fromOptional ? MIN_DATE : undefined)
-  if (!from || !search.to) return <Needs name={name} form={form} message={fromOptional ? 'Choose the last date this Report covers.' : 'Choose the first and last dates this Report covers.'} />
-  if (from > search.to) return <Needs name={name} form={form} alert message="The “To” date is before the “From” date. Change one of them to open the Report." />
+  if (!from || !search.to) {
+    return page(chosen ? <Needs message={fromOptional ? 'Choose the last date this Report covers.' : 'Choose the first and last dates this Report covers.'} /> : null)
+  }
+  if (from > search.to) return page(<Needs alert message="The “To” date is before the “From” date. Change one of them to show the Report." />)
   const problem = rangeProblem?.(from, search.to)
-  if (problem) return <Needs name={name} form={form} alert message={problem} />
-  if (!accounts.data) return <p role="status">Loading…</p>
+  if (problem) return page(<Needs alert message={problem} />)
+  if (!accounts.data) return page(<p role="status">Loading…</p>)
   const selected = search.account === undefined ? accounts.data : accounts.data.filter((a) => a.id === search.account)
   if (selected.length === 0) {
     return accounts.data.length === 0 ? (
-      <>
-        <h1 className="text-2xl font-semibold">{name}</h1>
-        <p className="mt-2">
-          {noAccounts} An Account is added the first time the Admin imports a file for it.
-        </p>
-      </>
+      page(<Needs message={`${noAccounts} An Account is added the first time the Admin imports a file for it.`} />)
     ) : (
-      <Needs name={name} form={form} alert message="There is no such Account. Choose one below." />
+      page(<Needs alert message="There is no such Account. Choose one in the form above." />)
     )
   }
   const labels = selected.map(accountLabel).join('; ')
-  return children({
-    accounts: selected,
-    from,
-    to: search.to,
-    accountsText: search.account === undefined ? `All Accounts: ${labels}` : labels,
-    accountsInTitle: search.account === undefined ? 'All Accounts' : selected[0]!.name,
-  })
+  return page(
+    children({
+      accounts: selected,
+      from,
+      to: search.to,
+      accountsText: search.account === undefined ? `All Accounts: ${labels}` : labels,
+      accountsInTitle: search.account === undefined ? 'All Accounts' : selected[0]!.name,
+    }),
+  )
 }
 
 /** What a Report says while its data is on the way or could not be read; null once it has arrived. A failed read fails the whole Report, so an incomplete one never looks complete. */

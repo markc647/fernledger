@@ -1,6 +1,6 @@
 import type { LoanPage, LoanRow } from '../generated/api/report-loans' // relative, not '@/': a Worker test imports this file (worker/report-loans.test.ts)
 import { formatBalance } from './format'
-import { readUpToCap, searchDate, searchId, statusAt, type ListingStatus } from './report-transactions'
+import { addressId, readUpToCap, searchDate, statusAt, type ListingStatus } from './report-transactions'
 
 // The Loans Report's data, put together in the browser from the API's pages (worker/report-loans.ts), one Loans Category after another, a page at a time
 // (ADR 0004), up to a cap, by the same loop as the Transaction listing's (`readUpToCap`). The Worker finds which Transactions are loans; this file only adds them up and
@@ -141,8 +141,7 @@ export function totalLoans(sections: LoanSection[]) {
 /** What the Loans Report's address holds: the Loans Category (all of them when left out) and the dates, both ends included. A start date is optional. */
 export type LoansSearch = { category?: number; from?: string; to?: string }
 
-/** Reads the address's search parameters (already parsed by the router) into a LoansSearch. Anything that isn't valid is left out rather than refused. */
+/** Reads the address's search parameters (already parsed by the router) into a LoansSearch: what is blank or a date that is not valid is `undefined`, and a Category that is named but not valid is one that does not exist (see `parseReportSearch`). */
 export function parseLoansSearch(raw: Record<string, unknown>): LoansSearch {
-  const search = { category: searchId(raw.category), from: searchDate(raw.from), to: searchDate(raw.to) }
-  return Object.fromEntries(Object.entries(search).filter(([, value]) => value !== undefined))
+  return { category: addressId(raw.category), from: searchDate(raw.from), to: searchDate(raw.to) }
 }

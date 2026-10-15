@@ -186,16 +186,26 @@ export async function loadListing({
 export type ReportSearch = { account?: number; from?: string; to?: string }
 
 /** An ID in an address (an Account's, or the Loans Report's Category): a whole number from 1 to 999,999,999, or nothing. */
-export const searchId = (value: unknown) => {
+const searchId = (value: unknown) => {
   const number = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,9}$/.test(value) ? Number(value) : NaN
   return Number.isSafeInteger(number) && number >= 1 && number <= 999_999_999 ? number : undefined
 }
 
+/**
+ * The ID an address names (an Account's, or a Loans Category's), for what is named and not what is valid: nothing for a blank one (`account=`, which an earlier form sent for
+ * every Account), and 0, an ID nothing has, for one that is named but is not an ID (`abc`, `-1`, too many digits). The page then says there is no such Account, and does not
+ * quietly widen to every Account, which is not what the address asked for.
+ */
+export const addressId = (value: unknown) => (value === undefined || value === null || value === '' ? undefined : (searchId(value) ?? 0))
+
 /** A date in an address: a real date within the years the API accepts, or nothing. */
 export const searchDate = (value: unknown) => (typeof value === 'string' && isSearchDate(value) ? value : undefined)
 
-/** Reads the address's search parameters (already parsed by the router) into a ReportSearch. Anything that isn't valid is left out rather than refused. */
+/**
+ * Reads the address's search parameters (already parsed by the router) into a ReportSearch. A blank one is left out, and so is a date that isn't valid (the page then asks for
+ * the dates); an Account that is named but not valid is one that does not exist (`addressId`). Each is `undefined` when left out, and not missing, because the router lays what a
+ * route validates over the address's own search, so a missing key would leave the address's text in its place.
+ */
 export function parseReportSearch(raw: Record<string, unknown>): ReportSearch {
-  const search = { account: searchId(raw.account), from: searchDate(raw.from), to: searchDate(raw.to) }
-  return Object.fromEntries(Object.entries(search).filter(([, value]) => value !== undefined))
+  return { account: addressId(raw.account), from: searchDate(raw.from), to: searchDate(raw.to) }
 }

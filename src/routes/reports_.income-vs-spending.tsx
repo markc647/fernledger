@@ -7,21 +7,23 @@ import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/co
 import { tooManyIncomeMonths } from '@/lib/income-vs-spending'
 import { reportIncomeVsSpendingQuery } from '@/lib/queries'
 import { parseReportSearch } from '@/lib/report-transactions'
+import { REPORTS } from '@/lib/reports'
 
 // Like the other Reports, this one lives in its address (?account=2&from=2026-01-01&to=2026-12-31, the Account left out for all of them), so it can be reopened
-// or sent on. It opens in a new window from the Reports page (target="_blank" with rel="noopener").
+// or sent on. The form is on the page with the Report.
 export const Route = createFileRoute('/reports_/income-vs-spending')({
   component: IncomeVsSpendingPage,
   validateSearch: parseReportSearch,
+  staticData: { nav: { label: REPORTS.incomeVsSpending.name, parent: '/reports' } },
 })
 
-const NAME = 'Income vs spending by month'
+const REPORT = REPORTS.incomeVsSpending
 
 function IncomeVsSpendingPage() {
   const search = Route.useSearch()
   return (
     <ReportGate
-      name={NAME}
+      report={REPORT}
       search={search}
       form={<IncomeVsSpendingForm defaults={search} />}
       noAccounts="There are no Accounts yet, so there is no income or spending."
@@ -44,7 +46,7 @@ function IncomeVsSpending({ scope, account }: { scope: ReportScope; account: num
   // The title block lists the Accounts; the table's heading, which is repeated on every printed page, says "All Accounts" rather than list them each time.
   const accountsInHeading = account === undefined ? 'All Accounts' : scope.accountsText
   return (
-    <ReportFrame name={NAME} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={report.dataUpdatedAt}>
+    <ReportFrame name={REPORT.name} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={report.dataUpdatedAt}>
       <IncomeVsSpendingReport report={report.data!} accounts={accountsInHeading} />
       <BackToReports />
     </ReportFrame>

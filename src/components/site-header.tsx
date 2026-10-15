@@ -1,7 +1,8 @@
+import { Link } from '@tanstack/react-router'
 import { LogOut, SlidersHorizontal } from 'lucide-react'
 import { TextSizeControl } from '@/components/text-size-control'
 import { ThemeToggle } from '@/components/theme-toggle'
-import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Separator } from '@/components/ui/separator'
@@ -33,6 +34,7 @@ function SignOut({ className }: { className?: string }) {
  */
 export function SiteHeader({
   group,
+  groupTo,
   page,
   textSize,
   onTextSize,
@@ -40,6 +42,8 @@ export function SiteHeader({
   onToggleTheme,
 }: {
   group?: string
+  /** For a page that belongs to another page (a Report, to Reports): the address of that page, which the group is a link to. It is a link at every width, because on a phone it is the way back. */
+  groupTo?: string
   page: string
   textSize: TextSize
   onTextSize: (size: TextSize) => void
@@ -55,8 +59,19 @@ export function SiteHeader({
           <BreadcrumbList className="flex-nowrap gap-1.5 text-sm sm:gap-2">
             {group && (
               <>
-                <BreadcrumbItem className="hidden sm:inline-flex">{group}</BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden sm:block" />
+                {groupTo ? (
+                  <BreadcrumbItem className="shrink-0">
+                    <BreadcrumbLink asChild>
+                      {/* Exact, or the router marks it as the current page, which the page after it is. */}
+                      <Link to={groupTo} activeOptions={{ exact: true }}>
+                        {group}
+                      </Link>
+                    </BreadcrumbLink>
+                  </BreadcrumbItem>
+                ) : (
+                  <BreadcrumbItem className="hidden sm:inline-flex">{group}</BreadcrumbItem>
+                )}
+                <BreadcrumbSeparator className={groupTo ? undefined : 'hidden sm:block'} />
               </>
             )}
             <BreadcrumbItem className="min-w-0">

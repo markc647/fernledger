@@ -27,7 +27,7 @@ type DatePickerProps = Omit<React.ComponentProps<typeof Button>, 'value' | 'onCh
   /** The earliest and latest date it allows, written the same way: days outside them cannot be chosen, and the year choices stop at them. Default: the years the API accepts. */
   min?: string
   max?: string
-  /** Gives the date to a form that is sent without scripting (a Report's, which opens in a new window): a hidden field of this name holds `value`. */
+  /** Gives the date to a form that reads its fields as a plain form sends them (a Report's, which puts them in the Report's address): a hidden field of this name holds `value`. */
   name?: string
   /** The calendar offers "Clear date" once there is a date, as a date input could always be emptied. Off where the form has its own way to clear it. */
   clearable?: boolean
