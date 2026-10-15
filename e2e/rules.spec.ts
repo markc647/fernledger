@@ -1,5 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { addRule, categoryId, pageOrder, removeRule, ruleIds } from './rule-helpers'
+import { arrowTo, chooseAction, menuAction, openActions, ruleActionButtons } from './row-actions-helpers'
 import { mainNav, navGroup, navigateTo } from './shell-helpers'
 
 // The light and dark projects share one local database, so each test uses text and an Account of its own, no earlier run used
@@ -19,22 +21,6 @@ async function importTransaction(context: BrowserContext, baseURL: string, proje
   })
   expect(res.ok()).toBe(true)
 }
-
-async function categoryId(context: BrowserContext, name: string) {
-  const categories = (await (await context.request.get('/api/categories')).json()) as { id: number; name: string }[]
-  return categories.find((c) => c.name === name)!.id
-}
-
-async function addRule(context: BrowserContext, baseURL: string, body: Record<string, unknown>) {
-  const res = await context.request.post('/api/rules', { headers: { Origin: baseURL }, data: body })
-  expect(res.status()).toBe(201)
-  return ((await res.json()) as { id: number }).id
-}
-
-const removeRule = async (context: BrowserContext, baseURL: string, id: number) =>
-  expect((await context.request.delete(`/api/rules/${id}`, { headers: { Origin: baseURL }, data: {} })).ok()).toBe(true)
-
-const ruleIds = async (context: BrowserContext) => ((await (await context.request.get('/api/rules')).json()) as { id: number }[]).map((r) => r.id)
 
 const rowFor = (page: Page, text: string) => page.getByRole('row', { name: new RegExp(text) })
 
@@ -96,7 +82,7 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
 
   // Remove it again so that no other test is affected. The Transaction keeps the Category the Rule gave it.
   await page.goto('/rules')
-  await page.getByRole('button', { name: /^Remove Rule \d+$/ }).last().click()
+  await chooseAction(ruleActionButtons(page).last(), 'Remove')
   await expect(page.getByRole('group', { name: /^Remove Rule/ })).toContainText('Transactions it already put in a Category keep that Category')
   await expect(page.getByRole('button', { name: 'Keep it' })).toBeFocused()
   await page.getByRole('button', { name: /^Yes, remove Rule/ }).click()
@@ -115,22 +101,32 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
     await page.goto('/rules')
     await expect(rowFor(page, `EXAMPLE TWO ${stamp}`)).toContainText(`Text contains “EXAMPLE TWO ${stamp}” and type is EFTPOS and money out and amount from $10.00 to $250.00`)
 
-    // WCAG 2.5.3: each button's accessible name contains the text it shows, so voice control can say what it sees.
-    for (const action of ['up', 'down', 'edit', 'remove']) {
-      const button = page.locator(`#rule-${second}-${action}`)
-      expect(await button.getAttribute('aria-label')).toContain((await button.innerText()).trim())
-    }
+    // WCAG 2.5.3: a menu item's accessible name is the text it shows, so voice control can say what it sees. The button that opens the menu says whose actions they are.
+    const secondActions = page.locator(`#rule-${second}-actions`)
+    expect(await secondActions.getAttribute('aria-label')).toMatch(/^Actions for Rule \d+$/)
+    await openActions(secondActions)
+    await expect(page.getByRole('menuitem')).toHaveText(['Edit', 'Move up', 'Move down', 'Remove'])
+    for (const action of ['Edit', 'Move up', 'Move down', 'Remove']) expect(await menuAction(page, action).getAttribute('aria-label')).toBeNull()
+    await page.keyboard.press('Escape')
+    await expect(secondActions).toBeFocused()
 
-    // Move the first Rule down: it lands after the second, so Move down is no longer possible and focus stays on its other button.
-    const moveDown = page.locator(`#rule-${first}-down`)
-    await moveDown.focus()
+    // Move the first Rule down with the keyboard: the button opens the menu (Enter), the arrow keys choose, and Enter moves it. It lands after the second, so Move down is no longer
+    // possible for it, and focus is back on its Actions button.
+    const firstActions = page.locator(`#rule-${first}-actions`)
+    await firstActions.focus()
+    await page.keyboard.press('Enter')
+    await expect(menuAction(page, 'Edit')).toBeFocused()
+    await arrowTo(page, 'Move down')
     await page.keyboard.press('Enter')
     await expect(page.getByRole('status').filter({ hasText: /^Moved Rule \d+ down/ })).toBeVisible()
-    await expect(page.locator(`#rule-${first}-up`)).toBeFocused()
+    await expect(firstActions).toBeFocused()
     expect((await ruleIds(context)).filter((id) => id === first || id === second)).toEqual([second, first])
+    await openActions(firstActions)
+    await expect(menuAction(page, 'Move down')).toHaveAttribute('aria-disabled', 'true')
+    await page.keyboard.press('Escape')
 
     // Edit the second: the amount range changes, and it needs no new check while the text, type and amounts are as they were.
-    await page.locator(`#rule-${second}-edit`).click()
+    await chooseAction(secondActions, 'Edit')
     await expect(page.getByLabel('Text contains')).toHaveValue(`EXAMPLE TWO ${stamp}`)
     await expect(page.getByLabel('Amount from ($)')).toHaveValue('10.00')
     await page.getByLabel('What the Rule does').selectOption({ label: 'Mark as a Transfer' })
@@ -140,12 +136,121 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
     await noAxeViolations(page)
     await page.getByRole('button', { name: 'Save Rule' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Saved the changes to the Rule.' })).toBeVisible()
-    await expect(page.locator(`#rule-${second}-edit`)).toBeFocused()
+    await expect(secondActions).toBeFocused()
     await expect(rowFor(page, `EXAMPLE TWO ${stamp}`)).toContainText('Mark as a Transfer')
     await noAxeViolations(page)
   } finally {
     await removeRule(context, baseURL!, first)
     await removeRule(context, baseURL!, second)
+  }
+})
+
+test("a Rule's Actions menu opens its form and its question where the old buttons did, and focus comes back to the row's button", async ({ page, context, baseURL }, testInfo) => {
+  await signInAs(context, 'admin')
+  const stamp = `${testInfo.project.name}${Date.now()}`
+  const id = await addRule(context, baseURL!, { textContains: `EXAMPLE MENU ${stamp}`, categoryId: await categoryId(context, 'Fuel') })
+
+  try {
+    await page.goto('/rules')
+    const actions = page.locator(`#rule-${id}-actions`)
+    const number = (await ruleIds(context)).indexOf(id) + 1
+    await expect(actions).toHaveAccessibleName(`Actions for Rule ${number}`)
+
+    // The menu is named for the button that opened it, and Escape closes it and puts focus back.
+    await openActions(actions)
+    await expect(page.getByRole('menu', { name: `Actions for Rule ${number}` })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menu')).toHaveCount(0)
+    await expect(actions).toBeFocused()
+
+    // Edit: focus goes into the form, as it did from the Edit button. Cancel brings it back to this row's button.
+    await chooseAction(actions, 'Edit')
+    await expect(page.getByLabel('Text contains')).toBeFocused()
+    await expect(page.getByLabel('Text contains')).toHaveValue(`EXAMPLE MENU ${stamp}`)
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    await expect(actions).toBeFocused()
+    await expect(page.getByLabel('Text contains')).toHaveCount(0)
+
+    // Remove: the question opens on its safe answer, and Keep it brings focus back to this row's button, which was taken out of the row while the question was in it.
+    await chooseAction(actions, 'Remove')
+    await expect(page.getByRole('group', { name: `Remove Rule ${number}` })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Keep it' })).toBeFocused()
+    await expect(actions).toHaveCount(0)
+    await page.getByRole('button', { name: 'Keep it' }).click()
+    await expect(actions).toBeFocused()
+    expect(await ruleIds(context)).toContain(id) // nothing was removed
+  } finally {
+    await removeRule(context, baseURL!, id)
+  }
+})
+
+test('the first Rule cannot move up and the last cannot move down, and each of the others can do both', async ({ page, context, baseURL }, testInfo) => {
+  await signInAs(context, 'admin')
+  const stamp = `${testInfo.project.name}${Date.now()}`
+  const fuel = await categoryId(context, 'Fuel')
+  const ids = [await addRule(context, baseURL!, { textContains: `EXAMPLE A ${stamp}`, categoryId: fuel }), await addRule(context, baseURL!, { textContains: `EXAMPLE B ${stamp}`, categoryId: fuel })]
+
+  try {
+    await page.goto('/rules')
+    const buttons = ruleActionButtons(page)
+    await expect(buttons.nth(1)).toBeVisible() // at least these two
+    expect(await buttons.count()).toBeGreaterThanOrEqual(2)
+    await openActions(buttons.first())
+    await expect(menuAction(page, 'Move up')).toHaveAttribute('aria-disabled', 'true')
+    await expect(menuAction(page, 'Move down')).not.toHaveAttribute('aria-disabled', 'true')
+    await page.keyboard.press('Escape')
+    await openActions(buttons.last())
+    await expect(menuAction(page, 'Move down')).toHaveAttribute('aria-disabled', 'true')
+    await expect(menuAction(page, 'Move up')).not.toHaveAttribute('aria-disabled', 'true')
+    await page.keyboard.press('Escape')
+    // A disabled item does nothing when it is chosen.
+    await openActions(buttons.first())
+    await menuAction(page, 'Move up').click({ force: true })
+    await expect(page.getByRole('menu')).toBeVisible()
+    await page.keyboard.press('Escape')
+    expect(await ruleIds(context)).toEqual(expect.arrayContaining(ids))
+  } finally {
+    for (const id of ids) await removeRule(context, baseURL!, id)
+  }
+})
+
+test('the Admin moves a Rule up and down from its Actions menu with the mouse, and the Worker has the new order', async ({ page, context, baseURL }, testInfo) => {
+  await signInAs(context, 'admin')
+  const stamp = `${testInfo.project.name}${Date.now()}`
+  const fuel = await categoryId(context, 'Fuel')
+  const [a, b, c] = [
+    await addRule(context, baseURL!, { textContains: `EXAMPLE FIRST ${stamp}`, categoryId: fuel }),
+    await addRule(context, baseURL!, { textContains: `EXAMPLE SECOND ${stamp}`, categoryId: fuel }),
+    await addRule(context, baseURL!, { textContains: `EXAMPLE THIRD ${stamp}`, categoryId: fuel }),
+  ] as [number, number, number]
+  const mine = (ids: number[]) => ids.filter((id) => id === a || id === b || id === c)
+
+  try {
+    await page.goto('/rules')
+    const all = await ruleIds(context)
+    const total = all.length
+    const cNumber = all.indexOf(c) + 1
+
+    await chooseAction(page.locator(`#rule-${c}-actions`), 'Move up')
+    await expect(page.getByRole('status').filter({ hasText: /^Moved Rule \d+ up/ })).toContainText(`Moved Rule ${cNumber} up. It is now Rule ${cNumber - 1} of ${total}.`)
+    await expect(page.getByRole('status').filter({ hasText: /^Moved Rule \d+ up/ })).toContainText('To use the change on the Transactions you already have, choose Apply the Rules to all Transactions')
+    await expect(page.locator(`#rule-${c}-actions`)).toBeFocused() // the Rule is somewhere else in the list, and so is its button
+    expect(mine(await ruleIds(context))).toEqual([a, c, b])
+    expect(await pageOrder(page, a, b, c)).toEqual([a, c, b])
+    await expect(page.locator(`#rule-${c}-actions`)).toHaveAccessibleName(`Actions for Rule ${cNumber - 1}`) // renumbered
+
+    await chooseAction(page.locator(`#rule-${a}-actions`), 'Move down')
+    await expect(page.getByRole('status').filter({ hasText: /^Moved Rule \d+ down/ })).toBeVisible()
+    await expect(page.locator(`#rule-${a}-actions`)).toBeFocused()
+    expect(mine(await ruleIds(context))).toEqual([c, a, b])
+    expect(await pageOrder(page, a, b, c)).toEqual([c, a, b])
+    await noAxeViolations(page)
+
+    // The Change Log has the new order.
+    await page.goto('/change-log')
+    await expect(page.getByRole('listitem').filter({ hasText: 'Changed the order of Rules' }).first()).toContainText('Rule change by admin@example.com')
+  } finally {
+    for (const id of [a, b, c]) await removeRule(context, baseURL!, id)
   }
 })
 
@@ -162,7 +267,7 @@ test.describe('a refused Rule', () => {
 
     try {
       await page.goto('/rules')
-      await page.locator(`#rule-${id}-edit`).click()
+      await chooseAction(page.locator(`#rule-${id}-actions`), 'Edit')
       await page.getByLabel('What the Rule does').selectOption({ label: 'Mark as a Transfer' })
       await page.getByRole('button', { name: 'Save Rule' }).click()
       await expect(page.getByRole('alert').filter({ hasText: 'changed just now' })).toHaveText('This Rule was changed just now. Try again.')
@@ -186,9 +291,10 @@ test.describe('a refused Rule', () => {
 
     try {
       await page.goto('/rules')
-      await page.locator(`#rule-${first}-down`).click()
+      await chooseAction(page.locator(`#rule-${first}-actions`), 'Move down')
       await expect(page.getByRole('alert').filter({ hasText: 'The Rules have changed' })).toHaveText('The Rules have changed since this page loaded. Reload the page, then try again.')
       expect((await ruleIds(context)).filter((id) => id === first || id === second)).toEqual([first, second]) // nothing moved
+      expect(await pageOrder(page, first, second)).toEqual([first, second]) // and the page is back to the order the Worker has
     } finally {
       await removeRule(context, baseURL!, first)
       await removeRule(context, baseURL!, second)
@@ -207,7 +313,7 @@ test.describe('a Rule removed meanwhile', () => {
 
     await page.goto('/rules')
     await expect(rowFor(page, `EXAMPLE SIX ${stamp}`)).toBeVisible()
-    await page.locator(`#rule-${id}-remove`).click()
+    await chooseAction(page.locator(`#rule-${id}-actions`), 'Remove')
     await removeRule(context, baseURL!, id) // another page removes it while this one asks
     await page.getByRole('button', { name: /^Yes, remove Rule \d+$/ }).click()
 
@@ -523,7 +629,7 @@ test.describe('while the Rules are being applied', () => {
       await page.getByRole('button', { name: 'Cancel' }).click()
       await expect.poll(() => steps).toBeGreaterThan(whenOpened + 2) // and then on again
 
-      await page.getByRole('button', { name: new RegExp(`^Remove Rule \\d+$`) }).last().click()
+      await chooseAction(ruleActionButtons(page).last(), 'Remove')
       await expect(page.getByRole('group', { name: /^Remove Rule/ })).toContainText('A run is going. Removing the Rule starts it again from the first Transaction.')
     } finally {
       await removeRule(context, baseURL!, rule)

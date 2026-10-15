@@ -54,13 +54,24 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
  * start. So it emulates reduced motion (src/index.css makes every transition and animation near-instant under it), waits for what is running, and puts the setting back. The
  * emulation is for this check only: reduced motion left on broke the focus-outline and text-size tests, which look at a transition on its way. (It is put back to what the page
  * had, not to `null`, which Playwright accepts and does not apply to this media feature: the page stays reduced.)
+ *
+ * `within` is a selector for the part of the page to look at, for a state where the rest is not the reader's to use: while a menu of actions is open (Radix, modal) everything behind it is
+ * `aria-hidden` and focus is held in the menu, but its focusable elements are still in the page, which axe reads as `aria-hidden-focus` whatever holds focus.
+ *
+ * It looks from the top of the page, which is the page and not where the reader happens to be scrolled to: part-way down a long list, the sticky header can be over most of a row's button, and
+ * axe reads that button (44px, and fully there once the page moves) as a target under 24px (`target-size`, "partially obscured"), in whichever row the scroll leaves under the header.
+ * `keepScroll` leaves the page where it is, for a moment when moving it would change what is being looked at (a row held in the middle of a drag, a menu open beside its button: it goes off
+ * the screen with the button).
  */
-export async function noAxeViolations(page: Page) {
+export async function noAxeViolations(page: Page, { within, keepScroll = false }: { within?: string; keepScroll?: boolean } = {}) {
   const wasReduced = await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   try {
     await settle(page)
-    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze()
+    if (!keepScroll) await page.evaluate(() => window.scrollTo(0, 0))
+    const axe = new AxeBuilder({ page }).withTags(WCAG)
+    if (within) axe.include(within)
+    const { violations } = await axe.analyze()
     // Which element, not only how many, because a CI run keeps no trace to look at afterwards.
     expect(violations.map((v) => `${v.id}: ${v.nodes.map((node) => node.target.join(' ')).join(', ')}`)).toEqual([])
   } finally {
