@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
-import { expect } from './fixtures'
+import { expect, noAxeViolations } from './fixtures'
+import { contrastOf, rgbOf, type Rgb } from './shell-helpers'
 
 // The "⋯" menu on a row of the Rules and Categories tables (src/components/row-actions.tsx), and the cards on a phone: the same button and menu at every width. A spec says which
 // row's actions it means and which it chooses, and not where the control is today.
@@ -10,7 +11,13 @@ export const actionsButton = (page: Page, row: string) => page.getByRole('button
 /** The "⋯" button of every Rule, in the order the page shows them. */
 export const ruleActionButtons = (page: Page) => page.getByRole('button', { name: /^Actions for Rule \d+$/ })
 
-/** The open menu, for `noAxeViolations(page, { within: OPEN_MENU, keepScroll: true })`: while it is open the rest of the page is hidden from a screen reader, and is not what is looked at. */
+/**
+ * Axe on the page from the top of it (`fromTop`, e2e/fixtures.ts), for the specs of a page with a long list of rows with buttons: the Rules, the Categories and the menus of their rows.
+ * The sticky header can be over most of a row's button wherever the page is scrolled to, which axe reads as a target too small to press.
+ */
+export const noAxeViolationsFromTop = (page: Page) => noAxeViolations(page, { fromTop: true })
+
+/** The open menu, for `noAxeViolations(page, { within: OPEN_MENU })`: while it is open the rest of the page is hidden from a screen reader, and is not what is looked at. */
 export const OPEN_MENU = '[data-slot="dropdown-menu-content"]'
 
 /** The open menu's item by its words. */
@@ -41,41 +48,20 @@ export async function chooseAction(button: Locator, action: string) {
 }
 
 /**
- * The contrast of an element's text against what it is drawn on, as the browser paints it (WCAG 1.4.3): the element's own fill, which may be translucent, over the first fill under it that
- * is not. Read from a canvas, which turns whatever colour space the theme is written in into the sRGB the reader sees.
+ * The contrast of an element's text against what it is drawn on, as the browser paints it (WCAG 1.4.3): the fills of the element and of each element it is in, the first of them over
+ * the page, laid one over the next (a translucent fill, such as a tint, shows what is under it).
  */
-export const textContrast = (target: Locator) =>
-  target.evaluate((element) => {
-    const canvas = document.createElement('canvas')
-    canvas.width = canvas.height = 1
-    const context = canvas.getContext('2d', { willReadFrequently: true })!
-    const paint = (colour: string) => {
-      context.fillStyle = colour
-      context.fillRect(0, 0, 1, 1)
-    }
+export async function textContrast(target: Locator) {
+  const { text, fills } = await target.evaluate((element) => {
     const fills: string[] = []
-    for (let node: Element | null = element; node; node = node.parentElement) {
-      const fill = getComputedStyle(node).backgroundColor
-      context.clearRect(0, 0, 1, 1)
-      paint(fill)
-      if (context.getImageData(0, 0, 1, 1).data[3] === 0) continue // nothing there
-      fills.unshift(fill)
-      if (context.getImageData(0, 0, 1, 1).data[3] === 255) break // opaque: nothing under it shows
-    }
-    context.clearRect(0, 0, 1, 1)
-    for (const fill of fills) paint(fill)
-    const [r, g, b] = context.getImageData(0, 0, 1, 1).data
-    const background = [r!, g!, b!]
-    context.clearRect(0, 0, 1, 1)
-    paint(getComputedStyle(element).color)
-    const [tr, tg, tb] = context.getImageData(0, 0, 1, 1).data
-    const luminance = ([red, green, blue]: number[]) => {
-      const [lr, lg, lb] = [red!, green!, blue!].map((value) => {
-        const channel = value / 255
-        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
-      })
-      return 0.2126 * lr! + 0.7152 * lg! + 0.0722 * lb!
-    }
-    const [lighter, darker] = [luminance(background), luminance([tr!, tg!, tb!])].sort((x, y) => y - x)
-    return (lighter! + 0.05) / (darker! + 0.05)
+    for (let node: Element | null = element; node; node = node.parentElement) fills.unshift(getComputedStyle(node).backgroundColor)
+    return { text: getComputedStyle(element).color, fills }
   })
+  const [colour, ...layers] = await rgbOf(target.page(), [text, ...fills])
+  let behind: Rgb = { r: 255, g: 255, b: 255 }
+  for (const layer of layers) {
+    const alpha = layer.a / 255
+    behind = { r: layer.r * alpha + behind.r * (1 - alpha), g: layer.g * alpha + behind.g * (1 - alpha), b: layer.b * alpha + behind.b * (1 - alpha) }
+  }
+  return contrastOf(colour!, behind)
+}

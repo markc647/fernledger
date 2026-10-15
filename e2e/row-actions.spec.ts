@@ -1,6 +1,6 @@
-import type { BrowserContext, Locator, Page } from '@playwright/test'
-import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
-import { addRule, categoryId, removeRule } from './rule-helpers'
+import type { Locator, Page } from '@playwright/test'
+import { expect, noAxeViolations, settle, test } from './fixtures'
+import { ruleActions, ruleGrip, withRules } from './rule-helpers'
 import { actionsButton, arrowTo, menuAction, OPEN_MENU, openActions, textContrast } from './row-actions-helpers'
 import { chooseTextSize, expectTextSize } from './shell-helpers'
 
@@ -24,27 +24,20 @@ const resolved = (page: Page, property: 'color' | 'backgroundColor', value: stri
 const style = (target: Locator, ...properties: string[]) =>
   target.evaluate((element, names) => Object.fromEntries(names.map((name) => [name, getComputedStyle(element).getPropertyValue(name)])), properties)
 
-/** Two Rules to look at (the first has one after it, so it can move down), and gone when the spec is done. `body` is given the first one's id. */
-async function withRule(page: Page, context: BrowserContext, baseURL: string, testInfo: { project: { name: string } }, body: (id: number) => Promise<void>) {
-  await signInAs(context, 'admin')
-  const fuel = await categoryId(context, 'Fuel')
-  const stamp = `${testInfo.project.name}${Date.now()}`
-  const ids = [await addRule(context, baseURL, { textContains: `EXAMPLE LOOK ${stamp}`, categoryId: fuel }), await addRule(context, baseURL, { textContains: `EXAMPLE LOOK TOO ${stamp}`, categoryId: fuel })]
-  try {
+/** Two Rules to look at (the first has one after it, so it can move down), on the Rules page. `body` is given the first one's id. */
+const withRule = (page: Page, context: Parameters<typeof withRules>[0], baseURL: string, testInfo: { project: { name: string } }, body: (id: number) => Promise<void>) =>
+  withRules(context, baseURL, testInfo, ['LOOK', 'LOOK TOO'], async ([id]) => {
     await page.goto('/rules')
-    await body(ids[0]!)
-  } finally {
-    for (const id of ids) await removeRule(context, baseURL, id)
-  }
-}
+    await body(id)
+  })
 
 test('the menu, its items and the handle are drawn in the theme, and their text is at least 4.5:1 against what it is on, resting and highlighted', async ({ page, context, baseURL }, testInfo) => {
   await withRule(page, context, baseURL!, testInfo, async (id) => {
-    const actions = page.locator(`#rule-${id}-actions`)
+    const actions = ruleActions(page, id)
     // The handle and the button are graphics that carry meaning: 3:1 (1.4.11), and in practice more.
     expect(await textContrast(actions)).toBeGreaterThanOrEqual(3)
-    expect(await textContrast(page.locator(`#rule-${id}-grip`))).toBeGreaterThanOrEqual(3)
-    expect((await style(page.locator(`#rule-${id}-grip`), 'color'))['color']).toBe(await resolved(page, 'color', 'var(--muted-foreground)'))
+    expect(await textContrast(ruleGrip(page, id))).toBeGreaterThanOrEqual(3)
+    expect((await style(ruleGrip(page, id), 'color'))['color']).toBe(await resolved(page, 'color', 'var(--muted-foreground)'))
 
     // Opened with the keyboard, which highlights the first item at once.
     await actions.focus()
@@ -77,14 +70,14 @@ test('Windows high contrast keeps the handle and the button as buttons, the high
     const canvasText = await resolved(page, 'backgroundColor', 'CanvasText')
 
     // The button and the handle keep an edge (a fill is dropped), so they are still things to press.
-    for (const target of [page.locator(`#rule-${id}-actions`), page.locator(`#rule-${id}-grip`)]) {
+    for (const target of [ruleActions(page, id), ruleGrip(page, id)]) {
       const edge = await style(target, 'border-top-width', 'border-top-style')
       expect(parseFloat(edge['border-top-width']!)).toBeGreaterThan(0)
       expect(edge['border-top-style']).toBe('solid')
     }
 
     // The menu has an edge, its highlighted item is the palette's highlight, the others have no box, and the line between items is drawn.
-    await page.locator(`#rule-${id}-actions`).focus()
+    await ruleActions(page, id).focus()
     await page.keyboard.press('Enter')
     await expect(menuAction(page, 'Edit')).toBeFocused()
     expect(parseFloat((await style(page.locator(OPEN_MENU), 'border-top-width'))['border-top-width']!)).toBeGreaterThan(0)
@@ -96,8 +89,8 @@ test('Windows high contrast keeps the handle and the button as buttons, the high
     await page.keyboard.press('Escape')
 
     // Focus on the handle is the palette's outline, and a Rule picked up is outlined as well as lifted.
-    const handle = page.locator(`#rule-${id}-grip`)
-    await page.locator(`#rule-${id}-actions`).focus()
+    const handle = ruleGrip(page, id)
+    await ruleActions(page, id).focus()
     await page.keyboard.press('Shift+Tab') // back to the handle, as a keyboard does, so that it has focus that shows
     await expect(handle).toBeFocused()
     const ring = await style(handle, 'outline-style', 'outline-width', 'outline-color')
@@ -118,12 +111,12 @@ for (const size of ['Medium', 'Large'] as const) {
       await chooseTextSize(page, size)
       await expectTextSize(page, size)
       await settle(page)
-      for (const target of [page.locator(`#rule-${id}-actions`), page.locator(`#rule-${id}-grip`)]) {
+      for (const target of [ruleActions(page, id), ruleGrip(page, id)]) {
         const box = (await target.boundingBox())!
         expect(box.width).toBeGreaterThanOrEqual(44)
         expect(box.height).toBeGreaterThanOrEqual(44)
       }
-      await openActions(page.locator(`#rule-${id}-actions`))
+      await openActions(ruleActions(page, id))
       await settle(page)
       for (const item of await page.getByRole('menuitem').all()) expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44)
       // The text is the page's 16px at Medium (and 20px at Large), not shadcn's 14px: the menu is read at the size the page is.
@@ -132,20 +125,17 @@ for (const size of ['Medium', 'Large'] as const) {
   })
 }
 
-test('the Rules page and the Categories page have no WCAG 2.2 AA violations with a row\'s menu open', async ({ page, context, baseURL }, testInfo) => {
+// The pages with their menus closed are scanned by the specs of the pages (rules.spec.ts, categories.spec.ts). Open, the menu is the part of the page that matters: the rest is hidden from a
+// screen reader while it is open, and is not looked at.
+test("a row's menu, open on the Rules page and on the Categories page, has no WCAG 2.2 AA violations", async ({ page, context, baseURL }, testInfo) => {
   await withRule(page, context, baseURL!, testInfo, async (id) => {
-    await noAxeViolations(page)
-    await openActions(page.locator(`#rule-${id}-actions`))
-    await noAxeViolations(page, { within: OPEN_MENU, keepScroll: true })
+    await openActions(ruleActions(page, id))
+    await noAxeViolations(page, { within: OPEN_MENU })
     await page.keyboard.press('Escape')
 
     await page.goto('/categories')
     await expect(page.getByRole('cell', { name: 'Groceries', exact: true })).toBeVisible()
-    await noAxeViolations(page)
     await openActions(actionsButton(page, 'Groceries'))
-    await expect(page.getByRole('menuitem')).toHaveText(['Rename', 'Select kind', 'Remove'])
-    await noAxeViolations(page, { within: OPEN_MENU, keepScroll: true })
-    await page.keyboard.press('Escape')
-    await expect(actionsButton(page, 'Groceries')).toBeFocused()
+    await noAxeViolations(page, { within: OPEN_MENU })
   })
 })

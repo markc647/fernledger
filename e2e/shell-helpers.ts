@@ -141,3 +141,35 @@ export async function navigateTo(page: Page, label: string, group?: string) {
   else await showSidebar(page)
   await navLink(page, label).click()
 }
+
+// Colour, as the page draws it: for the specs that hold a contrast to WCAG (the sidebar, the menu of a row's actions).
+
+/** A colour, as the page draws it (red, green, blue). Canvas reads any CSS colour, including the oklch the theme uses. */
+export const rgbOf = (page: Page, colours: string[]) =>
+  page.evaluate((list) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 1
+    const context = canvas.getContext('2d', { willReadFrequently: true })!
+    return list.map((css) => {
+      context.clearRect(0, 0, 1, 1)
+      context.fillStyle = css
+      context.fillRect(0, 0, 1, 1)
+      const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data
+      return { r: r!, g: g!, b: b!, a: a! }
+    })
+  }, colours)
+
+export type Rgb = { r: number; g: number; b: number }
+
+export const luminance = ({ r, g, b }: Rgb) => {
+  const [lr, lg, lb] = [r, g, b].map((v) => {
+    const c = v / 255
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * lr! + 0.7152 * lg! + 0.0722 * lb!
+}
+/** WCAG's contrast ratio of two colours (1.4.3, 1.4.11). */
+export const contrastOf = (a: Rgb, b: Rgb) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (hi! + 0.05) / (lo! + 0.05)
+}

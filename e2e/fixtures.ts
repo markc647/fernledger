@@ -56,19 +56,19 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
  * had, not to `null`, which Playwright accepts and does not apply to this media feature: the page stays reduced.)
  *
  * `within` is a selector for the part of the page to look at, for a state where the rest is not the reader's to use: while a menu of actions is open (Radix, modal) everything behind it is
- * `aria-hidden` and focus is held in the menu, but its focusable elements are still in the page, which axe reads as `aria-hidden-focus` whatever holds focus.
+ * `aria-hidden` and focus is held in the menu, but its focusable elements are still in the page, which axe reads as `aria-hidden-focus` whatever holds focus. The page is not moved for it:
+ * a menu is beside its button, and goes off the screen with it.
  *
- * It looks from the top of the page, which is the page and not where the reader happens to be scrolled to: part-way down a long list, the sticky header can be over most of a row's button, and
+ * `fromTop` looks from the top of the page, and not from where the reader happens to be scrolled to: part-way down a long list, the sticky header can be over most of a row's button, and
  * axe reads that button (44px, and fully there once the page moves) as a target under 24px (`target-size`, "partially obscured"), in whichever row the scroll leaves under the header.
- * `keepScroll` leaves the page where it is, for a moment when moving it would change what is being looked at (a row held in the middle of a drag, a menu open beside its button: it goes off
- * the screen with the button).
+ * Only a spec of a page with such a list asks for it (the Rules, the Categories, the menus of their rows: `noAxeViolationsFromTop` in row-actions-helpers.ts); every other scan is of the page where it is.
  */
-export async function noAxeViolations(page: Page, { within, keepScroll = false }: { within?: string; keepScroll?: boolean } = {}) {
+export async function noAxeViolations(page: Page, { within, fromTop = false }: { within?: string; fromTop?: boolean } = {}) {
   const wasReduced = await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   try {
+    if (fromTop && !within) await page.evaluate(() => window.scrollTo(0, 0)) // before the wait, which is for what the move itself starts
     await settle(page)
-    if (!keepScroll) await page.evaluate(() => window.scrollTo(0, 0))
     const axe = new AxeBuilder({ page }).withTags(WCAG)
     if (within) axe.include(within)
     const { violations } = await axe.analyze()
