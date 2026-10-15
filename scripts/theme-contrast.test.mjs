@@ -44,6 +44,7 @@ const pairs = [
   ['popover-foreground', 'popover', 4.5],
   ['accent-foreground', 'accent', 4.5],
   ['danger', 'popover', 4.5],
+  // The Calendar's weekday names (src/components/ui/calendar.tsx) are muted text on the popover it is drawn in.
   ['muted-foreground', 'popover', 4.5],
   // The shell (src/components/site-header.tsx, app-sidebar.tsx): text on the tinted header and sidebar, on the current page's pill and under the pointer, the breadcrumb's
   // group and the footer's role (muted text on the tint), and the focus ring on the tint and on the pill.

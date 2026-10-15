@@ -175,6 +175,23 @@ test("a Rule's Actions menu opens its form and its question where the old button
   })
 })
 
+test('with one Rule there is nothing to put in order: no handle, no Reorder heading and no words about the order, and the Rule has its menu', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  await page.route('**/api/rules', (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({ json: [{ id: 1, textContains: 'EXAMPLE ONLY', bankType: null, direction: null, minCents: null, maxCents: null, categoryId: 7, categoryName: 'Fuel', categoryRemoved: false, transfer: false }] })
+      : route.fallback(),
+  )
+  await page.goto('/rules')
+  await expect(page.getByRole('table', { name: 'Rules, in the order they are checked' })).toBeVisible()
+  await expect(page.getByRole('row', { name: /EXAMPLE ONLY/ })).toBeVisible()
+  await expect(ruleActions(page, 1)).toHaveAccessibleName('Actions for Rule 1')
+  await expect(page.locator('[id$="-grip"]')).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: 'Reorder' })).toHaveCount(0)
+  await expect(page.getByText(/To change the order/)).toHaveCount(0)
+  await noAxeViolationsFromTop(page)
+})
+
 test('the first Rule cannot move up and the last cannot move down, and each of the others can do both', async ({ page, context, baseURL }, testInfo) => {
   await withRules(context, baseURL!, testInfo, ['A', 'B'], async () => {
     await page.goto('/rules')

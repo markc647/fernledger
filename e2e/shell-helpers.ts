@@ -161,7 +161,7 @@ export const rgbOf = (page: Page, colours: string[]) =>
 
 export type Rgb = { r: number; g: number; b: number }
 
-export const luminance = ({ r, g, b }: Rgb) => {
+const luminance = ({ r, g, b }: Rgb) => {
   const [lr, lg, lb] = [r, g, b].map((v) => {
     const c = v / 255
     return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4

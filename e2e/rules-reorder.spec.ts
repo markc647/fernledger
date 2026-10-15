@@ -140,6 +140,13 @@ test.describe('an order the Worker does not take', () => {
   ]) {
     test(`is ${name}: the order before comes back, and the page says so`, async ({ page, context, baseURL }, testInfo) => {
       await withRules(context, baseURL!, testInfo, ['FIRST', 'SECOND', 'THIRD'], async ([a, b, c]) => {
+        await page.goto('/rules')
+
+        // A move that works first, so that there is something said of it (the Moved line) for the failure to take away.
+        await dragHandle(page, a, b)
+        await expect(status(page, /^Moved Rule/)).toBeVisible()
+        await expect.poll(async () => pageOrder(page, a, b, c)).toEqual([b, a, c])
+
         let held = true
         let release = () => {}
         const gate = new Promise<void>((resolve) => (release = resolve))
@@ -149,24 +156,22 @@ test.describe('an order the Worker does not take', () => {
           held = false
           await route.fulfill({ status: code, json: body })
         })
-
-        await page.goto('/rules')
         const before = await ruleIds(context)
         await dragHandle(page, a, c)
         await expect.poll(async () => pageOrder(page, a, b, c)).toEqual([b, c, a]) // shown at once
         expect(held).toBe(true)
         release()
         await expect(page.getByRole('alert').filter({ hasText: message })).toHaveText(message)
-        await expect.poll(async () => pageOrder(page, a, b, c)).toEqual([a, b, c]) // and taken back
+        await expect.poll(async () => pageOrder(page, a, b, c)).toEqual([b, a, c]) // and taken back
         expect(await ruleIds(context)).toEqual(before) // nothing was saved
-        await expect(page.getByRole('status').filter({ hasText: /^Moved/ })).toHaveCount(0)
+        await expect(page.getByRole('status').filter({ hasText: /^Moved/ })).toHaveCount(0) // and what was said of the move before is not said of this one
         await noAxeViolationsFromTop(page)
 
         // It can be tried again, and this time the Worker takes it.
         await page.unroute(/\/api\/rules\/order$/)
         await dragHandle(page, a, c)
         await expect(status(page, /^Moved Rule/)).toBeVisible()
-        await expect(page.getByRole('alert').filter({ hasText: message })).toHaveCount(0) // the problem is cleared by the next move
+        await expect(page.getByRole('alert').filter({ hasText: message })).toHaveCount(0) // the problem is cleared when the next move works
         await expect.poll(async () => (await ruleIds(context)).filter((id) => [a, b, c].includes(id))).toEqual([b, c, a])
       })
     })
@@ -196,9 +201,9 @@ test('while an order is being saved the handles and Move up and Move down are of
 
     await dragHandle(page, a, b)
     await expect(page.getByText('Waiting while you change a Rule.')).toBeVisible() // ...until the order is being saved: the run is told to wait
-    const whenSaving = steps
     await expect.poll(async () => pageOrder(page, a, b, c)).toEqual([b, a, c])
     for (const id of [a, b, c]) await expect(ruleGrip(page, id)).toHaveAttribute('aria-disabled', 'true')
+    const whenSaving = steps
     await openActions(ruleActions(page, c))
     await expect(menuAction(page, 'Move up')).toHaveAttribute('aria-disabled', 'true')
     await page.keyboard.press('Escape')

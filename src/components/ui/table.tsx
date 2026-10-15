@@ -1,8 +1,8 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
-// shadcn/ui Table (radix-nova), trimmed to what the app uses (the stock `TableFooter` is left out). It is written by hand because the shadcn CLI does not run here; its only differences from
-// the registry are the import of `cn`, the `"use client"` line, which a Vite app has no use for, and that. Do not edit it for the app:
+// shadcn/ui Table (radix-nova), trimmed to what the app uses. It is written by hand because the shadcn CLI does not run here; its only differences from the registry are the import of `cn`,
+// the missing `"use client"` line (a Vite app has no use for it), and the missing `TableFooter`. Do not edit it for the app:
 // what the app needs of a table that stock does not give (text that wraps rather than runs on, a size in rem, a border that survives Windows high contrast) is put on it by its caller
 // (`ResponsiveTable` with `look="shadcn"`, src/components/responsive-table.tsx).
 

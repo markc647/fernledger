@@ -120,6 +120,8 @@ function AdminRules() {
     },
     onSuccess: async (_data, change) => {
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
+      // An earlier failure's alert is taken away when a move works, not as it is dropped: taking the line away moves the table up the page under the pointer.
+      setProblem('')
       setNotice(change.message)
     },
     onError: (failure, _change, context) => {
@@ -142,7 +144,6 @@ function AdminRules() {
   const items: Item[] = (rules ?? []).map((rule, i, all) => ({ rule, number: i + 1, first: i === 0, last: i === all.length - 1 }))
   const ids = items.map((i) => i.rule.id)
   const reorder = (next: number[], message: string, focus: string) => {
-    setProblem('')
     moveFocus.current = focus
     move.mutate({ ids: next, message: `${message} ${afterChange(runGoing)}` })
   }
