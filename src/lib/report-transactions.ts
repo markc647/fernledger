@@ -186,7 +186,7 @@ export async function loadListing({
 export type ReportSearch = { account?: number; from?: string; to?: string }
 
 /** An ID in an address (an Account's, or the Loans Report's Category): a whole number from 1 to 999,999,999, or nothing. */
-export const searchId = (value: unknown) => {
+const searchId = (value: unknown) => {
   const number = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,9}$/.test(value) ? Number(value) : NaN
   return Number.isSafeInteger(number) && number >= 1 && number <= 999_999_999 ? number : undefined
 }

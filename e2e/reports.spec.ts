@@ -99,7 +99,7 @@ const article = (page: Page) => page.getByRole('article', { name: 'Transaction l
 
 test.describe('opening a Report', () => {
   test('the Transactions page opens it in a new window, carrying the Account and dates', async ({ page, context, baseURL }, testInfo) => {
-    const { year } = dataFor(testInfo.project.name)
+    const { year, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await page.goto(`/transactions?account=${savingsId}&from=${year}-01-01&to=${year}-12-31`)
@@ -113,7 +113,7 @@ test.describe('opening a Report', () => {
 
     const [popup] = await Promise.all([context.waitForEvent('page'), link.click()])
     await expect(popup.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible()
-    await expect(popup.getByRole('article', { name: 'Transaction listing' })).toContainText(dataFor(testInfo.project.name).savings.name)
+    await expect(popup.getByRole('article', { name: 'Transaction listing' })).toContainText(savings.name)
     await expect(page).toHaveURL(/\/transactions\?/) // the Transactions page is still where it was
   })
 
@@ -193,31 +193,31 @@ test.describe('opening a Report', () => {
     const { year } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
+    // A reading is a number of requests: those asked (the Worker has them) and those answered (the page has them).
     const asked: string[] = []
-    let slow = false // while it is, a read takes long enough for a second press to come in the middle of it
+    const answered: string[] = []
+    let slow = false // while it is, a request takes long enough for a second press to come in the middle of a reading
     await page.route('**/api/reports/transactions?**', async (route) => {
-      asked.push(new URL(route.request().url()).searchParams.get('accountId')!)
+      asked.push(route.request().url())
       if (slow) await new Promise((resolve) => setTimeout(resolve, 600))
       await route.continue()
     })
+    page.on('response', (response) => void (response.url().includes('/api/reports/transactions?') && answered.push(response.url())))
     await page.goto(reportAddress(savingsId, year))
     await expect(article(page).getByRole('table')).toBeVisible()
-    const first = asked.length
-    expect(first).toBeGreaterThan(0)
+    const reading = answered.length // the requests one reading takes
+    expect(reading).toBeGreaterThan(0)
 
     const show = page.getByRole('form', { name: 'Transaction listing' }).getByRole('button', { name: 'Show Report' })
     await show.click()
-    await expect.poll(() => asked.length).toBeGreaterThan(first) // the same address, asked for again, is read again
-    await expect(article(page).getByRole('table')).toBeVisible()
+    await expect.poll(() => answered.length).toBe(2 * reading) // the same address, asked for again, is read again
 
-    // A second press in the middle of a read joins it, and does not start another: a Report is thousands of rows of the free plan's D1 reads (ADR 0004).
-    await page.waitForTimeout(300)
-    const before = asked.length
+    // A second press in the middle of a reading joins it, and does not start another: a Report is thousands of rows of the free plan's D1 reads (ADR 0004). Another reading
+    // would have asked for its requests by the time the first one's slow answers come, so the count of those asked, when they have been, is how many readings there were.
     slow = true
     await show.dblclick()
-    await expect.poll(() => asked.length).toBeGreaterThan(before)
-    await page.waitForTimeout(1500)
-    expect(asked.length - before).toBe(first) // one more reading, of as many requests as the first took
+    await expect.poll(() => answered.length).toBeGreaterThanOrEqual(3 * reading)
+    expect(asked.length).toBe(3 * reading)
     await expect(article(page).getByRole('table')).toBeVisible()
   })
 
@@ -355,11 +355,11 @@ test.describe('on screen', () => {
   })
 
   test('is a Report for a single day when the dates are the same', async ({ page, context, baseURL }, testInfo) => {
-    const { year, savings } = dataFor(testInfo.project.name)
+    const { year, first, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
     await page.goto(`/reports/transactions?account=${savingsId}&from=${year}-01-01&to=${year}-01-01`)
-    await expect(article(page).locator('header dd').nth(1)).toHaveText(dataFor(testInfo.project.name).first) // one date, not "to" itself
+    await expect(article(page).locator('header dd').nth(1)).toHaveText(first) // one date, not "to" itself
     await expect(article(page).getByRole('table', { name: `Transactions in ${savings.name}` }).locator('tbody tr')).toHaveCount(1)
   })
 

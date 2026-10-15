@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import {
   blockStorage,
+  breadcrumb,
   chooseTextSize,
   closeHeaderControls,
   expectRailUnclipped,
@@ -67,8 +68,7 @@ test.describe('layout', () => {
   test('has the sidebar toggle, a separator and a breadcrumb (group, then page) at the left of the header', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/import')
-    const header = siteHeader(page)
-    const trail = header.getByRole('navigation', { name: 'Breadcrumb' })
+    const trail = breadcrumb(page)
     await expect(trail.getByRole('listitem')).toHaveText(['Transactions', 'Import']) // the separator between them is not read
     await expect(trail.locator('[aria-current="page"]')).toHaveText('Import')
     const [toggle, crumbs] = [(await toggleButton(page).boundingBox())!, (await trail.boundingBox())!]
@@ -189,7 +189,7 @@ test.describe('the sidebar navigation', () => {
   // still decides what a Member may do). A Member gets to Budgets from the Summary, and the page still says where it is.
   test('hides Set up from a Member without closing its pages to them, and the pages still say where they are', async ({ page, context }) => {
     await signInAs(context, 'member')
-    const trail = siteHeader(page).getByRole('navigation', { name: 'Breadcrumb' })
+    const trail = breadcrumb(page)
     await page.goto('/')
     await page.getByRole('region', { name: 'Budget vs actual' }).getByRole('link', { name: 'See all Budgets' }).click()
     await expect(page.getByRole('heading', { level: 1, name: 'Budgets' })).toBeVisible()
@@ -214,7 +214,7 @@ test.describe('the sidebar navigation', () => {
   test('shows the Admin Accounts in Set up, not Reports', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/accounts')
-    await expect(siteHeader(page).getByRole('navigation', { name: 'Breadcrumb' }).getByRole('listitem')).toHaveText(['Set up', 'Accounts'])
+    await expect(breadcrumb(page).getByRole('listitem')).toHaveText(['Set up', 'Accounts'])
     await expect(navGroup(page, 'Set up')).toHaveAttribute('aria-expanded', 'true')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'false')
   })
@@ -542,7 +542,7 @@ test.describe('on a phone', () => {
     await navigateToImport(page)
     await expect(page.getByRole('heading', { level: 1, name: 'Import' })).toBeVisible()
     await expect(sheet).toBeHidden() // going to a page closes it
-    await expect(siteHeader(page).getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Import')
+    await expect(breadcrumb(page)).toContainText('Import')
   })
 
   // A tap on the link of the page you are on goes nowhere, so nothing in the address changes to close the sheet: the tap closes it.

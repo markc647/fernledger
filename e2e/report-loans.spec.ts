@@ -187,6 +187,25 @@ test.describe('opening the Report', () => {
     await expect(loan).toHaveValue(String(aliceId)) // the form is still there, filled in from the address
   })
 
+  test('the Back button puts the Loan back as the address has it, a choice that was not asked for included', async ({ page, context, baseURL }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    const { aliceId } = await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    await page.goto(address(aliceId, null, `${d.year}-12-31`))
+    const form = page.getByRole('form', { name: 'Loans' })
+    const loan = form.getByLabel('Loan', { exact: true })
+    await expect(loan.locator('option:checked')).toHaveText(d.aliceLoan)
+
+    await pickDate(form, 'To', `${d.year}-11-30`)
+    await form.getByRole('button', { name: 'Show Report' }).click()
+    await expect(page).toHaveURL(new RegExp(`to=${d.year}-11-30`)) // the same Loan, another date
+    await loan.selectOption({ label: d.benLoan }) // not asked for
+    await page.goBack()
+    await expect(page).toHaveURL(new RegExp(`to=${d.year}-12-31`))
+    await expect(loan).toHaveValue(String(aliceId)) // the address's, and not the one chosen after it
+    await expect(loan.locator('option:checked')).toHaveText(d.aliceLoan)
+  })
+
   test('its form needs only the date to go up to: the start date may be left blank, and a start date must be a date, in order', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/reports/loans')

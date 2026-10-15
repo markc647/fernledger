@@ -97,6 +97,16 @@ test.describe('the pages', () => {
     expect(asked).toEqual([])
   })
 
+  test('says there are no Accounts yet, as a status, when there are none, and keeps the form on the page', async ({ page }) => {
+    await page.route('**/api/accounts', (route) => route.fulfill({ json: [] }))
+    for (const report of EXPECTED) {
+      await page.goto(`${report.path}?from=2090-01-02&to=2090-03-04`)
+      await expect(page.getByRole('status').filter({ hasText: /^There are no Accounts yet/ })).toBeVisible()
+      await expect(page.getByRole('form', { name: report.name, exact: true })).toBeVisible()
+      await expect(page.getByRole('article')).toHaveCount(0)
+    }
+  })
+
   // The router takes out of the address what a page leaves out as not valid, so an address of nothing but dates that are not dates is the page for choosing, address and all.
   test('an address that chooses only dates that are not dates is the page for choosing: its address loses them and nothing is said to be missing', async ({ page }) => {
     for (const report of EXPECTED) {
