@@ -76,8 +76,10 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
   // How many match: the count the list asks for, with the same key, so this makes no request of its own. A file holds the oldest
   // EXPORT_MAX_ROWS, so say so before the reader downloads, not only in the file.
   const { data: total } = useQuery({ ...transactionCountQuery(search), placeholderData: keepPreviousData, enabled: searchable })
-  const tooMany = total !== undefined && total > EXPORT_MAX_ROWS
-  const describedBy = [total !== undefined && 'filter-download-count', tooMany && 'filter-download-warning', 'filter-download-hint'].filter(Boolean).join(' ')
+  // While nothing is searched for, the previous search's count is kept as a placeholder, and is not this search's.
+  const shownTotal = searchable ? total : undefined
+  const tooMany = shownTotal !== undefined && shownTotal > EXPORT_MAX_ROWS
+  const describedBy = [shownTotal !== undefined && 'filter-download-count', tooMany && 'filter-download-warning', 'filter-download-hint'].filter(Boolean).join(' ')
 
   return (
     <form
@@ -204,9 +206,9 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
             Download CSV
           </Button>
         )}
-        {total !== undefined && (
+        {shownTotal !== undefined && (
           <span id="filter-download-count">
-            {total.toLocaleString('en-NZ')} {total === 1 ? 'Transaction matches' : 'Transactions match'}
+            {shownTotal.toLocaleString('en-NZ')} {shownTotal === 1 ? 'Transaction matches' : 'Transactions match'}
           </span>
         )}
       </div>

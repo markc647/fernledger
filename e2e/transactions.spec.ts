@@ -182,6 +182,16 @@ test('an address naming no such Account or Category says so, and one with blank 
     await expect(page.getByRole('alert'), address).toHaveCount(0)
   }
 
+  // Back to no such Account from a search that matched keeps none of that search's count.
+  await page.goto('/transactions?account=999999999')
+  await expect(page.getByRole('alert')).toBeVisible()
+  await page.getByLabel('Account', { exact: true }).selectOption({ label: 'All Accounts' })
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(page.getByText(/Transactions? match/)).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole('alert')).toHaveText('There is no such Account. Choose one in the form above.')
+  await expect(page.getByText(/Transactions? match/)).toHaveCount(0)
+
   // Blank and unknown parts are left out, so the API is never asked with them (it would refuse the unknown ones).
   await page.goto('/transactions?account=&category=&transfers=both&from=&to=2012-13-01&q=&sort=x&dir=up&page=0')
   await expect(page.getByRole('status').filter({ hasText: /^(Showing|There are no Transactions yet)/ })).toBeVisible()

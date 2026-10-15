@@ -95,7 +95,7 @@ export function TransactionList({
   const [saved, setSaved] = useState('')
   // A range that runs backwards can't match anything; the form explains it when typed, and a hand-edited address is explained here.
   const backwards = !!search.from && !!search.to && search.from > search.to
-  // An Account or Category the address names that doesn't exist is explained too (`noSuchOf`), rather than shown as an error or an empty list.
+  // An Account or Category the address names that doesn't exist is explained by the page (noSuchOf), rather than shown as an error or an empty list.
   const accounts = useQuery({ ...accountsQuery, enabled: search.account !== undefined })
   const categories = useQuery({ ...categoriesQuery, enabled: typeof search.category === 'number' })
   const noSuch = noSuchOf(search, accounts.data, categories.data)
