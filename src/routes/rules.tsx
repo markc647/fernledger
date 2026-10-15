@@ -40,7 +40,8 @@ const rerunQuery = queryOptions({
     if (!res.ok) throw new HttpError(res.status)
     return (await res.json()).job
   },
-  // The page itself keeps this up to date while a run is going; a refetch in the middle of that would only show an older step.
+  // The page itself keeps this up to date while a run is going; a refetch in the middle of that would only show an older step, and one
+  // still out when a step answers is cancelled in the loop below.
   staleTime: Infinity,
   refetchOnWindowFocus: false,
 })
@@ -274,8 +275,10 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
     onSuccess: async (started) => {
       setProblem('')
       setWatching(true)
-      if (started) queryClient.setQueryData(rerunQuery.queryKey, started)
-      else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
+      if (started) {
+        await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
+        queryClient.setQueryData(rerunQuery.queryKey, started)
+      } else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
       // The button is off while it runs, so keyboard focus moves to the progress rather than being lost.
       status.current?.focus()
     },
@@ -289,8 +292,10 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
       return (await res.json()).job
     },
     onSuccess: async (stopped) => {
-      if (stopped) queryClient.setQueryData(rerunQuery.queryKey, stopped)
-      else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
+      if (stopped) {
+        await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
+        queryClient.setQueryData(rerunQuery.queryKey, stopped)
+      } else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
       status.current?.focus()
       void refreshUsage(queryClient)
     },
@@ -319,6 +324,10 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
           return setProblem(res.status === 429 ? 'limit' : 'failed')
         }
         const { job: next } = await res.json()
+        if (stopped) return
+        // A reading of the job asked for before this step (the one asked for when the day changes, say) is dropped: landing after this
+        // answer, it would put a finished run back to running and ask for another step.
+        await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
         if (stopped) return
         queryClient.setQueryData(rerunQuery.queryKey, next)
         if (!next?.paused) asked.current = 0
