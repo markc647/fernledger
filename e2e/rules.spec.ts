@@ -446,7 +446,14 @@ test.describe('while the Rules are being applied', () => {
       await gates[n]!.opened
       await route.fulfill(answers[n]!())
     })
-    await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: current } }) : route.fallback()))
+    // When `holdBack` is set, the next reading of the job waits for it, and then says what the job was when it was set.
+    let holdBack: { job: typeof current; until: Promise<void> } | null = null
+    await page.route('**/api/rules/rerun', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback()
+      const held = holdBack
+      if (held) await held.until
+      await route.fulfill({ json: { job: held ? held.job : current } })
+    })
 
     await page.goto('/rules')
     // A run that was going when the page was opened is carried on, and shown.
@@ -472,15 +479,23 @@ test.describe('while the Rules are being applied', () => {
     await expect(page.getByText('Looked at 10,000 of up to 20,000 Transactions (50%).')).toBeVisible() // where it got to is still shown
     await noAxeViolationsFromTop(page)
 
-    // The day changes: the page asks again, with nobody pressing anything.
+    // The day changes: the page asks again, with nobody pressing anything. It reads the job as well as asking for a step, and the two
+    // answers can come back in either order. Here the reading comes back last, saying where the run was before the step finished it:
+    // the page keeps the step's answer, which is newer.
+    let answerTheReading = () => {}
+    holdBack = { job: current, until: new Promise<void>((resolve) => (answerTheReading = resolve)) }
+    const reading = page.waitForResponse((res) => res.request().method() === 'GET' && new URL(res.url()).pathname === '/api/rules/rerun')
     gates[2]!.open()
     await page.clock.fastForward('23:00:00')
     await expect(page.getByRole('status').filter({ hasText: 'Finished. Looked at all 20,000 Transactions and updated 1,234 of them.' })).toBeVisible()
+    answerTheReading()
+    await reading
     await expect(page.getByText('Finished Mon 12 Oct 2026, 1:05 pm.')).toBeVisible()
     await expect(alert).toHaveCount(0)
     await expect(bar).toHaveCount(0)
     await expect(rerunButton(page)).toBeEnabled()
     await noAxeViolationsFromTop(page)
+    expect(steps).toBe(3) // the late reading did not set the run going again
   })
 
   test('a run that has used its share of the day is shown as paused, and the page does not ask for steps', async ({ page, context }) => {

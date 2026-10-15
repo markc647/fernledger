@@ -319,6 +319,9 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
           return setProblem(res.status === 429 ? 'limit' : 'failed')
         }
         const { job: next } = await res.json()
+        // A step's answer is newer than a reading of the job that is still out (the one asked for when the day changes, say), so that
+        // reading is dropped: shown after this, it would put a finished run back to running and ask for another step.
+        await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
         if (stopped) return
         queryClient.setQueryData(rerunQuery.queryKey, next)
         if (!next?.paused) asked.current = 0
