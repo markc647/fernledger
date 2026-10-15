@@ -6,14 +6,15 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { isSearchDate } from '@/lib/date-range'
 import { accountsQuery, categoriesQuery, transactionCountQuery } from '@/lib/queries'
-import { EXPORT_MAX_ROWS, exportPath, MAX_TEXT, TRANSFERS_FILTERS, tidy, type TransactionSearch } from '@/lib/transaction-search'
+import { EXPORT_MAX_ROWS, exportPath, MAX_TEXT, noSuchOf, TRANSFERS_FILTERS, tidy, type TransactionSearch } from '@/lib/transaction-search'
 
 /** What is typed in the form: text for every field, so a half-typed filter is never lost. */
 type Draft = { account: string; category: string; transfers: string; from: string; to: string; q: string }
 
 const draftOf = (search: TransactionSearch): Draft => ({
-  account: search.account === undefined ? '' : String(search.account),
-  category: search.category === undefined ? '' : String(search.category),
+  // An Account or Category of 0 (the address named one that isn't an ID) is no choice, so Search doesn't send it again.
+  account: search.account ? String(search.account) : '',
+  category: search.category === 'uncategorised' ? 'uncategorised' : search.category ? String(search.category) : '',
   transfers: search.transfers ?? '',
   from: search.from ?? '',
   to: search.to ?? '',
@@ -68,9 +69,9 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
   // Filters are applied when Search is pressed, not as they are typed, so say so while what is shown is not what is asked for.
   const unapplied = JSON.stringify({ ...draft, q: draft.q.trim() }) !== applied
   // The file holds what the list shows, which is the applied search, so it waits for Search; and a range that runs backwards holds nothing,
-  // nor does an address naming an Account or Category that isn't an ID (0: the list says there is no such one).
+  // nor does a search naming an Account or Category that doesn't exist (the list says there is no such one).
   const backwards = !!search.from && !!search.to && search.from > search.to
-  const searchable = !backwards && search.account !== 0 && search.category !== 0
+  const searchable = !backwards && !noSuchOf(search, accounts.data, categories.data)
   const canDownload = !unapplied && searchable
   // How many match: the count the list asks for, with the same key, so this makes no request of its own. A file holds the oldest
   // EXPORT_MAX_ROWS, so say so before the reader downloads, not only in the file.

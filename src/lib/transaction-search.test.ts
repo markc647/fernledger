@@ -1,6 +1,6 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 import { describe, expect, it } from 'vitest'
-import { apiQuery, exportPath, filterQuery, filtersOf, parseTransactionSearch, sortOf, tidy } from './transaction-search'
+import { apiQuery, exportPath, filterQuery, filtersOf, noSuchOf, parseTransactionSearch, sortOf, tidy } from './transaction-search'
 
 describe('parseTransactionSearch', () => {
   it('reads every filter the page puts in the address', () => {
@@ -99,7 +99,26 @@ describe('tidy', () => {
     expect(tidy({ account: undefined, category: 'uncategorised', q: '', sort: 'date', dir: 'desc', page: 1 })).toEqual({ category: 'uncategorised' })
     expect(tidy({ sort: 'amount', dir: 'asc', page: 2 })).toEqual({ sort: 'amount', page: 2 })
     expect(tidy({ sort: 'date', dir: 'asc' })).toEqual({ dir: 'asc' })
-    expect(Object.keys(tidy({}))).toHaveLength(9) // left out as undefined, not missing: see parseTransactionSearch
+  })
+})
+
+describe('noSuchOf', () => {
+  const accounts = [{ id: 2 }, { id: 3 }]
+  const categories = [{ id: 7 }]
+
+  it('names an Account or Category of 0 whether or not its list has arrived, and a missing one once it has', () => {
+    expect(noSuchOf({ account: 0 }, undefined, undefined)).toBe('Account')
+    expect(noSuchOf({ category: 0 }, undefined, undefined)).toBe('Category')
+    expect(noSuchOf({ account: 9 }, accounts, categories)).toBe('Account')
+    expect(noSuchOf({ category: 9 }, accounts, categories)).toBe('Category')
+    expect(noSuchOf({ account: 9, category: 9 }, accounts, categories)).toBe('Account')
+  })
+
+  it('names nothing that exists, is left out, is Uncategorised, or whose list has not arrived', () => {
+    expect(noSuchOf({ account: 2, category: 7 }, accounts, categories)).toBeNull()
+    expect(noSuchOf({}, accounts, categories)).toBeNull()
+    expect(noSuchOf({ category: 'uncategorised' }, accounts, [])).toBeNull()
+    expect(noSuchOf({ account: 9, category: 9 }, undefined, undefined)).toBeNull()
   })
 })
 

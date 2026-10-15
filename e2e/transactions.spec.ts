@@ -161,13 +161,28 @@ test('an address naming no such Account or Category says so, and one with blank 
     ['/transactions?account=999999999', 'Account'],
     ['/transactions?category=abc', 'Category'],
     ['/transactions?category=999999999', 'Category'],
-  ]) {
-    await page.goto(address!)
+  ] as const) {
+    await page.goto(address)
     await expect(page.getByRole('alert'), address).toHaveText(`There is no such ${name}. Choose one in the form above.`)
+    await expect(page.getByRole('button', { name: 'Download CSV' }), address).toBeDisabled()
+    await expect(page.getByRole('link', { name: 'Download CSV' }), address).toHaveCount(0)
   }
   await noAxeViolations(page)
 
-  // Blank and unknown parts are left out (an earlier form sent `account=` for every Account), so the API is never asked with them and refuses.
+  // The form shows every Account (or Category) for one that isn't an ID, and Search goes there rather than back to the alert.
+  for (const [address, key] of [
+    ['/transactions?account=abc', 'account'],
+    ['/transactions?category=abc', 'category'],
+  ] as const) {
+    await page.goto(address)
+    await expect(page.getByRole('alert'), address).toBeVisible()
+    await page.getByRole('button', { name: 'Search', exact: true }).click()
+    await expect(page, address).not.toHaveURL(new RegExp(`${key}=`))
+    await expect(page.getByRole('status').filter({ hasText: /^(Showing|There are no Transactions yet)/ }), address).toBeVisible()
+    await expect(page.getByRole('alert'), address).toHaveCount(0)
+  }
+
+  // Blank and unknown parts are left out, so the API is never asked with them (it would refuse the unknown ones).
   await page.goto('/transactions?account=&category=&transfers=both&from=&to=2012-13-01&q=&sort=x&dir=up&page=0')
   await expect(page.getByRole('status').filter({ hasText: /^(Showing|There are no Transactions yet)/ })).toBeVisible()
   await expect(page.getByRole('alert')).toHaveCount(0)

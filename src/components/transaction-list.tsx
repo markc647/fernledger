@@ -22,7 +22,7 @@ import { KIND_NOTES } from '@/lib/category-kinds'
 import { formatDate } from '@/lib/format'
 import { meQuery } from '@/lib/me'
 import { accountsQuery, categoriesQuery, PAGE_SIZE, transactionCountQuery, transactionsQuery } from '@/lib/queries'
-import { SORT_KEYS, sortOf, tidy, type DetailOrigin, type SortKey, type TransactionSearch } from '@/lib/transaction-search'
+import { noSuchOf, SORT_KEYS, sortOf, tidy, type DetailOrigin, type SortKey, type TransactionSearch } from '@/lib/transaction-search'
 import { transferLabel } from '@/lib/transfers'
 
 type Row = InferResponseType<typeof api.transactions.$get, 200>['transactions'][number]
@@ -66,9 +66,6 @@ function CategoryCell({ row }: { row: Row }) {
   )
 }
 
-/** Whether `id` names something not in `list`: 0 is never in it (an address naming one that isn't an ID), and anything else once the list has arrived. */
-const missing = (id: number | 'uncategorised' | undefined, list: { id: number }[] | undefined) => typeof id === 'number' && (id === 0 || (list !== undefined && !list.some((item) => item.id === id)))
-
 const hasFilter = (search: TransactionSearch) => search.account !== undefined || search.category !== undefined || search.transfers !== undefined || !!search.from || !!search.to || !!search.q
 
 /**
@@ -98,10 +95,10 @@ export function TransactionList({
   const [saved, setSaved] = useState('')
   // A range that runs backwards can't match anything; the form explains it when typed, and a hand-edited address is explained here.
   const backwards = !!search.from && !!search.to && search.from > search.to
-  // So is an Account or Category the address names that doesn't exist (`missing`), rather than shown as an error or an empty list.
+  // An Account or Category the address names that doesn't exist is explained too (`noSuchOf`), rather than shown as an error or an empty list.
   const accounts = useQuery({ ...accountsQuery, enabled: search.account !== undefined })
   const categories = useQuery({ ...categoriesQuery, enabled: typeof search.category === 'number' })
-  const noSuch = missing(search.account, accounts.data) ? 'Account' : missing(search.category, categories.data) ? 'Category' : null
+  const noSuch = noSuchOf(search, accounts.data, categories.data)
   const searchable = !backwards && !noSuch
   const { data, error, isFetching } = useQuery({ ...transactionsQuery(search), placeholderData: keepPreviousData, enabled: searchable })
   // The total is kept while a new search's is fetched, and a page or sort change doesn't ask again.

@@ -1,5 +1,4 @@
-import { isSearchDate } from './date-range'
-import { addressId } from './report-transactions'
+import { addressId, searchDate } from './report-transactions'
 
 // What the Transactions page keeps in its address, so a search survives a reload and Back returns to it. The API's own
 // parameters are built from it by `apiQuery`. Everything here is forgiving: an address typed or edited by hand never breaks the page.
@@ -71,8 +70,6 @@ const positiveInteger = (value: unknown, max: number) => {
   return Number.isSafeInteger(number) && number >= 1 && number <= max ? number : undefined
 }
 
-const searchDate = (value: unknown) => (typeof value === 'string' && isSearchDate(value) ? value : undefined)
-
 /**
  * Reads the address's search parameters, which the router has already parsed (so `?q=2026` arrives as a number and `?account=2`
  * as 2), into a TransactionSearch. Anything that isn't valid is left out rather than refused, except an Account or Category that is named but isn't an ID,
@@ -91,6 +88,17 @@ export function parseTransactionSearch(raw: Record<string, unknown>): Transactio
     dir: raw.dir === 'asc' || raw.dir === 'desc' ? raw.dir : undefined,
     page: positiveInteger(raw.page, MAX_PAGE),
   })
+}
+
+type Listed = readonly { id: number }[] | undefined
+
+/**
+ * What the search names that doesn't exist, if anything: an Account or Category of 0 (an address naming one that isn't an ID: `addressId`), or one that isn't in
+ * its list once the list has arrived. The page says so rather than searching.
+ */
+export function noSuchOf(search: Pick<TransactionSearch, 'account' | 'category'>, accounts: Listed, categories: Listed): 'Account' | 'Category' | null {
+  const missing = (id: number | 'uncategorised' | undefined, list: Listed) => typeof id === 'number' && (id === 0 || (list !== undefined && !list.some((item) => item.id === id)))
+  return missing(search.account, accounts) ? 'Account' : missing(search.category, categories) ? 'Category' : null
 }
 
 /** The search's filters alone, which are all that decide how many Transactions match: no sort, no page. */
