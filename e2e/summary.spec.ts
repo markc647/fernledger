@@ -91,7 +91,7 @@ test('the Summary has no WCAG 2.2 AA violations at the largest text size, on a p
   for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
     await page.goto('/')
-    await chooseTextSize(page, 'Large')
+    await chooseTextSize(page, 'Xtra Large')
     await expect(page.getByRole('region', { name: 'Balance checks' }).getByRole('listitem').first()).toBeVisible()
     await expect(page.getByRole('region', { name: 'Recent transactions' })).toContainText('EXAMPLE')
     await noAxeViolations(page)

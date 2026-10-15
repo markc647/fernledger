@@ -185,7 +185,7 @@ test('it has no WCAG 2.2 AA violations closed, open, and open on a phone at the 
   // A phone, 200% zoom on a laptop (640 by 360, shorter than the calendar) and 400% zoom (316 by 256).
   for (const viewport of [{ width: 390, height: 844 }, { width: 640, height: 360 }, { width: 316, height: 256 }]) {
     await page.setViewportSize(viewport)
-    await chooseTextSize(page, 'Large')
+    await chooseTextSize(page, 'Xtra Large')
     await dateField(page, 'Date').scrollIntoViewIfNeeded()
     await pickDate(page, 'Date', '2027-03-31') // a day in the last row, which on a short screen is reached by scrolling the calendar
     await expectStored(page, 'Date', '2027-03-31')

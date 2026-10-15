@@ -237,7 +237,7 @@ test('the buttons that show net worth and spending are touch targets with a clea
   const show = region.getByRole('button', { name: 'Show net worth', exact: true })
   await expect(show).toBeVisible()
   expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44)
-  await chooseTextSize(page, 'Large')
+  await chooseTextSize(page, 'Xtra Large')
   const { live, element } = await liveRegion(region)
 
   await show.focus()
@@ -296,7 +296,7 @@ test('a Member lands on the Summary, which has the charts and the same cards as 
   expect(spendingRequests).toHaveLength(1)
 })
 
-// The grid's columns come from the room the page has, in rem, so they follow the text size: the same window has fewer at Large than at Medium. Small, Medium and Large are 14px, 16px and 20px.
+// The grid's columns come from the room the page has, in rem, so they follow the text size: the same window has fewer at Xtra Large than at Medium. Small, Medium, Large and Xtra Large are 14px, 16px, 18px and 20px.
 test('the cards are a single column on a phone, and share rows when the page has the room, whatever the text size', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await stubNetWorth(page)
@@ -317,7 +317,7 @@ test('the cards are a single column on a phone, and share rows when the page has
       if (index > 0) expect(card[name]!.y, `${what}: ${name} is under the card before it`).toBeGreaterThanOrEqual(card[names[index - 1]!]!.y + card[names[index - 1]!]!.height - 1)
     }
   }
-  const settled = async (size: 'Medium' | 'Large') => {
+  const settled = async (size: 'Medium' | 'Xtra Large') => {
     await chooseTextSize(page, size)
     await expect(page.getByRole('region', { name: 'Balances' }).getByRole('table').or(page.getByRole('region', { name: 'Balances' }).getByRole('list'))).toBeVisible()
   }
@@ -340,8 +340,8 @@ test('the cards are a single column on a phone, and share rows when the page has
   expect(card['Recent transactions']!.y).toBeGreaterThanOrEqual(card['Budget vs actual']!.y + card['Budget vs actual']!.height - 1)
   expect(card['Net worth over time']!.y).toBeGreaterThanOrEqual(card['Recent transactions']!.y + card['Recent transactions']!.height - 1)
 
-  await settled('Large') // larger text leaves the same window less room: it cannot hold a card and a half of it beside another
-  await expectOneColumn('1440px wide at Large')
+  await settled('Xtra Large') // larger text leaves the same window less room: it cannot hold a card and a half of it beside another
+  await expectOneColumn('1440px wide at Xtra Large')
 
   await settled('Medium')
   await page.setViewportSize({ width: 800, height: 900 }) // the sidebar is the icon rail, and the page is narrower than a row of two cards can use
@@ -609,7 +609,7 @@ test('the charts have no WCAG 2.2 AA violations in this theme, with their data, 
     await page.setViewportSize(viewport)
     await page.goto('/')
     await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
-    await chooseTextSize(page, 'Large')
+    await chooseTextSize(page, 'Xtra Large')
     await chooseDates(page, from, to)
     await showNetWorth(page)
     await showSpending(page, new RegExp(`^Bar chart of the 3 Categories that spent the most in ${words}`))

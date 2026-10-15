@@ -144,7 +144,7 @@ export async function expectBlackOnWhite(page: Page, atLeast: number) {
   expect(Math.min(...paper)).toBeGreaterThan(240)
 }
 
-/** No word of the Report is under 12pt (16px), and the table's own text is set to it, not left to the 15px it has on screen. */
+/** No word of the Report is under 12pt (16px), and the table's own text is at least that (a table's rule is `print:text-[12pt]`, which holds it there whatever the text size on screen). */
 export async function expectNoTextUnder12pt(page: Page, article: Locator, atLeast: number) {
   const small = await page.evaluate(() => {
     const walker = document.createTreeWalker(document.querySelector('.report-frame')!, NodeFilter.SHOW_TEXT)
