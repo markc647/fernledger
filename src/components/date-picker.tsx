@@ -56,12 +56,15 @@ export function DatePicker({ id, labelId, value, onChange, min = MIN_DATE, max =
             id={id}
             variant="field"
             size="touch"
-            // The date may wrap, as an input's text could not: three fields side by side at 200% zoom and the largest text size are narrower than a date.
-            className={cn('w-full min-w-0 px-3', !day && 'text-muted-foreground', className)}
+            // The box is never narrower than its longest date (--date-field-min, src/index.css) and the date never wraps, whatever the text size. A row of boxes makes room by
+            // starting a new line (`date-fields` in src/index.css, or flex-wrap), not by squeezing one.
+            className={cn('w-full min-w-(--date-field-min) px-3', !day && 'text-muted-foreground', className)}
             aria-labelledby={`${labelId} ${dateId}`}
             {...button}
           >
-            <span id={dateId}>{day ? formatDate(value) : 'Choose a date'}</span>
+            <span id={dateId} className="whitespace-nowrap">
+              {day ? formatDate(value) : 'Choose a date'}
+            </span>
             <CalendarIcon />
           </Button>
         </PopoverTrigger>

@@ -106,7 +106,8 @@ export function SpendingByCategory() {
         </div>
         {choice === 'custom' &&
           (['from', 'to'] as const).map((field) => (
-            <div key={field} className="min-w-0 flex-[1_1_10rem]">
+            // A date field is never narrower than its date (DatePicker), so it does not shrink below that: it wraps to the next line instead.
+            <div key={field} className="flex-[1_1_var(--date-field-min)]">
               <label id={`${id}-${field}-label`} htmlFor={`${id}-${field}`} className="block font-medium">
                 {field === 'from' ? 'From' : 'To'}
               </label>

@@ -1,8 +1,8 @@
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { calendarOf, clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
-import { chooseTextSize } from './shell-helpers'
+import { chooseTextSize, closeHeaderControls, openHeaderControls, textSizeGroup } from './shell-helpers'
 
 // The DatePicker (src/components/date-picker.tsx) on the Styleguide's three samples: "Date", "Optional date" and a date from 10 to 20 October 2026. The forms that use it
 // have their own specs, which choose their dates through `pickDate`; this is the picker itself: what it gives, how it is named, the keyboard, the limits, time zones,
@@ -233,3 +233,123 @@ test('in Windows high contrast the chosen day is filled with the reader\'s highl
   await expect(today).toHaveCount(1)
   expect(await today.evaluate((cell) => getComputedStyle(cell).outlineStyle)).toBe('dashed')
 })
+
+// ---------------------------------------------------------------------------------------------------------------
+// A chosen date is on one line, in every box, at every text size
+
+/**
+ * The widest date the app writes in Geist, "Wed 20 Sept 2000": measured by the width of every day from 2000 to 2100 (13.4ch). "Wed" is the widest weekday and "Sept" the longest month;
+ * "Wed 30 Sept 2026" is a hair narrower.
+ */
+const WIDEST = '2000-09-20'
+
+type Box = { x: number; y: number; width: number; height: number }
+
+/**
+ * Whether the date a field shows is on one line and clear of its calendar icon. It asks the text's own rectangles: the box grows to hold a second line, so its height
+ * would never show one.
+ */
+async function expectDateOnOneLine(field: Locator, where: string) {
+  const { lines, clear } = await field.evaluate((button) => {
+    const range = document.createRange()
+    range.selectNodeContents(button.querySelector('span')!)
+    const rects = [...range.getClientRects()]
+    const icon = button.querySelector('svg')!.getBoundingClientRect()
+    return { lines: new Set(rects.map((rect) => Math.round(rect.top))).size, clear: rects.every((rect) => rect.right <= icon.left + 0.5) }
+  })
+  expect(lines, `${where}: the date is on one line`).toBe(1)
+  expect(clear, `${where}: the date ends before the calendar icon`).toBe(true)
+}
+
+/**
+ * Runs `check` at each text size the control offers, so a size added to it (an Xtra Large) is covered without this spec being told. It fails unless the largest is 20px or
+ * more, the size README Accessibility promises.
+ */
+async function atEveryTextSize(page: Page, check: (size: string) => Promise<void>) {
+  await openHeaderControls(page)
+  const count = await textSizeGroup(page).getByRole('radio').count()
+  await closeHeaderControls(page)
+  expect(count).toBeGreaterThanOrEqual(3)
+  let largest = 0
+  for (let i = 0; i < count; i++) {
+    await page.setViewportSize({ width: 1280, height: 800 }) // where the header's controls are in its bar, not left under a phone's menu by the last width
+    await openHeaderControls(page)
+    const radio = textSizeGroup(page).getByRole('radio').nth(i)
+    await radio.click()
+    await expect(radio).toBeChecked()
+    await closeHeaderControls(page)
+    const root = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))
+    largest = Math.max(largest, root)
+    await settle(page)
+    await check(`text size ${i + 1} of ${count} (${root}px)`)
+  }
+  expect(largest).toBeGreaterThanOrEqual(20)
+}
+
+test('the longest date is on one line in the picker at every text size', async ({ page }) => {
+  await pickDate(page, 'Date', WIDEST)
+  await pickDate(page, 'Optional date', WIDEST)
+  await atEveryTextSize(page, async (size) => {
+    for (const label of ['Date', 'Optional date']) await expectDateOnOneLine(dateField(page, label), `${label} at ${size}`)
+  })
+})
+
+const overlap = (a: Box, b: Box) => a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1
+
+// Every page with a DatePicker, with the longest date chosen in each box, at each text size and at the widths where a box is squeezed: a laptop, a phone, 200% zoom and 400% zoom.
+// A box is wide enough, or it moves to the next line (a pair stacks on a phone): the date never wraps, nothing sticks out sideways, and no box sits over the one beside it.
+const VIEWPORTS = [
+  { name: 'a laptop', width: 1280, height: 800 },
+  { name: 'a phone', width: 390, height: 844 },
+  { name: '200% zoom', width: 640, height: 360 },
+  { name: '400% zoom', width: 316, height: 256 },
+]
+const FROM_TO = ['From', 'To']
+const FORM_PAGES: { name: string; path: string; fields: string[]; admin?: boolean; ready?: (page: Page) => Promise<unknown> }[] = [
+  { name: 'Transactions', path: '/transactions', fields: FROM_TO },
+  { name: 'Change Log', path: '/change-log', fields: FROM_TO },
+  { name: 'Settings', path: '/settings', fields: ['Cutover Date for Example savings'], admin: true },
+  { name: 'Dashboard spending', path: '/', fields: FROM_TO, admin: true, ready: (page) => page.getByRole('region', { name: 'Spending by Category' }).getByLabel('Period', { exact: true }).selectOption('custom') },
+  { name: 'Transaction listing Report', path: '/reports/transactions', fields: FROM_TO },
+  { name: 'Balances Report', path: '/reports/balances', fields: FROM_TO },
+  { name: 'Spending Report', path: '/reports/spending', fields: FROM_TO },
+  { name: 'Budget vs actual Report', path: '/reports/budget-vs-actual', fields: FROM_TO },
+  { name: 'Income vs spending Report', path: '/reports/income-vs-spending', fields: FROM_TO },
+  { name: 'Loans Report', path: '/reports/loans', fields: ['From (optional)', 'To'] },
+]
+
+for (const { name, path, fields, admin, ready } of FORM_PAGES) {
+  test(`${name}: the longest date is on one line in every box, at every text size and width, and the boxes stack rather than squeeze it`, async ({ page, context }) => {
+    await signInAs(context, admin ? 'admin' : 'member')
+    // An Account's Cutover Date is the date its box shows, so the Settings page needs only an Account with that one.
+    const settings = path === '/settings'
+    if (settings) await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example savings', accountNumber: '99-9999-9999999-97', cutoverDate: WIDEST }] }))
+    await page.goto(path)
+    await ready?.(page)
+    await expect(dateField(page, fields[0]!)).toBeVisible()
+    if (!settings) for (const label of fields) await pickDate(page, label, WIDEST)
+    await atEveryTextSize(page, async (size) => {
+      for (const viewport of VIEWPORTS) {
+        await page.setViewportSize(viewport)
+        await settle(page)
+        const where = `${name} at ${size} on ${viewport.name}`
+        const boxes: Box[] = []
+        for (const label of fields) {
+          const field = dateField(page, label)
+          await field.scrollIntoViewIfNeeded()
+          await expectDateOnOneLine(field, `${label}, ${where}`)
+          // Where it is on the page, not in the window: the next box is scrolled to, which moves this one.
+          boxes.push(await field.evaluate((button) => {
+            const { x, y, width, height } = button.getBoundingClientRect()
+            return { x: x + scrollX, y: y + scrollY, width, height }
+          }))
+        }
+        for (const [i, a] of boxes.entries()) for (const b of boxes.slice(i + 1)) expect(overlap(a, b), `${where}: the boxes are apart`).toBe(false)
+        // On a phone a pair is one above the other.
+        if (viewport.width <= 390 && boxes.length === 2) expect(boxes[1]!.y, `${where}: the second box is under the first`).toBeGreaterThanOrEqual(boxes[0]!.y + boxes[0]!.height - 1)
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
+        expect(scrollWidth, `${where}: no sideways scrolling`).toBeLessThanOrEqual(clientWidth)
+      }
+    })
+  })
+}
