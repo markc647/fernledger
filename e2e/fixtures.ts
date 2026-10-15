@@ -63,9 +63,7 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
  * axe reads that button (44px, and fully there once the page moves) as a target under 24px (`target-size`, "partially obscured"), in whichever row the scroll leaves under the header.
  * Only a spec of a page with such a list asks for it (the Rules, the Categories, the menus of their rows: `noAxeViolationsFromTop` in row-actions-helpers.ts); every other scan is of the page where it is.
  *
- * Colour contrast (`color-contrast`) is left out of a scan unless it asks for `contrast: true`, which only e2e/contrast.spec.ts does. Every other rule still runs, on every scan. Contrast is
- * measured once for the whole app, in both themes, by that sweep (for text on a tint or a translucent fill) and by scripts/theme-contrast.test.mjs (for the theme's own pairs of colours):
- * measuring it again on every page a spec visits tells the same thing again, and is slow.
+ * `color-contrast` is left out unless a scan asks for `contrast: true`, and every other rule always runs: see CODING_STANDARDS.md#tests.
  */
 export async function noAxeViolations(page: Page, { within, fromTop = false, contrast = false }: { within?: string; fromTop?: boolean; contrast?: boolean } = {}) {
   const wasReduced = await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
