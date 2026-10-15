@@ -2,11 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
+import { RowAction, RowActions } from '@/components/row-actions'
 import { Button } from '@/components/ui/button'
+import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
 import { KIND_HINTS, KIND_LABELS, KINDS, type CategoryKind } from '@/lib/category-kinds'
+import { CATEGORY_SORT_WORDS, sortCategories, type CategorySort, type CategorySortDirection, type CategorySortKey } from '@/lib/category-sort'
 import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { budgetsQuery, categoriesQuery } from '@/lib/queries'
 
@@ -44,6 +47,8 @@ function Categories() {
   const { data: categories, error } = useQuery(categoriesQuery)
   const [editing, setEditing] = useState<Editing>(null)
   const [notice, setNotice] = useState('')
+  // How the list is sorted, until the reader leaves the page: null is the order the Worker lists them in (by name), which is the order a first visit shows.
+  const [sort, setSort] = useState<CategorySort | null>(null)
   // Until `me` arrives nobody is the Admin: the controls fail closed. The API refuses a Member's write whatever the page shows.
   const isAdmin = me?.role === 'admin'
   // How many Budget changes each Spending Category has, for the questions that say what a change to it does to them. Only the Admin sees those.
@@ -66,33 +71,37 @@ function Categories() {
   }
   const sameName = (name: string, exceptId?: number) => categories?.some((c) => c.id !== exceptId && asciiFold(c.name) === asciiFold(name.trim())) ?? false
 
+  const sorting = (key: CategorySortKey, header: string): Column<Category>['sort'] => ({
+    direction: sort?.key === key ? sort.direction : null,
+    set: (direction: CategorySortDirection) => {
+      setSort({ key, direction })
+      setNotice(`Sorted by ${header}, ${CATEGORY_SORT_WORDS[direction]}.`)
+    },
+    labels: CATEGORY_SORT_WORDS,
+  })
   const columns: Column<Category>[] = [
-    { key: 'name', header: 'Category', cell: (c) => c.name },
-    { key: 'kind', header: 'Kind', cell: (c) => KIND_LABELS[c.kind] },
+    { key: 'name', header: 'Category', cell: (c) => c.name, sort: sorting('name', 'Category') },
+    { key: 'kind', header: 'Kind', cell: (c) => KIND_LABELS[c.kind], sort: sorting('kind', 'Kind') },
   ]
   if (isAdmin)
     columns.push({
       key: 'actions',
       header: 'Actions',
+      align: 'end',
       cell: (c) =>
         editing?.id === c.id && editing.action === 'rename' ? (
-          <RenameForm category={c} taken={sameName} onDone={(message) => done(message, `rename-${c.id}-button`)} onCancel={() => done('', `rename-${c.id}-button`)} />
+          <RenameForm category={c} taken={sameName} onDone={(message) => done(message, `category-${c.id}-actions`)} onCancel={() => done('', `category-${c.id}-actions`)} />
         ) : editing?.id === c.id && editing.action === 'set-kind' ? (
-          <KindForm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message, `kind-${c.id}-button`)} onCancel={() => done('', `kind-${c.id}-button`)} />
+          <KindForm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message, `category-${c.id}-actions`)} onCancel={() => done('', `category-${c.id}-actions`)} />
         ) : editing?.id === c.id && editing.action === 'remove' ? (
-          <RemoveConfirm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message)} onCancel={() => done('', `remove-${c.id}-button`)} />
+          <RemoveConfirm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message)} onCancel={() => done('', `category-${c.id}-actions`)} />
         ) : (
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button id={`rename-${c.id}-button`} size="touch" variant="outline" aria-label={`Rename ${c.name}`} onClick={() => { setNotice(''); setEditing({ action: 'rename', id: c.id }) }}>
-              Rename
-            </Button>
-            <Button id={`kind-${c.id}-button`} size="touch" variant="outline" aria-label={`Select kind of ${c.name}`} onClick={() => { setNotice(''); setEditing({ action: 'set-kind', id: c.id }) }}>
-              Select
-            </Button>
-            <Button id={`remove-${c.id}-button`} size="touch" variant="outline" aria-label={`Remove ${c.name}`} onClick={() => { setNotice(''); setEditing({ action: 'remove', id: c.id }) }}>
-              Remove
-            </Button>
-          </div>
+          <RowActions row={c.name} id={`category-${c.id}-actions`}>
+            <RowAction onSelect={() => { setNotice(''); setEditing({ action: 'rename', id: c.id }) }}>Rename</RowAction>
+            <RowAction onSelect={() => { setNotice(''); setEditing({ action: 'set-kind', id: c.id }) }}>Select kind</RowAction>
+            <DropdownMenuSeparator />
+            <RowAction variant="destructive" onSelect={() => { setNotice(''); setEditing({ action: 'remove', id: c.id }) }}>Remove</RowAction>
+          </RowActions>
         ),
     })
 
@@ -114,7 +123,7 @@ function Categories() {
         ) : !categories ? (
           <p role="status">Loading…</p>
         ) : (
-          <ResponsiveTable caption="Categories" columns={columns} rows={categories} getRowKey={(c) => c.id} emptyMessage="There are no Categories. Add one above." />
+          <ResponsiveTable caption="Categories" columns={columns} rows={sortCategories(categories, sort)} getRowKey={(c) => c.id} emptyMessage="There are no Categories. Add one above." look="shadcn" />
         )}
       </div>
     </>
@@ -276,7 +285,7 @@ function KindForm({ category, budgetChanges, onDone, onCancel }: { category: Cat
 
 function RemoveConfirm({ category, budgetChanges, onDone, onCancel }: { category: Category; budgetChanges: number; onDone: (message: string) => void; onCancel: () => void }) {
   const queryClient = useQueryClient()
-  // Opens on the safe answer. Cancelling puts focus back on the Remove button (Categories' `done`), and a removal on the message.
+  // Opens on the safe answer. Cancelling puts focus back on the row's Actions button (Categories' `done`), and a removal on the message.
   const keep = useRef<HTMLButtonElement>(null)
   useEffect(() => keep.current?.focus(), [])
   const remove = useMutation({
