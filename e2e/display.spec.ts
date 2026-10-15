@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import { netWorth as netWorthRegion, pressShowNetWorth, pressShowSpending, spending as spendingRegion } from './chart-helpers'
 import { dateField } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
+import { actionsButton, chooseAction, openActions } from './row-actions-helpers'
 import {
   chooseTextSize,
   closeHeaderControls,
@@ -461,7 +462,7 @@ test.describe('zoom', () => {
   // The Categories page with a long Category name and its Admin forms open: the kind form (with the Budgets it keeps), then the removal question for a
   // Spending Category with Budget changes and for an Income one. The Categories and Budgets are stubbed.
   const categoryForms = [
-    { form: 'the kind form', button: 'Select kind of', category: 'long' },
+    { form: 'the kind form', button: 'Select kind', category: 'long' },
     { form: 'the removal question', button: 'Remove', category: 'long' },
     { form: 'the removal question for an Income Category', button: 'Remove', category: 'Wages and salary' },
   ] as const
@@ -490,8 +491,8 @@ test.describe('zoom', () => {
           await page.goto('/categories')
           await chooseTextSize(page, size)
           const target = category === 'long' ? longName : category
-          await page.getByRole('button', { name: `${button} ${target}` }).click()
-          if (button === 'Select kind of') {
+          await chooseAction(actionsButton(page, target), button)
+          if (button === 'Select kind') {
             await expect(page.locator('#kind-1')).toBeFocused()
             await page.locator('#kind-1').selectOption('loans')
             await expect(page.getByText('Its Budgets are kept but not used.')).toBeVisible()
@@ -511,6 +512,77 @@ test.describe('zoom', () => {
           expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
         })
       }
+    }
+  }
+
+  // Two Rules (the first long) and two Categories (the first with a long name), for a test of the Rules page or the Categories page to look at.
+  const longCategory = 'Health and medical costs for the household and the long-term care fees'
+  const stubRulesAndCategories = async (page: Page) => {
+    await page.route('**/api/rules', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({
+            json: [
+              { id: 1, textContains: 'EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN', bankType: 'EFTPOS', direction: 'out', minCents: 1000, maxCents: 123456789, categoryId: 7, categoryName: longCategory, categoryRemoved: false, transfer: false },
+              { id: 2, textContains: 'second', bankType: null, direction: null, minCents: null, maxCents: null, categoryId: 7, categoryName: longCategory, categoryRemoved: false, transfer: false },
+            ],
+          })
+        : route.fallback(),
+    )
+    await page.route(/\/api\/categories$/, (route) =>
+      route.request().method() === 'GET' ? route.fulfill({ json: [{ id: 1, name: longCategory, kind: 'spending' }, { id: 2, name: 'Wages and salary', kind: 'income' }] }) : route.fallback(),
+    )
+  }
+
+  // A row's Actions menu, open, on the Rules page and the Categories page, with a long Rule and a long Category name: it is at the end of its button, which is at the end of a row or of a card,
+  // and it stays whole inside the window at every zoom and text size (a window 256px high is shorter than the menu at Large, which then scrolls inside itself), with nothing scrolling sideways.
+  // The Rules and the Categories are stubbed.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['Medium', 'Large'] as const) {
+      for (const { path, row } of [
+        { path: '/rules', row: 'Rule 1' },
+        { path: '/categories', row: longCategory },
+      ]) {
+        test(`${path} with a row's Actions menu open at ${name} and text size ${size} has no horizontal scrolling and the menu is inside the window`, async ({ page, context }) => {
+          await signInAs(context, 'admin')
+          await stubRulesAndCategories(page)
+          await page.setViewportSize({ width, height })
+          await page.goto(path)
+          await chooseTextSize(page, size)
+          await expectTextSize(page, size)
+          await openActions(actionsButton(page, row))
+          await settle(page)
+          const menu = (await page.getByRole('menu').boundingBox())!
+          expect(menu.x).toBeGreaterThanOrEqual(0)
+          expect(menu.y).toBeGreaterThanOrEqual(0)
+          expect(menu.x + menu.width).toBeLessThanOrEqual(width)
+          expect(menu.y + menu.height).toBeLessThanOrEqual(height + 1)
+          const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
+          expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        })
+      }
+    }
+  }
+
+  // The table of the Rules and of the Categories just above a phone's width, where the zoom widths above do not look: a table starts at 768px (a media query's `48rem` is the browser's 16px,
+  // not the page's text size), so at 768px it is there at every size, with its columns (a handle, the order, When, Then, Actions) at their narrowest and the text at its largest at Large.
+  // Nothing may scroll sideways, in the table's own box or in the page.
+  for (const size of ['Medium', 'Large'] as const) {
+    for (const path of ['/rules', '/categories'] as const) {
+      test(`${path} as a table at 768px wide and text size ${size} fits`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await stubRulesAndCategories(page)
+        await page.setViewportSize({ width: 768, height: 1024 })
+        await page.goto(path)
+        await chooseTextSize(page, size)
+        await expectTextSize(page, size)
+        const box = page.locator('[data-slot="table-container"]')
+        await expect(box).toHaveCount(1)
+        await expect(page.getByRole('table', { name: path === '/rules' ? 'Rules, in the order they are checked' : 'Categories' })).toBeVisible()
+        await settle(page)
+        expect(await box.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true) // the box has not had to scroll its table
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
     }
   }
 

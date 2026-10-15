@@ -5,6 +5,7 @@ import {
   breadcrumb,
   chooseTextSize,
   closeHeaderControls,
+  contrastOf,
   expectRailUnclipped,
   expectTextSize,
   mainNav,
@@ -12,6 +13,7 @@ import {
   navLink,
   openHeaderControls,
   openNavGroup,
+  rgbOf,
   showSidebar,
   siteHeader,
   sidebarTitle,
@@ -675,33 +677,6 @@ test('still works, without errors, when the browser blocks storage: the text siz
 
 // ---------------------------------------------------------------------------------------------------------------
 // Focus
-
-/** A colour, as the page draws it (red, green, blue). Canvas reads any CSS colour, including the oklch the theme uses. */
-const rgbOf = (page: Page, colours: string[]) =>
-  page.evaluate((list) => {
-    const canvas = document.createElement('canvas')
-    canvas.width = canvas.height = 1
-    const context = canvas.getContext('2d', { willReadFrequently: true })!
-    return list.map((css) => {
-      context.clearRect(0, 0, 1, 1)
-      context.fillStyle = css
-      context.fillRect(0, 0, 1, 1)
-      const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data
-      return { r: r!, g: g!, b: b!, a: a! }
-    })
-  }, colours)
-
-const luminance = ({ r, g, b }: { r: number; g: number; b: number }) => {
-  const [lr, lg, lb] = [r, g, b].map((v) => {
-    const c = v / 255
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
-  })
-  return 0.2126 * lr! + 0.7152 * lg! + 0.0722 * lb!
-}
-const contrastOf = (a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }) => {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
-  return (hi! + 0.05) / (lo! + 0.05)
-}
 
 /** What the reader's palette draws a system colour (Highlight) as, asked of a probe: the same string a computed style gives. */
 const systemColour = (page: Page, name: string) =>
