@@ -3,7 +3,7 @@ import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { navigateTo } from './shell-helpers'
 
 // Ticket 30: the pages every Member can open (About your data, How to sign in) and the Home Screen app. Axe runs on both
-// pages, for a Member and for the Admin (without colour contrast, which a scan leaves out: see `noAxeViolations`); the zoom test in display.spec.ts
+// pages, for a Member and for the Admin (without colour contrast, which a scan leaves out: see `noAxeViolations`; e2e/contrast.spec.ts has both pages); the zoom test in display.spec.ts
 // covers both pages too.
 
 // The Settings are shared by every test and both themes, so each test leaves the defaults behind (as settings.spec.ts does).
