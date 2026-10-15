@@ -1,3 +1,4 @@
+import { createMemoryHistory, createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 import { describe, expect, it } from 'vitest'
 import { apiQuery, exportPath, filterQuery, filtersOf, parseTransactionSearch, sortOf, tidy } from './transaction-search'
 
@@ -27,8 +28,6 @@ describe('parseTransactionSearch', () => {
   it('leaves out anything that is not valid rather than failing, so a bad address still shows the list', () => {
     expect(
       parseTransactionSearch({
-        account: 'abc',
-        category: 'everything',
         from: '2026-02-30',
         to: '1999-01-01',
         q: '   ',
@@ -37,8 +36,34 @@ describe('parseTransactionSearch', () => {
         page: 0,
       }),
     ).toEqual({})
-    expect(parseTransactionSearch({ account: -1, page: 1.5, category: 0 })).toEqual({})
-    expect(parseTransactionSearch({ account: { id: 1 }, q: { text: 'x' }, from: 20260101 })).toEqual({})
+    expect(parseTransactionSearch({ page: 1.5, q: { text: 'x' }, from: 20260101 })).toEqual({})
+  })
+
+  it('makes an Account or Category that is named but is not valid one that does not exist, so the page says so and does not widen to all of them', () => {
+    for (const named of ['abc', '0', 0, -1, '1234567890', { id: 1 }]) {
+      expect(parseTransactionSearch({ account: named }).account, String(named)).toBe(0)
+      expect(parseTransactionSearch({ category: named }).category, String(named)).toBe(0)
+    }
+    expect(parseTransactionSearch({ account: '', category: '' })).toEqual({})
+  })
+
+  // The router lays what a route validates over the address's own search, so a key that is left out brings back the address's text: every key is there, as undefined.
+  it('keeps every key, as undefined when it is left out', () => {
+    const none = { account: undefined, category: undefined, transfers: undefined, from: undefined, to: undefined, q: undefined, sort: undefined, dir: undefined, page: undefined }
+    expect(parseTransactionSearch({})).toStrictEqual(none)
+    expect(parseTransactionSearch({ account: '', from: '', q: ' ', sort: 'date', page: 1 })).toStrictEqual(none)
+  })
+
+  it("leaves none of the address's text in what the router gives the page", () => {
+    const searchAt = (address: string) => {
+      const root = createRootRoute()
+      const route = createRoute({ getParentRoute: () => root, path: '/transactions', validateSearch: parseTransactionSearch })
+      const router = createRouter({ routeTree: root.addChildren([route]), history: createMemoryHistory({ initialEntries: [address] }) })
+      return router.matchRoutes(router.state.location).at(-1)!.search
+    }
+    expect(searchAt('/transactions?account=abc&category=abc')).toEqual({ account: 0, category: 0 })
+    expect(searchAt('/transactions?account=&category=&transfers=both&from=&to=2026-13-01&q=&sort=x&dir=up&page=0')).toEqual({})
+    expect(searchAt('/transactions?account=2&sort=date&dir=desc&page=1')).toEqual({ account: 2 })
   })
 
   it('drops the defaults, so the address stays short', () => {
@@ -74,6 +99,7 @@ describe('tidy', () => {
     expect(tidy({ account: undefined, category: 'uncategorised', q: '', sort: 'date', dir: 'desc', page: 1 })).toEqual({ category: 'uncategorised' })
     expect(tidy({ sort: 'amount', dir: 'asc', page: 2 })).toEqual({ sort: 'amount', page: 2 })
     expect(tidy({ sort: 'date', dir: 'asc' })).toEqual({ dir: 'asc' })
+    expect(Object.keys(tidy({}))).toHaveLength(9) // left out as undefined, not missing: see parseTransactionSearch
   })
 })
 

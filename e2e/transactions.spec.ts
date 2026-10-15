@@ -153,6 +153,26 @@ test('a range that ends before it starts is explained and not searched', async (
   await expect(page.getByRole('alert')).toContainText('before the “From” date')
 })
 
+test('an address naming no such Account or Category says so, and one with blank or unknown parts still shows the list', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  for (const [address, name] of [
+    ['/transactions?account=abc', 'Account'],
+    ['/transactions?account=0', 'Account'],
+    ['/transactions?account=999999999', 'Account'],
+    ['/transactions?category=abc', 'Category'],
+    ['/transactions?category=999999999', 'Category'],
+  ]) {
+    await page.goto(address!)
+    await expect(page.getByRole('alert'), address).toHaveText(`There is no such ${name}. Choose one in the form above.`)
+  }
+  await noAxeViolations(page)
+
+  // Blank and unknown parts are left out (an earlier form sent `account=` for every Account), so the API is never asked with them and refuses.
+  await page.goto('/transactions?account=&category=&transfers=both&from=&to=2012-13-01&q=&sort=x&dir=up&page=0')
+  await expect(page.getByRole('status').filter({ hasText: /^(Showing|There are no Transactions yet)/ })).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
 test('Transactions sort by a column heading on a wide screen and from a menu on a narrow one', async ({ page, context, baseURL }, testInfo) => {
   const { stamp, names } = await seedFour(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')
