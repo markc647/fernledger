@@ -1,11 +1,11 @@
 import type { BrowserContext, Page } from '@playwright/test'
+import { thisMonth } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { transactionId } from './report-helpers'
 import { navigateTo } from './shell-helpers'
 
-// The Budgets page and the Summary's Budget vs actual, against the real Worker. A Budget is for this NZ month, so the test finds
-// out which month that is the way the Worker does (Pacific/Auckland) and imports a Transaction dated its first day. The light and
-// dark projects share one local database, so each makes a Category and an Account of its own.
-const thisMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7)
+// The Budgets page and the Summary's Budget vs actual, against the real Worker. A Budget is for this NZ month (`thisMonth`, date-helpers.ts), so the test imports a Transaction dated its
+// first day. The light and dark projects share one local database, so each makes a Category and an Account of its own.
 const words = (month: string) => new Date(`${month}-01T00:00:00Z`).toLocaleString('en-NZ', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 const monthWords = words(thisMonth)
 const nextMonth = (() => {
@@ -33,9 +33,7 @@ async function seed(context: BrowserContext, baseURL: string, projectName: strin
     },
   })
   expect(imported.ok()).toBe(true)
-  const found = await context.request.get(`/api/transactions?text=${encodeURIComponent(description)}&count=false`)
-  const { transactions } = (await found.json()) as { transactions: { id: number }[] }
-  const override = await context.request.put(`/api/transactions/${transactions[0]!.id}/override`, { headers, data: { categoryId } })
+  const override = await context.request.put(`/api/transactions/${await transactionId(context, description)}/override`, { headers, data: { categoryId } })
   expect(override.ok()).toBe(true)
   return { name }
 }

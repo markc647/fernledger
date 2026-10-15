@@ -44,6 +44,19 @@ export async function withRules<Words extends string[]>(
   }
 }
 
+/** What the Worker says of the features when the D1 usage bar is switched on (local development has no Cloudflare token, so the specs that look at the bar stub it). */
+export const usageOn = { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] }
+
+/** What the Worker says of the day's database use, changed by what a spec passes: Low on both bars unless it says otherwise. */
+export const usageFigures = (over: Record<string, unknown> = {}) => ({
+  rowsRead: 1_234_567,
+  rowsWritten: 4_321,
+  readLimit: 5_000_000,
+  writeLimit: 100_000,
+  resetsAt: '2026-10-15T00:00:00.000Z',
+  ...over,
+})
+
 /** The "⋯" button of a Rule's row or card, by the Rule's id (the page puts the id in the button's own, so it is found wherever the Rule is in the list). */
 export const ruleActions = (page: Page, id: number) => page.locator(`#rule-${id}-actions`)
 

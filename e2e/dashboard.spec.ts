@@ -3,6 +3,7 @@ import { drawn, LINE, NET_WORTH, netWorth, pressShowNetWorth, pressShowSpending,
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
+import { transactionId } from './report-helpers'
 import { chooseTextSize, mainNav, navLink, openNavGroup } from './shell-helpers'
 
 // The Dashboard (where the Admin lands) and the Summary (where a Member does), which are a grid of cards with the charts on two of them, against the real Worker. The light and dark projects share one local
@@ -68,9 +69,7 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
   const categories = (await (await context.request.get('/api/categories')).json()) as { id: number; name: string }[]
   for (const row of rows.everyday) {
     if (!row.category) continue
-    const found = await context.request.get(`/api/transactions?text=${encodeURIComponent(row.payee)}&from=${month}-01&to=${to}&count=false`)
-    const { transactions } = (await found.json()) as { transactions: { id: number }[] }
-    const override = await context.request.put(`/api/transactions/${transactions[0]!.id}/override`, { headers, data: { categoryId: categories.find((c) => c.name === row.category)!.id } })
+    const override = await context.request.put(`/api/transactions/${await transactionId(context, row.payee, `&from=${month}-01&to=${to}`)}/override`, { headers, data: { categoryId: categories.find((c) => c.name === row.category)!.id } })
     expect(override.ok()).toBe(true)
   }
 }
