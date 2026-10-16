@@ -89,8 +89,9 @@ test('Windows high contrast keeps the handle and the button as buttons, the high
     await page.keyboard.press('Escape')
 
     // Focus on the handle is the palette's outline, and a Rule picked up is outlined as well as lifted.
+    // Radix puts focus back on the button in a task of its own after the menu has closed. Wait for that rather than focus the button here, or on a busy browser it lands after Shift+Tab and takes focus back from the handle.
     const handle = ruleGrip(page, id)
-    await ruleActions(page, id).focus()
+    await expect(ruleActions(page, id)).toBeFocused()
     await page.keyboard.press('Shift+Tab') // back to the handle, as a keyboard does, so that it has focus that shows
     await expect(handle).toBeFocused()
     const ring = await style(handle, 'outline-style', 'outline-width', 'outline-color')
