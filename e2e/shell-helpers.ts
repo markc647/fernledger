@@ -75,9 +75,11 @@ export async function atEveryTextSize(page: Page, check: (size: string) => Promi
   for (let i = 0; i < count; i++) {
     await page.setViewportSize(start)
     await openHeaderControls(page)
-    const radio = textSizeGroup(page).getByRole('radio').nth(i)
-    await radio.click()
-    await expect(radio).toBeChecked()
+    // The label, which holds the radio button and the word drawn beside it: once a keyboard has been used (closing the phone's menu with Escape) the menu opens with focus on its first
+    // radio button, whose word is then drawn over it, and a click on the radio button itself is refused as intercepted. A click on the label is a click on either.
+    const option = textSizeGroup(page).locator('label').nth(i)
+    await option.click()
+    await expect(option.getByRole('radio')).toBeChecked()
     await closeHeaderControls(page)
     const root = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))
     largest = Math.max(largest, root)

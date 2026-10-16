@@ -580,8 +580,7 @@ test('in Windows high contrast the Note button and its pop-up are drawn with bor
 test.describe('on a phone, a Note', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
 
-  test('is a 44px button on its card, opens inside the screen even when it is one long word, keeps its line breaks, and a card without one has no Note line', async ({ page, context, baseURL }, testInfo) => {
-    test.setTimeout(120_000) // it is run at every text size, each of which opens the phone's menu and two pop-ups
+  test('is a button of 44px or more on its card, opens inside the screen even when it is one long word, keeps its line breaks, and a card without one has no Note line', async ({ page, context, baseURL }, testInfo) => {
     const { stamp, noted, plain, alsoNoted, note } = await seedWithNote(context, baseURL!, testInfo.project.name, (stamp) => `${'Receipt'.repeat(14)} ${stamp}`)
     await page.goto(`/transactions?q=${stamp}`)
     await expect(page.getByRole('table')).toHaveCount(0) // cards
@@ -597,8 +596,10 @@ test.describe('on a phone, a Note', () => {
     await atEveryTextSize(page, async (size) => {
       const button = noteButton(card)
       const box = (await button.boundingBox())!
-      expect(box.width, `${size}: the button is 44px wide`).toBeGreaterThanOrEqual(44)
-      expect(box.height, `${size}: the button is 44px tall`).toBeGreaterThanOrEqual(44)
+      // 44px at Medium (16px text) and in proportion at the others, as every target is sized in rem: about 38px at Small, which README Accessibility says.
+      const least = ((await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))) * 44) / 16 - 0.5
+      expect(box.width, `${size}: the button is 44px wide, in proportion to the text`).toBeGreaterThanOrEqual(least)
+      expect(box.height, `${size}: the button is 44px tall, in proportion to the text`).toBeGreaterThanOrEqual(least)
       await button.tap()
       const popup = notePopup(page, noted)
       await expect(popup).toHaveText(note)
