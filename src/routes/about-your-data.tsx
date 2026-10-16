@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
+import { PageHeading } from '@/components/help-sheet'
 import { Status } from '@/components/status'
 import { contactLine, retentionLine, type SettingLine } from '@/lib/about-data'
 import { featuresQuery } from '@/lib/features'
@@ -33,10 +34,9 @@ function AboutYourData() {
   const failed = settingsFailed || meFailed
   return (
     <article className="max-w-2xl text-base leading-relaxed print:text-[13.5pt]">
-      <h1 className="text-2xl font-semibold">About your data</h1>
-      <p className="mt-3">
-        This page explains how Fernledger handles the financial information in it: what it holds, who can see it, where it is kept, for how long, and who to ask.
-      </p>
+      <PageHeading help={<p>{INTRO}</p>}>About your data</PageHeading>
+      {/* On paper the page is read without the sheet, so the sentence that says what it is stays in a printout. */}
+      <p className="mt-3 hidden print:block">{INTRO}</p>
 
       <Section id="held" title="What is held">
         <ul className="list-disc space-y-2 ps-6">
@@ -127,6 +127,8 @@ function AboutYourData() {
     </article>
   )
 }
+
+const INTRO = 'This page explains how Fernledger handles the financial information in it: what it holds, who can see it, where it is kept, for how long, and who to ask.'
 
 // Who Fernledger contacts (ADR 0010), by whether the optional D1 usage bar is on. Each is a whole sentence and each is true when it is shown.
 const AKAHU_ONLY_IF = 'It contacts no one but Akahu (only if this Fernledger uses Akahu Sync)'

@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { pickDate } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
+import { openHelp } from './help-helpers'
 import { ADMIN_EMAIL, dateText, ensureCategory, forgetKeptReports, forgetKeptReportsAfterEach, importRows, MEMBER_EMAIL, type KeptChoices } from './report-helpers'
 import { actionsButton, menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
 import { breadcrumb, chooseTextSize, expectTextSize, navGroup, navLink } from './shell-helpers'
@@ -519,10 +520,14 @@ test.describe('a Member', () => {
     await page.goto('/transactions?from=2026-01-01&to=2026-10-31')
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
     await expect(page.getByRole('link', { name: /Transaction listing Report/ })).toHaveCount(0)
-    await expect(page.getByText('To print Transactions as a Report')).toHaveCount(0)
+    const memberHelp = await openHelp(page) // the Transactions page keeps its Report line in the page's help sheet
+    await expect(memberHelp.getByRole('link', { name: /Transaction listing Report/ })).toHaveCount(0)
+    await expect(memberHelp.getByText('To print Transactions as a Report')).toHaveCount(0)
     await signInAs(context, 'admin')
     await page.reload()
-    await expect(page.getByRole('link', { name: /Open a Transaction listing Report/ })).toBeVisible()
+    await expect(page.getByRole('link', { name: /Open a Transaction listing Report/ })).toHaveCount(0) // not on the page itself
+    const adminHelp = await openHelp(page)
+    await expect(adminHelp.getByRole('link', { name: /Open a Transaction listing Report/ })).toBeVisible()
   })
 })
 

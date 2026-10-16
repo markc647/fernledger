@@ -1,6 +1,7 @@
 import type { BrowserContext } from '@playwright/test'
 import type { Role } from '../src/generated/api/auth'
 import { expect, noAxeViolations, test } from './fixtures'
+import { openHelp } from './help-helpers'
 import { sidebarTitle } from './shell-helpers'
 
 // Cookies are not scoped by port, so the dev identity needs no copy of the port from playwright.config.ts.
@@ -86,7 +87,9 @@ test('the Admin is told what to set up, and how, for a feature that is switched 
 test('the Admin is not a Setting', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.goto('/settings')
-  await expect(page.getByText("The Admin is set when Fernledger is deployed and can't be changed here.")).toBeVisible()
+  await expect(page.getByText("The Admin is set when Fernledger is deployed and can't be changed here.")).toBeHidden() // it is in the page's help sheet
+  await expect(await openHelp(page)).toContainText("The Admin is set when Fernledger is deployed and can't be changed here.")
+  await page.keyboard.press('Escape')
   await expect(page.getByLabel(/admin/i)).toHaveCount(0)
 })
 

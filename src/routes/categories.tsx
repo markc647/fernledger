@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
+import { PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { RowAction, RowActions } from '@/components/row-actions'
 import { Button } from '@/components/ui/button'
@@ -107,11 +108,16 @@ function Categories() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold">Categories</h1>
-      <p className="mt-2">
-        A Category groups Transactions by purpose. Its kind says how its Transactions are added up: Spending, Income or Loans (money lent or borrowed, which the Loans Report adds up).{' '}
-        {isAdmin ? "Add, rename or remove them to suit you, and set each one's kind." : 'Only the Admin can change them.'}
-      </p>
+      <PageHeading
+        help={
+          <p>
+            A Category groups Transactions by purpose. Its kind says how its Transactions are added up: Spending, Income or Loans (money lent or borrowed, which the Loans Report adds up).{' '}
+            {isAdmin ? "Add, rename or remove them to suit you, and set each one's kind." : 'Only the Admin can change them.'}
+          </p>
+        }
+      >
+        Categories
+      </PageHeading>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {notice}

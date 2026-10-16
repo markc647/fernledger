@@ -121,14 +121,12 @@ export function TransactionList({
   showFilters = false,
   origin,
   emptyMessage,
-  intro,
 }: {
   search: TransactionSearch
   onSearch: (search: TransactionSearch, options?: { replace?: boolean }) => void
   showFilters?: boolean
   origin?: DetailOrigin
   emptyMessage: ReactNode
-  intro?: ReactNode
 }) {
   const [editing, setEditing] = useState<Row | null>(null)
   const [saved, setSaved] = useState('')
@@ -282,7 +280,6 @@ export function TransactionList({
 
   return (
     <>
-      {intro}
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {saved}

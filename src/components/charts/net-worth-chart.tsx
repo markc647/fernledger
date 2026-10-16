@@ -10,7 +10,6 @@ import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type Ch
 import { Select } from '@/components/ui/select'
 import {
   DEFAULT_NET_WORTH_RANGE,
-  NET_WORTH_ABOUT,
   NET_WORTH_RANGE_LABELS,
   NET_WORTH_RANGES,
   netWorthSummary,
@@ -92,11 +91,6 @@ export function NetWorthChart() {
       ) : (
         <>
           {isPlaceholderData && <p className="mb-2 font-medium">Updating…</p>}
-          {NET_WORTH_ABOUT.map((paragraph) => (
-            <p key={paragraph} className="mb-3 text-muted-foreground">
-              {paragraph}
-            </p>
-          ))}
           <div className={isPlaceholderData ? 'opacity-60' : undefined}>
             <ChartFigure label={netWorthSummary(data.points)}>
               <ChartContainer config={config} className="h-64 sm:h-80">

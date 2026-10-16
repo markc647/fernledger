@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { drawn, LINE, NET_WORTH, NET_WORTH_PATH, netWorth, pressShowNetWorth, showNetWorth, spyApi, spyNetWorth, stubNetWorth } from './chart-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
+import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import { chooseTextSize, mainNav, navGroup, navLink, openNavGroup } from './shell-helpers'
 
@@ -396,7 +397,7 @@ test('net worth, as the Worker adds it up from every Account, is the Balances\' 
   await expect(netWorth(page).getByRole('row').nth(1)).toContainText(dollars(total))
 })
 
-test('net worth is drawn as a line, and says what it is: only the money in these Accounts, with the months before an Account\'s history an estimate', async ({ page, context }) => {
+test('net worth is drawn as a line, and the page\'s help sheet says what it is: only the money in these Accounts, with the months before an Account\'s history an estimate', async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
   await page.goto(NET_WORTH_PATH)
@@ -404,10 +405,13 @@ test('net worth is drawn as a line, and says what it is: only the money in these
   const figure = await showNetWorth(page)
   await expect(figure.locator('path.recharts-line-curve')).toHaveAttribute('d', /^M[\d.]+/)
   expect(await figure.getAttribute('aria-label')).toContain('It was $10,000.00 at the end of August 2026 and $10,800.00 on Wed 7 Oct 2026.')
-  await expect(netWorth(page)).toContainText("Only the money in these Accounts, added up at the end of each month from the bank balances Fernledger holds. A loan to or from someone whose account isn't tracked shows as a fall or a rise.")
-  await expect(netWorth(page)).toContainText("Months before an Account's first Transaction use the balance it had when its Transactions begin, so they are an estimate")
+  await expect(netWorth(page)).not.toContainText('Only the money in these Accounts') // the card keeps the line and its figures; what it is, is in the page's sheet
   await expect(netWorth(page)).not.toContainText(/\bwe\b/i)
-  await expect(netWorth(page)).not.toContainText('Loans Report')
+  const help = await openHelp(page)
+  await expect(help).toContainText("Only the money in these Accounts, added up at the end of each month from the bank balances Fernledger holds. A loan to or from someone whose account isn't tracked shows as a fall or a rise.")
+  await expect(help).toContainText("Months before an Account's first Transaction use the balance it had when its Transactions begin, so they are an estimate")
+  await expect(help).not.toContainText(/\bwe\b/i)
+  await expect(help).not.toContainText('Loans Report')
 })
 
 test('the Net worth page lets the reader choose how far back net worth goes, before it is drawn or after, and the card is busy while it asks', async ({ page, context }) => {

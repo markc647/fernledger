@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { Amount } from '@/components/amount'
 import { D1UsageBar } from '@/components/d1-usage-bar'
+import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { RowAction, RowActions } from '@/components/row-actions'
 import { DragHandle, SortableFrame, SortableRow } from '@/components/sortable-rows'
@@ -49,8 +50,27 @@ const rerunQuery = queryOptions({
 /** Read the D1 usage bar's figures again (a query that is not on, because the feature is not set up, is left alone). */
 const refreshUsage = (queryClient: QueryClient) => queryClient.invalidateQueries({ queryKey: d1UsageQuery.queryKey })
 
-const INTRO =
-  'A Rule is used for new Transactions as they are imported. The Transactions you already have change only when you choose Apply the Rules to all Transactions, below.'
+const INTRO = 'A Rule is used for new Transactions as they are imported. The Transactions you already have change only when you choose Apply the Rules to all Transactions.'
+
+/** The page's help sheet: what a Rule is and when it is used, and, under its own heading, what the Apply box does. */
+function RulesHelp() {
+  return (
+    <>
+      <p>
+        A Rule puts the Transactions that match it into a Category, or marks them as Transfers. Rules are checked from the top of the list, and the first one that matches is used. A Category you set by hand
+        on a Transaction (an Override) always beats a Rule, and a Rule beats the category Akahu suggests, if you use Akahu Sync. So does Not a Transfer, which the Admin chooses on a Transaction a Rule wrongly marks as a Transfer.
+      </p>
+      <p>{INTRO}</p>
+      <HelpHeading>Apply the Rules to all Transactions</HelpHeading>
+      <p>
+        Fernledger goes through every Transaction you have, a few at a time, and gives each the Category of the first Rule that matches it. A Transaction that no Rule matches any more loses the
+        Category a Rule gave it. A Category you set by hand (an Override) is never changed.
+      </p>
+      <p>Change the Rules first, then apply them once.</p>
+    </>
+  )
+}
+
 /** Said after any change to the Rules, and before one while a run is going: that run starts again, so it uses the change. */
 const THEN_APPLY = 'To use the change on the Transactions you already have, choose Apply the Rules to all Transactions, below.'
 const RUN_GOING_BEFORE = 'A run is going. Saving starts it again from the first Transaction.'
@@ -71,7 +91,7 @@ function Rules() {
   if (!me) return null
   return (
     <>
-      <h1 className="text-2xl font-semibold">Rules</h1>
+      <PageHeading help={me.role === 'admin' && <RulesHelp />}>Rules</PageHeading>
       {me.role === 'admin' ? <AdminRules /> : <p className="mt-2">Only the Admin can use this page.</p>}
     </>
   )
@@ -192,11 +212,6 @@ function AdminRules() {
 
   return (
     <>
-      <p className="mt-2">
-        A Rule puts the Transactions that match it into a Category, or marks them as Transfers. Rules are checked from the top of the list, and the first one that matches is used. A Category you set by hand
-        on a Transaction (an Override) always beats a Rule, and a Rule beats the category Akahu suggests, if you use Akahu Sync. So does Not a Transfer, which the Admin chooses on a Transaction a Rule wrongly marks as a Transfer.
-      </p>
-      <p className="mt-2">{INTRO}</p>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {notice}
@@ -367,11 +382,6 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
       <h2 id="rerun-heading" className="text-lg font-semibold">
         Apply the Rules to all Transactions
       </h2>
-      <p className="mt-1">
-        Fernledger goes through every Transaction you have, a few at a time, and gives each the Category of the first Rule that matches it. A Transaction that no Rule matches any more loses the
-        Category a Rule gave it. A Category you set by hand (an Override) is never changed.
-      </p>
-      <p className="mt-1">Change the Rules first, then apply them once.</p>
       <D1UsageBar />
       <div className="mt-3 flex flex-wrap gap-2">
         <Button id="rerun-button" className="max-w-full py-2 whitespace-normal" size="touch" disabled={running || start.isPending || job === undefined} onClick={() => start.mutate()}>

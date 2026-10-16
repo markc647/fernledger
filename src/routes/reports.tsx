@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { FolderOpen, Printer, Save, Share2, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { RowAction, RowActions } from '@/components/row-actions'
 import { Button } from '@/components/ui/button'
@@ -83,12 +84,17 @@ function Reports() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold">Reports</h1>
-      <p className="mt-2">
-        {isAdmin
-          ? "Each Report you show is kept here as its choices: which Report, its dates and its Account. Opening one works it out again from today's data. Choose a Report in the sidebar, under Reports, to make one."
-          : "The Reports the Admin has made. Opening one works it out again from today's data. Print it to save a PDF on your computer."}
-      </p>
+      <PageHeading
+        help={
+          <p>
+            {isAdmin
+              ? "Each Report you show is kept here as its choices: which Report, its dates and its Account. Opening one works it out again from today's data. Choose a Report in the sidebar, under Reports, to make one."
+              : "The Reports the Admin has made. Opening one works it out again from today's data. Print it to save a PDF on your computer."}
+          </p>
+        }
+      >
+        Reports
+      </PageHeading>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {notice}

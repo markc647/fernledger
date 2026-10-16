@@ -3,6 +3,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PreviewRow } from '@/generated/api/import-rows'
 import { Amount } from '@/components/amount'
+import { PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable } from '@/components/responsive-table'
 import { Status } from '@/components/status'
 import { Button } from '@/components/ui/button'
@@ -38,7 +39,7 @@ function ImportScreen() {
   const { data: me, isPending } = useQuery(meQuery)
   return (
     <>
-      <h1 className="text-2xl font-semibold">Import</h1>
+      <PageHeading help={me?.role === 'admin' && <p>Choose a bank export (a CSV file). Fernledger reads it in your browser and shows you what it found. Nothing is saved until you confirm.</p>}>Import</PageHeading>
       {me?.role === 'admin' ? (
         <ImportFlow />
       ) : isPending ? (
@@ -105,7 +106,6 @@ function ImportFlow() {
     const existing = file && accounts?.find((a) => a.accountNumber === file.accountNumber)
     return (
       <div className="mt-4 space-y-6">
-        <p>Choose a bank export (a CSV file). Fernledger reads it in your browser and shows you what it found. Nothing is saved until you confirm.</p>
         <div>
           <label htmlFor="bank-file" className="block font-medium">
             Bank export file
