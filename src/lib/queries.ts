@@ -12,6 +12,12 @@ import { apiQuery, filterQuery, filtersOf, type TransactionSearch } from './tran
 
 export const PAGE_SIZE = 50
 
+/**
+ * A Report's reads are asked for again when they fail, as any read is, except when the Worker refuses them (403): a Member who asks for a Report the Admin has not made is told so
+ * at once, and asking again would only be refused again.
+ */
+const retryUnlessRefused = (count: number, error: unknown) => !(error instanceof HttpError && error.status === 403) && count < 3
+
 export const accountsQuery = queryOptions({
   queryKey: ['accounts'],
   queryFn: async () => {
@@ -88,6 +94,7 @@ export const transactionQuery = (id: string) =>
 export const reportListingQuery = (accounts: { id: number; name: string; accountNumber: string }[], from: string, to: string) =>
   queryOptions({
     queryKey: ['reports', 'transactions', accounts.map((a) => a.id), from, to],
+    retry: retryUnlessRefused,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     queryFn: () =>
@@ -110,6 +117,7 @@ export const reportListingQuery = (accounts: { id: number; name: string; account
 export const reportBalancesQuery = (accounts: { id: number; name: string; accountNumber: string; cutoverDate: string | null }[], from: string, to: string) =>
   queryOptions({
     queryKey: ['reports', 'balances', accounts.map((a) => a.id), from, to],
+    retry: retryUnlessRefused,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     queryFn: () =>
@@ -132,6 +140,7 @@ export const reportBalancesQuery = (accounts: { id: number; name: string; accoun
 export const reportSpendingQuery = (accountId: number | undefined, from: string, to: string) =>
   queryOptions({
     queryKey: ['reports', 'spending', accountId ?? null, from, to],
+    retry: retryUnlessRefused,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -148,6 +157,7 @@ export const reportSpendingQuery = (accountId: number | undefined, from: string,
 export const reportBudgetQuery = (from: string, to: string) =>
   queryOptions({
     queryKey: ['reports', 'budget-vs-actual', from, to],
+    retry: retryUnlessRefused,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -164,6 +174,7 @@ export const reportBudgetQuery = (from: string, to: string) =>
 export const reportIncomeVsSpendingQuery = (accountId: number | undefined, from: string, to: string) =>
   queryOptions({
     queryKey: ['reports', 'income-vs-spending', accountId ?? null, from, to],
+    retry: retryUnlessRefused,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -172,6 +183,19 @@ export const reportIncomeVsSpendingQuery = (accountId: number | undefined, from:
       return res.json()
     },
   })
+
+/**
+ * The Reports the Admin has made, newest first: one small query (worker/kept-reports.ts), and a kept Report is only its choices, so it is never out of date the way a Report's figures
+ * would be. The Reports page is this table. The Admin showing a Report refreshes it.
+ */
+export const keptReportsQuery = queryOptions({
+  queryKey: ['kept-reports'],
+  queryFn: async () => {
+    const res = await api['kept-reports'].$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
 
 /** The Categories in use, by name. */
 export const categoriesQuery = queryOptions({
@@ -191,6 +215,7 @@ export const categoriesQuery = queryOptions({
 export const reportLoansQuery = (category: number | undefined, from: string | undefined, to: string) =>
   queryOptions({
     queryKey: ['reports', 'loans', category ?? null, from ?? null, to],
+    retry: retryUnlessRefused,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     queryFn: async () => {
