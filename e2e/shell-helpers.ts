@@ -4,10 +4,10 @@ import { expect, settle } from './fixtures'
 // The app shell (src/routes/__root.tsx): a sticky header across the top (the page's banner), and the sidebar beside the page. On a phone the sidebar is a sheet and the
 // header's controls are in one menu. These find the same things at every width, so a spec says what it does and not where the control is today.
 
-export type TextSizeName = 'Small' | 'Medium' | 'Large'
+export type TextSizeName = 'Small' | 'Medium' | 'Large' | 'Xtra Large'
 
 /** The value `data-text-size` takes for each size (src/lib/text-size.ts). */
-const TEXT_SIZE_VALUE = { Small: 'small', Medium: 'medium', Large: 'large' } as const
+const TEXT_SIZE_VALUE = { Small: 'small', Medium: 'medium', Large: 'large', 'Xtra Large': 'xlarge' } as const
 
 /** The sticky header across the top of the page. */
 export const siteHeader = (page: Page) => page.getByRole('banner')
@@ -24,7 +24,7 @@ export const mainNav = (page: Page) => page.getByRole('navigation', { name: 'Mai
 /** The button of the header that opens the menu of its controls, which is all a phone's header has of them. Not visible from `md` up. */
 const displayMenuButton = (page: Page) => siteHeader(page).getByRole('button', { name: 'Display settings and sign out' })
 
-/** The header's controls are in its bar from `md` up and in one menu below: opens the menu when the bar doesn't have them. */
+/** The header's controls are in its bar from `md` up, while the bar is 46rem wide, and in one menu otherwise: opens the menu when the bar doesn't have them. */
 export async function openHeaderControls(page: Page) {
   const trigger = displayMenuButton(page)
   await expect(trigger.or(textSizeGroup(page))).toBeVisible() // the header is drawn: `isVisible` below does not wait for it
@@ -43,7 +43,7 @@ export async function closeHeaderControls(page: Page) {
   }
 }
 
-/** The text size buttons, wherever this width has them (the open menu on a phone): a group of three radio buttons. */
+/** The text size buttons, wherever this width has them (the open menu on a phone): a group of four radio buttons. */
 export const textSizeGroup = (page: Page) => page.getByRole('group', { name: 'Text size' })
 
 /** One of the text size buttons (a radio button), by the word on it. */

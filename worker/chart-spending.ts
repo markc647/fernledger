@@ -2,7 +2,7 @@ import * as z from 'zod/mini'
 import { isQueryDate } from './dates'
 import { monthEnd, monthsBefore, monthStart, nzMonth } from './months'
 
-// The question the spending chart asks (GET /api/charts/spending): which dates. The answer is spending-by-category.ts's, the same one a Report of it
+// The question GET /api/charts/spending takes (no page asks it now; it was the Summary's spending chart's): which dates. The answer is spending-by-category.ts's, the same one a Report of it
 // gets (ADR 0012), so this file is only the periods the Worker names and the query string that asks for them or for two dates.
 
 /** Periods named by the Worker, because "this month" is a New Zealand month whatever the clock of the browser asking. */

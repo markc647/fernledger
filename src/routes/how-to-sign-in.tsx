@@ -10,7 +10,7 @@ export const Route = createFileRoute('/how-to-sign-in')({
 })
 
 /**
- * The Cloudflare Access email one-time PIN sign-in (ADR 0002), in large print, for Members who find it hard. Printable:
+ * The Cloudflare Access email one-time PIN sign-in (ADR 0002), for Members who find it hard, at the page's text size (they can make it larger) and in large type on paper. Printable:
  * the header, the sidebar and buttons drop out of the printout (`print:hidden`, in src/components/site-header.tsx and ui/sidebar.tsx), and the text is 12pt or more.
  * The address in step 1 is the one the page is open at, so nothing about the deployment is written into the guide.
  *
@@ -26,7 +26,7 @@ function HowToSignIn() {
   const { data: me } = useQuery(meQuery)
   const contact = settings?.about_contact.trim()
   return (
-    <article className="max-w-2xl text-lg leading-relaxed print:text-[13pt] print:leading-snug">
+    <article className="max-w-2xl text-base leading-relaxed print:text-[13pt] print:leading-snug">
       <h1 className="text-2xl font-semibold print:text-[20pt]">How to sign in</h1>
       <p className="mt-3">Fernledger has no password. Each time you sign in, Cloudflare emails you a short code, and you type that code in.</p>
       {settings && <p className="mt-2">This guide is for {settings.app_title}.</p>}
@@ -37,7 +37,7 @@ function HowToSignIn() {
       </p>
       {me?.role === 'admin' && <p className="mt-3 print:hidden">Print this and give it to each Member before their first sign-in.</p>}
 
-      <ol aria-label="Steps" className="mt-6 list-decimal space-y-4 ps-9 text-xl marker:font-semibold print:mt-4 print:space-y-2 print:text-[14pt]">
+      <ol aria-label="Steps" className="mt-6 list-decimal space-y-4 ps-9 text-base marker:font-semibold print:mt-4 print:space-y-2 print:text-[14pt]">
         {/* Each step stays whole across a page break. */}
         <li className="break-inside-avoid ps-1">
           <strong className="font-semibold">Open Fernledger.</strong> Use the link the Admin gave you, or the Fernledger icon on your Home Screen. Fernledger's address is{' '}

@@ -35,7 +35,7 @@ export function D1UsageBar() {
   if (!feature) return null
   return (
     <section aria-labelledby={heading} className="mt-3">
-      <h3 id={heading} className="font-medium">
+      <h3 id={heading} className="text-lg font-medium">
         Free database allowance
       </h3>
       {!on ? (

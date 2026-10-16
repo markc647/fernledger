@@ -185,7 +185,7 @@ test('it has no WCAG 2.2 AA violations closed, open, and open on a phone at the 
   // A phone, 200% zoom on a laptop (640 by 360, shorter than the calendar) and 400% zoom (316 by 256).
   for (const viewport of [{ width: 390, height: 844 }, { width: 640, height: 360 }, { width: 316, height: 256 }]) {
     await page.setViewportSize(viewport)
-    await chooseTextSize(page, 'Large')
+    await chooseTextSize(page, 'Xtra Large')
     await dateField(page, 'Date').scrollIntoViewIfNeeded()
     await pickDate(page, 'Date', '2027-03-31') // a day in the last row, which on a short screen is reached by scrolling the calendar
     await expectStored(page, 'Date', '2027-03-31')
@@ -280,11 +280,10 @@ const VIEWPORTS = [
   { name: '400% zoom', width: 316, height: 256 },
 ]
 const FROM_TO = ['From', 'To']
-const FORM_PAGES: { name: string; path: string; fields: string[]; admin?: boolean; ready?: (page: Page) => Promise<unknown> }[] = [
+const FORM_PAGES: { name: string; path: string; fields: string[]; admin?: boolean }[] = [
   { name: 'Transactions', path: '/transactions', fields: FROM_TO },
   { name: 'Change Log', path: '/change-log', fields: FROM_TO },
   { name: 'Settings', path: '/settings', fields: ['Cutover Date for Example savings'], admin: true },
-  { name: 'Dashboard spending', path: '/', fields: FROM_TO, admin: true, ready: (page) => page.getByRole('region', { name: 'Spending by Category' }).getByLabel('Period', { exact: true }).selectOption('custom') },
   { name: 'Transaction listing Report', path: '/reports/transactions', fields: FROM_TO },
   { name: 'Balances Report', path: '/reports/balances', fields: FROM_TO },
   { name: 'Spending Report', path: '/reports/spending', fields: FROM_TO },
@@ -293,14 +292,13 @@ const FORM_PAGES: { name: string; path: string; fields: string[]; admin?: boolea
   { name: 'Loans Report', path: '/reports/loans', fields: ['From (optional)', 'To'] },
 ]
 
-for (const { name, path, fields, admin, ready } of FORM_PAGES) {
+for (const { name, path, fields, admin } of FORM_PAGES) {
   test(`${name}: the longest date is on one line in every box, at every text size and width, and the boxes stack rather than squeeze it`, async ({ page, context }) => {
     await signInAs(context, admin ? 'admin' : 'member')
     // An Account's Cutover Date is the date its box shows, so the Settings page needs only an Account with that one.
     const settings = path === '/settings'
     if (settings) await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example savings', accountNumber: '99-9999-9999999-97', cutoverDate: WIDEST }] }))
     await page.goto(path)
-    await ready?.(page)
     await expect(dateField(page, fields[0]!)).toBeVisible()
     // A box is as wide with no date as with the longest, so choosing a date never moves what is beside it (a Cutover Date is set from the start, so Settings has no "before").
     const widthOf = (label: string) => dateField(page, label).evaluate((button) => button.getBoundingClientRect().width)

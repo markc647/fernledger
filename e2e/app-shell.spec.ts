@@ -87,6 +87,14 @@ test.describe('layout', () => {
     await expect(trail.locator('[aria-current="page"]')).toHaveText('Spending by Category')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
     await expect(navLink(page, 'Reports')).toHaveAttribute('data-active', 'true')
+    // Net worth is no Report but a page with a row of its own under Reports: named in the trail, and it (not Reports) is the row marked.
+    await page.goto('/reports/net-worth')
+    await expect(trail.getByRole('listitem')).toHaveText(['Reports', 'Net worth'])
+    await expect(trail.locator('[aria-current="page"]')).toHaveText('Net worth')
+    await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
+    await expect(navLink(page, 'Net worth')).toHaveAttribute('data-active', 'true')
+    await expect(navLink(page, 'Reports')).not.toHaveAttribute('data-active', 'true')
+    await expect(mainNav(page).locator('[data-active="true"]')).toHaveCount(1)
   })
 
   test('is one skip link, then the header, then the sidebar, then the page, and the skip link goes to the page', async ({ page }) => {
@@ -165,21 +173,21 @@ test.describe('the sidebar navigation', () => {
     expect(await outline(page)).toEqual([
       'Dashboard',
       'Transactions: All Transactions, Uncategorised, Import',
-      'Reports: Reports',
+      'Reports: Reports, Net worth',
       'Set up: Accounts, Categories, Rules, Budgets, Settings',
       'Help: Change Log, About your data, How to sign in',
     ])
     await noAxeViolations(page) // with every group open
   })
 
-  test('lists a Member\'s: the Summary, Accounts among the Reports, and no Set up group at all', async ({ page, context }) => {
+  test('lists a Member\'s: the Summary, Net worth and Accounts among the Reports, and no Set up group at all', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/')
     await expect(navLink(page, 'Summary')).toBeVisible()
     expect(await outline(page)).toEqual([
       'Summary',
       'Transactions: All Transactions',
-      'Reports: Reports, Accounts',
+      'Reports: Reports, Net worth, Accounts',
       'Help: Change Log, About your data, How to sign in',
     ])
     await expect(navGroup(page, 'Set up')).toHaveCount(0)
@@ -242,13 +250,13 @@ test.describe('the sidebar navigation', () => {
     await expect(navLink(page, 'Uncategorised')).toHaveCount(0)
   })
 
-  test('opens the group of a page you arrive at from somewhere else, such as a Dashboard shortcut', async ({ page, context }) => {
+  test('opens the group of a page you arrive at from somewhere else, such as a link on the Dashboard', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/')
-    await expect(navGroup(page, 'Transactions')).toHaveAttribute('aria-expanded', 'false') // the Dashboard holds no group
-    await page.getByRole('region', { name: 'Your tools' }).getByRole('link', { name: /^Import/ }).click()
-    await expect(page.getByRole('heading', { level: 1, name: 'Import' })).toBeVisible()
-    await expect(navGroup(page, 'Transactions')).toHaveAttribute('aria-expanded', 'true')
+    await expect(navGroup(page, 'Set up')).toHaveAttribute('aria-expanded', 'false') // the Dashboard holds no group
+    await page.getByRole('region', { name: 'Budget vs actual' }).getByRole('link', { name: 'Set or change Budgets' }).click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Budgets' })).toBeVisible()
+    await expect(navGroup(page, 'Set up')).toHaveAttribute('aria-expanded', 'true')
   })
 
   // The pill alone is a white or grey fill a hair away from the tint (1.1:1), so the row has a bar at its start that is 3:1 against the tint in both themes
@@ -277,8 +285,8 @@ test.describe('the sidebar navigation', () => {
     const [bar, tint, pill] = await rgbOf(page, [on.bar!.colour, await page.locator('[data-slot="sidebar-inner"]').evaluate((el) => getComputedStyle(el).backgroundColor), on.fill])
     expect(contrastOf(bar!, tint!), 'the bar against the sidebar').toBeGreaterThanOrEqual(3)
     expect(contrastOf(bar!, pill!), 'the bar against the pill it is drawn on').toBeGreaterThanOrEqual(3)
-    // Its text is 14px (text-sm) at Medium, like the rest of the sidebar.
-    expect(await current.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBe(14)
+    // Its text is 16px at Medium: the page's size, like the rest of the sidebar (README, Accessibility: one size for all text).
+    expect(await current.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBe(16)
   })
 
   test('the group holding the current page is shown as current while it is shut', async ({ page, context }) => {
@@ -580,21 +588,21 @@ test.describe('on a phone', () => {
     await expect(textSizeGroup(page)).toBeVisible()
     await expect(themeToggle(page)).toBeVisible()
     await expect(signOutLink(page)).toHaveAttribute('href', '/cdn-cgi/access/logout')
-    await textSizeButton(page, 'Large').click()
-    await expectTextSize(page, 'Large')
+    await textSizeButton(page, 'Xtra Large').click()
+    await expectTextSize(page, 'Xtra Large')
     await noAxeViolations(page)
     await page.keyboard.press('Escape')
     await expect(textSizeGroup(page)).toBeHidden()
     // The page behind kept the choice, and so does the menu when it is opened again.
     await openHeaderControls(page)
-    await expect(textSizeButton(page, 'Large')).toBeChecked()
+    await expect(textSizeButton(page, 'Xtra Large')).toBeChecked()
   })
 
   test('has a menu that is no taller than the room there is, on a short, landscape screen, and scrolls', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.setViewportSize({ width: 640, height: 200 })
     await page.goto('/')
-    await chooseTextSize(page, 'Large')
+    await chooseTextSize(page, 'Xtra Large')
     await openHeaderControls(page)
     const menu = page.locator('[data-slot="popover-content"]')
     const box = (await menu.boundingBox())!
@@ -623,13 +631,17 @@ test('the header controls are one Tab stop each, in order, and the arrow keys ch
   await expect(textSizeButton(page, 'Large')).toBeFocused() // ...and an arrow key moves within it, and chooses
   await expect(textSizeButton(page, 'Large')).toBeChecked()
   await expectTextSize(page, 'Large')
+  await page.keyboard.press('ArrowRight')
+  await expect(textSizeButton(page, 'Xtra Large')).toBeChecked()
+  await expectTextSize(page, 'Xtra Large')
+  await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('ArrowLeft')
   await expect(textSizeButton(page, 'Medium')).toBeChecked()
   await page.keyboard.press('ArrowLeft')
   await expect(textSizeButton(page, 'Small')).toBeChecked()
   await expectTextSize(page, 'Small')
   await page.keyboard.press('ArrowLeft') // and wraps round, as radio buttons do
-  await expect(textSizeButton(page, 'Large')).toBeChecked()
+  await expect(textSizeButton(page, 'Xtra Large')).toBeChecked()
 
   await tab()
   await expect(themeToggle(page)).toBeFocused()
@@ -640,10 +652,11 @@ test('the header controls are one Tab stop each, in order, and the arrow keys ch
   await expect(signOutLink(page)).toBeFocused()
 
   // The text size group is named, and its buttons have names that start with what they show.
-  await expect(textSizeGroup(page).getByRole('radio')).toHaveCount(3)
+  await expect(textSizeGroup(page).getByRole('radio')).toHaveCount(4)
   await expect(textSizeLabel(page, 'Small')).toHaveText('Small')
   await expect(textSizeLabel(page, 'Medium')).toHaveText('Medium')
   await expect(textSizeLabel(page, 'Large')).toHaveText('Large')
+  await expect(textSizeLabel(page, 'Xtra Large')).toHaveText('Xtra Large')
 })
 
 test('Ctrl+B and the toggle button are both keyboard ways to the sidebar, and the toggle says whether it is open', async ({ page }) => {
@@ -834,11 +847,11 @@ test.describe('print', () => {
 // ---------------------------------------------------------------------------------------------------------------
 // Accessibility of what opens
 
-test('the phone menu and the sidebar sheet have no WCAG 2.2 AA violations at the largest text size, when open', async ({ page, context }) => {
+test('the phone menu and the sidebar sheet have no WCAG 2.2 AA violations at Xtra Large, when open', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
-  await chooseTextSize(page, 'Large')
+  await chooseTextSize(page, 'Xtra Large')
   await openHeaderControls(page)
   await noAxeViolations(page)
   await closeHeaderControls(page)

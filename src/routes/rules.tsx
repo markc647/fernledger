@@ -694,7 +694,7 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
         </div>
 
         <div>
-          {/* The longest label here. A Button does not wrap by default; at 320px and text size Large this one is wider than the form around it, so it may wrap. */}
+          {/* The longest label here. A Button does not wrap by default; at 320px and text size Xtra Large this one is wider than the form around it, so it may wrap. */}
           <Button type="button" size="touch" variant="outline" className="max-w-full py-1 whitespace-normal" disabled={check.isPending} onClick={onCheck}>
             Check how many match
           </Button>

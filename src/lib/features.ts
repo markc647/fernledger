@@ -8,6 +8,7 @@ import { HttpError } from './me'
  */
 export const featuresQuery = queryOptions({
   queryKey: ['features'],
+  retry: 1, // the Balances table waits for it to know whether to show its Sync column
   queryFn: async () => {
     const res = await api.features.$get()
     if (!res.ok) throw new HttpError(res.status)

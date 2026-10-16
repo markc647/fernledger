@@ -55,6 +55,8 @@ const routes: NavEntry[] = [
   { to: '/uncategorised', label: 'Uncategorised', group: 'transactions', adminOnly: true, order: 15 },
   { to: '/import', label: 'Import', group: 'transactions', adminOnly: true, order: 20 },
   { to: '/reports', label: 'Reports', group: 'reports', order: 50 },
+  // Net worth is no Report but a page of its own in the Reports group: it has a row, though its address begins with Reports'.
+  { to: '/reports/net-worth', label: 'Net worth', group: 'reports', order: 55 },
   // A Report is a page of Reports, which the sidebar does not list: the breadcrumb names it and Reports is marked as the current page.
   { to: '/reports/loans', label: 'Loans', parent: '/reports' },
   { to: '/reports/balances', label: 'Balances over time', parent: '/reports' },
@@ -77,7 +79,7 @@ describe('navSections', () => {
     expect(outline('admin')).toEqual([
       'Dashboard',
       'Transactions: All Transactions, Uncategorised, Import',
-      'Reports: Reports',
+      'Reports: Reports, Net worth',
       'Set up: Accounts, Categories, Rules, Budgets, Settings',
       'Help: Change Log, About your data, How to sign in',
     ])
@@ -87,7 +89,7 @@ describe('navSections', () => {
     expect(outline('member')).toEqual([
       'Summary',
       'Transactions: All Transactions',
-      'Reports: Reports, Accounts',
+      'Reports: Reports, Net worth, Accounts',
       'Help: Change Log, About your data, How to sign in',
     ])
   })
@@ -165,6 +167,13 @@ describe('trailFor', () => {
     it('is the longest address that covers the pathname: a page of its own pages is itself, and /reports/loans-old is only Reports', () => {
       expect(trailFor(routes, 'admin', '/reports/loans/2')).toMatchObject({ page: 'Loans', to: '/reports' })
       expect(trailFor(routes, 'admin', '/reports/loans-old')).toMatchObject({ page: 'Reports', to: '/reports' })
+    })
+
+    it('is not confused by a page that has its own row under the page it belongs to: Net worth is marked as itself, and a Report is still under Reports', () => {
+      expect(trailFor(routes, 'admin', '/reports/net-worth')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Net worth', to: '/reports/net-worth' }) // no parent: its group is not a link
+      expect(trailFor(routes, 'member', '/reports/net-worth')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Net worth', to: '/reports/net-worth' })
+      expect(trailFor(routes, 'admin', '/reports/loans')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Loans', to: '/reports', parent: '/reports' })
+      expect(trailFor(routes, 'admin', '/reports/net-worthy')).toMatchObject({ page: 'Reports', to: '/reports' })
     })
 
     it('says nothing of a page whose parent is not a page of the sidebar', () => {
