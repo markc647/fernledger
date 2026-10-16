@@ -1,6 +1,6 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 import { describe, expect, it } from 'vitest'
-import { apiQuery, exportPath, filterQuery, filtersOf, noSuchOf, parseTransactionSearch, sortOf, tidy } from './transaction-search'
+import { apiQuery, exportPath, filterQuery, filtersOf, noSuchOf, parseExportSearch, parseTransactionSearch, sortOf, tidy } from './transaction-search'
 
 describe('parseTransactionSearch', () => {
   it('reads every filter the page puts in the address', () => {
@@ -79,6 +79,17 @@ describe('parseTransactionSearch', () => {
 
   it('keeps a range that runs backwards, for the page to explain', () => {
     expect(parseTransactionSearch({ from: '2026-10-09', to: '2026-10-08' })).toEqual({ from: '2026-10-09', to: '2026-10-08' })
+  })
+})
+
+describe('parseExportSearch', () => {
+  it('reads the filters and nothing else, so an address with a sort or a page keeps neither on the Export page, which has no list', () => {
+    const filters = { account: 2, category: 'uncategorised', transfers: 'only', from: '2026-01-01', to: '2026-03-31', q: 'cafe' }
+    expect(parseExportSearch({ ...filters, sort: 'amount', dir: 'desc', page: 3 })).toStrictEqual({ ...filters, sort: undefined, dir: undefined, page: undefined })
+  })
+
+  it('is forgiving as the Transactions page is: a named Account that is not an ID is one that does not exist, and a bad date is left out', () => {
+    expect(parseExportSearch({ account: 'abc', from: '2026-02-30' })).toMatchObject({ account: 0, from: undefined })
   })
 })
 

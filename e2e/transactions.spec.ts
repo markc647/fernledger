@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import type { BrowserContext, Page } from '@playwright/test'
 import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
@@ -164,8 +163,6 @@ test('an address naming no such Account or Category says so, and one with blank 
   ] as const) {
     await page.goto(address)
     await expect(page.getByRole('alert'), address).toHaveText(`There is no such ${name}. Choose one in the form above.`)
-    await expect(page.getByRole('button', { name: 'Download CSV' }), address).toBeDisabled()
-    await expect(page.getByRole('link', { name: 'Download CSV' }), address).toHaveCount(0)
   }
   await noAxeViolations(page)
 
@@ -182,15 +179,15 @@ test('an address naming no such Account or Category says so, and one with blank 
     await expect(page.getByRole('alert'), address).toHaveCount(0)
   }
 
-  // Back to no such Account from a search that matched keeps none of that search's count.
+  // Back to no such Account from a search that matched shows the explanation again, not that search's list.
   await page.goto('/transactions?account=999999999')
   await expect(page.getByRole('alert')).toBeVisible()
   await page.getByLabel('Account', { exact: true }).selectOption({ label: 'All Accounts' })
   await page.getByRole('button', { name: 'Search', exact: true }).click()
-  await expect(page.getByText(/Transactions? match/)).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: /^(Showing|There are no Transactions yet)/ })).toBeVisible()
   await page.goBack()
   await expect(page.getByRole('alert')).toHaveText('There is no such Account. Choose one in the form above.')
-  await expect(page.getByText(/Transactions? match/)).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: /^Showing/ })).toHaveCount(0)
 
   // Blank and unknown parts are left out, so the API is never asked with them (it would refuse the unknown ones).
   await page.goto('/transactions?account=&category=&transfers=both&from=&to=2012-13-01&q=&sort=x&dir=up&page=0')
@@ -350,85 +347,20 @@ test('typed filters say they are not applied until Search is pressed', async ({ 
   await expect(page.getByText(hint)).toHaveCount(0)
 })
 
-test('a Member downloads the Transactions they searched for as a CSV file, with formulas defused, once Search has been pressed', async ({ page, context, baseURL }, testInfo) => {
-  const { savings } = accountsFor(testInfo.project.name)
-  const stamp = `csv${testInfo.project.name}${Date.now()}`
-  await seed(context, baseURL!, [
-    {
-      account: savings,
-      rows: [
-        { date: '2012-06-02', description: `=EXAMPLE ${stamp} FORMULA`, amountCents: -1234 },
-        { date: '2012-06-01', description: `EXAMPLE ${stamp} PLAIN`, amountCents: 5000 },
-        { date: '2012-07-01', description: `EXAMPLE ${stamp} OUTSIDE`, amountCents: -100 },
-      ],
-    },
-  ])
+test('the filters have Search and Clear filters but no Download CSV or count of matches, which are on the Export page', async ({ page, context, baseURL }, testInfo) => {
+  const { stamp } = await seedFour(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')
-  await page.goto(`/transactions?q=${stamp}&from=2012-06-01&to=2012-06-30`)
-  await expect(dataRows(page)).toHaveCount(2)
-  const link = page.getByRole('link', { name: 'Download CSV' })
-  await expect(link).toBeVisible()
-  await noAxeViolations(page)
-
-  // The file holds what is shown, so it waits while the filters typed are not the ones applied.
-  await searchBox(page).fill('something else')
-  await expect(page.getByRole('button', { name: 'Download CSV' })).toBeDisabled()
-  await expect(link).toHaveCount(0)
-  await searchBox(page).fill(stamp)
-  await expect(link).toBeVisible()
-
-  const [file] = await Promise.all([page.waitForEvent('download'), link.click()])
-  expect(file.suggestedFilename()).toBe('fernledger-transactions-2012-06-01-to-2012-06-30.csv')
-  const text = readFileSync(await file.path(), 'utf8')
-  const byteOrderMark = String.fromCharCode(0xfeff) // so Excel reads the file as UTF-8
-  expect(text).toBe(
-    [
-      `${byteOrderMark}Date,Account,Description,Category,Note,Amount,Bank type,Bank memo,Bank reference,Bank counterparty account,Bank particulars,Bank payment code,Bank card suffix`,
-      // A bank file gives a type and a memo and none of the rest, which are empty cells all the same.
-      `2012-06-01,${savings.name},EXAMPLE ${stamp} PLAIN,Uncategorised,,50.00,EFTPOS,EFTPOS,,,,,`,
-      `2012-06-02,${savings.name},'=EXAMPLE ${stamp} FORMULA,Uncategorised,,-12.34,EFTPOS,EFTPOS,,,,,`,
-      '',
-      'Totals',
-      'Money in,50.00',
-      'Money out,-12.34',
-      'Net,37.66',
-      'Transactions,2',
-      '',
-    ].join('\r\n'),
-  )
-})
-
-test('says how many Transactions match, warns before a download that would stop short, and links to what a saved file leaves unprotected', async ({ page, context }) => {
-  await signInAs(context, 'member')
-  const row = { id: 4242, accountId: 1, accountName: 'Example savings', date: '2026-10-08', description: 'EXAMPLE CAFE TOWN', bankType: 'EFTPOS', amountCents: -2345, categoryId: null, categoryName: null, categorySource: null, note: null }
-  let total = 5001
-  await page.route(/\/api\/transactions\?/, (route) => {
-    const countOnly = new URL(route.request().url()).searchParams.get('count') === 'only'
-    return route.fulfill({ json: countOnly ? { total, transactions: [] } : { total: null, transactions: [row] } })
-  })
-  const matches = page.locator('#filter-download-count')
-  const warning = page.getByText('Only the oldest up to 5,000 will be saved (fewer if Notes are long). Set From and To to one year at a time to save the rest.')
-
-  await page.goto('/transactions')
-  await expect(matches).toHaveText('5,001 Transactions match')
-  await expect(warning).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Download CSV' })).toHaveAccessibleDescription(/5,001 Transactions match.*Only the oldest up to 5,000 will be saved/)
-  await noAxeViolations(page)
-
-  // Exactly the most is not too many, and one is "matches".
-  total = 5000
-  await page.reload()
-  await expect(matches).toHaveText('5,000 Transactions match')
-  await expect(warning).toHaveCount(0)
-  total = 1
-  await page.reload()
-  await expect(matches).toHaveText('1 Transaction matches')
-
-  // What leaves Fernledger's protection is explained in the README, and the search links to that section.
-  await expect(page.getByRole('search', { name: 'Search Transactions' }).getByRole('link', { name: "what it can't protect against" })).toHaveAttribute(
-    'href',
-    'https://github.com/markc647/fernledger#what-it-cant-protect-against',
-  )
+  await page.goto(`/transactions?q=${stamp}`)
+  await expect(dataRows(page)).toHaveCount(4) // the page has its data, so what is not on it could have been
+  const filters = page.getByRole('search', { name: 'Search Transactions' })
+  await expect(searchBox(page)).toBeVisible()
+  for (const label of ['Account', 'Category', 'Transfers']) await expect(filters.getByLabel(label, { exact: true })).toBeVisible()
+  for (const label of ['From', 'To']) await expect(dateField(filters, label)).toBeVisible()
+  await expect(filters.getByRole('button', { name: 'Search', exact: true })).toBeVisible()
+  await expect(filters.getByRole('button', { name: 'Clear filters' })).toBeVisible()
+  await expect(page.getByText('Download CSV')).toHaveCount(0) // not the button, not its explanation
+  await expect(page.locator('#filter-download-count')).toHaveCount(0)
+  await expect(filters.getByRole('link')).toHaveCount(0)
 })
 
 test('Back from a Transaction opened on the Uncategorised page returns to the Uncategorised page, in the same order', async ({ page, context }) => {

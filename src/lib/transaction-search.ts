@@ -104,6 +104,9 @@ export function noSuchOf(search: Pick<TransactionSearch, 'account' | 'category'>
 /** The search's filters alone, which are all that decide how many Transactions match: no sort, no page. */
 export const filtersOf = ({ account, category, transfers, from, to, q }: TransactionSearch): TransactionSearch => tidy({ account, category, transfers, from, to, q })
 
+/** What the Export page keeps in its address: the filters alone, read as the Transactions page reads them. It has no list, so a sort or a page in the address is left out. */
+export const parseExportSearch = (raw: Record<string, unknown>): TransactionSearch => filtersOf(parseTransactionSearch(raw))
+
 /** The API's parameters for the filters alone. Blank ones are left out. */
 export function filterQuery(search: TransactionSearch): Record<string, string> {
   const query: Record<string, string> = {}
