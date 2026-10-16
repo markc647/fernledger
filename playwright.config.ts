@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { defineConfig } from '@playwright/test'
 
@@ -7,8 +8,15 @@ import { defineConfig } from '@playwright/test'
 // CI runs them as their own job. The first run needs `npx playwright install chromium`.
 const port = Number(process.env.E2E_PORT ?? 5199) // E2E_PORT lets parallel checkouts each run their own server
 const baseURL = `http://localhost:${port}` // the one place the port is used; the specs get it from Playwright
-// E2E_STATE_ROOT (a RAM disk, say) holds each run's database, one folder per port so parallel checkouts don't share one; else it is in the checkout.
-const state = process.env.E2E_STATE_ROOT ? join(process.env.E2E_STATE_ROOT, `e2e-state-${port}`) : '.wrangler/e2e-state'
+// TEST_TEMP_ROOT (a RAM disk, say) takes the tests' throwaway files off the system disk: each run's database, one folder per port
+// so parallel checkouts don't share one, and the temp files of the browsers and the Worker runtime. Without it the database is in the checkout.
+const tempRoot = process.env.TEST_TEMP_ROOT
+if (tempRoot) {
+  const temp = join(tempRoot, 'Temp')
+  mkdirSync(temp, { recursive: true })
+  process.env.TEMP = process.env.TMP = process.env.TMPDIR = temp
+}
+const state = tempRoot ? join(tempRoot, `e2e-state-${port}`) : '.wrangler/e2e-state'
 
 export default defineConfig({
   testDir: './e2e',
