@@ -11,12 +11,14 @@ import {
   type Row as TableRow,
 } from '@tanstack/react-table'
 import type { InferResponseType } from 'hono/client'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { MessageSquareText } from 'lucide-react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Amount } from '@/components/amount'
 import { EditPanel } from '@/components/edit-panel'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { api } from '@/lib/api'
 import { KIND_NOTES } from '@/lib/category-kinds'
 import { formatDate } from '@/lib/format'
@@ -65,6 +67,43 @@ function CategoryCell({ row }: { row: Row }) {
     </>
   )
 }
+
+/**
+ * The Note column: a Note is not written in the list (it can be long, and the list is for scanning), but is behind a button that opens it beside the row. A row without a Note shows nothing
+ * (a screen reader is still told "No Note", in text only it reads). The button is 44px and named for its row, and the pop-up is the app's Popover as Radix leaves it: Escape and a press
+ * outside close it, and Escape puts focus back on the button. Focus goes to the Note when it opens, so a Note too long for a short screen can be scrolled with the keyboard.
+ */
+function NoteCell({ row }: { row: Row }) {
+  const noteId = useId()
+  if (!row.note) return <span className="sr-only">No Note</span>
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="touch" className="px-0" aria-label={`Read the Note on ${row.description}, ${formatDate(row.date)}`}>
+          <MessageSquareText className="size-5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        collisionPadding={8}
+        aria-label={`Note on ${row.description}`}
+        aria-describedby={noteId}
+        // As wide as a line of text reads well, never wider than the screen, and scrolling inside itself rather than running off a short one.
+        className="max-h-(--radix-popover-content-available-height) w-[min(22rem,calc(100vw-1rem))] overflow-y-auto overscroll-contain"
+      >
+        <p id={noteId} tabIndex={0} className="break-words whitespace-pre-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          {row.note}
+        </p>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/**
+ * The Note column asks for the least room it can have, so a table gives it what its heading and the button need and no more. The plain table's heading wraps anywhere (`overflow-wrap` in
+ * src/index.css), so `whitespace-nowrap` is what keeps "Note" whole when no row on the page has a button to hold the column open.
+ */
+const NOTE_COLUMN = 'w-px whitespace-nowrap'
 
 const hasFilter = (search: TransactionSearch) => search.account !== undefined || search.category !== undefined || search.transfers !== undefined || !!search.from || !!search.to || !!search.q
 
@@ -161,15 +200,7 @@ export function TransactionList({
       helper.accessor('note', {
         header: 'Note',
         enableSorting: false,
-        cell: (info) =>
-          info.getValue() ? (
-            <span className="whitespace-pre-line">{info.getValue()}</span>
-          ) : (
-            <>
-              <span aria-hidden="true">—</span>
-              <span className="sr-only">No Note</span>
-            </>
-          ),
+        cell: (info) => <NoteCell row={info.row.original} />,
       }),
       helper.accessor('amountCents', { id: 'amount', header: 'Amount', cell: (info) => <Amount cents={info.getValue()} showLabel /> }),
       ...(isAdmin
@@ -226,6 +257,8 @@ export function TransactionList({
       key: column.id,
       header: String(column.columnDef.header),
       align: column.id === 'amount' ? 'end' : 'start',
+      className: column.id === 'note' ? NOTE_COLUMN : undefined,
+      hideOnCard: column.id === 'note' ? (row) => !row.original.note : undefined,
       cell: (row) => <FlexRender cell={row.getAllCellsByColumnId()[column.id]!} />,
       sort:
         column.getCanSort() && isSortKey(column.id)

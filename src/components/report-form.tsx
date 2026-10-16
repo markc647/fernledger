@@ -131,7 +131,7 @@ function ReportForm({
         void navigate({ href, resetScroll: false }).then(() => requestAnimationFrame(scroll.show))
       }}
     >
-      <div className={askAccount || chooser ? 'grid gap-4 sm:grid-cols-3' : 'grid gap-4 sm:grid-cols-2'}>
+      <div className="date-fields gap-4">
         {askAccount && <AccountField id={id} defaultAccount={defaults.account} address={address} />}
         {chooser}
         {(['from', 'to'] as const).map((field) => (

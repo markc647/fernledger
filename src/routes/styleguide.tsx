@@ -38,7 +38,7 @@ function DateSamples() {
   const [optional, setOptional] = useState('')
   const [bounded, setBounded] = useState('2026-10-15')
   return (
-    <div className="grid max-w-3xl gap-4 sm:grid-cols-3">
+    <div className="date-fields max-w-3xl gap-4">
       <div>
         <label id="sample-date-label" htmlFor="sample-date" className="block font-medium">
           Date
