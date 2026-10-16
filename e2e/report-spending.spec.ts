@@ -431,7 +431,7 @@ test.describe('the chart', () => {
   test('draws the Report\'s own figures as bars between the total and the table, and asks the Worker for nothing more', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInToOpen(context, baseURL, 'member', { report: 'spending', from: `${d.year}-01-01`, to: `${d.year}-12-31` })
     const asked = spyApi(page)
     await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
     const figure = await spendingDrawn(page, drawnFor(d))
@@ -465,7 +465,8 @@ test.describe('the chart', () => {
   test('changing the Account or the dates asks for the Report again, and the chart is drawn from the new answer', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInToOpen(context, baseURL, 'admin', { report: 'spending', accountId: savingsId, from: `${d.year}-01-01`, to: `${d.year}-12-31` })
+    await signInToOpen(context, baseURL, 'member', { report: 'spending', from: `${d.year}-01-01`, to: `${d.year}-12-31` })
     await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
     await spendingDrawn(page, drawnFor(d))
     const asked = spyApi(page)
@@ -479,7 +480,7 @@ test.describe('the chart', () => {
   test('is left out of the printout, where the Report is as it always was', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { everydayId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInToOpen(context, baseURL, 'member', { report: 'spending', accountId: everydayId, from: `${d.year}-01-01`, to: `${d.year}-12-31` })
     await page.goto(address(everydayId, `${d.year}-01-01`, `${d.year}-12-31`))
     await spendingDrawn(page, drawnFor(d)) // drawn on the screen first, so that its absence from the page is the print layout's and not a chart that had not arrived
     await page.emulateMedia({ media: 'print' })
@@ -524,7 +525,7 @@ test.describe('the chart', () => {
   test('has no WCAG 2.2 AA violations in this theme with the bars drawn, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInToOpen(context, baseURL, 'member', { report: 'spending', from: `${d.year}-01-01`, to: `${d.year}-12-31` })
     for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport)
       await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
@@ -538,7 +539,7 @@ test.describe('the chart', () => {
   test('the bars are the theme\'s colour, drawn in the text colour when Windows high contrast is on, and nothing moves', { tag: '@theme' }, async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInToOpen(context, baseURL, 'member', { report: 'spending', from: `${d.year}-01-01`, to: `${d.year}-12-31` })
     await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
     await spendingDrawn(page, drawnFor(d))
     const bar = bars(page).locator('path').first()
@@ -578,7 +579,7 @@ test.describe('the chart', () => {
     test('says so where the chart would be, and leaves the Report', async ({ page, context, baseURL }, testInfo) => {
       const d = dataFor(testInfo.project.name)
       await seed(context, baseURL!, testInfo.project.name)
-      await signInAs(context, 'member')
+      await signInToOpen(context, baseURL, 'member', { report: 'spending', from: `${d.year}-01-01`, to: `${d.year}-12-31` })
       await page.route(/\/assets\/spending-chart-[^/]+\.js/, (route) => route.abort())
       await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
       await expect(page.getByRole('alert').filter({ hasText: "The chart couldn't be loaded. Reload the page to try again." })).toBeVisible()
