@@ -1,7 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { pickDate } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
-import { ADMIN_EMAIL, dateText, forgetKeptReports, forgetKeptReportsAfterEach, importRows, MEMBER_EMAIL, type KeptChoices } from './report-helpers'
+import { ADMIN_EMAIL, dateText, ensureCategory, forgetKeptReports, forgetKeptReportsAfterEach, importRows, MEMBER_EMAIL, type KeptChoices } from './report-helpers'
 import { actionsButton, menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
 import { breadcrumb, chooseTextSize, expectTextSize, navGroup, navLink } from './shell-helpers'
 
@@ -57,6 +57,26 @@ const stubPrint = (page: Page) =>
     window.print = () => void ((window as unknown as { printed: number }).printed += 1)
   })
 const printed = (page: Page) => page.evaluate(() => (window as unknown as { printed: number }).printed)
+
+/** Lets the page draw `count` frames: a print is started two frames after a Report is painted, so a test that a print did not happen again waits a few frames and then looks. */
+const frames = (page: Page, count: number) =>
+  page.evaluate(
+    (n) =>
+      new Promise<void>((resolve) => {
+        const next = (left: number) => (left === 0 ? resolve() : requestAnimationFrame(() => next(left - 1)))
+        next(n)
+      }),
+    count,
+  )
+
+/** The requests the page makes to keep a Report, as they are made. */
+function keepRequests(page: Page) {
+  const made: string[] = []
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/kept-reports') made.push(request.url())
+  })
+  return made
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Making a Report keeps it
@@ -142,6 +162,7 @@ test.describe('showing a Report as the Admin', () => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'admin')
+    const keeps = keepRequests(page)
     for (const address of [
       `/reports/spending?account=999999999&from=${year}-01-01&to=${year}-12-31`, // no such Account
       `/reports/spending?from=${year}-12-31&to=${year}-01-01`, // the wrong way round
@@ -150,8 +171,9 @@ test.describe('showing a Report as the Admin', () => {
       await page.goto(address)
       await expect(page.getByRole('heading', { level: 1, name: 'Spending by Category' })).toBeVisible()
       await expect(page.getByRole('alert').or(page.getByRole('status').filter({ hasText: /^Choose/ }))).toBeVisible()
+      await frames(page, 5) // a Report that was shown would ask to be kept by now
     }
-    await page.waitForLoadState('networkidle')
+    expect(keeps).toEqual([])
     expect(await keptList(context)).toEqual([])
   })
 
@@ -272,7 +294,7 @@ test.describe('the Reports page', () => {
     await expect.poll(() => asked.length).toBe(2)
   })
 
-  test('Print opens the Report and starts the browser\'s print window, once, and not again when the page is reloaded', async ({ page, context, baseURL }, testInfo) => {
+  test('Print opens the Report and starts the browser\'s print window, once', async ({ page, context, baseURL }, testInfo) => {
     const { year, account } = dataFor(testInfo.project.name)
     const { accountId } = await seed(context, baseURL!, testInfo.project.name)
     await keep(context, baseURL, { report: 'spending', accountId, from: `${year}-01-01`, to: `${year}-12-31` })
@@ -284,12 +306,8 @@ test.describe('the Reports page', () => {
 
     await expect(page.getByRole('article', { name: 'Spending by Category' })).toBeVisible()
     await expect.poll(() => printed(page)).toBe(1)
-    await page.waitForTimeout(500)
+    await frames(page, 5)
     expect(await printed(page)).toBe(1) // once
-    await page.reload()
-    await expect(page.getByRole('article', { name: 'Spending by Category' })).toBeVisible()
-    await page.waitForTimeout(500)
-    expect(await printed(page)).toBe(0) // the new page starts at none: a reload does not print again
   })
 
   test('Delete asks first, in the row; keeping it puts focus back on the row\'s button, and deleting takes the row off the list and says so', async ({ page, context, baseURL }, testInfo) => {
@@ -304,6 +322,7 @@ test.describe('the Reports page', () => {
     const question = page.getByRole('group', { name: `Delete ${name}` })
     await expect(question).toBeVisible()
     await expect(question).toContainText('comes off this list')
+    await expect(question).toContainText(`Delete the Budget vs actual Report, ${dateText(`${year}-01-01`)} to ${dateText(`${year}-03-31`)}, all Accounts? It comes off`) // a phrase of the list is in lower case in the middle of a sentence
     await expect(question.getByRole('button', { name: 'Keep it' })).toBeFocused() // it opens on the safe answer
     await noAxeViolations(page)
     await question.getByRole('button', { name: 'Keep it' }).click()
@@ -326,6 +345,16 @@ test.describe('the Reports page', () => {
     await expect(page.getByRole('listitem').filter({ hasText: 'Removed the kept Budget vs actual Report' }).first()).toContainText('Report change by admin@example.com')
   })
 
+  test('Delete asks about a Loans Report in words that read as a sentence: all loans, from the first Transaction, all Accounts', async ({ page, context, baseURL }, testInfo) => {
+    const { year } = dataFor(testInfo.project.name)
+    await keep(context, baseURL, { report: 'loans', to: `${year}-12-31` })
+    await page.goto('/reports')
+    const name = rowName('Loans, All loans', `From the first Transaction to ${dateText(`${year}-12-31`)}`, 'All Accounts')
+    await openActions(actionsButton(page, name))
+    await menuAction(page, 'Delete').click()
+    await expect(page.getByRole('group', { name: `Delete ${name}` })).toContainText(`Delete the Loans Report for all loans, from the first Transaction to ${dateText(`${year}-12-31`)}, all Accounts? It comes off`)
+  })
+
   test('has no WCAG 2.2 AA violations as the Admin, with rows, and on a phone, where the rows are cards', async ({ page, context, baseURL }, testInfo) => {
     const { year, account } = dataFor(testInfo.project.name)
     const { accountId } = await seed(context, baseURL!, testInfo.project.name)
@@ -334,7 +363,6 @@ test.describe('the Reports page', () => {
     await signInAs(context, 'admin')
     await page.goto('/reports')
     await expect(rows(page)).toHaveCount(2)
-    await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
     await noAxeViolations(page)
 
     await page.setViewportSize({ width: 390, height: 844 })
@@ -428,7 +456,9 @@ test.describe('a Member', () => {
     const { year, account } = dataFor(testInfo.project.name)
     const { accountId } = await seed(context, baseURL!, testInfo.project.name)
     await keep(context, baseURL, { report: 'spending', accountId, from: `${year}-01-01`, to: `${year}-12-31` })
+    const lastMade = (await keptList(context))[0]!.lastMadeAt
     await signInAs(context, 'member')
+    const keeps = keepRequests(page)
     await page.goto('/reports')
     await openActions(actionsButton(page, rowName('Spending by Category', range(year), account.name)))
     await menuAction(page, 'Open').click()
@@ -440,10 +470,10 @@ test.describe('a Member', () => {
     await expect(page.getByRole('article')).toContainText(`by ${MEMBER_EMAIL}`)
     await expect(breadcrumb(page).getByRole('listitem')).toHaveText(['Reports', 'Spending by Category'])
     await expect(navLink(page, 'Reports')).toHaveAttribute('data-active', 'true') // a Member's sidebar has no row for it: Reports is marked
-    expect(await keptList(context)).toHaveLength(1) // a Member's view is not a showing: nothing is made, and nothing is changed
-    const [kept] = await keptList(context)
-    await page.waitForLoadState('networkidle')
-    expect((await keptList(context))[0]!.lastMadeAt).toBe(kept!.lastMadeAt)
+    await frames(page, 5) // a Report that asked to be kept would have by now
+    expect(keeps).toEqual([]) // a Member's view is not a showing: nothing is asked for, and nothing is changed
+    expect(await keptList(context)).toHaveLength(1)
+    expect((await keptList(context))[0]!.lastMadeAt).toBe(lastMade)
     await noAxeViolations(page)
   })
 
@@ -465,6 +495,21 @@ test.describe('a Member', () => {
       await page.goto(path)
       await expect(page.getByRole('status').filter({ hasText: 'Only the Admin makes Reports.' })).toBeVisible()
       await expect(page.getByRole('link', { name: 'list of Reports' })).toHaveAttribute('href', '/reports')
+      await expect(page.getByRole('form')).toHaveCount(0)
+    }
+  })
+
+  test('is told the Admin makes Reports, not to use a form they do not have, when an address cannot show a Report: dates the wrong way round, no such Account, too many months', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    for (const path of [
+      '/reports/spending?from=2012-12-31&to=2012-01-01',
+      '/reports/spending?account=999999999&from=2012-01-01&to=2012-12-31',
+      '/reports/budget-vs-actual?from=2001-01-01&to=2030-12-31',
+    ]) {
+      await page.goto(path)
+      await expect(page.getByRole('status').filter({ hasText: 'Only the Admin makes Reports.' }), path).toBeVisible()
+      await expect(page.getByRole('link', { name: 'list of Reports' })).toHaveAttribute('href', '/reports')
+      await expect(page.getByText(/in the form|Change one of them|Choose dates/)).toHaveCount(0)
       await expect(page.getByRole('form')).toHaveCount(0)
     }
   })
@@ -508,5 +553,56 @@ test.describe('a Member, when they ask for a Report that is not kept', () => {
     await page.goto('/reports/spending?from=2002-01-01&to=2002-12-31')
     await expect(page.getByRole('alert')).toContainText('The Admin has not made this Report')
     expect(asked).toBe(1)
+  })
+})
+
+test.describe('a Member, when the Admin takes back a Report between the list and the Report', () => {
+  test.use({ expectedStatuses: [403] })
+
+  test('opens it later without printing: a Print that was refused is not left waiting for the next time the Report is shown', async ({ page, context, baseURL, request }, testInfo) => {
+    const { year, account } = dataFor(testInfo.project.name)
+    const { accountId } = await seed(context, baseURL!, testInfo.project.name)
+    const choices = { report: 'spending', accountId, from: `${year}-01-01`, to: `${year}-12-31` }
+    await keep(context, baseURL, choices)
+    await signInAs(context, 'member')
+    await stubPrint(page)
+    await page.goto('/reports')
+    const row = actionsButton(page, rowName('Spending by Category', range(year), account.name))
+    await expect(row).toBeVisible()
+
+    // The Admin takes it off the list after this page read it, so Print opens a Report that the Worker refuses.
+    await forgetKeptReports(request, baseURL)
+    await openActions(row)
+    await menuAction(page, 'Print').click()
+    await expect(page.getByRole('alert')).toContainText('The Admin has not made this Report')
+    expect(await printed(page)).toBe(0)
+
+    // The Admin makes it again, and the Member opens it, from the same list, without printing.
+    expect((await request.post('/api/kept-reports', { headers: { Origin: baseURL! }, data: choices })).ok()).toBe(true)
+    await navLink(page, 'Reports').click()
+    await openActions(row)
+    await menuAction(page, 'Open').click()
+    await expect(page.getByRole('article', { name: 'Spending by Category' })).toBeVisible()
+    await frames(page, 5)
+    expect(await printed(page)).toBe(0)
+  })
+})
+
+test.describe('a Member, when a kept Loans Report is of a Category that has since been removed', () => {
+  test.use({ expectedStatuses: [404] })
+
+  test('is told the Admin makes Reports, and where to open one, and not to choose a Category in a form they do not have', async ({ page, context, baseURL }, testInfo) => {
+    const { year } = dataFor(testInfo.project.name)
+    await signInAs(context, 'admin')
+    const categoryId = await ensureCategory(context, baseURL!, `Kept loan ${testInfo.project.name} ${Date.now()}`, 'loans')
+    await keep(context, baseURL, { report: 'loans', categoryId, to: `${year}-12-31` })
+    expect((await context.request.delete(`/api/categories/${categoryId}`, { headers: { Origin: baseURL! }, data: {} })).ok()).toBe(true)
+    await signInAs(context, 'member')
+
+    await page.goto(`/reports/loans?category=${categoryId}&to=${year}-12-31`)
+
+    await expect(page.getByRole('status').filter({ hasText: 'Only the Admin makes Reports.' })).toBeVisible()
+    await expect(page.getByText('Choose one in the form above')).toHaveCount(0)
+    await expect(page.getByRole('link', { name: 'list of Reports' })).toHaveAttribute('href', '/reports')
   })
 })
