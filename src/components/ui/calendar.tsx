@@ -53,7 +53,7 @@ function Calendar({ className, classNames, components, ...props }: React.Compone
         dropdowns: cn('flex h-(--cell-size) w-full items-center justify-center gap-2 text-base font-medium', defaultClassNames.dropdowns),
         month_grid: cn('w-full border-collapse', defaultClassNames.month_grid),
         weekdays: cn('flex', defaultClassNames.weekdays),
-        weekday: cn('flex-1 rounded-(--cell-radius) text-[0.9375rem] font-normal text-muted-foreground select-none', defaultClassNames.weekday),
+        weekday: cn('flex-1 rounded-(--cell-radius) text-base font-normal text-muted-foreground select-none', defaultClassNames.weekday),
         week: cn('mt-2 flex w-full', defaultClassNames.week),
         day: cn('group/day relative aspect-square h-full w-full rounded-(--cell-radius) p-0 text-center select-none', defaultClassNames.day),
         today: cn('rounded-(--cell-radius) bg-muted text-foreground', defaultClassNames.today),

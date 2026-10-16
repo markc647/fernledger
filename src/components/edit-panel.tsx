@@ -123,7 +123,7 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
       </form>
       {(row.canMarkNotTransfer || row.notTransfer) && (
         <div className="mt-4 border-t-2 pt-4">
-          <h3 className="font-medium">Not a Transfer</h3>
+          <h3 className="text-lg font-medium">Not a Transfer</h3>
           <p className="mt-1 text-muted-foreground">
             {row.notTransfer
               ? NOT_TRANSFER_NOTE

@@ -15,9 +15,9 @@ const config = { cents: { label: 'Spent', color: 'var(--chart-2)' } } satisfies 
 export function SpendingChart({ bars, label }: { bars: SpendingCategory[]; label: string }) {
   const [ref, width] = useElementWidth<HTMLDivElement>()
   const rem = useRem()
-  // The names get up to 40% of the width, and no more than 14rem or less than 5rem; each character is about 0.55rem.
+  // The names get up to 40% of the width, and no more than 14rem or less than 5rem; each character of the axis text (1rem, the page's size) is about 0.6rem.
   const labelWidth = Math.round(Math.min(Math.max(width * 0.4, rem * 5), rem * 14))
-  const maxChars = Math.max(5, Math.floor(labelWidth / (rem * 0.55)))
+  const maxChars = Math.max(5, Math.floor(labelWidth / (rem * 0.6)))
   return (
     <ChartFigure label={label}>
       <div ref={ref}>

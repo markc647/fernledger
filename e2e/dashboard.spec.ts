@@ -204,7 +204,7 @@ test('the Dashboard and the Summary ask the Worker for their three cards and no 
   expect(more.filter((address) => address.startsWith('/api/charts') || address.startsWith('/api/reports') || address.startsWith('/api/balances')), 'and no balance').toEqual([])
 })
 
-// The grid has no more than one column now that every card is a whole row, whatever the room or the text size. Small, Medium and Large are 14px, 16px and 20px.
+// The grid has no more than one column now that every card is a whole row, whatever the room or the text size. Small, Medium, Large and Xtra Large are 14px, 16px, 18px and 20px.
 test('the cards are one column, each as wide as the page and under the one before, on a phone and on a wide screen, whatever the text size', async ({ page, context }) => {
   await signInAs(context, 'admin')
   const boxes = async () => {
@@ -222,7 +222,7 @@ test('the cards are one column, each as wide as the page and under the one befor
       if (index > 0) expect(card[name]!.y, `${what}: ${name} is under the card before it`).toBeGreaterThanOrEqual(card[CARDS[index - 1]!]!.y + card[CARDS[index - 1]!]!.height - 1)
     }
   }
-  const settled = async (size: 'Medium' | 'Large') => {
+  const settled = async (size: 'Medium' | 'Xtra Large') => {
     await chooseTextSize(page, size)
     for (const name of CARDS) await expect(page.getByRole('region', { name }).getByText('Loading…')).toHaveCount(0) // each card has its answer, with or without Accounts in the database
   }
@@ -234,8 +234,8 @@ test('the cards are one column, each as wide as the page and under the one befor
   const wide = await boxes()
   expect(wide['Balances']!.width, 'Balances takes the whole row, with no card beside it').toBeGreaterThan(700)
 
-  await settled('Large')
-  await expectOneColumn('1440px wide at Large')
+  await settled('Xtra Large')
+  await expectOneColumn('1440px wide at Xtra Large')
 
   await settled('Medium')
   await page.setViewportSize({ width: 800, height: 900 }) // the sidebar is the icon rail
@@ -326,7 +326,7 @@ test('the button that shows net worth is a touch target with a clear name, works
   const show = region.getByRole('button', { name: 'Show net worth', exact: true })
   await expect(show).toBeVisible()
   expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44)
-  await chooseTextSize(page, 'Large')
+  await chooseTextSize(page, 'Xtra Large')
   const { live, element } = await liveRegion(region)
 
   await show.focus()
@@ -459,7 +459,7 @@ test('the Net worth page has no WCAG 2.2 AA violations, with its data, at the la
   for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
     await page.goto(NET_WORTH_PATH)
-    await chooseTextSize(page, 'Large')
+    await chooseTextSize(page, 'Xtra Large')
     await showNetWorth(page)
     await netWorth(page).getByText('Show the figures').click() // the table is part of what is scanned
     await expect(netWorth(page).getByRole('table').or(netWorth(page).getByRole('list', { name: /Net worth at the end of each month/ }))).toBeVisible()

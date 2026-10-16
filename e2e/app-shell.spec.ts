@@ -285,8 +285,8 @@ test.describe('the sidebar navigation', () => {
     const [bar, tint, pill] = await rgbOf(page, [on.bar!.colour, await page.locator('[data-slot="sidebar-inner"]').evaluate((el) => getComputedStyle(el).backgroundColor), on.fill])
     expect(contrastOf(bar!, tint!), 'the bar against the sidebar').toBeGreaterThanOrEqual(3)
     expect(contrastOf(bar!, pill!), 'the bar against the pill it is drawn on').toBeGreaterThanOrEqual(3)
-    // Its text is 14px (text-sm) at Medium, like the rest of the sidebar.
-    expect(await current.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBe(14)
+    // Its text is 16px at Medium: the page's size, like the rest of the sidebar (README, Accessibility: one size for all text).
+    expect(await current.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBe(16)
   })
 
   test('the group holding the current page is shown as current while it is shut', async ({ page, context }) => {
@@ -588,21 +588,21 @@ test.describe('on a phone', () => {
     await expect(textSizeGroup(page)).toBeVisible()
     await expect(themeToggle(page)).toBeVisible()
     await expect(signOutLink(page)).toHaveAttribute('href', '/cdn-cgi/access/logout')
-    await textSizeButton(page, 'Large').click()
-    await expectTextSize(page, 'Large')
+    await textSizeButton(page, 'Xtra Large').click()
+    await expectTextSize(page, 'Xtra Large')
     await noAxeViolations(page)
     await page.keyboard.press('Escape')
     await expect(textSizeGroup(page)).toBeHidden()
     // The page behind kept the choice, and so does the menu when it is opened again.
     await openHeaderControls(page)
-    await expect(textSizeButton(page, 'Large')).toBeChecked()
+    await expect(textSizeButton(page, 'Xtra Large')).toBeChecked()
   })
 
   test('has a menu that is no taller than the room there is, on a short, landscape screen, and scrolls', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.setViewportSize({ width: 640, height: 200 })
     await page.goto('/')
-    await chooseTextSize(page, 'Large')
+    await chooseTextSize(page, 'Xtra Large')
     await openHeaderControls(page)
     const menu = page.locator('[data-slot="popover-content"]')
     const box = (await menu.boundingBox())!
@@ -631,13 +631,17 @@ test('the header controls are one Tab stop each, in order, and the arrow keys ch
   await expect(textSizeButton(page, 'Large')).toBeFocused() // ...and an arrow key moves within it, and chooses
   await expect(textSizeButton(page, 'Large')).toBeChecked()
   await expectTextSize(page, 'Large')
+  await page.keyboard.press('ArrowRight')
+  await expect(textSizeButton(page, 'Xtra Large')).toBeChecked()
+  await expectTextSize(page, 'Xtra Large')
+  await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('ArrowLeft')
   await expect(textSizeButton(page, 'Medium')).toBeChecked()
   await page.keyboard.press('ArrowLeft')
   await expect(textSizeButton(page, 'Small')).toBeChecked()
   await expectTextSize(page, 'Small')
   await page.keyboard.press('ArrowLeft') // and wraps round, as radio buttons do
-  await expect(textSizeButton(page, 'Large')).toBeChecked()
+  await expect(textSizeButton(page, 'Xtra Large')).toBeChecked()
 
   await tab()
   await expect(themeToggle(page)).toBeFocused()
@@ -648,10 +652,11 @@ test('the header controls are one Tab stop each, in order, and the arrow keys ch
   await expect(signOutLink(page)).toBeFocused()
 
   // The text size group is named, and its buttons have names that start with what they show.
-  await expect(textSizeGroup(page).getByRole('radio')).toHaveCount(3)
+  await expect(textSizeGroup(page).getByRole('radio')).toHaveCount(4)
   await expect(textSizeLabel(page, 'Small')).toHaveText('Small')
   await expect(textSizeLabel(page, 'Medium')).toHaveText('Medium')
   await expect(textSizeLabel(page, 'Large')).toHaveText('Large')
+  await expect(textSizeLabel(page, 'Xtra Large')).toHaveText('Xtra Large')
 })
 
 test('Ctrl+B and the toggle button are both keyboard ways to the sidebar, and the toggle says whether it is open', async ({ page }) => {
@@ -842,11 +847,11 @@ test.describe('print', () => {
 // ---------------------------------------------------------------------------------------------------------------
 // Accessibility of what opens
 
-test('the phone menu and the sidebar sheet have no WCAG 2.2 AA violations at the largest text size, when open', async ({ page, context }) => {
+test('the phone menu and the sidebar sheet have no WCAG 2.2 AA violations at Xtra Large, when open', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
-  await chooseTextSize(page, 'Large')
+  await chooseTextSize(page, 'Xtra Large')
   await openHeaderControls(page)
   await noAxeViolations(page)
   await closeHeaderControls(page)

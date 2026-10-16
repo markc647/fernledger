@@ -525,7 +525,7 @@ test.describe('the chart', () => {
     for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport)
       await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
-      await chooseTextSize(page, 'Large')
+      await chooseTextSize(page, 'Xtra Large')
       await spendingDrawn(page, drawnFor(d))
       await expect(bars(page)).toHaveCount(4) // the bars are in, as well as the figure
       await noAxeViolations(page)

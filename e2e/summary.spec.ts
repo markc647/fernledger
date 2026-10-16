@@ -96,7 +96,7 @@ test('the Summary has no WCAG 2.2 AA violations at the largest text size, on a p
   for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
     await page.goto('/')
-    await chooseTextSize(page, 'Large')
+    await chooseTextSize(page, 'Xtra Large')
     await expect(page.getByRole('region', { name: 'Balances' }).getByText('Check', { exact: true }).first()).toBeVisible() // the warning is drawn before the scan
     await expect(page.getByRole('region', { name: 'Recent transactions' })).toContainText('EXAMPLE')
     await noAxeViolations(page)
@@ -222,7 +222,7 @@ test.describe('the Balances table: Checked and Sync', () => {
     for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport)
       const balances = await open(page, { syncSetUp: true })
-      await chooseTextSize(page, 'Large')
+      await chooseTextSize(page, 'Xtra Large')
       await expect(balances.getByText('Not Synced').first()).toBeVisible()
       await noAxeViolations(page)
     }
