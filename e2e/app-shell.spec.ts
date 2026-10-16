@@ -80,6 +80,10 @@ test.describe('layout', () => {
     await expect(trail.getByRole('listitem')).toHaveText(['Dashboard']) // a page of its own has no group
     await page.goto('/transactions')
     await expect(trail.getByRole('listitem')).toHaveText(['Transactions', 'All Transactions'])
+    await page.goto('/export')
+    await expect(trail.getByRole('listitem')).toHaveText(['Transactions', 'Export'])
+    await expect(trail.locator('[aria-current="page"]')).toHaveText('Export')
+    await expect(navLink(page, 'Export')).toHaveAttribute('data-active', 'true')
     await page.goto('/reports')
     await expect(trail.getByRole('listitem')).toHaveText(['Reports', 'Reports'])
     await page.goto('/reports/spending') // a Report is the Admin's: it has a row of its own under Reports, which is marked, and the trail names it under Reports
@@ -173,7 +177,7 @@ test.describe('the sidebar navigation', () => {
     await expect(navGroup(page, 'Set up')).toBeVisible() // once who is signed in is known
     expect(await outline(page)).toEqual([
       'Dashboard',
-      'Transactions: All Transactions, Uncategorised, Import',
+      'Transactions: All Transactions, Uncategorised, Import, Export',
       'Reports: Reports, Net worth, Spending by Category, Income vs spending by month, Loans, Transaction listing, Balances over time, Budget vs actual',
       'Set up: Accounts, Categories, Rules, Budgets, Settings',
       'Help: Change Log, About your data, How to sign in',
@@ -187,7 +191,7 @@ test.describe('the sidebar navigation', () => {
     await expect(navLink(page, 'Summary')).toBeVisible()
     expect(await outline(page)).toEqual([
       'Summary',
-      'Transactions: All Transactions',
+      'Transactions: All Transactions, Export',
       'Reports: Reports, Net worth, Accounts',
       'Help: Change Log, About your data, How to sign in',
     ])

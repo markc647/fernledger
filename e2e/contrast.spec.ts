@@ -232,6 +232,22 @@ const PAGES: {
     },
   },
   {
+    // The Transactions' filters and Download CSV, with the warning that a file would stop short showing (the count is stubbed, so the page needs no 5,001 Transactions) and then the line that says typed fields are not yet applied.
+    path: '/export',
+    setup: async ({ page }) => {
+      await page.route(/\/api\/transactions\?/, (route) => route.fulfill({ json: { total: 5001, transactions: [] } }))
+    },
+    visit: async ({ page, scan }) => {
+      await page.goto('/export')
+      await heading(page, 'Export')
+      await expect(page.getByText('Only the oldest up to 5,000 will be saved')).toBeVisible()
+      await scan()
+      await page.getByRole('searchbox', { name: 'Search', exact: true }).fill('cafe')
+      await expect(page.getByText('Press Search to apply these filters.')).toBeVisible()
+      await scan('with typed fields not applied')
+    },
+  },
+  {
     // Nothing is imported: the preview is of a file the Admin has chosen, and a file that is not a bank export is explained. A Member is told the screen is the Admin's.
     path: '/import',
     visit: async ({ page, role, data, scan }) => {

@@ -237,6 +237,7 @@ test.describe('every page with text to read once has the "?"', () => {
 
 for (const [path, heading] of [
   ['/accounts', 'Accounts'],
+  ['/export', 'Export'],
   ['/how-to-sign-in', 'How to sign in'],
 ] as const) {
   test(`${heading} has no text to read once, so no "?"`, async ({ page, context }) => {
