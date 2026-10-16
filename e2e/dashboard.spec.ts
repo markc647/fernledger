@@ -207,11 +207,40 @@ test('the Dashboard and the Summary ask the Worker for their three cards and no 
 // The grid has no more than one column now that every card is a whole row, whatever the room or the text size. Small, Medium, Large and Xtra Large are 14px, 16px, 18px and 20px.
 test('the cards are one column, each as wide as the page and under the one before, on a phone and on a wide screen, whatever the text size', async ({ page, context }) => {
   await signInAs(context, 'admin')
+  type Box = { x: number; y: number; width: number; height: number }
+  /**
+   * Where each card is, every card read at the same moment and then again until the two readings agree. Reading them one after the other, as `boundingBox` does, can straddle a change
+   * of the page that `settle` (it waits for CSS transitions) cannot see: after a resize the tables become cards a frame later, in script, and the sidebar then begins a 200ms width
+   * transition. A Budget vs actual table on a phone is twice the height of its cards, so a card read before that and the next one after it overlapped. The reading waits for two frames, so
+   * the page has drawn the width it is at, and for every card to have its answer.
+   */
+  const read = () =>
+    page.evaluate(async (names) => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      const found: Record<string, (Box & { loading: boolean }) | null> = {}
+      for (const name of names) {
+        const card = [...document.querySelectorAll('main [role="region"][aria-labelledby]')].find((region) => document.getElementById(region.getAttribute('aria-labelledby')!)?.textContent === name)
+        const { x, y, width, height } = card?.getBoundingClientRect() ?? { x: 0, y: 0, width: 0, height: 0 }
+        found[name] = card ? { x, y, width, height, loading: card.textContent!.includes('Loading…') } : null
+      }
+      return found
+    }, CARDS)
   const boxes = async () => {
-    await settle(page) // the sidebar and the buttons have finished their width transition
-    const found: Record<string, { x: number; y: number; width: number; height: number }> = {}
-    for (const name of CARDS) found[name] = (await page.getByRole('main').getByRole('region', { name }).boundingBox())!
-    return found
+    await settle(page)
+    let before = ''
+    await expect
+      .poll(
+        async () => {
+          const now = await read()
+          const text = JSON.stringify(now)
+          const stopped = text === before && Object.values(now).every((card) => card && !card.loading)
+          before = text
+          return stopped
+        },
+        { message: 'the cards have their answers and have stopped moving' },
+      )
+      .toBe(true)
+    return JSON.parse(before) as Record<string, Box>
   }
   /** Every card on a row of its own, as wide as the page, one under the next. */
   const expectOneColumn = async (what: string) => {
@@ -239,9 +268,6 @@ test('the cards are one column, each as wide as the page and under the one befor
 
   await settled('Medium')
   await page.setViewportSize({ width: 800, height: 900 }) // the sidebar is the icon rail
-  // It becomes the rail when the page hears of the new width, a moment after the resize, and its width then takes 200ms to change: `settle` can run before that starts, find nothing to
-  // wait for, and let the cards be measured one at a time while they slide.
-  await expect(page.locator('[data-slot="sidebar"]:not([data-mobile])')).toHaveAttribute('data-state', 'collapsed')
   await expectOneColumn('800px wide')
   await page.setViewportSize({ width: 390, height: 844 })
   await expectOneColumn('a phone')
