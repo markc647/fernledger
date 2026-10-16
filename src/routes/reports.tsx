@@ -88,7 +88,7 @@ function Reports() {
         help={
           <p>
             {isAdmin
-              ? "Each Report you show is kept here as its choices: which Report, its dates and its Account. Opening one works it out again from today's data. Choose a Report in the sidebar, under Reports, to make one."
+              ? 'Each Report you create is saved here for quick access at a later date. Select Open from the Actions menu to view or print. Opening a Report reads the latest data, so the Report always contains the latest updates you have made to the Categories for a Transaction or any new Transactions within the dates the Report covers. To have a Report show here, choose one of the Report types in the sidebar and it will be saved here.'
               : "The Reports the Admin has made. Opening one works it out again from today's data. Print it to save a PDF on your computer."}
           </p>
         }
