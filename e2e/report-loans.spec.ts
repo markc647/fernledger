@@ -1,6 +1,7 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   dateText,
@@ -163,8 +164,11 @@ test.describe('opening the Report', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Loans' })
-    await expect(form).toContainText('Leave From blank to begin at the first Transaction')
-    await expect(form).toContainText('Name each Category for its person, like “Loan – Alice”') // how the Report knows who owes whom
+    await expect(form).not.toContainText('Leave From blank')
+    const help = await openHelp(page) // what the form will do, and how the Report knows who owes whom, are in the page's help sheet
+    await expect(help).toContainText('Leave From blank to begin at the first Transaction')
+    await expect(help).toContainText('Name each Category for its person, like “Loan – Alice”')
+    await page.keyboard.press('Escape')
     const loan = form.getByLabel('Loan', { exact: true })
     await expect(loan).toHaveValue('') // every Loans Category unless one is chosen
     // Only Loans Categories are offered: the starter one and the Admin's own, and no Spending or Income Category.

@@ -2,6 +2,7 @@ import type { BrowserContext, Page } from '@playwright/test'
 import { spendingChart, spendingDrawn, spyApi } from './chart-helpers'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import { chooseTextSize } from './shell-helpers'
 import {
@@ -146,7 +147,9 @@ test.describe('opening the Report', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Spending by Category' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Spending by Category' })
-    await expect(form).toContainText('the most spent first, and one for Uncategorised when there is any.')
+    await expect(form).not.toContainText('one for Uncategorised')
+    await expect(await openHelp(page)).toContainText('the most spent first, and one for Uncategorised when there is any.') // the form's note is in the page's help sheet
+    await page.keyboard.press('Escape')
     await expect(form.getByLabel('Account')).toHaveValue('') // every Account unless one is chosen
     await pickDate(form, 'From', `${d.year}-01-01`)
     await pickDate(form, 'To', `${d.year}-12-31`)

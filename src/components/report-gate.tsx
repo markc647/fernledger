@@ -1,13 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
-import { createContext, useContext, useMemo, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
+import { HelpHeading, PageHeading } from '@/components/help-sheet'
+import { Button } from '@/components/ui/button'
 import { MIN_DATE } from '@/lib/date-range'
 import type { Chosen } from '@/lib/kept-reports'
 import { HttpError, meQuery } from '@/lib/me'
 import { accountsQuery } from '@/lib/queries'
 import { accountLabel } from '@/lib/report-frame'
 import { addressId, type ReportSearch } from '@/lib/report-transactions'
-import type { ReportInfo } from '@/lib/reports'
+import { PRINT_HELP, type ReportInfo } from '@/lib/reports'
 
 /** An Account as the Reports read it (the Accounts API's). */
 export type ReportAccount = { id: number; name: string; accountNumber: string; cutoverDate: string | null }
@@ -44,10 +46,42 @@ const ReportScrollContext = createContext<ReportScroll>({ request: () => {}, sho
 export const useReportScroll = () => useContext(ReportScrollContext)
 
 /**
- * A Report's page: its name, what it holds and its form, and below them the Report itself, or what is missing from one. The name, the words and the form are for the screen; a
- * printout is the Report alone (`print:hidden`), which writes its own title block (ReportFrame).
+ * Where the button that prints the Report is. The Admin has the form, and the button sits in its row of buttons beside "Show Report" once a Report is on the page (`printable`, which the
+ * Report's frame says when it is); a Member has no form, so the frame puts the button above the Report itself (`inForm` is false).
  */
-function ReportPage({ report, form, children }: { report: ReportInfo; form: ReactNode; children: ReactNode }) {
+type ReportPrint = { printable: boolean; setPrintable: (printable: boolean) => void; inForm: boolean }
+const ReportPrintContext = createContext<ReportPrint>({ printable: false, setPrintable: () => {}, inForm: false })
+export const useReportPrint = () => useContext(ReportPrintContext)
+
+/** "Print or save as PDF". How to use the print window is said once, in the page's help sheet. */
+export function PrintReportButton({ variant }: { variant: 'default' | 'outline' }) {
+  return (
+    <Button type="button" size="touch" variant={variant} onClick={() => window.print()}>
+      Print or save as PDF
+    </Button>
+  )
+}
+
+/** The text of a Report page's "?": what the Report holds, what the Admin's form will make of the choices (a Member has no form), and how printing works. All of it is from `REPORTS`. */
+function ReportHelp({ report, isAdmin }: { report: ReportInfo; isAdmin: boolean }) {
+  return (
+    <>
+      <p>{report.about}</p>
+      {isAdmin && <p>{report.note}</p>}
+      <HelpHeading>Printing</HelpHeading>
+      <p>{PRINT_HELP}</p>
+    </>
+  )
+}
+
+/**
+ * A Report's page: its name (with the "?" whose sheet says what it holds), its form, and below them the Report itself, or what is missing from one. The name and the form are for the
+ * screen; a printout is the Report alone (`print:hidden`), which writes its own title block (ReportFrame).
+ */
+function ReportPage({ report, form, isAdmin, children }: { report: ReportInfo; form: ReactNode; isAdmin: boolean; children: ReactNode }) {
+  const [printable, setPrintable] = useState(false)
+  const inForm = Boolean(form)
+  const print = useMemo<ReportPrint>(() => ({ printable, setPrintable, inForm }), [printable, inForm])
   const requested = useRef(false)
   const scroll = useMemo<ReportScroll>(
     () => ({
@@ -63,15 +97,16 @@ function ReportPage({ report, form, children }: { report: ReportInfo; form: Reac
   )
   return (
     <ReportScrollContext.Provider value={scroll}>
-      <div className="print:hidden">
-        <h1 className="text-2xl font-semibold">{report.name}</h1>
-        <p className="mt-2">{report.about}</p>
-        {form && <div className="mt-4">{form}</div>}
-      </div>
-      {/* Always there, so the page has somewhere to move to as soon as a Report is asked for. The space above a Report is padding, not margin, so it moves with the container, and the page stops short of the sticky header (its `scroll-padding-top`) by a little more. On paper the Report starts at the page's own margin. */}
-      <div id={RESULT_ID} className={`scroll-mt-4 print:pt-0 ${children ? 'pt-8' : ''}`}>
-        {children}
-      </div>
+      <ReportPrintContext.Provider value={print}>
+        <div className="print:hidden">
+          <PageHeading help={<ReportHelp report={report} isAdmin={isAdmin} />}>{report.name}</PageHeading>
+          {form && <div className="mt-4">{form}</div>}
+        </div>
+        {/* Always there, so the page has somewhere to move to as soon as a Report is asked for. The space above a Report is padding, not margin, so it moves with the container, and the page stops short of the sticky header (its `scroll-padding-top`) by a little more. On paper the Report starts at the page's own margin. */}
+        <div id={RESULT_ID} className={`scroll-mt-4 print:pt-0 ${children ? 'pt-8' : ''}`}>
+          {children}
+        </div>
+      </ReportPrintContext.Provider>
     </ReportScrollContext.Provider>
   )
 }
@@ -96,7 +131,7 @@ export function ReportGate({
   rangeProblem,
   children,
 }: {
-  /** The Report (src/lib/reports.ts): its name, as the heading says it, and what it holds, under the heading. */
+  /** The Report (src/lib/reports.ts): its name, as the heading says it, and what it holds, in the sheet of the "?" beside the heading. */
   report: ReportInfo
   /** What the address holds (parseReportSearch). */
   search: ReportSearch
@@ -123,7 +158,7 @@ export function ReportGate({
     [report, search.account, category, search.from, search.to],
   )
   const page = (body: ReactNode, withForm = true) => (
-    <ReportPage report={report} form={withForm && isAdmin && form}>
+    <ReportPage report={report} form={withForm && isAdmin && form} isAdmin={isAdmin}>
       {body}
     </ReportPage>
   )
