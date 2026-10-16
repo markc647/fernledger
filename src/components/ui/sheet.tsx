@@ -37,7 +37,6 @@ function SheetContent({ className, children, side = 'left', ...props }: React.Co
       <SheetOverlay />
       <SheetPrimitive.Content
         data-slot="sheet-content"
-        data-side={side}
         className={cn(
           'fixed inset-y-0 z-50 flex h-full w-3/4 max-w-sm flex-col gap-4 border-border bg-background shadow-lg outline-hidden print:hidden',
           side === 'left'
