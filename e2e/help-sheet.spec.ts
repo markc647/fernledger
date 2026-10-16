@@ -120,14 +120,14 @@ test.describe('the sheet', () => {
     expect(parseFloat(side), "the sheet's edge is a border, not a shadow").toBeGreaterThanOrEqual(1)
   })
 
-  test('About your data keeps its first sentence in a printout, where the sheet is not', async ({ page }) => {
-    const sentence = 'This page explains how Fernledger handles the financial information in it'
+  test('About your data has its first sentence on the page, on the screen and on paper, once, and no "?"', async ({ page }) => {
+    const sentence = page.getByText('This page explains how Fernledger handles the financial information in it') // one match: a second, for paper only, would make this fail
     await page.goto('/about-your-data')
     await expect(page.getByRole('heading', { level: 1, name: 'About your data' })).toBeVisible()
-    await expect(page.getByText(sentence)).toBeHidden() // on the screen it is in the sheet
+    await expect(sentence).toBeVisible()
+    await expect(trigger(page)).toHaveCount(0)
     await page.emulateMedia({ media: 'print' })
-    await expect(page.getByText(sentence)).toBeVisible()
-    await expect(trigger(page)).toBeHidden() // and the "?" is not
+    await expect(sentence).toBeVisible()
   })
 })
 
@@ -165,9 +165,19 @@ const PAGES: Case[] = [
   },
   { path: '/budgets', heading: 'Budgets', says: ['A Budget is the amount you plan to spend'], adminSays: ['Choose Edit on a Category'], memberSays: ['Only the Admin can change them.'], roles: BOTH },
   { path: '/settings', heading: 'Settings', says: ["The Admin is set when Fernledger is deployed", 'A Cutover Date is the day an Account stops taking Transactions'], ready: (page) => expect(page.getByLabel('App title')).toBeVisible() },
-  { path: '/about-your-data', heading: 'About your data', says: ['This page explains how Fernledger handles'], roles: BOTH },
   { path: '/change-log', heading: 'Change Log', says: ['Everything the Admin has changed'], roles: BOTH },
-  { path: '/reports', heading: 'Reports', says: [], adminSays: ['Each Report you show is kept here'], memberSays: ['The Reports the Admin has made'], roles: BOTH },
+  {
+    path: '/reports',
+    heading: 'Reports',
+    says: [],
+    adminSays: [
+      'Each Report you create is saved here for quick access at a later date.',
+      'Select Open from the Actions menu to view or print.',
+      'To have a Report show here, choose one of the Report types in the sidebar and it will be saved here.',
+    ],
+    memberSays: ['The Reports the Admin has made'],
+    roles: BOTH,
+  },
   {
     // The cards' answers are stubbed, with a Budget, so that both have their tables when the cards' notes are looked for: the Budget card's note was shown only with a row to show.
     path: '/',
@@ -225,9 +235,14 @@ test.describe('every page with text to read once has the "?"', () => {
   }
 })
 
-test('a page with no text to read once has no "?"', async ({ page, context }) => {
-  await signInAs(context, 'admin')
-  await page.goto('/accounts')
-  await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toBeVisible()
-  await expect(trigger(page)).toHaveCount(0)
-})
+for (const [path, heading] of [
+  ['/accounts', 'Accounts'],
+  ['/how-to-sign-in', 'How to sign in'],
+] as const) {
+  test(`${heading} has no text to read once, so no "?"`, async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.goto(path)
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+    await expect(trigger(page)).toHaveCount(0)
+  })
+}
