@@ -61,8 +61,8 @@ export async function chooseTextSize(page: Page, size: TextSizeName) {
 }
 
 /**
- * Runs `check` at each text size the control offers, so a size added to it (an Xtra Large) is covered without the spec being told. It fails unless the largest is 20px or more, the size README
- * Accessibility promises. The size is chosen at the width the page has when this is called (a laptop's header has the buttons in its bar, a phone's has them in a menu), and `check` may change
+ * Runs `check` at each text size the control offers (Small, Medium, Large and Xtra Large: 14px, 16px, 18px and 20px), so a size added to it is covered without the spec being told. It fails
+ * unless there are four, the largest being 20px or more, as README Accessibility promises. The size is chosen at the width the page has when this is called (a laptop's header has the buttons in its bar, a phone's has them in a menu), and `check` may change
  * the width: the next size is chosen from the width this started at.
  */
 export async function atEveryTextSize(page: Page, check: (size: string) => Promise<void>) {
@@ -70,7 +70,7 @@ export async function atEveryTextSize(page: Page, check: (size: string) => Promi
   await openHeaderControls(page)
   const count = await textSizeGroup(page).getByRole('radio').count()
   await closeHeaderControls(page)
-  expect(count).toBeGreaterThanOrEqual(3)
+  expect(count).toBeGreaterThanOrEqual(4)
   let largest = 0
   for (let i = 0; i < count; i++) {
     await page.setViewportSize(start)
