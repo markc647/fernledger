@@ -6,7 +6,7 @@ import { recordChange } from './changelog'
 import { isQueryDate } from './dates'
 import { ID, nothing, pathId, validate } from './validate'
 
-// Kept Reports (migrations/4701_kept_reports.sql). Only the Admin makes Reports: each time the Admin shows one, its CHOICES are kept here (which Report, the dates, the Account or
+// Kept Reports (migrations/9701_kept_reports.sql). Only the Admin makes Reports: each time the Admin shows one, its CHOICES are kept here (which Report, the dates, the Account or
 // Category), not its figures, and a Member can open only a Report that is kept. Opening one works it out again from today's data, as showing it does, so this table is small:
 // the list is one query and a kept Report costs the Report's own reads and nothing more (a Member's read adds one lookup, by Report and last date, which is an index).
 
