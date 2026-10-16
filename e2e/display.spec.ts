@@ -1500,7 +1500,7 @@ test.describe('reduced motion', () => {
   })
 })
 
-test.describe('forced colours (Windows high contrast)', () => {
+test.describe('forced colours (Windows high contrast)', { tag: '@theme' }, () => {
   test('still shows every status icon and word', async ({ page }) => {
     await page.emulateMedia({ forcedColors: 'active' })
     await page.goto('/styleguide')
