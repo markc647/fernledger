@@ -12,7 +12,7 @@ import {
 } from '@tanstack/react-table'
 import type { InferResponseType } from 'hono/client'
 import { MessageSquareText } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Amount } from '@/components/amount'
 import { EditPanel } from '@/components/edit-panel'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
@@ -68,22 +68,18 @@ function CategoryCell({ row }: { row: Row }) {
   )
 }
 
-/** What a person can press or type in: a press that lands on one is not given back to the Note button. A container with `tabindex="-1"` (`main`, a status line) is not one. */
-const CONTROL = 'a[href], button, input, select, textarea, summary, [contenteditable], [tabindex]:not([tabindex="-1"])'
-
 /**
  * The Note column: a Note is not written in the list (it can be long, and the list is for scanning), but is behind a button that opens it beside the row. A row without a Note shows nothing
- * (a screen reader is still told "No Note", in text only it reads). The button is 44px, named for its row, and the pop-up is the app's Popover: Escape and a press
- * outside close it, and focus goes back to the button. A press outside that lands on a control (a field, a button, a link) leaves focus there, which is where that press meant it to go; one that
- * lands on the page itself, which takes focus for the skip link (`main`), does not count.
+ * (a screen reader is still told "No Note", in text only it reads). The button is 44px and named for its row, and the pop-up is the app's Popover as Radix leaves it: Escape and a press
+ * outside close it, and Escape puts focus back on the button. Focus goes to the Note when it opens, so a Note too long for a short screen can be scrolled with the keyboard.
  */
 function NoteCell({ row }: { row: Row }) {
-  const button = useRef<HTMLButtonElement>(null)
+  const noteId = useId()
   if (!row.note) return <span className="sr-only">No Note</span>
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button ref={button} variant="outline" size="touch" className="px-0" aria-label={`Read the Note on ${row.description}, ${formatDate(row.date)}`}>
+        <Button variant="outline" size="touch" className="px-0" aria-label={`Read the Note on ${row.description}, ${formatDate(row.date)}`}>
           <MessageSquareText className="size-5" />
         </Button>
       </PopoverTrigger>
@@ -91,22 +87,20 @@ function NoteCell({ row }: { row: Row }) {
         align="end"
         collisionPadding={8}
         aria-label={`Note on ${row.description}`}
+        aria-describedby={noteId}
         // As wide as a line of text reads well, never wider than the screen, and scrolling inside itself rather than running off a short one.
         className="max-h-(--radix-popover-content-available-height) w-[min(22rem,calc(100vw-1rem))] overflow-y-auto overscroll-contain"
-        onCloseAutoFocus={(event) => {
-          // Radix puts focus back on the button after Escape only. A press on anything that is not a control leaves focus nowhere useful (the page, or nothing), so it goes to the button then too.
-          event.preventDefault()
-          if (!document.activeElement?.matches(CONTROL)) button.current?.focus()
-        }}
       >
-        <p className="break-words whitespace-pre-line">{row.note}</p>
+        <p id={noteId} tabIndex={0} className="break-words whitespace-pre-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          {row.note}
+        </p>
       </PopoverContent>
     </Popover>
   )
 }
 
 /** The Note column asks for the least room it can have, so a table gives it what its heading and the button need and no more. */
-const NOTE_COLUMN = 'w-px whitespace-nowrap'
+const NOTE_COLUMN = 'w-px'
 
 const hasFilter = (search: TransactionSearch) => search.account !== undefined || search.category !== undefined || search.transfers !== undefined || !!search.from || !!search.to || !!search.q
 

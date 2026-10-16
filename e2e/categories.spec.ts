@@ -479,7 +479,7 @@ test('a Note is a button that opens it, in All Transactions and in Uncategorised
     expect(Math.abs(opened.x + opened.width - (box.x + box.width)), `${heading}: the pop-up ends where its button does`).toBeLessThanOrEqual(2) // to within the pixel it is rounded to
     await noAxeViolationsFromTop(page)
 
-    // Escape closes it and leaves focus on the button; so does a press outside it, which closes it (focus is where Radix leaves it); the keyboard opens it again.
+    // Escape closes it and puts focus back on the button, a press outside it closes it too, and the keyboard opens it again.
     await page.keyboard.press('Escape')
     await expect(popup).toBeHidden()
     await expect(button).toBeFocused()
