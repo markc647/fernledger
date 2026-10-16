@@ -3,7 +3,7 @@ import type { Role } from '../src/generated/api/auth'
 import { stubBalances } from './balances-helpers'
 import { NET_WORTH_PATH, showNetWorth, stubNetWorth } from './chart-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
-import { helpButton as trigger, helpSheet as sheet } from './help-helpers'
+import { HELP_LABEL, helpButton as trigger, helpSheet as sheet } from './help-helpers'
 import { chooseTextSize } from './shell-helpers'
 
 // The page's "?" help sheet (src/components/help-sheet.tsx, CODING_STANDARDS.md#ui): the text a reader reads once is in a sheet that opens from the right, beside the page's heading, so a
@@ -48,7 +48,7 @@ test.describe('the sheet', () => {
     expect(box.x, 'and it leaves the page showing on the left').toBeGreaterThan(0)
 
     // The text is a region the dialog's title names, and Close is the last thing in the sheet, under the text, at its foot.
-    await expect(sheet(page).getByRole('region', { name: 'About this page' })).toBeVisible()
+    await expect(sheet(page).getByRole('region', { name: HELP_LABEL })).toBeVisible()
     const close = sheet(page).getByRole('button', { name: 'Close' })
     const closeBox = (await close.boundingBox())!
     const textBox = (await sheet(page).getByText('Search and filter every Transaction').boundingBox())!
@@ -109,6 +109,7 @@ test.describe('the sheet', () => {
     await page.keyboard.press('Shift+Tab')
     await page.keyboard.press('Tab') // keyboard focus, so :focus-visible
     await expect(trigger(page)).toBeFocused()
+    await settle(page) // the outline grows from nothing to 2px in the button's transition
     // The browser's own focus ring is `auto`, so only the page's outline is a solid one of 2px or more.
     const outline = await trigger(page).evaluate((el) => ({ style: getComputedStyle(el).outlineStyle, width: parseFloat(getComputedStyle(el).outlineWidth) }))
     expect(outline.style, 'focus is the page\'s outline').toBe('solid')
@@ -212,11 +213,13 @@ test.describe('every page with text to read once has the "?"', () => {
         await expect(trigger(page)).toBeVisible()
         await expectBesideHeading(page)
         await ready?.(page, role) // drawn as it was when the page said these things
-        for (const phrase of phrases) await expect(page.getByText(phrase), phrase).toBeHidden()
+        // The sheet first: what is only for the Admin, or for a Member, is there once the page knows who is signed in (which `ready` does not always wait for), and by then the page would have
+        // said it if it were going to. Only then is "the page does not say it" a thing that could have been false.
         await trigger(page).click()
         for (const phrase of phrases) await expect(sheet(page).getByText(phrase), phrase).toBeVisible()
         await page.keyboard.press('Escape')
         await expect(trigger(page)).toBeFocused()
+        for (const phrase of phrases) await expect(page.getByText(phrase), phrase).toBeHidden()
       })
     }
   }

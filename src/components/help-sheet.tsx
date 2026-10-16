@@ -25,7 +25,7 @@ export function HelpSheet({ children }: { children: ReactNode }) {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="outline" size="touch" className="shrink-0 rounded-full px-0 print:hidden" aria-label={HELP_LABEL}>
+        <Button variant="outline" size="touch" className="rounded-full px-0 print:hidden" aria-label={HELP_LABEL}>
           <CircleQuestionMark className="size-5" aria-hidden />
         </Button>
       </SheetTrigger>
