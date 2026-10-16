@@ -420,7 +420,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide', '/transactions', '/export', '/change-log', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/net-worth', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/income-vs-spending', '/reports/loans']
+  const pages = ['/', '/settings', '/styleguide', '/transactions', '/change-log', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/net-worth', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/income-vs-spending', '/reports/loans']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -489,6 +489,29 @@ test.describe('zoom', () => {
       await within(navLink(page, label), (await sheet.boundingBox())!, label)
     }
   })
+
+  // The Export page with the warning that a file would stop short showing, and the count: the longest text it shows. The count is stubbed, so this needs no data in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
+      test(`/export with the warning showing at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await page.route(/\/api\/transactions\?/, (route) => route.fulfill({ json: { total: 5001, transactions: [] } }))
+        await page.setViewportSize({ width, height })
+        await page.goto('/export')
+        await chooseTextSize(page, size)
+        await expect(page.getByText('Only the oldest up to 5,000 will be saved')).toBeVisible()
+        await expect(page.getByText('5,001 Transactions match')).toBeVisible()
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expectTextSize(page, size)
+        await settle(page)
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
 
   // The Import screen with a file chosen and the "Replace imported history" question open: the longest text it shows.
   // The Account and its imported-row count are stubbed, so this needs no data in the database.

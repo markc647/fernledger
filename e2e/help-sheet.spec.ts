@@ -237,7 +237,6 @@ test.describe('every page with text to read once has the "?"', () => {
 
 for (const [path, heading] of [
   ['/accounts', 'Accounts'],
-  ['/export', 'Export'],
   ['/how-to-sign-in', 'How to sign in'],
 ] as const) {
   test(`${heading} has no text to read once, so no "?"`, async ({ page, context }) => {
@@ -247,3 +246,12 @@ for (const [path, heading] of [
     await expect(trigger(page)).toHaveCount(0)
   })
 }
+
+// The Export page's explanation of what Download CSV saves and what a saved file leaves unprotected is needed each time a file is saved, so it is on the page, and the page has no sheet.
+test('Export keeps its explanation on the page, so has no "?"', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  await page.goto('/export')
+  await expect(page.getByRole('heading', { level: 1, name: 'Export' })).toBeVisible()
+  await expect(page.getByText('Download CSV saves the Transactions that match the filters you last searched with')).toBeVisible()
+  await expect(trigger(page)).toHaveCount(0)
+})
