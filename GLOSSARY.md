@@ -5,7 +5,7 @@ A self-hosted tracker for NZ bank accounts, synced via Akahu, that one Admin man
 ## People
 
 **Admin**:
-The one Member who can change Categories, Rules, Budgets, Overrides, Notes and Not a Transfer marks, and who owns the Akahu connection.
+The one Member who can change Categories, Rules, Budgets, Overrides, Notes and Not a Transfer marks, who makes Reports, and who owns the Akahu connection.
 _Avoid_: Super user, owner, editor
 
 **Member**:

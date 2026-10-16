@@ -24,8 +24,8 @@ import {
 } from './report-helpers'
 
 // Ticket 18: the Report frame and the Transaction listing Report (spec stories 97 to 99). A Report has a page of its own, with its form and, below it, the Report, which is laid
-// out for paper and says on its face what it is, which Account and dates it covers, and who generated it and when. The Reports page is a card for each Report, and
-// reports-pages.spec.ts checks the six pages' common ground. The print layout is checked three ways: the page under print media (what the browser lays out), and the PDF
+// out for paper and says on its face what it is, which Account and dates it covers, and who generated it and when. The Reports page is the table of the kept Reports
+// (kept-reports.spec.ts), and reports-pages.spec.ts checks the six pages' common ground. The print layout is checked three ways: the page under print media (what the browser lays out), and the PDF
 // it makes (page count, the text on each page, the page margins and the size of the type).
 
 test.describe.configure({ mode: 'serial' })
