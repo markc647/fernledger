@@ -4,7 +4,7 @@ import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
 import { chooseTextSize, mainNav, navGroup, navLink, openNavGroup } from './shell-helpers'
 
-// The Dashboard (where the Admin lands) and the Summary (where a Member does), which are the same grid of cards, and the Net worth page, which has net worth over time, against the
+// The Dashboard (where the Admin lands) and the Summary (where a Member does), which are the same column of cards, and the Net worth page, which has net worth over time, against the
 // real Worker. (The spending chart is on the Spending by Category Report: e2e/report-spending.spec.ts.) The light and dark projects share one local
 // database, so each has two Accounts of its own, and its own months of Transactions (2004, which no other spec uses: June for light and September for dark,
 // with the month before each for a second point on the net worth line), so the amounts below are the only ones in the dates a test asks about and nothing from
