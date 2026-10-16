@@ -98,7 +98,7 @@ export function sourceOf(row: MonthBalance) {
  */
 export const rowsDiffer = (report: BalancesReport) => report.rows.some((row) => row.bankCents !== null && row.bankCents !== row.balanceCents)
 
-/** A Balance Check difference in the Balance Check's own words (src/lib/balance-check.ts, which the Summary shows too), and the bank balance that found it. */
+/** A Balance Check difference in the Balance Check's own words (src/lib/balance-check.ts, which the Import's result shows too), and the bank balance that found it. */
 export function describeDifference(difference: BalanceDifference) {
   return {
     headline: balanceDiffersMessage(difference.differenceCents, difference.since),

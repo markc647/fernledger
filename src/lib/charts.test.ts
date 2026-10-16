@@ -1,21 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { barsOf, CHART_BARS, datesProblem, describeDates, NET_WORTH_ABOUT, NET_WORTH_RANGE_LABELS, NET_WORTH_RANGES, netWorthSummary, notCountedLine, PERIOD_LABELS, PERIODS, shorten, spendingSummary, stoppedEarly, stoppedEarlyLine, tooManyAccountsMessage } from './charts'
+import { barsOf, CHART_BARS, describeDates, NET_WORTH_ABOUT, NET_WORTH_RANGE_LABELS, NET_WORTH_RANGES, netWorthSummary, notCountedLine, shorten, spendingSummary, stoppedEarly, stoppedEarlyLine, tooManyAccountsMessage } from './charts'
 
 const category = (cents: number, id = cents) => ({ categoryId: id, name: `Category ${id}`, cents })
 
-describe('PERIODS', () => {
-  it('offers each period the Worker names, with words for it', () => {
-    expect(PERIODS).toEqual(['this-month', 'last-month', 'past-3-months', 'past-12-months'])
-    expect(PERIODS.map((period) => PERIOD_LABELS[period])).toEqual(['This month', 'Last month', 'Past 3 months', 'Past 12 months'])
-  })
-})
-
 describe('barsOf', () => {
   it('draws the Categories that spent something, in the order given, and leaves out one that took in more than it paid out', () => {
-    const { rows, bars, leftOut } = barsOf([category(5000), category(300), category(0, 3), category(-2500, 4)])
+    const { bars, leftOut } = barsOf([category(5000), category(300), category(0, 3), category(-2500, 4)])
 
-    expect(bars.map((c) => c.cents)).toEqual([5000, 300])
-    expect(rows.map((c) => c.cents)).toEqual([5000, 300, 0, -2500]) // every Category the Worker gave is a row, a fully refunded one as $0.00, with no bar
+    expect(bars.map((c) => c.cents)).toEqual([5000, 300]) // a fully refunded Category ($0.00) and one that took back more are in the Report's table and have no bar
     expect(leftOut).toBe(0)
   })
 
@@ -30,8 +22,8 @@ describe('barsOf', () => {
   })
 
   it('draws nothing for no spending', () => {
-    expect(barsOf([])).toEqual({ rows: [], bars: [], leftOut: 0 })
-    expect(barsOf([category(-100)])).toEqual({ rows: [category(-100)], bars: [], leftOut: 0 }) // it is listed, and there is nothing to draw
+    expect(barsOf([])).toEqual({ bars: [], leftOut: 0 })
+    expect(barsOf([category(-100)])).toEqual({ bars: [], leftOut: 0 }) // there is nothing to draw
   })
 })
 
@@ -65,24 +57,6 @@ describe('describeDates', () => {
     ['2026-10-01', '2026-10-30', 'Thu 1 Oct 2026 to Fri 30 Oct 2026'],
   ])('writes %s to %s as "%s"', (from, to, text) => {
     expect(describeDates(from, to)).toBe(text)
-  })
-})
-
-describe('datesProblem', () => {
-  it('is nothing for two real dates in order, or the same day', () => {
-    expect(datesProblem('2026-10-01', '2026-10-31')).toBeNull()
-    expect(datesProblem('2026-10-09', '2026-10-09')).toBeNull()
-  })
-
-  it.each([
-    ['', '2026-10-31', 'from', 'Choose a From date.'],
-    ['2026-10-01', '', 'to', 'Choose a To date.'],
-    ['2026-02-30', '2026-10-31', 'from', 'The “From” date must be a real date from the year 2000 to 2100.'],
-    ['2026-10-01', '0002-10-31', 'to', 'The “To” date must be a real date from the year 2000 to 2100.'],
-    ['1999-12-31', '2026-10-31', 'from', 'The “From” date must be a real date from the year 2000 to 2100.'],
-    ['2026-10-31', '2026-10-01', 'to', 'The “To” date is before the “From” date. Change one of them to see the chart.'],
-  ])('marks %j and %j: the %s field, "%s"', (from, to, field, message) => {
-    expect(datesProblem(from, to)).toEqual({ field, message })
   })
 })
 

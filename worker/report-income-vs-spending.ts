@@ -7,8 +7,8 @@ import { buildMonthlySpending, rollUpMonthly, type MonthlyRow, type SpendingRang
 // The data of the income-vs-spending-by-month Report (GET /api/reports/income-vs-spending): what came in as Income and what was spent as Spending in each NZ
 // month of a range of dates, for every Account or for one. It decides nothing about what is Spending or Income (ADR 0012): `buildMonthlySpending` is
 // `buildSpending`'s statement (spending.ts builds both from one: the same Transfer exclusion, effective Category and kind) grouped by month and kind instead of by
-// Category, and `rollUpMonthly` adds its rows with `rollUp`'s own figures, so the Report cannot differ from the Dashboard's chart, Budget vs actual or the Spending by
-// Category Report on what it counts (the Report's tests hold it to all of them). What this file adds is the calendar (a month with nothing in it has a row of zeros, so a
+// Category, and `rollUpMonthly` adds its rows with `rollUp`'s own figures, so the Report cannot differ from the Spending by Category Report (and its chart), Budget vs actual or
+// `GET /api/charts/spending` on what it counts (the Report's tests hold it to all of them). What this file adds is the calendar (a month with nothing in it has a row of zeros, so a
 // gap in the trend is never mistaken for missing data, and a month that is not over or has not begun says so) and the difference between the two (plain subtraction).
 // `rollUpMonthly` also says how much of what came in has no Category: Uncategorised counts as Spending (ADR 0012), so a wage nobody has given a Category yet comes off
 // Spending instead of counting as Income, and the Report says how much that is rather than leave the Difference to be misread.

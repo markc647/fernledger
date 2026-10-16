@@ -52,7 +52,7 @@ function HomeLink({ section, activeTo }: { section: Extract<NavSection, { kind: 
 
 /**
  * A group of pages that opens and closes: a button that says whether its list is open (`aria-expanded`, and `aria-controls` while there is a list), and the list, which is only in
- * the page while it is open. The group holding the current page is open, and opens again when you arrive in it from elsewhere (a Dashboard shortcut, say). While the sidebar is the
+ * the page while it is open. The group holding the current page is open, and opens again when you arrive in it from elsewhere (a link on the Dashboard, say). While the sidebar is the
  * icon rail the pages have nowhere to show, so the group does not say it is open then, and a click on its icon opens the sidebar and the group. Whether it is open is remembered
  * through a visit to the rail.
  */

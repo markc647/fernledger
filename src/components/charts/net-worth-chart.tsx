@@ -34,10 +34,10 @@ const UPDATING = 'Updating net worth…'
 const LOADED = 'Net worth has loaded.'
 
 /**
- * Net worth over time, a card of the Summary and the Dashboard: the money in the Accounts added up at the end of each month (worker/net-worth.ts). The line is a picture of the figures
- * under "Show the figures", which a screen reader and a printout use. The figures come from the Worker as they are shown. The card does not ask the Worker until the reader presses
- * "Show net worth", because working it out reads every Transaction of every Account (ADR 0004) and the Summary is where everyone lands. The range (the last 24 months, 5 years or
- * all history) is chosen beside the button, before or after, and reads exactly as much whichever it is.
+ * Net worth over time, the card of the Net worth page (a page of the Reports group in the sidebar): the money in the Accounts added up at the end of each month (worker/net-worth.ts).
+ * The line is a picture of the figures under "Show the figures", which a screen reader and a printout use. The figures come from the Worker as they are shown. The card does not ask
+ * the Worker until the reader presses "Show net worth", because working it out reads every Transaction of every Account (ADR 0004), so opening the page costs nothing. The range
+ * (the last 24 months, 5 years or all history) is chosen beside the button, before or after, and reads exactly as much whichever it is.
  */
 export function NetWorthChart() {
   const id = useId()
@@ -55,7 +55,7 @@ export function NetWorthChart() {
   // What a screen reader is told as it happens, in a region that is on the page from the start (a change is announced, an arrival often is not).
   const message = !requested || error ? '' : !data ? LOADING : isPlaceholderData ? UPDATING : LOADED
   return (
-    <DashboardCard headingId="net-worth-heading" headingRef={heading} title="Net worth over time" span="half" busy={requested && (isPlaceholderData || (!data && !error))}>
+    <DashboardCard headingId="net-worth-heading" headingRef={heading} title="Net worth over time" busy={requested && (isPlaceholderData || (!data && !error))}>
       <LiveStatus message={message} />
       {!requested && <p className="mb-3">Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.</p>}
       {/* The range is chosen before net worth is drawn as well as after, because every range reads the same (so choosing first costs one read, not two): the choice sits beside the button. */}
