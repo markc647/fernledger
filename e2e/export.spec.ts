@@ -50,6 +50,10 @@ test('a Member searches for Transactions and downloads them as a CSV file, with 
   await expect(matches).toHaveText('2 Transactions match')
   await expect(link).toBeVisible()
   await expect(page.getByText('Press Search to apply these filters.')).toHaveCount(0)
+  // The page is the form and the file, and not a list of the Transactions that match: two do, and neither is on it.
+  await expect(page.getByRole('table')).toHaveCount(0)
+  await expect(page.getByRole('navigation', { name: 'Pages' })).toHaveCount(0)
+  await expect(page.getByText(`EXAMPLE ${stamp} PLAIN`)).toHaveCount(0)
   await noAxeViolations(page)
 
   const [file] = await Promise.all([page.waitForEvent('download'), link.click()])
@@ -94,19 +98,21 @@ test('says what a saved file leaves unprotected, always, and warns of the cap on
   const explanation = page.getByText(EXPLANATION, { exact: true })
   const warning = page.getByText(WARNING, { exact: true })
   const top = async (locator: Locator) => (await locator.boundingBox())!.y
+  const colourOf = (locator: Locator) => locator.evaluate((el) => getComputedStyle(el).color)
 
   await page.goto('/export')
   await expect(matches).toHaveText('5,001 Transactions match')
   await expect(warning).toBeVisible()
   // The warning is in a status region, which the page always has, so that a screen reader announces it when it comes; and both are under the heading and above the form.
   await expect(page.getByRole('status').filter({ has: warning })).toBeVisible()
+  await expect(page.getByRole('status').filter({ has: matches })).toBeVisible() // and the count is announced when a search changes it
   expect(await top(page.getByRole('heading', { level: 1, name: 'Export', exact: true }))).toBeLessThan(await top(explanation))
   expect(await top(explanation)).toBeLessThan(await top(warning))
   expect(await top(warning)).toBeLessThan(await top(page.getByRole('search', { name: 'Search Transactions' })))
   await expect(page.getByRole('link', { name: 'Download CSV' })).toHaveAccessibleDescription(/5,001 Transactions match.*Only the oldest up to 5,000 will be saved.*Download CSV saves the Transactions/)
-  // The page is the form and the file, and not a list of Transactions.
-  await expect(page.getByRole('table')).toHaveCount(0)
-  await expect(page.getByRole('navigation', { name: 'Pages' })).toHaveCount(0)
+  // The explanation is the same lighter grey as a field's hint; the warning is not.
+  expect(await colourOf(explanation)).toBe(await colourOf(page.locator('#filter-q-hint')))
+  expect(await colourOf(warning)).not.toBe(await colourOf(explanation))
   await noAxeViolations(page)
 
   // Exactly the most is not too many, and one is "matches". The explanation is there either way.
@@ -151,4 +157,14 @@ test('an address naming no such Account or Category, or a range that runs backwa
   await page.goBack()
   await expect(page.getByRole('alert')).toHaveText('There is no such Account. Choose one in the form above.')
   await expect(page.getByText(/Transactions? match/)).toHaveCount(0)
+})
+
+test('says so when the Transactions that match cannot be counted', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  // A body that isn't JSON fails the query without a failed request, which the fixture would report as a console error.
+  await page.route(/\/api\/transactions\?/, (route) => route.fulfill({ contentType: 'application/json', body: 'not json' }))
+  await page.goto('/export')
+  // The query tries again a few times before it gives up.
+  await expect(page.getByRole('alert')).toHaveText("Fernledger couldn't count the Transactions that match. Reload the page to try again.", { timeout: 15_000 })
+  await expect(page.locator('#filter-download-count')).toHaveCount(0)
 })

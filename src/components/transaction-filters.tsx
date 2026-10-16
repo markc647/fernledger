@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { isSearchDate } from '@/lib/date-range'
 import { accountsQuery, categoriesQuery } from '@/lib/queries'
-import { MAX_TEXT, TRANSFERS_FILTERS, tidy, type TransactionSearch } from '@/lib/transaction-search'
+import { MAX_TEXT, rangeBackwards, TRANSFERS_FILTERS, tidy, type TransactionSearch } from '@/lib/transaction-search'
 
 /** What is typed in the form: text for every field, so a half-typed filter is never lost. */
 type Draft = { account: string; category: string; transfers: string; from: string; to: string; q: string }
@@ -40,7 +40,7 @@ function problemWith(draft: Draft): { field: 'from' | 'to'; message: string } | 
     if (draft[field] !== '' && !isSearchDate(draft[field]))
       return { field, message: `The “${field === 'from' ? 'From' : 'To'}” date must be a real date from the year 2000 to 2100.` }
   }
-  if (draft.from !== '' && draft.to !== '' && draft.from > draft.to) return { field: 'to', message: 'The “To” date is before the “From” date. Change one of them to search.' }
+  if (rangeBackwards(draft)) return { field: 'to', message: 'The “To” date is before the “From” date. Change one of them to search.' }
   return null
 }
 

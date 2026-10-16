@@ -101,6 +101,19 @@ export function noSuchOf(search: Pick<TransactionSearch, 'account' | 'category'>
   return missing(search.account, accounts) ? 'Account' : missing(search.category, categories) ? 'Category' : null
 }
 
+/** Whether the dates run backwards, From after To, which no Transaction can match. A form's field with no date is "", and is no date. */
+export const rangeBackwards = ({ from, to }: Pick<TransactionSearch, 'from' | 'to'>) => !!from && !!to && from > to
+
+/**
+ * What a page says in place of a search that can't be run, or null when it can: dates that run backwards, or an Account or Category that doesn't exist (`noSuchOf`). A page that
+ * lists the Transactions says it for a reader who wants to `see` them, and the Export page for one who wants to `save` them. The form explains a range as it is typed; this is for an address typed by hand.
+ */
+export function searchProblem(search: Pick<TransactionSearch, 'account' | 'category' | 'from' | 'to'>, accounts: Listed, categories: Listed, goal: 'see' | 'save'): string | null {
+  if (rangeBackwards(search)) return `The “To” date is before the “From” date. Change one of them to ${goal} Transactions.`
+  const missing = noSuchOf(search, accounts, categories)
+  return missing ? `There is no such ${missing}. Choose one in the form above.` : null
+}
+
 /** The search's filters alone, which are all that decide how many Transactions match: no sort, no page. */
 export const filtersOf = ({ account, category, transfers, from, to, q }: TransactionSearch): TransactionSearch => tidy({ account, category, transfers, from, to, q })
 
