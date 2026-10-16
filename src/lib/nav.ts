@@ -28,13 +28,22 @@ export type NavMeta = {
   group?: NavGroupId
   /** Lower comes first within its group (default 50); ties sort alphabetically. */
   order?: number
-  /** Where a Member finds it when that is not where the Admin does: Accounts is in Set up for the Admin, whose group a Member never sees, and in Reports for a Member. */
-  member?: { group?: NavGroupId; order?: number }
   /**
-   * For a page the sidebar does not list: the address of the page it belongs to (each of the six Reports belongs to Reports). It has no row of its own. The sidebar marks the page it
-   * belongs to as the current one, and the breadcrumb names this page under that page's group ("Reports › Loans"). The page it belongs to is one that is in the sidebar.
+   * Where a Member finds it when that is not where the Admin does: Accounts is in Set up for the Admin, whose group a Member never sees, and in Reports for a Member. A Member can
+   * also find a page as a page of another (`parent`) where the Admin finds it in the sidebar: each of the six Reports has a row for the Admin, who makes them, and for a Member is a
+   * page of Reports, which lists the ones the Admin has made.
+   */
+  member?: { group?: NavGroupId; order?: number; parent?: string }
+  /**
+   * For a page the sidebar does not list: the address of the page it belongs to. It has no row of its own. The sidebar marks the page it belongs to as the current one, and the
+   * breadcrumb names this page under that page's group ("Reports › Loans"). The page it belongs to is one that is in the sidebar.
    */
   parent?: string
+  /**
+   * For a page that has a row of its own and is also a part of another page (a Report, to Reports): the breadcrumb's group is a link to that page, which on a phone is the way back,
+   * as it is for a page with a `parent`. Unlike `parent`, the sidebar marks this page and not that one.
+   */
+  within?: string
 }
 
 declare module '@tanstack/react-router' {
@@ -86,7 +95,8 @@ const covers = (to: string, pathname: string) => (to === '/' ? pathname === '/' 
  * Where a page is, for the breadcrumb and for which group opens: the group (none for a link on its own) and the page, from the longest address that covers `pathname`. It
  * looks through every page, not only those in this reader's sidebar, so a Member who arrives at Budgets from the Summary is told it is in Set up, though their sidebar has no such group.
  * A page that belongs to another (`parent`) is named as itself, in its parent's group, and `to` is its parent's, because that is the row the sidebar marks; `parent` says so, for
- * the breadcrumb to link its group to that page.
+ * the breadcrumb to link its group to that page. A page with a row of its own that is also within another (`within`) is marked itself, and `parent` is the page it is within, for the
+ * same link.
  */
 export function trailFor<To extends string>(
   entries: NavEntry<To>[],
@@ -106,5 +116,6 @@ export function trailFor<To extends string>(
     if (placeOf.has(page.parent ?? page.to) && covers(page.to, pathname) && (!best || page.to.length > best.to.length)) best = page
   }
   if (!best) return {}
-  return { ...placeOf.get(best.parent ?? best.to)!, page: best.label, ...(best.parent === undefined ? undefined : { parent: best.parent }) }
+  const linkedTo = best.parent ?? best.within
+  return { ...placeOf.get(best.parent ?? best.to)!, page: best.label, ...(linkedTo === undefined ? undefined : { parent: linkedTo }) }
 }

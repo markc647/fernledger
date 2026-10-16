@@ -1,9 +1,10 @@
 import { NOT_COUNTED_AS_SPENDING_OR_INCOME } from './budgets'
 
 /**
- * The six Reports, in the order the Reports page lists them. Each has a page of its own at `to` (src/routes/reports_.*.tsx), where its form and the Report are together.
- * `name` is what the Report is called everywhere (the page, the card, the breadcrumb, the Report's own title); `choices` are the address's search parameters the Report reads
- * (a Budget has no Account); `summary` is the one line of its card, and `about` is the paragraph under the page's heading, which says what the Report holds.
+ * The six Reports, in the order the sidebar lists them (src/lib/report-nav.ts). Each has a page of its own at `to` (src/routes/reports_.*.tsx), where its form and the Report are together.
+ * `name` is what the Report is called everywhere (the page, the sidebar, the breadcrumb, the list of kept Reports, the Report's own title); `choices` are the address's search
+ * parameters the Report reads (a Budget has no Account); `summary` is the one line that says what it holds (the Reports page was a card of it for each Report before it became the list of
+ * kept Reports, and nothing shows it now), and `about` is the paragraph under the page's heading, which says what the Report holds.
  */
 export const REPORTS = {
   spending: {

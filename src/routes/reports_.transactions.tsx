@@ -6,6 +6,7 @@ import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/co
 import { CappedNotice, TransactionListing } from '@/components/transaction-listing'
 import { reportListingQuery } from '@/lib/queries'
 import { parseReportSearch } from '@/lib/report-transactions'
+import { reportNav } from '@/lib/report-nav'
 import { REPORTS } from '@/lib/reports'
 
 // The Report lives in its address (?account=2&from=2026-10-01&to=2026-10-31), so it can be reopened or sent on, and the
@@ -13,7 +14,7 @@ import { REPORTS } from '@/lib/reports'
 export const Route = createFileRoute('/reports_/transactions')({
   component: TransactionListingReport,
   validateSearch: parseReportSearch,
-  staticData: { nav: { label: REPORTS.transactions.name, parent: '/reports' } },
+  staticData: { nav: reportNav(REPORTS.transactions) },
 })
 
 const REPORT = REPORTS.transactions

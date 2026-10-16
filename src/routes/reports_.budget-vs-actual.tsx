@@ -6,6 +6,7 @@ import { ReportFrame } from '@/components/report-frame'
 import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
 import { reportBudgetQuery } from '@/lib/queries'
 import { parseBudgetReportSearch, tooManyMonths } from '@/lib/report-budget'
+import { reportNav } from '@/lib/report-nav'
 import { REPORTS } from '@/lib/reports'
 
 // Like the other Reports, this one lives in its address (?from=2026-01-01&to=2026-06-30), so it can be reopened or sent on. The form is on the page with the Report.
@@ -13,7 +14,7 @@ import { REPORTS } from '@/lib/reports'
 export const Route = createFileRoute('/reports_/budget-vs-actual')({
   component: BudgetVsActualReport,
   validateSearch: parseBudgetReportSearch,
-  staticData: { nav: { label: REPORTS.budgetVsActual.name, parent: '/reports' } },
+  staticData: { nav: reportNav(REPORTS.budgetVsActual) },
 })
 
 const REPORT = REPORTS.budgetVsActual
