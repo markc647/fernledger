@@ -37,6 +37,21 @@ export type ChangeEntry = {
 const json = (value: unknown) => (value === undefined ? null : JSON.stringify(value))
 
 /**
+ * The statement that writes an entry. With `onlyIfChanged` it writes only if the statement just before it in the batch changed a row (`changes()` is that statement's row count).
+ * `recordChange` ends its batch with one; a change that makes a second entry (a kept Report that also drops another) puts that entry's statement after the one it describes,
+ * in the same batch.
+ */
+export function changeLogStatement(db: D1Database, entry: ChangeEntry): D1PreparedStatement {
+  return db
+    .prepare(
+      entry.onlyIfChanged
+        ? 'INSERT INTO change_log (actor, type, summary, before, after) SELECT ?, ?, ?, ?, ? WHERE changes() > 0'
+        : 'INSERT INTO change_log (actor, type, summary, before, after) VALUES (?, ?, ?, ?, ?)',
+    )
+    .bind(entry.actor.email, entry.type, entry.summary, json(entry.before), json(entry.after))
+}
+
+/**
  * Runs the mutation and writes its Change Log entry in one D1 batch, which is atomic:
  * if the mutation fails there is no entry, and if the entry fails the mutation is rolled back.
  * Every Admin change goes through this, so the Change Log can't miss one.
@@ -44,13 +59,5 @@ const json = (value: unknown) => (value === undefined ? null : JSON.stringify(va
  */
 export async function recordChange(db: D1Database, mutation: D1PreparedStatement | D1PreparedStatement[], entry: ChangeEntry): Promise<D1Result[]> {
   const statements = Array.isArray(mutation) ? mutation : [mutation]
-  // `changes()` is the row count of the statement just before this one in the batch.
-  const log = db
-    .prepare(
-      entry.onlyIfChanged
-        ? 'INSERT INTO change_log (actor, type, summary, before, after) SELECT ?, ?, ?, ?, ? WHERE changes() > 0'
-        : 'INSERT INTO change_log (actor, type, summary, before, after) VALUES (?, ?, ?, ?, ?)',
-    )
-    .bind(entry.actor.email, entry.type, entry.summary, json(entry.before), json(entry.after))
-  return (await db.batch([...statements, log])).slice(0, statements.length)
+  return (await db.batch([...statements, changeLogStatement(db, entry)])).slice(0, statements.length)
 }
