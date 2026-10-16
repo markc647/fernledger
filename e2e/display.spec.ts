@@ -61,36 +61,50 @@ const SAVED_AS = { Small: 'small', Medium: 'medium', Large: 'large', 'Xtra Large
 
 /**
  * What is drawn on the page that is not the size of the page's text, the root's font size (README, Accessibility: all text that is not a heading is exactly the chosen size, in every
- * part of the page). `off` lists each such word with its size; a heading (or a fieldset's legend, which Settings draws as one) is larger by design and is left out of it, and `headings` has the sizes of the h1s and h2s for a spec of how
- * much larger. `words` is how many it looked at, so a spec can tell that it looked.
+ * part of the page). `off` lists each such word with its size, and each text field, text area and select that is not that size (their text is a value, not a word in the page). A heading
+ * (or a fieldset's legend, which Settings draws as one) is larger by design and is left out of it: `notLarger` lists each one that is not larger than the page's text, `headings` has the
+ * sizes of the h1s and h2s for a spec of how much larger. `words` is how many it looked at, so a spec can tell that it looked.
  */
 const wordsOffTheSize = (page: Page) =>
   page.evaluate(() => {
     const root = parseFloat(getComputedStyle(document.documentElement).fontSize)
     const off: string[] = []
     const headings: { level: string; size: number }[] = []
+    const notLarger: string[] = []
     let words = 0
+    // Not what is not drawn (a closed disclosure's contents, text only for a screen reader), nor what is not words.
+    const drawn = (el: Element) => !el.closest('script, style, noscript, .sr-only') && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const el = node.parentElement
-      // Not what is not drawn (a closed disclosure's contents, text only for a screen reader), nor what is not words.
-      if (!el || !node.textContent?.trim() || el.closest('script, style, noscript, .sr-only') || el.getClientRects().length === 0 || getComputedStyle(el).visibility === 'hidden') continue
+      if (!el || !node.textContent?.trim() || !drawn(el)) continue
       const size = parseFloat(getComputedStyle(el).fontSize)
-      const heading = el.closest('h1, h2')
-      if (heading) headings.push({ level: heading.tagName.toLowerCase(), size })
       if (el.closest('h1, h2, h3, h4, h5, h6, legend')) continue
       words += 1
       if (Math.abs(size - root) > 0.01) off.push(`${size}px ${el.tagName.toLowerCase()} "${node.textContent.trim().slice(0, 40)}"`)
     }
-    return { root, off, words, headings }
+    for (const field of document.querySelectorAll('input:not([type=radio], [type=checkbox], [type=hidden], [type=file]), textarea, select')) {
+      if (!drawn(field)) continue
+      words += 1
+      const size = parseFloat(getComputedStyle(field).fontSize)
+      if (Math.abs(size - root) > 0.01) off.push(`${size}px ${field.tagName.toLowerCase()} (a field)`)
+    }
+    for (const heading of document.querySelectorAll('h1, h2, h3, h4, h5, h6, legend')) {
+      if (!drawn(heading)) continue
+      const size = parseFloat(getComputedStyle(heading).fontSize)
+      if (/^h[12]$/i.test(heading.tagName)) headings.push({ level: heading.tagName.toLowerCase(), size })
+      if (size <= root + 0.01) notLarger.push(`${size}px ${heading.tagName.toLowerCase()} "${(heading.textContent ?? '').trim().slice(0, 40)}"`)
+    }
+    return { root, off, notLarger, words, headings }
   })
 
-/** The words on the page are all the page's size, and there are some. `atLeast` is how many words it should have found. */
+/** The words on the page are all the page's size, every heading is larger, and there are some words. `atLeast` is how many words it should have found. */
 async function expectOneSize(page: Page, size: SizeName, atLeast = 10) {
   const found = await wordsOffTheSize(page)
   expect(found.root).toBe(PIXELS[size])
   expect(found.words).toBeGreaterThan(atLeast)
   expect(found.off).toEqual([])
+  expect(found.notLarger).toEqual([]) // a heading at the size of the text is a heading in weight alone
 }
 
 test.describe('text size', () => {
@@ -151,6 +165,20 @@ test.describe('text size', () => {
     await page.goto('/styleguide')
     await expectTextSize(page, 'Xtra Large')
     await expect(textSizeButton(page, 'Xtra Large')).toBeChecked()
+  })
+
+  // public/text-size-init.js sets the size from the document, before first paint and before the app's code has run, so the page never draws at one size and jumps to another. With every
+  // script of the app refused (its stylesheet is let through), the page is empty, and still has the size an earlier control saved, in the size of its text.
+  test.describe('before the app has loaded', () => {
+    test.use({ expectedConsoleErrors: ['Failed to load resource'] })
+    test('the Large an earlier control saved is on the page as Xtra Large, with no app to put it there', async ({ page }) => {
+      await page.addInitScript(() => localStorage.setItem('fernledger-text-size', 'large'))
+      await page.route(/\/assets\/.*\.js/, (route) => route.abort())
+      await page.goto('/styleguide')
+      await expectTextSize(page, 'Xtra Large')
+      expect(await page.locator('#root').evaluate((root) => root.childElementCount)).toBe(0) // the app has not drawn: the size did not come from it
+      expect(await fontSize(page, 'body')).toBe(20)
+    })
   })
 
   test('a choice made on the four-size control wins over what an earlier control saved', async ({ page }) => {
@@ -256,30 +284,40 @@ test.describe('text size', () => {
     }
   })
 
-  // The bar has the four sizes in it while it has the room (a container query of 46rem, which is in the page's own rem, so it follows the text size), and the page's name keeps room
-  // beside them; when it has not, they are in the menu with the theme and Sign out. A window 785px wide shows both: Medium has the room, and Xtra Large does not.
-  test('the header keeps the page name its room: the controls are in the bar at Medium and in the menu at Xtra Large, in a window 785px wide', async ({ page, context }) => {
-    await signInAs(context, 'admin')
-    await page.setViewportSize({ width: 785, height: 800 })
-    await page.goto('/reports/budget-vs-actual')
-    await expect(siteHeader(page).getByRole('button', { name: 'Display settings and sign out' })).toBeHidden()
-    await expect(textSizeGroup(page)).toBeVisible()
-    await textSizeButton(page, 'Xtra Large').click()
-    await expectTextSize(page, 'Xtra Large')
-    await expect(textSizeGroup(page)).toBeHidden()
-    await expect(siteHeader(page).getByRole('button', { name: 'Display settings and sign out' })).toBeVisible()
-    const pageName = siteHeader(page).getByText('Budget vs actual')
-    await expect(pageName).toBeVisible()
-    const width = (await pageName.boundingBox())!.width
-    const full = await pageName.evaluate((el) => el.scrollWidth)
-    expect(width).toBeGreaterThanOrEqual(full - 1) // whole, not cut short
-    await page.setViewportSize({ width: 1100, height: 800 }) // and with the room, they are in the bar again
-    await expect(textSizeGroup(page)).toBeVisible()
-  })
+  // The bar has the four sizes in it while it is 56rem wide (a container query, in the page's own rem, so it follows the text size): that is the room the four sizes, the theme, Sign out and
+  // a long page's name need together. A narrower bar has them in the menu with the page's name given the room. The edge is 56 times the page's text size in pixels, so at Medium it is 896px and
+  // at Xtra Large 1120px; the window is a scrollbar's width wider than the bar it holds, and 20px either side of the edge clears that.
+  for (const size of ['Medium', 'Xtra Large'] as const) {
+    test(`the header keeps the page name whole: the controls are in the bar from 56rem wide and in the menu below it, at ${size}`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [SAVED_UNDER, SAVED_AS[size]])
+      const edge = 56 * PIXELS[size]
+      const menuButton = siteHeader(page).getByRole('button', { name: 'Display settings and sign out' })
+      const pageName = siteHeader(page).locator('[aria-current="page"]')
+      const expectNameWhole = async (what: string) => {
+        await expect(pageName).toHaveText('Income vs spending by month')
+        expect(await pageName.evaluate((el) => el.scrollWidth <= el.clientWidth), `${what}: the page's name is cut short`).toBe(true)
+      }
+
+      await page.setViewportSize({ width: edge + 20, height: 800 })
+      await page.goto('/reports/income-vs-spending')
+      await expectTextSize(page, size)
+      await settle(page)
+      await expect(textSizeGroup(page)).toBeVisible() // with the room, they are in the bar...
+      await expect(menuButton).toBeHidden()
+      await expectNameWhole('in the bar')
+
+      await page.setViewportSize({ width: edge - 20, height: 800 })
+      await settle(page)
+      await expect(textSizeGroup(page)).toBeHidden() // ...and without it, in the menu
+      await expect(menuButton).toBeVisible()
+      await expectNameWhole('in the menu')
+    })
+  }
 })
 
 // One size for all text: README, Accessibility. Every word that is not a heading is exactly the chosen size, in every part of the view: the sidebar and its sub-menus, the breadcrumb, the header's
-// buttons, tables and cards, buttons, fields, selects, date pickers, menus, tooltips, badges, captions and hints. A page that has a word in another size (a `text-[15px]`, a prose page set a size up)
+// buttons, tables and cards, buttons, fields, selects, date pickers, menus, tooltips, badges, captions and hints. A page that has a word in another size (an arbitrary pixel size, a prose page set a size up)
 // fails here, and scripts/one-text-size.test.mjs fails the class that would do it. Printed Reports keep their sizes in pt, and are not on screen.
 test.describe('one size for all text', () => {
   const pages = ['/', '/styleguide', '/settings', '/about-your-data', '/how-to-sign-in', '/reports', '/reports/spending', '/transactions', '/categories', '/rules', '/budgets', '/import', '/change-log']
@@ -1414,24 +1452,6 @@ test.describe('responsive table', () => {
     expect(a!.x + a!.width).toBeCloseTo(b!.x + b!.width, 1)
     const align = await wide.locator('xpath=ancestor::td').evaluate((el) => getComputedStyle(el).textAlign)
     expect(['right', 'end']).toContain(align)
-  })
-
-  // README, Accessibility: a table's text is exactly the chosen size, with no floor above it (it was 15px) and no scaling of its own, and the cards a phone gets are the same. The size is
-  // chosen on the control here; "one size for all text", above, has it chosen before the page loads.
-  test('table and card text is exactly the chosen size, at every text size', async ({ page }) => {
-    await page.setViewportSize({ width: 1024, height: 768 })
-    await page.goto('/styleguide')
-    for (const size of SIZE_NAMES) {
-      await chooseTextSize(page, size)
-      for (const selector of ['table', 'table th', 'table td']) expect(await fontSize(page, selector), `${size}: ${selector}`).toBe(PIXELS[size])
-    }
-    await page.setViewportSize({ width: 390, height: 844 })
-    for (const size of SIZE_NAMES) {
-      await chooseTextSize(page, size)
-      for (const selector of ['ul[aria-label="Sample transactions"] li', 'ul[aria-label="Sample transactions"] dt', 'ul[aria-label="Sample transactions"] dd']) {
-        expect(await fontSize(page, selector), `${size}: ${selector}`).toBe(PIXELS[size])
-      }
-    }
   })
 
   test('prints as a table even from a phone-width page', async ({ page }) => {

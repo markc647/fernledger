@@ -1,4 +1,8 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+/* Tailwind reads the app's own files for class names, and only those: not the tests, the scripts or the docs, which write class names as examples (a fixed size in a test would
+   otherwise be made into a rule in the page's stylesheet). */
+@source "../src";
+@source "../index.html";
 
 /* Geist, Latin and Latin Extended only. Latin Extended carries the macrons (ā, ē, ī, ō, ū) that Māori words need;
    the browser downloads it only when a page uses one. */
@@ -71,7 +75,7 @@
    components stock (no edit for the app, and one that arrives with a merge cannot bring a smaller size back) and the size in one place. A heading says `text-lg`, `text-xl` or
    `text-2xl`, which are 1.125, 1.25 and 1.5 times it, so a heading is larger than the text at every choice. A fixed size (`text-[15px]`, `text-[0.9rem]`) does not follow the
    choice, so there are none: scripts/one-text-size.test.mjs fails on one. Printed Reports have sizes of their own, in pt (`print:text-[12pt]`), and a chart's axis text is
-   proportional to the page's. The line height is `text-base`'s. */
+   proportional to the page's. The line height is `text-base`'s. `text-xs`, `text-sm` and `text-base` are deliberately all the same size: not a mistake to correct. */
 @theme {
   --text-xs: 1rem;
   --text-xs--line-height: calc(1.5 / 1);

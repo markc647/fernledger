@@ -16,17 +16,15 @@ export function TextSizeControl({
   size,
   onChange,
   layout = 'joined',
-  className,
 }: {
   size: TextSize
   onChange: (size: TextSize) => void
   layout?: 'joined' | 'grid'
-  className?: string
 }) {
   const group = useId() // the one in the header and the one in the phone's menu are never the same group
   const joined = layout === 'joined'
   return (
-    <fieldset className={cn('m-0 min-w-0 rounded-md border-0 p-0', joined ? 'flex w-fit items-center shadow-xs' : 'grid w-full grid-cols-2 gap-1', className)}>
+    <fieldset className={cn('m-0 min-w-0 rounded-md border-0 p-0', joined ? 'flex w-fit items-center shadow-xs' : 'grid w-full grid-cols-2 gap-1')}>
       <legend className="sr-only">Text size</legend>
       {TEXT_SIZES.map(({ value, label, name }) => (
         <label key={value} className={cn('relative flex', joined && 'flex-1 not-first-of-type:-ms-px')}>

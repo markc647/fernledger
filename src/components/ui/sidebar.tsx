@@ -15,9 +15,10 @@ import { cn } from '@/lib/utils'
 //   expects a server to read it back, which this app does not have.
 // - Whether it is a sheet is a media query read by the first render (src/lib/use-media-query.ts), not state set in an effect after it, so a phone never draws the desktop
 //   sidebar first. The CSS (`hidden md:block`) agrees with it, so the two cannot disagree for a frame.
-// - Rows are 32px tall with a mouse and 44px on a touch screen (README, Accessibility), and the rail is wide enough for its icons and their focus outline at either; text is
-//   `text-sm`, which src/index.css makes the page's own size (the sidebar is no smaller than the page); focus is an outline, which Windows high contrast keeps; the current page has a fill, a hairline, a bar and a heavier font, and takes the palette's highlight in
-//   Windows high contrast (src/index.css).
+// - Rows are 32px tall with a mouse and 44px on a touch screen (README, Accessibility), and the rail is wide enough for its icons and their focus outline at either.
+// - Text is `text-sm`, which src/index.css makes the page's own size: the sidebar is no smaller than the page.
+// - Focus is an outline, which Windows high contrast keeps. The current page has a fill, a hairline, a bar and a heavier font, and takes the palette's highlight in Windows high
+//   contrast (src/index.css).
 // - Tooltips are for the rail only: an open sidebar shows the words, so its rows carry no tooltip (and no aria-describedby for one).
 // - It is app chrome, so it is left out of a printout.
 

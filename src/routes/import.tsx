@@ -249,7 +249,7 @@ function LostTransactions({ rows, lost }: { rows: LostTransaction[]; lost: numbe
   const shown = rows.slice(0, SHOWN_LOST)
   return (
     <section aria-labelledby="lost-heading" className="max-w-xl space-y-1">
-      <h3 id="lost-heading" className="font-semibold">
+      <h3 id="lost-heading" className="text-lg font-semibold">
         Transactions to set again by hand
       </h3>
       <ul className="list-disc space-y-1 ps-6">
