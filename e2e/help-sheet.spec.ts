@@ -1,15 +1,15 @@
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import type { Role } from '../src/generated/api/auth'
+import { stubBalances } from './balances-helpers'
+import { NET_WORTH_PATH, showNetWorth, stubNetWorth } from './chart-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { helpButton as trigger, helpSheet as sheet } from './help-helpers'
-import { forgetKeptReportsAfterEach } from './report-helpers'
 import { chooseTextSize } from './shell-helpers'
 
 // The page's "?" help sheet (src/components/help-sheet.tsx, CODING_STANDARDS.md#ui): the text a reader reads once is in a sheet that opens from the right, beside the page's heading, so a
-// table or a form is not pushed down by it. The component is tested once, on the Transactions page; every page that uses it is then listed with a phrase of what it says, to check that the "?" is
-// there, that the sheet has the phrase and that the page has not kept it. The Reports' print button, which sits with "Show Report", is in reports.spec.ts.
-
-forgetKeptReportsAfterEach() // the Report pages below are opened as the Admin, which keeps what they show
+// table or a form is not pushed down by it. The component is tested once, on the Transactions page (its colours are scanned open in contrast.spec.ts); every page that uses it is then listed
+// with phrases of what it says, to check that the "?" is there, that the sheet has the phrases and that the page has not kept them. The Reports' print button, which sits with "Show Report",
+// is in reports.spec.ts.
 
 /** The heading and the "?" are one row: the button is level with the heading and after it. */
 async function expectBesideHeading(page: Page) {
@@ -32,6 +32,9 @@ test.describe('the sheet', () => {
     await page.goto('/transactions')
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
     await expectBesideHeading(page)
+    const button = (await trigger(page).boundingBox())!
+    expect(button.width, 'a touch target, as every button is').toBeGreaterThanOrEqual(44)
+    expect(button.height).toBeGreaterThanOrEqual(44)
     await expect(sheet(page)).toHaveCount(0)
 
     await trigger(page).click()
@@ -44,7 +47,8 @@ test.describe('the sheet', () => {
     expect(viewport.width - (box.x + box.width)).toBeGreaterThanOrEqual(0)
     expect(box.x, 'and it leaves the page showing on the left').toBeGreaterThan(0)
 
-    // Close is the last thing in the sheet, under the text, at its foot.
+    // The text is a region the dialog's title names, and Close is the last thing in the sheet, under the text, at its foot.
+    await expect(sheet(page).getByRole('region', { name: 'About this page' })).toBeVisible()
     const close = sheet(page).getByRole('button', { name: 'Close' })
     const closeBox = (await close.boundingBox())!
     const textBox = (await sheet(page).getByText('Search and filter every Transaction').boundingBox())!
@@ -73,13 +77,6 @@ test.describe('the sheet', () => {
     await expect(trigger(page)).toBeFocused()
   })
 
-  test('has no accessibility violations open', async ({ page }) => {
-    await page.goto('/transactions')
-    await trigger(page).click()
-    await expect(sheet(page)).toBeVisible()
-    await noAxeViolations(page, { within: '[role="dialog"]' }) // behind a modal, the rest of the page is hidden from a screen reader
-  })
-
   test('fits a phone at the largest text size: beside the heading, inside the window, with Close in view and the long text scrolling in the sheet', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 600 })
     await page.goto('/reports/loans') // the longest help: what it holds, what its form asks, and printing
@@ -101,69 +98,123 @@ test.describe('the sheet', () => {
     const scrolls = await sheet(page).locator('[tabindex="0"]').evaluate((el) => el.scrollHeight > el.clientHeight)
     expect(scrolls, 'the text scrolls inside the sheet').toBe(true)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'no sideways scrolling').toBe(true)
-    await noAxeViolations(page, { within: '[role="dialog"]' })
+    await noAxeViolations(page, { within: '[role="dialog"]' }) // behind a modal, the rest of the page is hidden from a screen reader
   })
 
-  test('is drawn with a border, and the "?" with an edge and a focus outline, in Windows high contrast, where a shadow and a fill are dropped', { tag: '@theme' }, async ({ page }) => {
+  test('draws the "?" with an outline when it has focus in Windows high contrast, and the sheet with a border, where a shadow and a fill are dropped', { tag: '@theme' }, async ({ page }) => {
     await page.emulateMedia({ forcedColors: 'active' })
     await page.goto('/transactions')
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
-    const edge = await trigger(page).evaluate((el) => getComputedStyle(el).borderTopWidth)
-    expect(parseFloat(edge), 'the "?" has an edge').toBeGreaterThanOrEqual(1)
     await trigger(page).focus()
     await page.keyboard.press('Shift+Tab')
     await page.keyboard.press('Tab') // keyboard focus, so :focus-visible
     await expect(trigger(page)).toBeFocused()
-    const outline = await trigger(page).evaluate((el) => getComputedStyle(el).outlineStyle)
-    expect(outline, 'focus is an outline').not.toBe('none')
+    // The browser's own focus ring is `auto`, so only the page's outline is a solid one of 2px or more.
+    const outline = await trigger(page).evaluate((el) => ({ style: getComputedStyle(el).outlineStyle, width: parseFloat(getComputedStyle(el).outlineWidth) }))
+    expect(outline.style, 'focus is the page\'s outline').toBe('solid')
+    expect(outline.width).toBeGreaterThanOrEqual(2)
     await trigger(page).click()
     await expect(sheet(page)).toBeVisible()
     const side = await sheet(page).evaluate((el) => getComputedStyle(el).borderInlineStartWidth)
     expect(parseFloat(side), "the sheet's edge is a border, not a shadow").toBeGreaterThanOrEqual(1)
   })
+
+  test('About your data keeps its first sentence in a printout, where the sheet is not', async ({ page }) => {
+    const sentence = 'This page explains how Fernledger handles the financial information in it'
+    await page.goto('/about-your-data')
+    await expect(page.getByRole('heading', { level: 1, name: 'About your data' })).toBeVisible()
+    await expect(page.getByText(sentence)).toBeHidden() // on the screen it is in the sheet
+    await page.emulateMedia({ media: 'print' })
+    await expect(page.getByText(sentence)).toBeVisible()
+    await expect(trigger(page)).toBeHidden() // and the "?" is not
+  })
 })
 
-// Every page that has text to read once: `says` is a phrase of it. `roles` is who looks, the Admin alone unless the page is the same for a Member.
-type Case = { path: string; heading: string; says: string; roles?: Role[] }
+// Every page that has text to read once. `says` is what the sheet has for everyone who has the page, `adminSays` and `memberSays` what it has for one of them (a Member has no form, and the
+// Reports page says one thing to each). `roles` is who looks: the Admin alone unless the page is the same for a Member. `ready` waits for what used to be drawn with the text, which comes
+// after the heading when it needs data (a card's table, a form of the Settings, a drawn chart), so that "the page does not say it" is not true only because the page was not yet drawn.
+type Case = {
+  path: string
+  heading: string | Record<Role, string>
+  says: string[]
+  adminSays?: string[]
+  memberSays?: string[]
+  roles?: Role[]
+  setup?: (page: Page) => Promise<void>
+  ready?: (page: Page, role: Role) => Promise<void>
+}
 const BOTH: Role[] = ['admin', 'member']
+const PRINTING = 'In the print window, choose' // every Report's sheet says how to print
+const form = (name: string) => async (page: Page, role: Role) => {
+  if (role === 'admin') await expect(page.getByRole('form', { name })).toBeVisible()
+  else await expect(page.getByRole('status').filter({ hasText: 'Only the Admin makes Reports.' })).toBeVisible()
+}
+const card = (page: Page, name: string): Locator => page.getByRole('region', { name })
+
 const PAGES: Case[] = [
-  { path: '/transactions', heading: 'Transactions', says: 'Search and filter every Transaction', roles: BOTH },
-  { path: '/uncategorised', heading: 'Uncategorised', says: 'Transactions with no Category' },
-  { path: '/import', heading: 'Import', says: 'Choose a bank export' },
-  { path: '/categories', heading: 'Categories', says: 'A Category groups Transactions by purpose', roles: BOTH },
-  { path: '/rules', heading: 'Rules', says: 'Rules are checked from the top of the list' },
-  { path: '/rules', heading: 'Rules', says: 'Fernledger goes through every Transaction you have' }, // the Apply box's words
-  { path: '/budgets', heading: 'Budgets', says: 'A Budget is the amount you plan to spend', roles: BOTH },
-  { path: '/settings', heading: 'Settings', says: 'A Cutover Date is the day an Account stops taking Transactions' },
-  { path: '/about-your-data', heading: 'About your data', says: 'This page explains how Fernledger handles', roles: BOTH },
-  { path: '/change-log', heading: 'Change Log', says: 'Everything the Admin has changed', roles: BOTH },
-  { path: '/reports', heading: 'Reports', says: 'Each Report you show is kept here' },
-  { path: '/reports', heading: 'Reports', says: 'The Reports the Admin has made', roles: ['member'] },
-  { path: '/', heading: 'Dashboard', says: 'Balance as of the last Transaction we hold' },
-  { path: '/', heading: 'Summary', says: 'Each month stands alone', roles: ['member'] },
-  { path: '/reports/net-worth', heading: 'Net worth', says: 'Only the money in these Accounts', roles: BOTH },
-  { path: '/reports/spending', heading: 'Spending by Category', says: 'What each Category spent in the dates you choose', roles: BOTH },
-  { path: '/reports/spending', heading: 'Spending by Category', says: 'A Report has one row for each Category with spending' }, // the form's note, which only the Admin has the form for
-  { path: '/reports/income-vs-spending', heading: 'Income vs spending by month', says: 'What came in and what was spent in each month', roles: BOTH },
-  { path: '/reports/loans', heading: 'Loans', says: 'How much each person owes, or is owed', roles: BOTH },
-  { path: '/reports/transactions', heading: 'Transaction listing', says: 'Every Transaction in the dates you choose', roles: BOTH },
-  { path: '/reports/balances', heading: 'Balances over time', says: "Each Account's balance at the end of every month", roles: BOTH },
-  { path: '/reports/budget-vs-actual', heading: 'Budget vs actual', says: "Each Category's Budget against what it spent", roles: BOTH },
-  { path: '/reports/budget-vs-actual', heading: 'Budget vs actual', says: 'In the print window, choose', roles: BOTH }, // how to print, in every Report's sheet
+  { path: '/transactions', heading: 'Transactions', says: ['Search and filter every Transaction'], adminSays: ['To print Transactions as a Report'], roles: BOTH, ready: (page) => expect(page.getByRole('button', { name: 'Search', exact: true })).toBeVisible() },
+  { path: '/uncategorised', heading: 'Uncategorised', says: ['Transactions with no Category'] },
+  { path: '/import', heading: 'Import', says: ['Choose a bank export'], ready: (page) => expect(page.getByLabel('Bank export file')).toBeVisible() },
+  { path: '/categories', heading: 'Categories', says: ['A Category groups Transactions by purpose'], adminSays: ["Add, rename or remove them to suit you"], memberSays: ['Only the Admin can change them.'], roles: BOTH },
+  {
+    path: '/rules',
+    heading: 'Rules',
+    says: ['Rules are checked from the top of the list', 'The Transactions you already have change only when you choose', 'Fernledger goes through every Transaction you have', 'Change the Rules first, then apply them once.'],
+    ready: (page) => expect(card(page, 'Apply the Rules to all Transactions')).toBeVisible(),
+  },
+  { path: '/budgets', heading: 'Budgets', says: ['A Budget is the amount you plan to spend'], adminSays: ['Choose Edit on a Category'], memberSays: ['Only the Admin can change them.'], roles: BOTH },
+  { path: '/settings', heading: 'Settings', says: ["The Admin is set when Fernledger is deployed", 'A Cutover Date is the day an Account stops taking Transactions'], ready: (page) => expect(page.getByLabel('App title')).toBeVisible() },
+  { path: '/about-your-data', heading: 'About your data', says: ['This page explains how Fernledger handles'], roles: BOTH },
+  { path: '/change-log', heading: 'Change Log', says: ['Everything the Admin has changed'], roles: BOTH },
+  { path: '/reports', heading: 'Reports', says: [], adminSays: ['Each Report you show is kept here'], memberSays: ['The Reports the Admin has made'], roles: BOTH },
+  {
+    // The cards' answers are stubbed, with a Budget, so that both have their tables when the cards' notes are looked for: the Budget card's note was shown only with a row to show.
+    path: '/',
+    heading: { admin: 'Dashboard', member: 'Summary' },
+    says: ['Balance as of the last Transaction we hold', 'Each month stands alone'],
+    roles: BOTH,
+    setup: async (page) => {
+      await stubBalances(page)
+      await page.route('**/api/budgets/vs-actual', (route) =>
+        route.fulfill({ json: { month: '2026-10', rows: [{ categoryId: 1, categoryName: 'Example Category', budgetCents: 10_000, spentCents: 5_000 }], otherCents: 0, uncategorisedCents: 0 } }),
+      )
+    },
+    ready: async (page) => {
+      await expect(card(page, 'Balances')).toContainText('Example everyday')
+      await expect(card(page, 'Budget vs actual')).toContainText('Example Category')
+    },
+  },
+  {
+    path: NET_WORTH_PATH,
+    heading: 'Net worth',
+    says: ['Only the money in these Accounts', 'After its last Transaction an Account keeps its last balance'],
+    roles: BOTH,
+    setup: async (page) => void (await stubNetWorth(page)),
+    ready: async (page) => void (await showNetWorth(page)), // drawn: what the sheet says used to be above the line
+  },
+  { path: '/reports/spending', heading: 'Spending by Category', says: ['What each Category spent in the dates you choose', PRINTING], adminSays: ['A Report has one row for each Category with spending'], roles: BOTH, ready: form('Spending by Category') },
+  { path: '/reports/income-vs-spending', heading: 'Income vs spending by month', says: ['What came in and what was spent in each month', PRINTING], adminSays: ['A Report has one row for each month in your dates'], roles: BOTH, ready: form('Income vs spending by month') },
+  { path: '/reports/loans', heading: 'Loans', says: ['How much each person owes, or is owed', PRINTING], adminSays: ['A Report has a section for each Loans Category you choose'], roles: BOTH, ready: form('Loans') },
+  { path: '/reports/transactions', heading: 'Transaction listing', says: ['Every Transaction in the dates you choose', PRINTING], adminSays: ['A Report lists up to'], roles: BOTH, ready: form('Transaction listing') },
+  { path: '/reports/balances', heading: 'Balances over time', says: ["Each Account's balance at the end of every month", PRINTING], adminSays: ['A Report has one balance for the end of each month'], roles: BOTH, ready: form('Balances over time') },
+  { path: '/reports/budget-vs-actual', heading: 'Budget vs actual', says: ["Each Category's Budget against what it spent", PRINTING], adminSays: ['A Budget is for a whole month, so a Report shows every month'], roles: BOTH, ready: form('Budget vs actual') },
 ]
 
 test.describe('every page with text to read once has the "?"', () => {
-  for (const { path, heading, says, roles = ['admin'] as Role[] } of PAGES) {
+  for (const { path, heading, says, adminSays = [], memberSays = [], roles = ['admin'] as Role[], setup, ready } of PAGES) {
     for (const role of roles) {
-      test(`${path} as the ${role}: the sheet says "${says.slice(0, 40)}" and the page does not`, async ({ page, context }) => {
+      const phrases = [...says, ...(role === 'admin' ? adminSays : memberSays)]
+      test(`${path} as the ${role}: the sheet says ${phrases.length} thing${phrases.length === 1 ? '' : 's'} and the page does not`, async ({ page, context }) => {
         await signInAs(context, role)
+        await setup?.(page)
         await page.goto(path)
-        await expect(page.getByRole('heading', { level: 1, name: heading, exact: true })).toBeVisible()
+        await expect(page.getByRole('heading', { level: 1, name: typeof heading === 'string' ? heading : heading[role], exact: true })).toBeVisible()
         await expect(trigger(page)).toBeVisible()
         await expectBesideHeading(page)
-        await expect(page.getByText(says)).toBeHidden() // nothing on the page itself, in whichever state it is
+        await ready?.(page, role) // drawn as it was when the page said these things
+        for (const phrase of phrases) await expect(page.getByText(phrase), phrase).toBeHidden()
         await trigger(page).click()
-        await expect(sheet(page).getByText(says)).toBeVisible()
+        for (const phrase of phrases) await expect(sheet(page).getByText(phrase), phrase).toBeVisible()
         await page.keyboard.press('Escape')
         await expect(trigger(page)).toBeFocused()
       })

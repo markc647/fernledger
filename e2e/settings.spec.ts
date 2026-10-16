@@ -87,6 +87,7 @@ test('the Admin is told what to set up, and how, for a feature that is switched 
 test('the Admin is not a Setting', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.goto('/settings')
+  await expect(page.getByLabel('App title')).toBeVisible() // the form is drawn, which is where the sentence used to be
   await expect(page.getByText("The Admin is set when Fernledger is deployed and can't be changed here.")).toBeHidden() // it is in the page's help sheet
   await expect(await openHelp(page)).toContainText("The Admin is set when Fernledger is deployed and can't be changed here.")
   await page.keyboard.press('Escape')

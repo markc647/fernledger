@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test'
 import { netWorth as netWorthRegion, NET_WORTH_PATH, pressShowNetWorth, SPENDING_REPORT_PATH, spendingDrawn, stubSpendingReport } from './chart-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
+import { openHelp } from './help-helpers'
 import { actionsButton, chooseAction, openActions } from './row-actions-helpers'
 import {
   chooseTextSize,
@@ -381,8 +382,7 @@ test.describe('one size for all text', () => {
     await page.keyboard.press('Escape')
 
     // The page's help sheet: its text and its Close button are the page's size, and its title and headings are larger.
-    await page.getByRole('button', { name: 'About this page' }).click()
-    await expect(page.getByRole('dialog', { name: 'About this page' }).getByRole('heading', { name: 'Printing' })).toBeVisible()
+    await expect((await openHelp(page)).getByRole('heading', { name: 'Printing' })).toBeVisible()
     await settle(page)
     await expectOneSize(page, 'Xtra Large', 30)
     await page.keyboard.press('Escape')
