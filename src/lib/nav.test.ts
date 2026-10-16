@@ -202,10 +202,11 @@ describe('trailFor', () => {
       expect(trailFor(parented, 'admin', '/reports/detail-old')).toMatchObject({ page: 'Reports', to: '/reports' })
     })
 
-    it('is not confused by a page that has its own row under the page it belongs to: Net worth is marked as itself, and a Report is still under Reports', () => {
+    it('is not confused by a page that has its own row under the page it belongs to: Net worth is marked as itself, and a Report is still within Reports', () => {
       expect(trailFor(routes, 'admin', '/reports/net-worth')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Net worth', to: '/reports/net-worth' }) // no parent: its group is not a link
       expect(trailFor(routes, 'member', '/reports/net-worth')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Net worth', to: '/reports/net-worth' })
-      expect(trailFor(routes, 'admin', '/reports/loans')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Loans', to: '/reports', parent: '/reports' })
+      expect(trailFor(routes, 'admin', '/reports/loans')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Loans', to: '/reports/loans', parent: '/reports' }) // the Admin's Report has its row, marked
+      expect(trailFor(routes, 'member', '/reports/loans')).toEqual({ group: 'Reports', groupId: 'reports', page: 'Loans', to: '/reports', parent: '/reports' }) // a Member's is a page of Reports
       expect(trailFor(routes, 'admin', '/reports/net-worthy')).toMatchObject({ page: 'Reports', to: '/reports' })
     })
 
