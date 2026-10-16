@@ -1,6 +1,6 @@
 import { addressId, searchDate } from './report-transactions'
 
-// What the Transactions page keeps in its address, so a search survives a reload and Back returns to it. The API's own
+// What the Transactions page keeps in its address (the Export page keeps its filters, `parseExportSearch`), so a search survives a reload and Back returns to it. The API's own
 // parameters are built from it by `apiQuery`. Everything here is forgiving: an address typed or edited by hand never breaks the page.
 
 /** The sorts the API accepts (worker/transaction-search.test.ts pins the two lists together). */
