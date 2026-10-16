@@ -15,12 +15,14 @@ import {
   expectOwnPage,
   expectPageNumbers,
   expectTitleBlock,
+  forgetKeptReportsAfterEach,
   GENERATED,
   importRows,
   money,
   NOW,
   restoreAppTitleAfterEach,
   setTitle,
+  signInToOpen,
   TITLE,
 } from './report-helpers'
 
@@ -108,6 +110,7 @@ async function seed(context: BrowserContext, baseURL: string, project: string): 
 }
 
 restoreAppTitleAfterEach() // the Settings are shared by every test and both themes (as reports.spec.ts does)
+forgetKeptReportsAfterEach() // so is the list of kept Reports, which the Admin showing a Report adds to
 
 const address = (id: number, from: string, to: string) => `/reports/balances?account=${id}&from=${from}&to=${to}`
 const article = (page: Page) => page.getByRole('article', { name: 'Balances over time' })
@@ -119,7 +122,7 @@ test.describe('opening the Report', () => {
   test('its page has a form of its own that shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto('/reports/balances')
     await expect(page.getByRole('heading', { level: 1, name: 'Balances over time' })).toBeVisible()
 
@@ -134,7 +137,7 @@ test.describe('opening the Report', () => {
   })
 
   test('its form asks for real dates, in order, and shows nothing until they are', async ({ page, context }) => {
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto('/reports/balances')
     const form = page.getByRole('form', { name: 'Balances over time' })
     const show = form.getByRole('button', { name: 'Show Report' })
@@ -153,7 +156,7 @@ test.describe('opening the Report', () => {
   })
 
   test('an address with only some dates, dates the wrong way round, or no such Account explains itself and offers the form', async ({ page, context }) => {
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     for (const [path, words, alert] of [
       ['/reports/balances?from=2010-01-01', 'Choose the first and last dates', false],
       ['/reports/balances?from=2010-12-31&to=2010-01-01', 'before the “From” date', true],
@@ -174,7 +177,7 @@ test.describe('opening the Report', () => {
   test('the Print button opens the print window', async ({ page, context, baseURL }, testInfo) => {
     const { start } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.addInitScript(() => {
       ;(window as unknown as { printed: number }).printed = 0
       window.print = () => void ((window as unknown as { printed: number }).printed += 1)
@@ -197,7 +200,7 @@ test.describe('on screen', () => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, "Mum's finances")
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(savingsId, `${start}-01-01`, `${end}-12-31`))
 
     const report = article(page)
@@ -252,7 +255,7 @@ test.describe('on screen', () => {
   test('lists the Balance Check differences in the dates, in the Balance Check’s own words, and shows both figures where the bank and the Transactions disagree', async ({ page, context, baseURL }, testInfo) => {
     const { start, cheque } = dataFor(testInfo.project.name)
     const { chequeId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(chequeId, `${start}-01-01`, `${start}-12-31`))
 
     const account = article(page).getByRole('region', { name: `${cheque.name} (${cheque.number})` })
@@ -278,7 +281,7 @@ test.describe('on screen', () => {
   test('explains a balance that is off the bank’s figure by a difference found after the dates, and never says the bank agrees', async ({ page, context, baseURL }, testInfo) => {
     const { start, cheque } = dataFor(testInfo.project.name)
     const { chequeId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     // The Balance Check that found the $3.00 begins on 31 January, the last of these dates, so it is not listed: the Transaction missing from it is dated after.
     await page.goto(address(chequeId, `${start}-01-01`, `${start}-01-31`))
 
@@ -295,7 +298,7 @@ test.describe('on screen', () => {
   test('starts a Report that begins part way through the history from the balance the day before, and ends it on the last date asked for', async ({ page, context, baseURL }, testInfo) => {
     const { start, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     // From 10 June of the third year to 20 February of the fourth. The last Transaction before it is May's, month 28.
     const from = `${start + 2}-06-10`
     const to = `${start + 3}-02-20`
@@ -317,7 +320,7 @@ test.describe('on screen', () => {
   test('stops at the last date held, however far the dates run, and says so', async ({ page, context, baseURL }, testInfo) => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(savingsId, `${start}-01-01`, `${end + 1}-06-30`))
 
     const account = article(page).getByRole('region', { name: `${savings.name} (${savings.number})` })
@@ -329,7 +332,7 @@ test.describe('on screen', () => {
   test('says what is held, and shows no table, for dates that begin after it or end before it', async ({ page, context, baseURL }, testInfo) => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
 
     await page.goto(address(savingsId, `${end + 1}-01-01`, `${end + 1}-12-31`))
     const account = article(page).getByRole('region', { name: `${savings.name} (${savings.number})` })
@@ -343,7 +346,7 @@ test.describe('on screen', () => {
   test('says why an Account with no bank balance it can count has no balances, and never gives it figures', async ({ page, context, baseURL }, testInfo) => {
     const { start, nothing } = dataFor(testInfo.project.name)
     const { nothingId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(nothingId, `${start}-01-01`, `${start}-12-31`))
 
     const account = article(page).getByRole('region', { name: `${nothing.name} (${nothing.number})` })
@@ -355,7 +358,7 @@ test.describe('on screen', () => {
   test('lists every Account on its own when none is chosen', async ({ page, context, baseURL }, testInfo) => {
     const { start, end, savings, cheque, nothing } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(`/reports/balances?from=${start}-01-01&to=${end}-12-31`)
 
     const report = article(page)
@@ -367,11 +370,11 @@ test.describe('on screen', () => {
     await expect(page).toHaveTitle(`Fernledger – Balances over time – All Accounts – ${dateText(`${start}-01-01`)} to ${dateText(`${end}-12-31`)}`)
   })
 
-  for (const role of ['member', 'admin'] as const) {
-    test(`has no WCAG 2.2 AA violations as a ${role}, with a difference to list`, async ({ page, context, baseURL }, testInfo) => {
+  for (const role of ['admin', 'member'] as const) {
+    test(`has no WCAG 2.2 AA violations as ${role === 'admin' ? 'the Admin' : 'a Member, who opens the Report the Admin kept'}, with a difference to list`, async ({ page, context, baseURL }, testInfo) => {
       const { start, end, cheque } = dataFor(testInfo.project.name)
       await seed(context, baseURL!, testInfo.project.name)
-      await signInAs(context, role)
+      await signInToOpen(context, baseURL, role, { report: 'balances', from: `${start}-01-01`, to: `${end}-12-31` })
       await page.goto(`/reports/balances?from=${start}-01-01&to=${end}-12-31`)
       await expect(article(page).getByRole('table').first()).toBeVisible()
       await expect(article(page).getByRole('region', { name: `${cheque.name} (${cheque.number})` }).getByText('Balance differs from bank by $3.00')).toBeVisible()
@@ -383,7 +386,7 @@ test.describe('on screen', () => {
   test('is cards on a phone, with the same facts', async ({ page, context, baseURL }, testInfo) => {
     const { start, end } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(address(savingsId, `${start}-01-01`, `${end}-12-31`))
     const cards = article(page).getByRole('list', { name: /^Balances in / }).getByRole('listitem')
@@ -399,7 +402,7 @@ test.describe('on screen', () => {
     test('there is no Report: an Account that was not read never looks like one with no balances', async ({ page, context, baseURL }, testInfo) => {
       const { start, end } = dataFor(testInfo.project.name)
       const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
-      await signInAs(context, 'member')
+      await signInAs(context, 'admin')
       await page.route('**/api/reports/balances?**', (route) => route.fulfill({ status: 500, json: { error: 'Something went wrong' } }))
       await page.goto(address(savingsId, `${start}-01-01`, `${end}-12-31`))
       await expect(page.getByRole('alert')).toContainText("couldn't load this Report", { timeout: 20_000 })
@@ -417,7 +420,7 @@ test.describe('printed', () => {
     const { start, end } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, TITLE)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await context.clock.setFixedTime(NOW)
     await page.emulateMedia({ media: 'print' })
     await page.goto(address(savingsId, `${start}-01-01`, `${end}-12-31`))
@@ -530,7 +533,7 @@ test.describe('around the Report', () => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, "Mum's finances")
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(savingsId, `${start}-01-01`, `${end}-12-31`))
     await expect(page).toHaveTitle(`Mum's finances – Balances over time – ${savings.name} – ${dateText(`${start}-01-01`)} to ${dateText(`${end}-12-31`)}`)
     await page.getByRole('link', { name: 'Back to Reports' }).click()
@@ -538,12 +541,12 @@ test.describe('around the Report', () => {
     await expect(page).toHaveTitle("Mum's finances")
   })
 
-  test('shows every Member the same Report as the Admin', async ({ page, context, baseURL }, testInfo) => {
+  test('shows a Member the same Report as the Admin, once the Admin has kept it', async ({ page, context, baseURL }, testInfo) => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     const seen: string[] = []
-    for (const role of ['member', 'admin'] as const) {
-      await signInAs(context, role)
+    for (const role of ['admin', 'member'] as const) {
+      await signInToOpen(context, baseURL, role, { report: 'balances', accountId: savingsId, from: `${start}-01-01`, to: `${end}-12-31` })
       await page.goto(address(savingsId, `${start}-01-01`, `${end}-12-31`))
       await expect(article(page).getByRole('region', { name: `${savings.name} (${savings.number})` }).getByRole('table')).toBeVisible()
       seen.push((await article(page).getByRole('table').locator('tbody tr td:nth-child(2)').allTextContents()).join())

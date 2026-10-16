@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { forgetKeptReports } from './report-helpers'
 
 // The light and dark projects share one local database, so each has Accounts of its own, and the Transactions are dated
 // in 2011 and use amounts no other spec does, so nothing from another spec can pair with them (Transfers pair on date and amount).
@@ -344,7 +345,7 @@ test('the Import screen says how many Transfers it matched with other Accounts',
   await noAxeViolations(page)
 })
 
-test('the Report names a Transfer instead of a Category, and the CSV link carries the Transfers filter', async ({ page, context, baseURL }, testInfo) => {
+test('the Report names a Transfer instead of a Category, and the CSV link carries the Transfers filter', async ({ page, context, request, baseURL }, testInfo) => {
   const { everyday, savings } = accountsFor(testInfo.project.name)
   const stamp = `${testInfo.project.name}${Date.now()}`
   const out = `TFR TO SAVINGS ${stamp}`
@@ -355,13 +356,16 @@ test('the Report names a Transfer instead of a Category, and the CSV link carrie
   ])
   const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
   const everydayId = accounts.find((a) => a.name === everyday.name)!.id
-  await signInAs(context, 'member')
+  // Only the Admin makes a Report: showing it keeps it on the Reports page's list, which is shared by every spec, so it is taken off again.
+  await signInAs(context, 'admin')
 
   await page.goto(`/reports/transactions?account=${everydayId}&from=2011-01-01&to=2011-12-31`)
   const listing = page.getByRole('article', { name: 'Transaction listing' })
   await expect(listing.getByRole('row').filter({ hasText: out })).toContainText('Transfer')
   await expect(listing.getByRole('row').filter({ hasText: out })).not.toContainText('Uncategorised')
   await expect(listing.getByRole('row').filter({ hasText: friend })).toContainText('Uncategorised')
+  await expect.poll(async () => (await (await context.request.get('/api/kept-reports')).json()).length).toBeGreaterThan(0) // the page has asked for it to be kept
+  await forgetKeptReports(request, baseURL)
 
   await page.goto(`/transactions?q=${stamp}&transfers=exclude`)
   await expect(dataRows(page)).toHaveCount(1)

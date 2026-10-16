@@ -14,6 +14,7 @@ import {
   expectOwnPage,
   expectPageNumbers,
   expectTitleBlock,
+  forgetKeptReportsAfterEach,
   GENERATED,
   importRows,
   money,
@@ -22,6 +23,7 @@ import {
   overrideCategories,
   restoreAppTitleAfterEach,
   setTitle,
+  signInToOpen,
   spent,
   squash,
   TITLE,
@@ -146,6 +148,7 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
 }
 
 restoreAppTitleAfterEach() // the Settings are shared by every test and both themes (as reports.spec.ts does)
+forgetKeptReportsAfterEach() // so is the list of kept Reports, which the Admin showing a Report adds to
 
 const address = (from: string, to: string, extra = '') => `/reports/budget-vs-actual?from=${from}&to=${to}${extra}`
 const article = (page: Page) => page.getByRole('article', { name: 'Budget vs actual' })
@@ -162,7 +165,7 @@ test.describe('opening the Report', () => {
   test('its page has a form of its own that asks for dates and no Account and shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto('/reports/budget-vs-actual')
     await expect(page.getByRole('heading', { level: 1, name: 'Budget vs actual' })).toBeVisible()
 
@@ -178,7 +181,7 @@ test.describe('opening the Report', () => {
   })
 
   test('its form asks for real dates, in order, touching no more than 24 months, and shows nothing until they are', async ({ page, context }) => {
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto('/reports/budget-vs-actual')
     const form = page.getByRole('form', { name: 'Budget vs actual' })
     const show = form.getByRole('button', { name: 'Show Report' })
@@ -202,7 +205,7 @@ test.describe('opening the Report', () => {
   })
 
   test('an address with only some dates, dates the wrong way round, or too many months explains itself and offers the form', async ({ page, context }) => {
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     for (const [path, words, alert] of [
       ['/reports/budget-vs-actual?from=2001-01-01', 'Choose the first and last dates', false],
       ['/reports/budget-vs-actual?from=2001-12-31&to=2001-01-01', 'before the “From” date', true],
@@ -219,7 +222,7 @@ test.describe('opening the Report', () => {
   test('the Print button opens the print window', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.addInitScript(() => {
       ;(window as unknown as { printed: number }).printed = 0
       window.print = () => void ((window as unknown as { printed: number }).printed += 1)
@@ -242,7 +245,7 @@ test.describe('on screen', () => {
     const { year, everyday, savings } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, "Mum's finances")
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(`${year}-01-01`, `${year}-06-30`))
 
     const report = article(page)
@@ -271,7 +274,7 @@ test.describe('on screen', () => {
   test('adds the months that have ended together: each Category’s Budgets and spending while it had a Budget, the months it was over, and what is outside Budgets', async ({ page, context, baseURL }, testInfo) => {
     const { year, names } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(`${year}-01-01`, `${year}-06-30`))
 
     const section = together(page)
@@ -299,7 +302,7 @@ test.describe('on screen', () => {
     test(`compares ${FULL_MONTHS[Number(m) - 1]} with the Budget it had that month, as the Summary does`, async ({ page, context, baseURL }, testInfo) => {
       const { year, names } = dataFor(testInfo.project.name)
       await seed(context, baseURL!, testInfo.project.name)
-      await signInAs(context, 'member')
+      await signInAs(context, 'admin')
       await page.goto(address(`${year}-01-01`, `${year}-06-30`))
 
       const figures = MONTH_FIGURES[m]!
@@ -338,7 +341,7 @@ test.describe('on screen', () => {
   test('uses the Budget in effect each month: a Category is in the months from the month its Budget is effective, and not in those before it or after it ends', async ({ page, context, baseURL }, testInfo) => {
     const { year, names } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(`${year}-01-01`, `${year}-06-30`))
 
     await expect(month(page, monthText(`${year}-06`)).getByRole('table')).toBeVisible() // the Report has arrived
@@ -357,7 +360,7 @@ test.describe('on screen', () => {
   test('leaves out a Transfer, wages and money lent: April’s $300.00 Transfer and February’s $2,000.00 wages and $500.00 loan are not in any figure', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(`${year}-02-01`, `${year}-04-30`))
 
     await expect(month(page, monthText(`${year}-02`)).locator('dl')).toContainText(`Total spending${money(95_000)}`)
@@ -368,7 +371,7 @@ test.describe('on screen', () => {
   test('says once at the top that no Category has a Budget, and not for each month, when none has', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(`${year}-07-01`, `${year}-08-31`)) // both Budgets have ended
 
     const report = article(page)
@@ -388,7 +391,7 @@ test.describe('on screen', () => {
   test('says a month in a Report that has Budgets elsewhere has no Budget, in one sentence with whether anything was spent', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(`${year}-06-01`, `${year}-08-31`)) // June has Budgets; July and August have none and nothing spent
 
     await expect(article(page).getByText('No Category has a Budget in these months')).toHaveCount(0) // June has
@@ -399,7 +402,7 @@ test.describe('on screen', () => {
   test('is one month for dates in one month: no months together, only that month', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(`${year}-03-01`, `${year}-03-31`))
 
     await expect(article(page).getByRole('heading', { level: 2 })).toHaveText(['About these figures', monthText(`${year}-03`)])
@@ -409,7 +412,7 @@ test.describe('on screen', () => {
   test('shows whole months for dates that are part of a month, and says which dates were chosen and which are covered', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(`${year}-01-15`, `${year}-03-10`))
 
     const report = article(page)
@@ -426,7 +429,7 @@ test.describe('on screen', () => {
   test('takes no Account: an Account in the address changes nothing', async ({ page, context, baseURL }, testInfo) => {
     const { year, everyday } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(`${year}-01-01`, `${year}-01-31`, '&account=999999999'))
 
     await expect(article(page).locator('header')).toContainText('Account: All Accounts: ')
@@ -453,7 +456,7 @@ test.describe('on screen', () => {
         spentCents,
       }
     })
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.route('**/api/reports/budget-vs-actual?**', (route) =>
       route.fulfill({
         json: {
@@ -489,7 +492,7 @@ test.describe('on screen', () => {
       return `${Math.floor(index / 12)}-${two((index % 12) + 1)}`
     }
     const [before, next] = [around(-1), around(1)]
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
 
     await page.goto(address(`${before}-01`, `${next}-28`))
     const section = together(page)
@@ -514,11 +517,11 @@ test.describe('on screen', () => {
     await expect(month(page, 'January 2100')).toContainText('This month has not begun, so nothing has been spent yet. It is not in the months together.')
   })
 
-  for (const role of ['member', 'admin'] as const) {
-    test(`has no WCAG 2.2 AA violations as a ${role}, with every kind of row and status on it`, async ({ page, context, baseURL }, testInfo) => {
+  for (const role of ['admin', 'member'] as const) {
+    test(`has no WCAG 2.2 AA violations as ${role === 'admin' ? 'the Admin' : 'a Member, who opens the Report the Admin kept'}, with every kind of row and status on it`, async ({ page, context, baseURL }, testInfo) => {
       const { year } = dataFor(testInfo.project.name)
       await seed(context, baseURL!, testInfo.project.name)
-      await signInAs(context, role)
+      await signInToOpen(context, baseURL, role, { report: 'budget-vs-actual', from: `${year}-01-15`, to: `${year}-06-30` })
       await page.goto(address(`${year}-01-15`, `${year}-06-30`)) // part of a month, so the notice is on it too
       await expect(article(page).getByRole('table').first()).toBeVisible()
       await expect(article(page).getByText('Over Budget').first()).toBeVisible()
@@ -533,7 +536,7 @@ test.describe('on screen', () => {
   test('is cards on a phone, with the same facts', async ({ page, context, baseURL }, testInfo) => {
     const { year, names } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(address(`${year}-01-01`, `${year}-06-30`))
     const cards = month(page, monthText(`${year}-01`)).getByRole('list', { name: /^Budget and spending in January/ }).getByRole('listitem')
@@ -550,7 +553,7 @@ test.describe('on screen', () => {
 
     test('there is no Report: figures that were not read never look like a month with nothing in it', async ({ page, context }, testInfo) => {
       const { year } = dataFor(testInfo.project.name)
-      await signInAs(context, 'member')
+      await signInAs(context, 'admin')
       await page.route('**/api/reports/budget-vs-actual?**', (route) => route.fulfill({ status: 500, json: { error: 'Something went wrong' } }))
       await page.goto(address(`${year}-01-01`, `${year}-06-30`))
       await expect(page.getByRole('alert')).toContainText("couldn't load this Report", { timeout: 20_000 })
@@ -568,7 +571,7 @@ test.describe('printed', () => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, TITLE)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await context.clock.setFixedTime(NOW)
     await page.emulateMedia({ media: 'print' })
     await page.goto(address(`${year}-01-01`, `${year}-06-30`))
@@ -696,7 +699,7 @@ test.describe('around the Report', () => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, "Mum's finances")
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(`${year}-01-01`, `${year}-06-30`))
     await expect(page).toHaveTitle(`Mum's finances – Budget vs actual – All Accounts – ${dateText(`${year}-01-01`)} to ${dateText(`${year}-06-30`)}`)
     await page.getByRole('link', { name: 'Back to Reports' }).click()
@@ -704,12 +707,12 @@ test.describe('around the Report', () => {
     await expect(page).toHaveTitle("Mum's finances")
   })
 
-  test('shows every Member the same Report as the Admin', async ({ page, context, baseURL }, testInfo) => {
+  test('shows a Member the same Report as the Admin, once the Admin has kept it', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     const seen: string[] = []
-    for (const role of ['member', 'admin'] as const) {
-      await signInAs(context, role)
+    for (const role of ['admin', 'member'] as const) {
+      await signInToOpen(context, baseURL, role, { report: 'budget-vs-actual', from: `${year}-01-01`, to: `${year}-06-30` })
       await page.goto(address(`${year}-01-01`, `${year}-06-30`))
       await expect(together(page).getByRole('table')).toBeVisible()
       seen.push((await article(page).getByRole('table').locator('tbody tr').allTextContents()).join('|'))

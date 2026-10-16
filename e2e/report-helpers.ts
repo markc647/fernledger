@@ -1,17 +1,25 @@
 import type { APIRequestContext, BrowserContext, Locator, Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, signInAs, test } from './fixtures'
 import { textOf, type PdfPage } from './pdf-text'
 
 // What every Report's browser tests share (reports.spec.ts, report-balances.spec.ts, report-spending.spec.ts): the title block and print layout of ticket 18's Report
 // frame, which a Report must keep (README: Reports). A spec checks what is its own (the figures, its Accounts, its dates) and calls these for the rest, so a change to
 // the frame is one change here and a new Report adds no fourth copy.
+//
+// Only the Admin makes Reports (UI ticket U7): a spec shows a Report as the Admin, whose showing it keeps it on the Reports page's list, and a Member opens only a Report that is
+// kept. The list is shared by every spec and both themes, so a spec that shows Reports forgets them when each test ends (`forgetKeptReportsAfterEach`).
 
 export const MEMBER_EMAIL = 'dev.member@example.com'
+/** The Admin the tests sign in as (`signInAs(context, 'admin')`): ADMIN_EMAIL in playwright.config.ts. */
+export const ADMIN_EMAIL = 'admin@example.com'
 /** An app title with a quote, an apostrophe and a backslash in it: the Admin can type any of them. */
 export const TITLE = `Mum's "family" finances \\ Report`
 /** 3:42 pm in NZ, the moment a test fixes the browser's clock at (`context.clock.setFixedTime`). */
 export const NOW = new Date('2026-10-08T02:42:00.000Z')
-export const GENERATED = `Generated Thu 8 Oct 2026 at 3:42 pm by ${MEMBER_EMAIL}`
+/** What a Report says of who made it and when, for a Report the Admin shows. */
+export const GENERATED = `Generated Thu 8 Oct 2026 at 3:42 pm by ${ADMIN_EMAIL}`
+/** The same for a Report a Member opens. */
+export const GENERATED_FOR_MEMBER = `Generated Thu 8 Oct 2026 at 3:42 pm by ${MEMBER_EMAIL}`
 
 // Dates and money, written the way the app writes them.
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -48,6 +56,35 @@ export function restoreAppTitleAfterEach() {
 }
 export const setTitle = async (request: APIRequestContext, baseURL: string | undefined, app_title: string) =>
   expect((await request.patch('/api/settings', { headers: { Origin: baseURL! }, data: { app_title } })).ok()).toBe(true)
+
+/**
+ * Takes every kept Report off the Reports page's list (the Admin's API, as `request` is: no cookie is the localhost Admin). The list is shared by every spec and both themes, and a
+ * spec that shows a Report as the Admin has added to it.
+ */
+export async function forgetKeptReports(request: APIRequestContext, baseURL: string | undefined) {
+  const listed = await request.get('/api/kept-reports')
+  expect(listed.ok()).toBe(true)
+  for (const { id } of (await listed.json()) as { id: number }[]) expect((await request.delete(`/api/kept-reports/${id}`, { headers: { Origin: baseURL! }, data: {} })).ok()).toBe(true)
+}
+
+/** Call once at the top of a spec that shows Reports as the Admin: the list is left as it was found (empty) when each test ends, so no other spec sees what this one kept. */
+export function forgetKeptReportsAfterEach() {
+  test.afterEach(async ({ request, baseURL }) => forgetKeptReports(request, baseURL))
+}
+
+/** What the Admin's showing a Report keeps (worker/kept-reports.ts): the Report by its address's last part, the Account or Category by ID, and the dates. */
+export type KeptChoices = { report: string; accountId?: number; categoryId?: number; from?: string; to: string }
+
+/**
+ * Keeps a Report as the Admin showing it would have, and signs in as `role`: for a test that opens a Report as a Member, who can open only one that is kept. The Report is then on the
+ * Reports page's list until the test ends (`forgetKeptReportsAfterEach`).
+ */
+export async function signInToOpen(context: BrowserContext, baseURL: string | undefined, role: 'admin' | 'member', choices: KeptChoices) {
+  await signInAs(context, 'admin')
+  const kept = await context.request.post('/api/kept-reports', { headers: { Origin: baseURL! }, data: choices })
+  expect(kept.ok()).toBe(true)
+  await signInAs(context, role)
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Seeding: Categories, Imports and Overrides through the API, as the Admin makes them. The caller has signed in as the Admin (`signInAs(context, 'admin')`).
