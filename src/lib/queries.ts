@@ -127,7 +127,7 @@ export const reportBalancesQuery = (accounts: { id: number; name: string; accoun
 
 /**
  * The spending-by-Category Report's data: what each Category spent over the range, for the one Account or, with none, all of them, as the
- * Dashboard's chart is told it (worker/spending-by-category.ts). One request either way. Read once and kept, as the other Reports are: a Report is a snapshot.
+ * `GET /api/charts/spending` gives it (worker/spending-by-category.ts), and the Report's bar chart is drawn from it. One request either way. Read once and kept, as the other Reports are: a Report is a snapshot.
  */
 export const reportSpendingQuery = (accountId: number | undefined, from: string, to: string) =>
   queryOptions({
@@ -287,6 +287,7 @@ export const balancesQuery = queryOptions({
 /** Balance Check warnings (where the bank and the Transactions disagree), and each Account's latest check. */
 export const balanceChecksQuery = queryOptions({
   queryKey: ['balance-checks'],
+  retry: 1, // the Balances table waits for it: one more try, and then it says so, not three tries and a long wait
   queryFn: async () => {
     const res = await api['balance-checks'].$get()
     if (!res.ok) throw new HttpError(res.status)

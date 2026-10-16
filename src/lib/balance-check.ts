@@ -27,7 +27,7 @@ export const differenceDirection = (differenceCents: number) =>
     ? "The bank's balance is higher than the Transactions add up to. Some money in may be missing, or some money out counted twice."
     : "The bank's balance is lower than the Transactions add up to. Some money out may be missing, or some money in counted twice."
 
-/** How an Account stands with the bank, for the Checked column of Balances: its Balance Checks agree (`ok`), one disagrees (`check`, with every span that does, newest first), or it has not been checked (`none`). */
+/** How an Account stands with the bank, for the Checked column of Balances: its Balance Checks agree (`ok`), one disagrees (`check`, with every span that does, newest first), or its newest bank balance has not been checked (`none`). */
 export type Checked<Difference> = { kind: 'ok' } | { kind: 'check'; differences: Difference[] } | { kind: 'none' }
 
 /**

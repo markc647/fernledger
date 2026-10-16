@@ -23,13 +23,12 @@ export const DEFAULT_NET_WORTH_RANGE: typeof WORKER_DEFAULT_NET_WORTH_RANGE = '2
 export const CHART_BARS = 12
 
 /**
- * What to draw and what to say about the Spending Categories the Worker gave (it has put the biggest first): the table lists every one, a fully refunded Category as $0.00,
- * so money that went out and came back is still in view; the bars are the ones that spent something, at most `CHART_BARS`; and `leftOut` is how many of those the chart
- * left out. The Worker gives a Category only when it has Transactions in the dates, so none is listed that has nothing in it.
+ * What to draw of the Spending Categories the Worker gave (it has put the biggest first): the bars are the ones that spent something, at most `CHART_BARS`, and `leftOut` is how many
+ * of those the chart left out. The Report's table lists every Category, a fully refunded one as $0.00, so money that went out and came back is still in view whether or not it has a bar.
  */
 export function barsOf(categories: SpendingCategory[]) {
   const spent = categories.filter((category) => category.cents > 0)
-  return { rows: categories, bars: spent.slice(0, CHART_BARS), leftOut: Math.max(0, spent.length - CHART_BARS) }
+  return { bars: spent.slice(0, CHART_BARS), leftOut: Math.max(0, spent.length - CHART_BARS) }
 }
 
 /** `name` cut to `maxChars` characters with an ellipsis, for an axis with room for only so many. The whole name is in the tooltip and the table. */

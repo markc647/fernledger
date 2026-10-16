@@ -63,11 +63,11 @@ type CurrentBalanceRow = {
   asOfDate: string | null
   cutoverDate: string | null
   latestStatus: BalanceStatus | null
-  /** When Akahu Sync last reached the Account (an instant in UTC), or null: Sync is not built yet, so every Account has null. */
+  /** When Akahu Sync last reached the Account (an instant in UTC), or null: Sync is not built yet, so every Account has null. It is read, and not sent: the answer says only whether it was in the last 24 hours. */
   akahuSyncedAt: string | null
 }
 /** One Account of GET /api/balances. */
-export type CurrentBalance = CurrentBalanceRow & { syncedInLast24Hours: boolean }
+export type CurrentBalance = Omit<CurrentBalanceRow, 'akahuSyncedAt'> & { syncedInLast24Hours: boolean }
 type HistoryPoint = { date: string; balanceCents: number }
 
 export const balances = new Hono<AppEnv>()
@@ -76,7 +76,7 @@ export const balances = new Hono<AppEnv>()
     const { results } = await c.env.DB.prepare(CURRENT).all<CurrentBalanceRow>()
     // Whether that was in the last 24 hours is worked out here, on the Worker's clock (akahu-sync.ts), for the Sync column of the Summary and the Dashboard.
     const now = new Date()
-    const accounts: CurrentBalance[] = results.map((account) => ({ ...account, syncedInLast24Hours: syncedInLast24Hours(account.akahuSyncedAt, now) }))
+    const accounts: CurrentBalance[] = results.map(({ akahuSyncedAt, ...account }) => ({ ...account, syncedInLast24Hours: syncedInLast24Hours(akahuSyncedAt, now) }))
     return c.json({ accounts })
   })
   // One Account's balance at the end of each day it had Transactions, oldest first, worked backwards from its latest

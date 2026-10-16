@@ -36,6 +36,14 @@ describe('syncedInLast24Hours', () => {
     }
   })
 
+  it('is false for an instant that does not exist, which a date parser would roll on to a real one', () => {
+    for (const impossible of ['2026-02-30T00:00:00Z', '2026-02-29T00:00:00.000Z', '2026-04-31T01:00:00Z', '2026-10-15T24:00:00Z']) {
+      expect(syncedInLast24Hours(impossible, now), impossible).toBe(false)
+    }
+    // The same day and time, written with a day that exists, is a Sync.
+    expect(syncedInLast24Hours('2026-10-15T12:00:00Z', now)).toBe(true)
+  })
+
   it('reads an instant with or without milliseconds', () => {
     expect(syncedInLast24Hours('2026-10-15T01:00:00Z', now)).toBe(true) // exactly 24 hours
     expect(syncedInLast24Hours('2026-10-15T00:59:59Z', now)).toBe(false)

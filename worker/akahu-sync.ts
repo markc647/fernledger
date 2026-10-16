@@ -9,9 +9,15 @@ export const SYNCED_WITHIN_MS = 24 * 60 * 60 * 1000
 // not taken to be a Sync: a column that holds something else fails to Not Synced, which can be seen, rather than to Synced.
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
 
-/** Whether `syncedAt` is no more than 24 hours before `now` (exactly 24 hours counts) and not after it. Null, a value that is not an instant, and a time in the future are not. */
+/**
+ * Whether `syncedAt` is no more than 24 hours before `now` (exactly 24 hours counts) and not after it. Null, a value that is not an instant, an instant that does not exist (the 30th of
+ * February, which `Date.parse` rolls on to March), and a time in the future are not.
+ */
 export function syncedInLast24Hours(syncedAt: string | null, now: Date): boolean {
   if (syncedAt === null || !INSTANT.test(syncedAt)) return false
-  const age = now.getTime() - Date.parse(syncedAt)
-  return age >= 0 && age <= SYNCED_WITHIN_MS // an invalid date (month 13) is NaN, and so is neither
+  const at = Date.parse(syncedAt)
+  // An invalid date (month 13) is NaN; one that rolled over writes itself out as a different date and time, so only an instant that exists passes.
+  if (Number.isNaN(at) || new Date(at).toISOString().slice(0, 19) !== syncedAt.slice(0, 19)) return false
+  const age = now.getTime() - at
+  return age >= 0 && age <= SYNCED_WITHIN_MS
 }

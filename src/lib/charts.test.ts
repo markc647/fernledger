@@ -5,10 +5,9 @@ const category = (cents: number, id = cents) => ({ categoryId: id, name: `Catego
 
 describe('barsOf', () => {
   it('draws the Categories that spent something, in the order given, and leaves out one that took in more than it paid out', () => {
-    const { rows, bars, leftOut } = barsOf([category(5000), category(300), category(0, 3), category(-2500, 4)])
+    const { bars, leftOut } = barsOf([category(5000), category(300), category(0, 3), category(-2500, 4)])
 
-    expect(bars.map((c) => c.cents)).toEqual([5000, 300])
-    expect(rows.map((c) => c.cents)).toEqual([5000, 300, 0, -2500]) // every Category the Worker gave is a row, a fully refunded one as $0.00, with no bar
+    expect(bars.map((c) => c.cents)).toEqual([5000, 300]) // a fully refunded Category ($0.00) and one that took back more are in the Report's table and have no bar
     expect(leftOut).toBe(0)
   })
 
@@ -23,8 +22,8 @@ describe('barsOf', () => {
   })
 
   it('draws nothing for no spending', () => {
-    expect(barsOf([])).toEqual({ rows: [], bars: [], leftOut: 0 })
-    expect(barsOf([category(-100)])).toEqual({ rows: [category(-100)], bars: [], leftOut: 0 }) // it is listed, and there is nothing to draw
+    expect(barsOf([])).toEqual({ bars: [], leftOut: 0 })
+    expect(barsOf([category(-100)])).toEqual({ bars: [], leftOut: 0 }) // there is nothing to draw
   })
 })
 

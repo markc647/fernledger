@@ -1,6 +1,5 @@
 import { lazy, Suspense, type ComponentProps, type ReactNode } from 'react'
 import { ErrorBoundary } from '@/components/error-boundary'
-import { spanClass } from '@/components/summary/dashboard-card'
 
 const NetWorthChart = lazy(() => import('./net-worth-chart').then((module) => ({ default: module.NetWorthChart })))
 const SpendingChart = lazy(() => import('./spending-chart').then((module) => ({ default: module.SpendingChart })))
@@ -12,8 +11,8 @@ const SpendingChart = lazy(() => import('./spending-chart').then((module) => ({ 
  */
 function WhereItLoads({ what, children }: { what: string; children: ReactNode }) {
   return (
-    <ErrorBoundary fallback={<p role="alert" className={spanClass('full')}>The {what} couldn't be loaded. Reload the page to try again.</p>}>
-      <Suspense fallback={<p className={spanClass('full')}>Loading the {what}…</p>}>{children}</Suspense>
+    <ErrorBoundary fallback={<p role="alert">The {what} couldn't be loaded. Reload the page to try again.</p>}>
+      <Suspense fallback={<p>Loading the {what}…</p>}>{children}</Suspense>
     </ErrorBoundary>
   )
 }

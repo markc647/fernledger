@@ -148,7 +148,7 @@ test.describe('the Balances table: Checked and Sync', () => {
     await expect(row(balances, 'Example savings')).toContainText('$50,000.00') // its balance is as it was
 
     const none = cell(balances, 'Example card', 'Checked')
-    await expect(none).toHaveAccessibleName('No Balance Check')
+    await expect(none).toHaveAccessibleName('Not checked')
     await expect(none.locator('svg')).toHaveCount(0)
     await expect(none.getByText('—')).toBeVisible()
     // The old card of warnings, and the line above the table, are gone.

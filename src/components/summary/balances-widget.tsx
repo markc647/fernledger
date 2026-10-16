@@ -9,7 +9,7 @@ import { featuresQuery } from '@/lib/features'
 import { formatDate } from '@/lib/format'
 import { balanceChecksQuery, balancesQuery } from '@/lib/queries'
 
-/** The Account's Balance Checks against the bank, in words and an icon (never the colour alone): OK, Check with how far it is out, or a dash for an Account nothing has been compared for. */
+/** The Account's Balance Checks against the bank, in words and an icon (never the colour alone): OK, Check with how far it is out, or a dash ("Not checked" to a screen reader) where its newest bank balance has not been checked. */
 function CheckedCell({ checked }: { checked: Checked<{ differenceCents: number }> }) {
   if (checked.kind === 'ok') {
     return (
@@ -33,17 +33,14 @@ function CheckedCell({ checked }: { checked: Checked<{ differenceCents: number }
   return (
     <>
       <span aria-hidden="true">—</span>
-      <span className="sr-only">No Balance Check</span>
+      <span className="sr-only">Not checked</span>
     </>
   )
 }
 
 /**
- * Summary card: the balance of each Account, from its latest bank balance, and for each Account:
- * - Checked: OK when its Balance Checks agree with the bank, Check (and by how much) when one disagrees, a dash when none has been made;
- * - Sync: Synced when Akahu Sync reached it in the last 24 hours, Not Synced when not. The column is there only when Akahu Sync is set up (ADR 0008): until it is, no Account has been synced
- *   and the column would say so of every one.
- * The table waits for the Balance Checks and for whether Sync is set up as well as for the balances, so the columns do not appear after the rows. If the checks cannot be read the
+ * Summary card: the balance of each Account, from its latest bank balance, with a Checked column and, only when Akahu Sync is set up (ADR 0008), a Sync column (README, What it does,
+ * says what each shows). The table waits for the Balance Checks and for whether Sync is set up as well as for the balances, so the columns do not appear after the rows. If the checks cannot be read the
  * Checked column is left out and the card says so: a dash would claim that nothing was compared.
  */
 export function BalancesWidget() {
@@ -81,7 +78,7 @@ export function BalancesWidget() {
     <DashboardCard
       headingId="balances-heading"
       title="Balances"
-      description={accounts && 'Balance as of the last Transaction we hold, worked out from the bank balance in your Imports. It is not a live figure from the bank.'}
+      description={accounts && 'Balance as of the last Transaction we hold, worked out from the bank balance in your Imports. It is not a live figure from the bank. The Balances over time Report lists each difference and when it began.'}
     >
       {error ? (
         <p role="alert">Fernledger couldn't load the balances. Reload the page to try again.</p>

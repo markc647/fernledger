@@ -53,7 +53,7 @@ When Akahu first reported a Transaction to Sync, shown in its details as "First 
 _Avoid_: Created time, import time
 
 **Sync**:
-The daily pull of new Transactions and Pending Transactions from Akahu. An Account is **Synced** when Sync reached it in the last 24 hours, and **Not Synced** when not; the Balances table has a Sync column saying which, but only once Akahu Sync is set up (ADR 0008). The time is `accounts.akahu_synced_at`, which Sync will write.
+The daily pull of new Transactions and Pending Transactions from Akahu. An Account is **Synced** when Sync reached it in the last 24 hours (the time is `accounts.akahu_synced_at`, which Sync will write), and **Not Synced** when not; README [What it does](README.md#what-it-does) says where that shows.
 _Avoid_: Refresh, update, fetch
 
 **Account Link**:
@@ -61,7 +61,7 @@ The association between an Account and its account in Akahu; it can break when a
 _Avoid_: Mapping, connection
 
 **Balance Check**:
-The comparison, after each Import, between an Account's balance as reported by the bank and the balance calculated from its Transactions; it will also run after each Sync. The Balances table of the Summary and the Dashboard has a Checked column for it: OK where an Account's Balance Checks agree with the bank, Check (and by how much) where one disagrees, and a dash where none has been made.
+The comparison, after each Import, between an Account's balance as reported by the bank and the balance calculated from its Transactions; it will also run after each Sync. README [What it does](README.md#what-it-does) says where the result shows.
 The rules are in README [Correct](README.md#correct).
 _Avoid_: Reconciliation, audit
 
@@ -153,7 +153,7 @@ _Avoid_: Report
 ## Viewing
 
 **Summary**:
-The page every Member lands on, except the Admin, who lands on the Dashboard: a grid of cards with the balance of each Account (and whether it agrees with the bank, and whether Sync reached it), Budget vs actual for this month and the newest Transactions. The Dashboard has the same cards.
+The page every Member lands on, except the Admin, who lands on the Dashboard: a grid of cards with the balance of each Account (and whether it agrees with the bank, and, once Akahu Sync is set up, whether Sync reached it), Budget vs actual for this month and the newest Transactions. The Dashboard has the same cards.
 _Avoid_: Home page
 
 **Dashboard**:

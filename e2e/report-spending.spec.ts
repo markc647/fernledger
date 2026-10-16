@@ -452,7 +452,7 @@ test.describe('the chart', () => {
     expect(table.y).toBeGreaterThanOrEqual(picture.y + picture.height - 1)
     await expect(page.getByText('The chart shows the biggest')).toHaveCount(0) // all four fit
 
-    // One request for the Report, and that is all: the chart is drawn from its answer (the Dashboard's chart read of its own, which is gone).
+    // One request for the Report, and that is all: the chart is drawn from its answer (the Summary's old chart read its own, which is gone).
     await page.waitForLoadState('networkidle')
     const reads = asked.filter((address) => address.startsWith('/api/reports') || address.startsWith('/api/charts'))
     expect(reads).toHaveLength(1)
