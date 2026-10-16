@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import { isoDate } from './account-fields'
+import { syncedInLast24Hours } from './akahu-sync'
 import type { AppEnv } from './app-env'
 import { UNCOUNTED_SQL } from './balance-check'
 import type { BalanceStatus } from './balance-rules'
@@ -19,7 +20,7 @@ export const CURRENT = `
          b.bank_cents + COALESCE((SELECT SUM(t.amount_cents) FROM transactions t
                                   WHERE t.account_id = a.id AND t.date >= b.as_of_date AND (t.date > b.as_of_date OR t.id > b.through_transaction_id)), 0) AS balanceCents,
          MAX(b.as_of_date, COALESCE((SELECT MAX(t.date) FROM transactions t WHERE t.account_id = a.id AND t.date >= b.as_of_date), b.as_of_date)) AS asOfDate,
-         a.cutover_date AS cutoverDate,
+         a.cutover_date AS cutoverDate, a.akahu_synced_at AS akahuSyncedAt,
          (SELECT status FROM balance_checks WHERE account_id = a.id ORDER BY as_of_date DESC LIMIT 1) AS latestStatus
   FROM accounts a LEFT JOIN balance_checks b ON b.id = (${ANCHOR_ID})
   ORDER BY a.name COLLATE NOCASE, a.id`
@@ -55,21 +56,28 @@ const rangeQuery = z.object({ from: z.optional(isoDate), to: z.optional(isoDate)
 
 // `latestStatus` is the status of the Account's newest bank balance, counted or not, so the Summary can say why there is
 // no balance (the newest is after the Cutover Date, or the file ended before it) rather than that there is none.
-type CurrentBalance = {
+type CurrentBalanceRow = {
   accountId: number
   accountName: string
   balanceCents: number | null
   asOfDate: string | null
   cutoverDate: string | null
   latestStatus: BalanceStatus | null
+  /** When Akahu Sync last reached the Account (an instant in UTC), or null: Sync is not built yet, so every Account has null. It is read, and not sent: the answer says only whether it was in the last 24 hours. */
+  akahuSyncedAt: string | null
 }
+/** One Account of GET /api/balances. */
+export type CurrentBalance = Omit<CurrentBalanceRow, 'akahuSyncedAt'> & { syncedInLast24Hours: boolean }
 type HistoryPoint = { date: string; balanceCents: number }
 
 export const balances = new Hono<AppEnv>()
   // Every Account's balance now. Null for an Account with no bank balance yet to start from (`latestStatus` says why).
   .get('/', async (c) => {
-    const { results } = await c.env.DB.prepare(CURRENT).all<CurrentBalance>()
-    return c.json({ accounts: results })
+    const { results } = await c.env.DB.prepare(CURRENT).all<CurrentBalanceRow>()
+    // Whether that was in the last 24 hours is worked out here, on the Worker's clock (akahu-sync.ts), for the Sync column of the Summary and the Dashboard.
+    const now = new Date()
+    const accounts: CurrentBalance[] = results.map(({ akahuSyncedAt, ...account }) => ({ ...account, syncedInLast24Hours: syncedInLast24Hours(akahuSyncedAt, now) }))
+    return c.json({ accounts })
   })
   // One Account's balance at the end of each day it had Transactions, oldest first, worked backwards from its latest
   // bank balance. `from` and `to` (inclusive) limit the points returned, not the sum.

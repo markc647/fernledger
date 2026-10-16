@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 // - the colours go on the container as CSS variables (`--color-<key>`) through React's `style`, which sets them on the element's style object, not in a <style>
 //   element as stock shadcn does. The Content Security Policy allows inline styles today (worker/security-headers.ts), so this is not needed to run; it keeps a
 //   chart working should a stricter `style-src` ever drop 'unsafe-inline';
-// - text is sized in rem, so the Small / Medium / Large control scales an axis as it scales the page, and never below the body size a table's text keeps;
+// - text is the page's size, as a table's is (`text-base`: the root, which the text size control sets), so an axis scales with the page and is never below the body size;
 // - nothing moves: a chart draws itself at once (each chart sets `isAnimationActive={false}`, and `ChartTooltip` does by default), which reduced-motion readers need
 //   and the accessibility checks measure.
 // A chart is a picture of numbers that are also written out: put it in a `ChartFigure`, which names it for a screen reader in a sentence, and write the
@@ -30,7 +30,7 @@ function ChartContainer({ config, className, style, children, ...props }: Omit<R
         data-slot="chart"
         style={{ ...colours, ...style }}
         className={cn(
-          'flex w-full justify-center text-[0.9375rem]',
+          'flex w-full justify-center text-base',
           // Axis text: the muted colour that passes AA on the page and cards in both themes (scripts/theme-contrast.test.mjs).
           '[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground',
           '[&_.recharts-cartesian-grid_line]:stroke-border',

@@ -490,7 +490,7 @@ describe('the same figures as everywhere else that totals Spending and Income (A
     if (range.from === '2026-09-01') expect(r.totals.incomeCents).toBeGreaterThan(0) // the history does have something to compare
   })
 
-  // The Dashboard's chart and the Spending by Category Report total Spending with the same functions, so for the same dates the Spending this Report totals is
+  // `/api/charts/spending` and the Spending by Category Report total Spending with the same functions, so for the same dates the Spending this Report totals is
   // theirs. This holds it to them: a Report that kept its own idea of Spending would fail.
   it.each(ranges)('gives, for %s, the Spending total /api/charts/spending and the Spending by Category Report give', async (_what, range) => {
     await history()

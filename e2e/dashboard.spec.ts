@@ -1,12 +1,11 @@
 import type { BrowserContext, Page } from '@playwright/test'
-import { drawn, LINE, NET_WORTH, netWorth, pressShowNetWorth, pressShowSpending, SPENT, showNetWorth, showSpending, spending, spyNetWorth, spySpending, stubNetWorth, stubSpending } from './chart-helpers'
-import { dateField, pickDate } from './date-helpers'
+import { drawn, LINE, NET_WORTH, NET_WORTH_PATH, netWorth, pressShowNetWorth, showNetWorth, spyApi, spyNetWorth, stubNetWorth } from './chart-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
-import { transactionId } from './report-helpers'
-import { chooseTextSize, mainNav, navLink, openNavGroup } from './shell-helpers'
+import { chooseTextSize, mainNav, navGroup, navLink, openNavGroup } from './shell-helpers'
 
-// The Dashboard (where the Admin lands) and the Summary (where a Member does), which are a grid of cards with the charts on two of them, against the real Worker. The light and dark projects share one local
+// The Dashboard (where the Admin lands) and the Summary (where a Member does), which are the same grid of cards, and the Net worth page, which has net worth over time, against the
+// real Worker. (The spending chart is on the Spending by Category Report: e2e/report-spending.spec.ts.) The light and dark projects share one local
 // database, so each has two Accounts of its own, and its own months of Transactions (2004, which no other spec uses: June for light and September for dark,
 // with the month before each for a second point on the net worth line), so the amounts below are the only ones in the dates a test asks about and nothing from
 // another spec can pair with them as a Transfer. They are older than every other spec's Transactions on purpose: the Summary's newest five and the first
@@ -23,32 +22,25 @@ const dataFor = (project: string) => {
     earlier: dark ? '2004-08' : '2004-05',
     everyday: { number: `99-9999-9999999-${dark ? '66' : '64'}`, name: `Dashboard everyday ${project}` },
     savings: { number: `99-9999-9999999-${dark ? '67' : '65'}`, name: `Dashboard savings ${project}` },
-    words: dark ? 'September 2004' : 'June 2004',
-    from: `${month}-01`,
     to: `${month}-30`,
   }
 }
 
-type Row = { day: string; id: string; payee: string; amountCents: number; category?: string; earlier?: boolean }
+type Row = { day: string; id: string; payee: string; amountCents: number; earlier?: boolean }
 
-/** Spending $90.00 on Fuel, $45.50 on Groceries (a $10.00 refund comes off) and $25.00 that is Uncategorised, in a month that also holds a Transfer, a wage and a loan. */
+/** A month of Transactions in the first Account (with one in the month before: a second month for the net worth line), and the other half of a Transfer in the second. */
 const rowsFor = (project: string): { everyday: Row[]; savings: Row[] } => ({
   everyday: [
-    { day: '28', id: 'E1', payee: 'DASHBOARD EARLIER', amountCents: -100, earlier: true }, // the month before: a second month for the net worth line
-    { day: '03', id: 'G1', payee: 'DASHBOARD GROCERY A', amountCents: -4000, category: 'Groceries' },
-    { day: '10', id: 'G2', payee: 'DASHBOARD GROCERY B', amountCents: -1550, category: 'Groceries' },
-    { day: '11', id: 'G3', payee: 'DASHBOARD GROCERY REFUND', amountCents: 1000, category: 'Groceries' },
-    { day: '05', id: 'F1', payee: 'DASHBOARD FUEL', amountCents: -9000, category: 'Fuel' },
-    { day: '12', id: 'M1', payee: 'DASHBOARD MYSTERY', amountCents: -2500 },
-    { day: '15', id: 'T1', payee: 'DASHBOARD MOVED OUT', amountCents: -50_000 }, // $500.00 to the savings Account: a Transfer, not spending
-    { day: '20', id: 'W1', payee: 'DASHBOARD PAY', amountCents: 200_000, category: 'Wages and salary' }, // Income
-    { day: '22', id: 'L1', payee: 'DASHBOARD LENT', amountCents: -30_000, category: 'Loans' }, // money lent: neither
+    { day: '28', id: 'E1', payee: 'DASHBOARD EARLIER', amountCents: -100, earlier: true },
+    { day: '03', id: 'G1', payee: 'DASHBOARD GROCERY A', amountCents: -4000 },
+    { day: '05', id: 'F1', payee: 'DASHBOARD FUEL', amountCents: -9000 },
+    { day: '15', id: 'T1', payee: 'DASHBOARD MOVED OUT', amountCents: -50_000 }, // $500.00 to the savings Account: a Transfer
+    { day: '20', id: 'W1', payee: 'DASHBOARD PAY', amountCents: 200_000 },
   ].map((row) => ({ ...row, id: `${project}${row.id}` })),
   savings: [{ day: '15', id: `${project}T2`, payee: 'DASHBOARD MOVED IN', amountCents: 50_000 }],
 })
-const SPENDING = { fuel: '$90.00', groceries: '$45.50', uncategorised: '$25.00', total: '$160.50' }
 
-/** Imports the month's Transactions (a repeat is recognised and adds none) and gives them their Categories. */
+/** Imports the month's Transactions (a repeat is recognised and adds none), so there are two Accounts with balances. */
 async function seed(context: BrowserContext, baseURL: string, project: string) {
   await signInAs(context, 'admin')
   const headers = { Origin: baseURL }
@@ -66,16 +58,12 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
     })
     expect(imported.ok()).toBe(true)
   }
-  const categories = (await (await context.request.get('/api/categories')).json()) as { id: number; name: string }[]
-  for (const row of rows.everyday) {
-    if (!row.category) continue
-    const override = await context.request.put(`/api/transactions/${await transactionId(context, row.payee, `&from=${month}-01&to=${to}`)}/override`, { headers, data: { categoryId: categories.find((c) => c.name === row.category)!.id } })
-    expect(override.ok()).toBe(true)
-  }
 }
 
 const dollars = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
+
+/** The cards of the Summary and the Dashboard, in the order they are read. */
+const CARDS = ['Balances', 'Budget vs actual', 'Recent transactions']
 
 /**
  * A card's live region: the one status element it has, on the page before anything happens and empty, so that what it comes to say is a change a screen reader
@@ -113,13 +101,6 @@ const watchLiveRegions = (page: Page) =>
   })
 const liveHistory = (page: Page, heading: string) => page.evaluate((id) => (window as unknown as Live).__live[id], heading)
 
-/** Shows spending between two dates, as the person who chooses dates does. */
-async function chooseDates(page: Page, from: string, to: string) {
-  await spending(page).getByLabel('Period', { exact: true }).selectOption('custom')
-  await pickDate(spending(page), 'From', from)
-  await pickDate(spending(page), 'To', to)
-}
-
 /**
  * Answers the requests the page makes for `pattern` only when the test lets each one go (`release`), oldest first. A test of what a section shows while it waits for its
  * answer must not race a timer in the stub: an answer that comes by itself after 400 or 700 ms is gone when a slow run reaches the assertion about the wait (a full run
@@ -150,200 +131,143 @@ const balancesNow = async (context: BrowserContext) => {
 
 test.describe.configure({ mode: 'serial' })
 
-test('the Admin lands on the Dashboard: their tools, every card of the Summary, with the two charts waiting to be asked for', async ({ page, context, baseURL }, testInfo) => {
-  await seed(context, baseURL!, testInfo.project.name)
-  const netWorthRequests = await spyNetWorth(page) // what the page asks for, answered
-  await stubSpending(page, SPENT, 16_050)
-  const spendingRequests = spySpending(page)
+// ---------------------------------------------------------------------------------------------------------------
+// The Dashboard and the Summary
+
+test('the Admin lands on the Dashboard: the Summary\'s cards and nothing else, with no signed-in line, no tools card and no chart', async ({ page, context }) => {
+  await signInAs(context, 'admin')
   await page.setViewportSize({ width: 1024, height: 900 })
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
-  await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
 
   // The navigation calls the Admin's landing page the Dashboard, and has no separate Summary.
   const nav = mainNav(page)
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('aria-current', 'page')
   await expect(nav.getByRole('link', { name: 'Summary' })).toHaveCount(0)
 
-  // The Admin's tools lead to the Admin's pages.
-  const tools = page.getByRole('region', { name: 'Your tools' })
-  for (const [name, href] of [['Import', '/import'], ['Uncategorised', '/uncategorised'], ['Rules', '/rules'], ['Categories', '/categories'], ['Budgets', '/budgets'], ['Settings', '/settings']]) {
-    await expect(tools.getByRole('link', { name: new RegExp(`^${name}`) })).toHaveAttribute('href', href!)
-  }
+  // Who is signed in is in the sidebar's footer, and the page does not say it again. The Admin's tools are in the sidebar, so the page has no card of them.
+  await expect(page.locator('[data-slot="sidebar-footer"]')).toContainText('admin@example.com')
+  await expect(page.getByRole('main')).not.toContainText('Signed in as')
+  await expect(page.getByRole('region', { name: 'Your tools' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Balance checks' })).toHaveCount(0) // a Balance Check warning is in the Balances table
+  await expect(netWorth(page)).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Spending by Category' })).toHaveCount(0)
 
-  // Neither chart is asked for: each reads every Transaction it covers, so the Dashboard says so and offers a button, with the choice of range or period beside it.
-  const region = netWorth(page)
-  const show = region.getByRole('button', { name: 'Show net worth' })
-  await expect(show).toBeVisible()
-  const { live, element } = await liveRegion(region)
-  await expect(region).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
-  await expect(region.getByLabel('Range', { exact: true })).toHaveValue('24-months')
-  await expect(region.locator('svg.recharts-surface')).toHaveCount(0)
-  const showSpend = spending(page).getByRole('button', { name: 'Show spending' })
-  await expect(showSpend).toBeVisible()
-  await expect(spending(page)).toContainText('Spending is not read until you ask for it, because working it out reads every Transaction in the period you choose.')
-  await expect(spending(page).getByRole('combobox', { name: 'Period' })).toHaveValue('this-month')
-  await expect(spending(page).locator('svg.recharts-surface')).toHaveCount(0)
-  expect(netWorthRequests, 'net worth is asked for only when the button is pressed').toEqual([])
-  expect(spendingRequests, 'spending is asked for only when the button is pressed').toEqual([])
-
-  // The tools come first, then the Summary's cards in the Summary's order, each a region named by its heading (an h2 under the page's h1).
-  const headings = [
-    'Your tools',
-    'Balance checks',
-    'Balances',
-    'Budget vs actual',
-    'Recent transactions',
-    'Net worth over time',
-    'Spending by Category',
-  ]
-  expect(await page.getByRole('main').getByRole('heading', { level: 2 }).allInnerTexts()).toEqual(headings)
-  await noAxeViolations(page) // the page with the buttons
-
-  // Pressing one asks once, tells the reader what is happening, and draws the last 24 months, the range that was chosen beside the button.
-  await show.click()
-  await expect(region.getByRole('heading', { level: 2, name: 'Net worth over time' })).toBeFocused() // focus moves to the heading, as the button is gone
-  await drawn(region, LINE)
-  await expect(live).toHaveText('Net worth has loaded.') // the words arrive in the region that was already there, which is what is announced
-  expect(await element.evaluate((el) => el.isConnected)).toBe(true)
-  await expect(region.getByRole('button', { name: 'Show net worth' })).toHaveCount(0)
-  await expect(region.getByLabel('Range', { exact: true })).toHaveValue('24-months') // the choice stays, to change
-  expect(netWorthRequests).toHaveLength(1)
-  expect(new URL(netWorthRequests[0]!).searchParams.get('range')).toBe('24-months')
-  expect(spendingRequests, 'net worth asks for no spending').toEqual([])
-
-  // The same for spending: it is drawn from the data, with its bars, and focus stays at its heading.
-  await showSpend.click()
-  await expect(spending(page).getByRole('heading', { level: 2, name: 'Spending by Category' })).toBeFocused()
-  await drawn(spending(page), /^Bar chart of the 3 Categories that spent the most in October 2026/)
-  await expect(spending(page).locator('.recharts-bar-rectangle')).toHaveCount(3)
-  await expect(spending(page).getByRole('button', { name: 'Show spending' })).toHaveCount(0)
-  await expect(spending(page).getByRole('combobox', { name: 'Period' })).toHaveValue('this-month')
-  expect(spendingRequests).toHaveLength(1)
-  expect(new URL(spendingRequests[0]!).searchParams.get('period')).toBe('this-month')
-  expect(await page.getByRole('main').getByRole('heading', { level: 2 }).allInnerTexts()).toEqual(headings)
-  await noAxeViolations(page) // and with both charts
-  expect(netWorthRequests).toHaveLength(1) // nothing asked again
-  expect(spendingRequests).toHaveLength(1)
+  // The Summary's cards in the Summary's order, each a region named by its heading (an h2 under the page's h1).
+  await expect(page.getByRole('main').getByRole('heading', { level: 2 })).toHaveText(CARDS)
+  await noAxeViolations(page)
 })
 
-test('the buttons that show net worth and spending are touch targets with a clear name, work from the keyboard, and show a busy cue while they load', async ({ page, context }) => {
-  await signInAs(context, 'admin')
-  const net = await holdAnswers(page, /\/api\/charts\/net-worth/, () => NET_WORTH) // the cue is there for as long as the test looks at it
-  await stubSpending(page, SPENT, 16_050)
-  await page.goto('/')
-  const region = netWorth(page)
-  const show = region.getByRole('button', { name: 'Show net worth', exact: true })
-  await expect(show).toBeVisible()
-  expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44)
-  await chooseTextSize(page, 'Large')
-  const { live, element } = await liveRegion(region)
-
-  await show.focus()
-  await page.keyboard.press('Enter')
-
-  await expect(region).toHaveAttribute('aria-busy', 'true')
-  await expect(live).toHaveText(LOADING_NET_WORTH) // said in the region that was already on the page...
-  await expect(region.locator('p:not([role="status"])', { hasText: LOADING_NET_WORTH })).toBeVisible() // ...and shown on the screen
-  await expect(region.getByRole('heading', { level: 2 })).toBeFocused() // not lost to the page when the button goes
-  await net.release()
-  await drawn(region, LINE)
-  await expect(live).toHaveText('Net worth has loaded.') // the same region, its words changed
-  expect(await element.evaluate((el) => el.isConnected)).toBe(true)
-  await expect(region).toHaveAttribute('aria-busy', 'false')
-  expect(net.asked).toHaveLength(1)
-
-  // Spending's button is the same: 44px or more, named, and pressed with the keyboard, after which focus stays at the card's heading.
-  const showSpend = spending(page).getByRole('button', { name: 'Show spending', exact: true })
-  expect((await showSpend.boundingBox())?.height).toBeGreaterThanOrEqual(44)
-  await showSpend.focus()
-  await page.keyboard.press('Enter')
-  await expect(spending(page).getByRole('heading', { level: 2 })).toBeFocused()
-  await drawn(spending(page), /^Bar chart of the 3 Categories/)
-  await expect(spending(page)).toHaveAttribute('aria-busy', 'false')
-})
-
-test('a Member lands on the Summary, which has the charts and the same cards as the Dashboard, and sees none of the Admin\'s tools', async ({ page, context }) => {
+test('a Member lands on the Summary, which is the same cards as the Dashboard, with no signed-in line and none of the Admin\'s tools', async ({ page, context }) => {
   await signInAs(context, 'member')
-  const netWorthRequests = await spyNetWorth(page)
-  await stubSpending(page, SPENT, 16_050)
-  const spendingRequests = spySpending(page)
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Summary' })).toBeVisible()
   const nav = mainNav(page)
   await expect(nav.getByRole('link', { name: 'Summary' })).toHaveAttribute('aria-current', 'page')
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toHaveCount(0)
+  await expect(page.locator('[data-slot="sidebar-footer"]')).toContainText('Member (read-only)')
+  await expect(page.getByRole('main')).not.toContainText('Signed in as')
   await expect(page.getByRole('region', { name: 'Your tools' })).toHaveCount(0)
-
-  // Both charts wait to be asked for, as they do for the Admin: the Summary is where everyone lands, and they read every Transaction they cover (ADR 0004).
-  await expect(netWorth(page).getByRole('button', { name: 'Show net worth' })).toBeVisible()
-  await expect(spending(page).getByRole('button', { name: 'Show spending' })).toBeVisible()
-  // The Dashboard's cards less its tools, in the same order.
-  expect(await page.getByRole('main').getByRole('heading', { level: 2 }).allInnerTexts()).toEqual([
-    'Balance checks',
-    'Balances',
-    'Budget vs actual',
-    'Recent transactions',
-    'Net worth over time',
-    'Spending by Category',
-  ])
-  expect(netWorthRequests).toEqual([])
-  expect(spendingRequests).toEqual([])
-  await showNetWorth(page)
-  await showSpending(page, /^Bar chart of the 3 Categories/)
-  expect(netWorthRequests).toHaveLength(1)
-  expect(spendingRequests).toHaveLength(1)
+  await expect(netWorth(page)).toHaveCount(0)
+  // The Dashboard's cards, in the same order.
+  await expect(page.getByRole('main').getByRole('heading', { level: 2 })).toHaveText(CARDS)
 })
 
-// The grid's columns come from the room the page has, in rem, so they follow the text size: the same window has fewer at Large than at Medium. Small, Medium and Large are 14px, 16px and 20px.
-test('the cards are a single column on a phone, and share rows when the page has the room, whatever the text size', async ({ page, context }) => {
+// ADR 0004: the landing page's reads must not go up. The charts read every Transaction, so they wait on pages of their own (the Net worth page, the Spending by Category Report) and the
+// landing page asks for what it needs to say how the Accounts stand, this month against Budget and the newest Transactions, and for none of the charts' figures.
+test('the Dashboard and the Summary ask the Worker for their three cards and no chart, and the Net worth page asks for nothing until it is asked', async ({ page, context }) => {
+  for (const role of ['admin', 'member'] as const) {
+    await signInAs(context, role)
+    const asked = spyApi(page)
+    await page.goto('/')
+    await expect(page.getByRole('main').getByRole('heading', { level: 2 })).toHaveText(CARDS)
+    for (const name of CARDS) await expect(page.getByRole('region', { name }).getByText('Loading…')).toHaveCount(0) // each card has its answer
+    await page.waitForLoadState('networkidle')
+    const paths = [...new Set(asked.map((address) => address.split('?')[0]!))].sort()
+    expect(paths.filter((path) => path.startsWith('/api/charts')), `${role}: no chart is asked for`).toEqual([])
+    expect(paths.filter((path) => path.startsWith('/api/reports')), `${role}: no Report is asked for`).toEqual([])
+    // The one new request is whether Akahu Sync is set up, for the Balances table's Sync column: it is the Worker's secrets and reads no D1 row (ADR 0004).
+    expect(paths, `${role}: what the landing page reads`).toEqual(['/api/balance-checks', '/api/balances', '/api/budgets/vs-actual', '/api/features', '/api/me', '/api/settings', '/api/transactions'])
+    // Neither a Balance Check nor the balances are asked for twice by the table that now shows both.
+    expect(asked.filter((address) => address.startsWith('/api/balances')), `${role}: balances`).toHaveLength(1)
+    expect(asked.filter((address) => address.startsWith('/api/balance-checks')), `${role}: balance checks`).toHaveLength(1)
+    expect(asked.filter((address) => address.startsWith('/api/features')), `${role}: features`).toHaveLength(1)
+    asked.stop()
+  }
+
+  const net = await spyNetWorth(page)
+  const more = spyApi(page)
+  await page.goto(NET_WORTH_PATH)
+  await expect(netWorth(page).getByRole('button', { name: 'Show net worth' })).toBeVisible()
+  await page.waitForLoadState('networkidle')
+  expect(net, 'opening the page reads no Transaction').toEqual([])
+  expect(more.filter((address) => address.startsWith('/api/charts') || address.startsWith('/api/reports') || address.startsWith('/api/balances')), 'and no balance').toEqual([])
+})
+
+// The grid has no more than one column now that every card is a whole row, whatever the room or the text size. Small, Medium, Large and Xtra Large are 14px, 16px, 18px and 20px.
+test('the cards are one column, each as wide as the page and under the one before, on a phone and on a wide screen, whatever the text size', async ({ page, context }) => {
   await signInAs(context, 'admin')
-  await stubNetWorth(page)
-  await stubSpending(page, SPENT, 16_050)
-  const names = ['Your tools', 'Balance checks', 'Balances', 'Budget vs actual', 'Recent transactions', 'Net worth over time', 'Spending by Category'] as const
+  type Box = { x: number; y: number; width: number; height: number }
+  /**
+   * Where each card is, every card read at the same moment and then again until the two readings agree. Reading them one after the other, as `boundingBox` does, can straddle a change
+   * of the page that `settle` (it waits for CSS transitions) cannot see: after a resize the tables become cards a frame later, in script, and the sidebar then begins a 200ms width
+   * transition. A Budget vs actual table on a phone is twice the height of its cards, so a card read before that and the next one after it overlapped. The reading waits for two frames, so
+   * the page has drawn the width it is at, and for every card to have its answer.
+   */
+  const read = () =>
+    page.evaluate(async (names) => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      const found: Record<string, (Box & { loading: boolean }) | null> = {}
+      for (const name of names) {
+        const card = [...document.querySelectorAll('main [role="region"][aria-labelledby]')].find((region) => document.getElementById(region.getAttribute('aria-labelledby')!)?.textContent === name)
+        const { x, y, width, height } = card?.getBoundingClientRect() ?? { x: 0, y: 0, width: 0, height: 0 }
+        found[name] = card ? { x, y, width, height, loading: card.textContent!.includes('Loading…') } : null
+      }
+      return found
+    }, CARDS)
   const boxes = async () => {
-    await settle(page) // the sidebar and the buttons have finished their width transition
-    const found: Record<string, { x: number; y: number; width: number; height: number }> = {}
-    for (const name of names) found[name] = (await page.getByRole('main').getByRole('region', { name }).boundingBox())!
-    return found
+    await settle(page)
+    let before = ''
+    await expect
+      .poll(
+        async () => {
+          const now = await read()
+          const text = JSON.stringify(now)
+          const stopped = text === before && Object.values(now).every((card) => card && !card.loading)
+          before = text
+          return stopped
+        },
+        { message: 'the cards have their answers and have stopped moving' },
+      )
+      .toBe(true)
+    return JSON.parse(before) as Record<string, Box>
   }
   /** Every card on a row of its own, as wide as the page, one under the next. */
   const expectOneColumn = async (what: string) => {
     const card = await boxes()
-    for (const [index, name] of names.entries()) {
-      expect(Math.abs(card[name]!.x - card[names[0]]!.x), `${what}: ${name} starts where the first card does`).toBeLessThan(2)
-      expect(Math.abs(card[name]!.width - card[names[0]]!.width), `${what}: ${name} is as wide as the first card`).toBeLessThan(2)
-      if (index > 0) expect(card[name]!.y, `${what}: ${name} is under the card before it`).toBeGreaterThanOrEqual(card[names[index - 1]!]!.y + card[names[index - 1]!]!.height - 1)
+    for (const [index, name] of CARDS.entries()) {
+      expect(Math.abs(card[name]!.x - card[CARDS[0]!]!.x), `${what}: ${name} starts where the first card does`).toBeLessThan(2)
+      expect(Math.abs(card[name]!.width - card[CARDS[0]!]!.width), `${what}: ${name} is as wide as the first card`).toBeLessThan(2)
+      if (index > 0) expect(card[name]!.y, `${what}: ${name} is under the card before it`).toBeGreaterThanOrEqual(card[CARDS[index - 1]!]!.y + card[CARDS[index - 1]!]!.height - 1)
     }
   }
-  const settled = async (size: 'Medium' | 'Large') => {
+  const settled = async (size: 'Medium' | 'Xtra Large') => {
     await chooseTextSize(page, size)
-    await expect(page.getByRole('region', { name: 'Balances' }).getByRole('table').or(page.getByRole('region', { name: 'Balances' }).getByRole('list'))).toBeVisible()
+    for (const name of CARDS) await expect(page.getByRole('region', { name }).getByText('Loading…')).toHaveCount(0) // each card has its answer, with or without Accounts in the database
   }
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/')
-  await showNetWorth(page) // with the charts drawn, which makes their cards the tallest they are
-  await showSpending(page, /^Bar chart of the 3 Categories/)
   await settled('Medium')
-  const card = await boxes()
-  const row = (a: string, b: string) => Math.abs(card[a]!.y - card[b]!.y) < 2 && card[b]!.x > card[a]!.x + card[a]!.width - 1
-  // Balance checks (a third of a row) beside Balances (two thirds); the two charts side by side, the same width; the tools, Budget vs actual and the newest Transactions across the whole row.
-  expect(row('Balance checks', 'Balances')).toBe(true)
-  expect(card['Balances']!.width).toBeGreaterThan(card['Balance checks']!.width * 1.8)
-  expect(row('Net worth over time', 'Spending by Category')).toBe(true)
-  expect(Math.abs(card['Net worth over time']!.width - card['Spending by Category']!.width)).toBeLessThan(2)
-  for (const name of ['Your tools', 'Budget vs actual', 'Recent transactions']) expect(card[name]!.width, `${name} takes the whole row`).toBeGreaterThan(card['Net worth over time']!.width * 1.9)
-  expect(card['Balance checks']!.y).toBeGreaterThanOrEqual(card['Your tools']!.y + card['Your tools']!.height - 1)
-  expect(card['Budget vs actual']!.y).toBeGreaterThanOrEqual(card['Balances']!.y + card['Balances']!.height - 1)
-  expect(card['Recent transactions']!.y).toBeGreaterThanOrEqual(card['Budget vs actual']!.y + card['Budget vs actual']!.height - 1)
-  expect(card['Net worth over time']!.y).toBeGreaterThanOrEqual(card['Recent transactions']!.y + card['Recent transactions']!.height - 1)
+  await expectOneColumn('1440px wide')
+  const wide = await boxes()
+  expect(wide['Balances']!.width, 'Balances takes the whole row, with no card beside it').toBeGreaterThan(700)
 
-  await settled('Large') // larger text leaves the same window less room: it cannot hold a card and a half of it beside another
-  await expectOneColumn('1440px wide at Large')
+  await settled('Xtra Large')
+  await expectOneColumn('1440px wide at Xtra Large')
 
   await settled('Medium')
-  await page.setViewportSize({ width: 800, height: 900 }) // the sidebar is the icon rail, and the page is narrower than a row of two cards can use
+  await page.setViewportSize({ width: 800, height: 900 }) // the sidebar is the icon rail
   await expectOneColumn('800px wide')
   await page.setViewportSize({ width: 390, height: 844 })
   await expectOneColumn('a phone')
@@ -351,23 +275,22 @@ test('the cards are a single column on a phone, and share rows when the page has
   expect(scrollWidth).toBeLessThanOrEqual(innerWidth)
 })
 
-test('the old Charts address goes to the page that has the charts now, for a Member and for the Admin, and is in no sidebar', async ({ page, context }) => {
-  for (const [role, heading] of [['member', 'Summary'], ['admin', 'Dashboard']] as const) {
+test('the old Charts address goes to the Net worth page, the chart that was there, for a Member and for the Admin, and is in no sidebar', async ({ page, context }) => {
+  for (const role of ['member', 'admin'] as const) {
     await signInAs(context, role)
     await page.goto('/charts')
-    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
-    expect(new URL(page.url()).pathname).toBe('/')
+    await expect(page.getByRole('heading', { level: 1, name: 'Net worth' })).toBeVisible()
+    expect(new URL(page.url()).pathname).toBe(NET_WORTH_PATH)
     expect(new URL(page.url()).search).toBe('')
     await expect(netWorth(page)).toBeVisible()
-    await expect(spending(page)).toBeVisible()
     await openNavGroup(page, 'Reports')
     await expect(navLink(page, 'Charts')).toHaveCount(0)
-    await expect(mainNav(page).getByRole('link', { name: 'Summary' }).or(mainNav(page).getByRole('link', { name: 'Dashboard' }))).toHaveAttribute('aria-current', 'page')
+    await expect(navLink(page, 'Net worth')).toHaveAttribute('aria-current', 'page')
   }
   // A bookmark with more on the end of it goes the same way, and Back does not trap the reader on the address that redirects.
   await page.goto('/transactions')
   await page.goto('/charts?range=5-years')
-  await expect.poll(() => new URL(page.url()).pathname).toBe('/')
+  await expect.poll(() => new URL(page.url()).pathname).toBe(NET_WORTH_PATH)
   expect(new URL(page.url()).search).toBe('') // what was asked of the old page means nothing to this one
   await page.goBack()
   await expect.poll(() => new URL(page.url()).pathname).toBe('/transactions')
@@ -389,12 +312,73 @@ test('a Member\'s Summary and the Dashboard have the same Balances, so the Dashb
   expect(await balances.innerText()).toBe(asMember)
 })
 
+// ---------------------------------------------------------------------------------------------------------------
+// The Net worth page
+
+test('the Net worth page waits to be asked: net worth is not read when it opens, and one press reads it once, for the range chosen beside the button', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  const requests = await spyNetWorth(page)
+  await page.setViewportSize({ width: 1024, height: 900 })
+  await page.goto(NET_WORTH_PATH)
+  await expect(page.getByRole('heading', { level: 1, name: 'Net worth' })).toBeVisible()
+
+  const region = netWorth(page)
+  const show = region.getByRole('button', { name: 'Show net worth' })
+  await expect(show).toBeVisible()
+  const { live, element } = await liveRegion(region)
+  await expect(region).toContainText('Net worth is not drawn until you ask for it, because working it out reads every Transaction of every Account.')
+  await expect(region.getByLabel('Range', { exact: true })).toHaveValue('24-months')
+  await expect(region.locator('svg.recharts-surface')).toHaveCount(0)
+  expect(requests, 'net worth is asked for only when the button is pressed').toEqual([])
+  await expect(page.getByRole('main').getByRole('heading', { level: 2 })).toHaveText(['Net worth over time'])
+  await noAxeViolations(page) // the page with the button
+
+  // Pressing it asks once, tells the reader what is happening, and draws the last 24 months, the range that was chosen beside the button.
+  await show.click()
+  await expect(region.getByRole('heading', { level: 2, name: 'Net worth over time' })).toBeFocused() // focus moves to the heading, as the button is gone
+  await drawn(region, LINE)
+  await expect(live).toHaveText('Net worth has loaded.') // the words arrive in the region that was already there, which is what is announced
+  expect(await element.evaluate((el) => el.isConnected)).toBe(true)
+  await expect(region.getByRole('button', { name: 'Show net worth' })).toHaveCount(0)
+  await expect(region.getByLabel('Range', { exact: true })).toHaveValue('24-months') // the choice stays, to change
+  expect(requests).toHaveLength(1)
+  expect(new URL(requests[0]!).searchParams.get('range')).toBe('24-months')
+  await noAxeViolations(page) // and with the chart
+  expect(requests).toHaveLength(1) // nothing asked again
+})
+
+test('the button that shows net worth is a touch target with a clear name, works from the keyboard, and shows a busy cue while it loads', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  const net = await holdAnswers(page, /\/api\/charts\/net-worth/, () => NET_WORTH) // the cue is there for as long as the test looks at it
+  await page.goto(NET_WORTH_PATH)
+  const region = netWorth(page)
+  const show = region.getByRole('button', { name: 'Show net worth', exact: true })
+  await expect(show).toBeVisible()
+  expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+  await chooseTextSize(page, 'Xtra Large')
+  const { live, element } = await liveRegion(region)
+
+  await show.focus()
+  await page.keyboard.press('Enter')
+
+  await expect(region).toHaveAttribute('aria-busy', 'true')
+  await expect(live).toHaveText(LOADING_NET_WORTH) // said in the region that was already on the page...
+  await expect(region.locator('p:not([role="status"])', { hasText: LOADING_NET_WORTH })).toBeVisible() // ...and shown on the screen
+  await expect(region.getByRole('heading', { level: 2 })).toBeFocused() // not lost to the page when the button goes
+  await net.release()
+  await drawn(region, LINE)
+  await expect(live).toHaveText('Net worth has loaded.') // the same region, its words changed
+  expect(await element.evaluate((el) => el.isConnected)).toBe(true)
+  await expect(region).toHaveAttribute('aria-busy', 'false')
+  expect(net.asked).toHaveLength(1)
+})
+
 test('net worth, as the Worker adds it up from every Account, is the Balances\' total at its newest figure, whatever the range', async ({ page, context, baseURL }, testInfo) => {
   await seed(context, baseURL!, testInfo.project.name)
   const total = await balancesNow(context)
   const answer = (await (await context.request.get('/api/charts/net-worth?range=24-months')).json()) as { tooManyAccounts: { count: number; limit: number } | null }
   await signInAs(context, 'member')
-  await page.goto('/')
+  await page.goto(NET_WORTH_PATH)
   await pressShowNetWorth(page)
 
   if (answer.tooManyAccounts) {
@@ -415,7 +399,7 @@ test('net worth, as the Worker adds it up from every Account, is the Balances\' 
 test('net worth is drawn as a line, and says what it is: only the money in these Accounts, with the months before an Account\'s history an estimate', async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
-  await page.goto('/')
+  await page.goto(NET_WORTH_PATH)
 
   const figure = await showNetWorth(page)
   await expect(figure.locator('path.recharts-line-curve')).toHaveAttribute('d', /^M[\d.]+/)
@@ -426,13 +410,13 @@ test('net worth is drawn as a line, and says what it is: only the money in these
   await expect(netWorth(page)).not.toContainText('Loans Report')
 })
 
-test('the Summary lets the reader choose how far back net worth goes, before it is drawn or after, and the card is busy while it asks', async ({ page, context }) => {
+test('the Net worth page lets the reader choose how far back net worth goes, before it is drawn or after, and the card is busy while it asks', async ({ page, context }) => {
   await signInAs(context, 'member')
   await watchLiveRegions(page)
   // Each answer waits for the test to let it go, so the cues are there for as long as the test looks at them, the first answer as well as the second.
   const net = await holdAnswers(page, /\/api\/charts\/net-worth/, (url) => ({ ...NET_WORTH, range: url.searchParams.get('range') }))
   const asked = () => net.asked.map((url) => url.searchParams.get('range'))
-  await page.goto('/')
+  await page.goto(NET_WORTH_PATH)
   const region = netWorth(page)
   const live = region.getByRole('status') // the one live region the card keeps on the page
   const element = (await live.elementHandle())!
@@ -471,7 +455,7 @@ test('the Summary lets the reader choose how far back net worth goes, before it 
 test('net worth\'s figures open from the keyboard, and the control is a touch target', async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
-  await page.goto('/')
+  await page.goto(NET_WORTH_PATH)
   await showNetWorth(page)
   const summary = netWorth(page).getByText('Show the figures')
   expect((await summary.boundingBox())?.height).toBeGreaterThanOrEqual(44)
@@ -485,7 +469,7 @@ test('net worth\'s figures open from the keyboard, and the control is a touch ta
 test('net worth\'s figures are in the printout, though the disclosure is closed on the screen', async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
-  await page.goto('/')
+  await page.goto(NET_WORTH_PATH)
   await showNetWorth(page)
   await expect(netWorth(page).getByRole('table')).toBeHidden()
 
@@ -497,140 +481,28 @@ test('net worth\'s figures are in the printout, though the disclosure is closed 
   await expect(netWorth(page).getByRole('table')).toBeHidden() // and the page is as it was after printing
 })
 
-test('spending by Category for dates the reader chooses leaves out the Transfer, the wage and the loan, and the figures are in a table', async ({ page, context, baseURL }, testInfo) => {
-  const { words, from, to } = dataFor(testInfo.project.name)
-  await seed(context, baseURL!, testInfo.project.name)
-  await signInAs(context, 'member')
-  const requests = spySpending(page)
-  await page.goto('/')
-  await chooseDates(page, from, to) // chosen beside the button: nothing is asked until it is pressed, and then once, for these dates
-  expect(requests).toEqual([])
-  await pressShowSpending(page)
-  await expect.poll(() => requests.length).toBe(1)
-  expect(requests[0]).toContain(`from=${from}`)
-  expect(requests[0]).toContain(`to=${to}`)
-
-  const table = spending(page).getByRole('table', { name: `Spending by Category in ${words}` })
-  await expect(table.getByRole('row')).toHaveCount(4) // the heading and three Categories
-  const rows = table.getByRole('row')
-  await expect(rows.nth(1)).toContainText('Fuel')
-  await expect(rows.nth(1)).toContainText(SPENDING.fuel)
-  await expect(rows.nth(2)).toContainText('Groceries')
-  await expect(rows.nth(2)).toContainText(SPENDING.groceries) // $40.00 and $15.50, less a $10.00 refund
-  await expect(rows.nth(3)).toContainText('Uncategorised (includes money in not yet given a Category)') // as in Budget vs actual
-  await expect(rows.nth(3)).toContainText(SPENDING.uncategorised)
-  // The $500.00 Transfer, $2,000.00 wage and $300.00 loan are in none of it.
-  await expect(spending(page).getByText(`Total spending in ${words}: ${SPENDING.total}`)).toBeVisible()
-  await expect(table).not.toContainText('Wages and salary')
-  await expect(table).not.toContainText('Loans')
-  await expect(table).not.toContainText('$500.00')
-  await expect(table).not.toContainText('$2,000.00')
-  await expect(table).not.toContainText('$300.00')
-
-  const figure = await drawn(spending(page), new RegExp(`^Bar chart of the 3 Categories that spent the most in ${words}`))
-  expect(await figure.locator('.recharts-bar-rectangle').count()).toBe(3)
-})
-
-test('a period the Worker names is asked for by name, and a mistake in the dates is explained and not asked about', async ({ page, context }) => {
-  await signInAs(context, 'member')
-  const requests = spySpending(page)
-  await page.goto('/')
-  const region = spending(page)
-  await expect(region.getByRole('combobox', { name: 'Period' })).toHaveValue('this-month')
-
-  // The period is chosen beside the button, so choosing first asks for that period and no other.
-  await region.getByLabel('Period', { exact: true }).selectOption('last-month')
-  expect(requests).toEqual([])
-  await pressShowSpending(page)
-  await expect.poll(() => requests.length).toBe(1)
-  expect(requests[0]).toContain('/api/charts/spending?period=last-month')
-  const lastMonth = new Date(new Date().toLocaleString('en-US', { timeZone: 'Pacific/Auckland' }))
-  lastMonth.setDate(1)
-  lastMonth.setMonth(lastMonth.getMonth() - 1)
-  await expect(region).toContainText(lastMonth.toLocaleString('en-NZ', { month: 'long', year: 'numeric' }))
-
-  // Dates the wrong way round: the To date is marked and explained, and nothing more is asked of the Worker.
-  await region.getByLabel('Period', { exact: true }).selectOption('custom')
-  const before = requests.length
-  await pickDate(region, 'From', '2034-06-30')
-  await pickDate(region, 'To', '2034-06-01')
-  await expect(region.getByRole('alert')).toHaveText('The “To” date is before the “From” date. Change one of them to see the chart.')
-  await expect(dateField(region, 'To')).toHaveAttribute('aria-invalid', 'true')
-  expect(requests).toHaveLength(before)
-  // The old period stays on the screen as it was, and is not "updating" or busy: nothing is being asked for.
-  await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toHaveCount(0)
-  await expect(region).toHaveAttribute('aria-busy', 'false')
-
-  // Putting them right asks, and the explanation goes.
-  await pickDate(region, 'To', '2034-06-30')
-  await expect(region.getByRole('alert')).toHaveCount(0)
-  await expect.poll(() => requests.some((url) => url.includes('from=2034-06-30') && url.includes('to=2034-06-30'))).toBe(true)
-})
-
-test('spending is marked busy from its first load, and the old period is marked as old while a new one is asked for', async ({ page, context }) => {
-  await signInAs(context, 'member')
-  await watchLiveRegions(page)
-  const answers = await holdAnswers(page, /\/api\/charts\/spending\?/, () => ({ from: '2026-10-01', to: '2026-10-31', totalCents: 16_050, categories: SPENT })) // held, so the cues can be seen: the first answer as well as the second
-  await page.goto('/')
-  const region = spending(page)
-  const live = region.getByRole('status') // the one live region the card keeps on the page
-  const element = (await live.elementHandle())!
-  await expect(region).toHaveAttribute('aria-busy', 'false') // nothing is asked for until the button is pressed
-  await expect(live).toHaveText('')
-  await pressShowSpending(page)
-
-  await expect(region).toHaveAttribute('aria-busy', 'true') // the first load
-  await expect(live).toHaveText('Loading spending…')
-  await answers.release()
-  await drawn(region, /^Bar chart of the 3 Categories/)
-  await expect(region).toHaveAttribute('aria-busy', 'false')
-  await expect(live).toHaveText('Spending has loaded.')
-
-  await region.getByLabel('Period', { exact: true }).selectOption('last-month')
-
-  await expect(live).toHaveText('Updating spending…')
-  await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toBeVisible()
-  await expect(region).toHaveAttribute('aria-busy', 'true')
-  await answers.release()
-  await expect(live).toHaveText('Spending has loaded.')
-  await expect(region.locator('p:not([role="status"])', { hasText: 'Updating…' })).toHaveCount(0)
-  expect(await element.evaluate((el) => el.isConnected)).toBe(true)
-  // The one element went from empty to loading to loaded, and on to updating and loaded again.
-  expect(await liveHistory(page, 'spending-heading')).toEqual(['', 'Loading spending…', 'Spending has loaded.', 'Updating spending…', 'Spending has loaded.'])
-})
-
-test('the charts have no WCAG 2.2 AA violations, with their data, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
-  const { from, to, words } = dataFor(testInfo.project.name)
+test('the Net worth page has no WCAG 2.2 AA violations, with its data, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
   await seed(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')
   await stubNetWorth(page)
   for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
-    await page.goto('/')
-    await chooseTextSize(page, 'Large')
-    await chooseDates(page, from, to)
+    await page.goto(NET_WORTH_PATH)
+    await chooseTextSize(page, 'Xtra Large')
     await showNetWorth(page)
-    await showSpending(page, new RegExp(`^Bar chart of the 3 Categories that spent the most in ${words}`))
-    await expect(spending(page).locator('.recharts-bar-rectangle')).toHaveCount(3) // the bars are in, as well as the figure
     await netWorth(page).getByText('Show the figures').click() // the table is part of what is scanned
     await expect(netWorth(page).getByRole('table').or(netWorth(page).getByRole('list', { name: /Net worth at the end of each month/ }))).toBeVisible()
     await noAxeViolations(page)
   }
 })
 
-test('the chart colours are the theme\'s, drawn in the text colour when Windows high contrast is on, and nothing moves', { tag: '@theme' }, async ({ page, context, baseURL }, testInfo) => {
-  const { from, to } = dataFor(testInfo.project.name)
-  await seed(context, baseURL!, testInfo.project.name)
+test('the net worth line is the theme\'s colour, drawn in the text colour when Windows high contrast is on, and nothing moves', { tag: '@theme' }, async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
-  await page.goto('/')
+  await page.goto(NET_WORTH_PATH)
   const line = netWorth(page).locator('path.recharts-line-curve')
-  const bar = spending(page).locator('.recharts-bar-rectangle path').first()
-  await chooseDates(page, from, to)
   await showNetWorth(page)
-  await pressShowSpending(page)
   await expect(line).toBeVisible()
-  await expect(bar).toBeVisible()
 
   // Nothing is animating in a chart, whatever the reader's motion setting: it draws itself at once, and so does its tooltip.
   expect(await page.evaluate(() => document.querySelector('[data-slot="chart"]')!.getAnimations({ subtree: true }).length)).toBe(0)
@@ -650,31 +522,16 @@ test('the chart colours are the theme\'s, drawn in the text colour when Windows 
     return colour
   })
   expect(await stroke(line)).toBe(canvasText)
-  expect(await bar.evaluate((el) => getComputedStyle(el).fill)).toBe(canvasText)
-
-  // The pointer's own highlight behind a bar is not one of the bars: it is not drawn in the text colour, or it would hide the bar it marks.
-  await bar.hover()
-  const cursor = spending(page).locator('.recharts-tooltip-cursor')
-  await expect(cursor).toBeVisible()
-  expect(await cursor.evaluate((el) => getComputedStyle(el).fill)).not.toBe(canvasText)
 })
 
-test('hovering a bar or a point says what it is, in the same words as the figures', async ({ page, context }) => {
+test('hovering a point says what it is, in the same words as the figures', async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
-  await stubSpending(page, SPENT, 16_050)
-  await page.goto('/')
-  await showSpending(page, /^Bar chart of the 3 Categories/)
-
-  await spending(page).locator('.recharts-bar-rectangle').nth(1).hover()
-  const tip = spending(page).locator('.recharts-tooltip-wrapper')
-  await expect(tip).toContainText('Groceries')
-  await expect(tip).toContainText('$45.50')
-
+  await page.goto(NET_WORTH_PATH)
   await showNetWorth(page)
   const picture = netWorth(page).locator('svg.recharts-surface')
   const size = await picture.boundingBox()
-  await picture.hover({ position: { x: size!.width - 40, y: size!.height / 2 } }) // scrolls to it first: hovering the bar scrolled the page
+  await picture.hover({ position: { x: size!.width - 40, y: size!.height / 2 } })
   await expect(netWorth(page).locator('.recharts-tooltip-wrapper')).toContainText('Wed 7 Oct 2026')
 })
 
@@ -682,7 +539,7 @@ test.describe('when the answers are not the usual ones', () => {
   test('says so when net worth has more Accounts than can be added up, and when some are left out or stop early', async ({ page, context }) => {
     await signInAs(context, 'member')
     await stubNetWorth(page, { range: '24-months', counted: [], notCounted: [], points: [], tooManyAccounts: { count: 52, limit: 49 } })
-    await page.goto('/')
+    await page.goto(NET_WORTH_PATH)
     await pressShowNetWorth(page)
     await expect(netWorth(page)).toContainText("Net worth can't be drawn for this many Accounts. It works for up to 49, and this Fernledger has 52, so it shows nothing rather than a total that leaves some out.")
     await expect(netWorth(page).locator('svg.recharts-surface')).toHaveCount(0)
@@ -722,34 +579,10 @@ test.describe('when the answers are not the usual ones', () => {
   test('says so when there is nothing to draw', async ({ page, context }) => {
     await signInAs(context, 'member')
     await stubNetWorth(page, { range: '24-months', counted: [], notCounted: [], points: [], tooManyAccounts: null })
-    await stubSpending(page, [], 0)
-    await page.goto('/')
+    await page.goto(NET_WORTH_PATH)
     await pressShowNetWorth(page)
-    await pressShowSpending(page)
     await expect(netWorth(page)).toContainText('There are no Accounts yet, so there is no net worth to draw.')
-    await expect(spending(page)).toContainText('Nothing was spent in October 2026.')
-    await expect(spending(page).locator('svg.recharts-surface')).toHaveCount(0)
-  })
-
-  test('draws no bar for Categories that took money back or broke even, says so, and lists each, a fully refunded one as $0.00', async ({ page, context }) => {
-    await signInAs(context, 'member')
-    // Fuel took back more than it spent; Groceries spent $40.00 and had it all refunded; Uncategorised had a payment and the same money back.
-    await stubSpending(page, [{ categoryId: 2, name: 'Fuel', cents: -2500 }, { categoryId: 3, name: 'Groceries', cents: 0 }, { categoryId: null, name: 'Uncategorised', cents: 0 }], -2500)
-    await page.goto('/')
-    await pressShowSpending(page)
-
-    const region = spending(page)
-    await expect(region).toContainText('Nothing was spent above zero in October 2026: every Category took back as much as it spent, or more. The table shows what came back.')
-    await expect(region.locator('svg.recharts-surface')).toHaveCount(0)
-    const table = region.getByRole('table', { name: 'Spending by Category in October 2026' })
-    await expect(table.getByRole('row')).toHaveCount(4) // the heading and three Categories: money that went out and came back stays in view
-    await expect(table.getByRole('row').nth(1)).toContainText('Fuel')
-    await expect(table.getByRole('row').nth(1)).toContainText('$25.00 back')
-    await expect(table.getByRole('row').nth(2)).toContainText('Groceries')
-    await expect(table.getByRole('row').nth(2)).toContainText('$0.00')
-    await expect(table.getByRole('row').nth(3)).toContainText('Uncategorised (includes money in not yet given a Category)')
-    await expect(table.getByRole('row').nth(3)).toContainText('$0.00')
-    await expect(region.getByText('Total spending in October 2026: $25.00 back')).toBeVisible()
+    await expect(netWorth(page).locator('svg.recharts-surface')).toHaveCount(0)
   })
 
   test.describe('when the Worker fails', () => {
@@ -758,30 +591,26 @@ test.describe('when the answers are not the usual ones', () => {
     test('tells the reader to try again instead of drawing nothing', async ({ page, context }) => {
       await signInAs(context, 'member')
       await page.route(/\/api\/charts\/net-worth/, (route) => route.fulfill({ status: 500, json: { error: 'Something went wrong' } }))
-      await page.route(/\/api\/charts\/spending\?/, (route) => route.fulfill({ status: 500, json: { error: 'Something went wrong' } }))
-      await page.goto('/')
+      await page.goto(NET_WORTH_PATH)
       await pressShowNetWorth(page)
-      await pressShowSpending(page)
       await expect(netWorth(page).getByRole('alert')).toHaveText("Fernledger couldn't load net worth. Reload the page to try again.")
-      await expect(spending(page).getByRole('alert')).toContainText("Fernledger couldn't load the spending.")
     })
   })
 
   // A tab left open across a deploy asks for a chunk of code that is no longer there. The browser and React both log that, which is what this test expects of them; what it holds
-  // the page to is that the charts' place says so and the rest of the page, which does not need the chunk, is still there (without a boundary the whole page goes).
-  test.describe("when the charts' code cannot be loaded", () => {
+  // the page to is that the chart's place says so and the rest of the page, which does not need the chunk, is still there (without a boundary the whole page goes).
+  test.describe("when the chart's code cannot be loaded", () => {
     test.use({ expectedConsoleErrors: ['Failed to load resource: net::ERR_FAILED', 'dynamically imported module'] })
 
-    test('says so where the charts would be, and leaves the rest of the page', async ({ page, context }) => {
+    test('says so where the chart would be, and leaves the rest of the page', async ({ page, context }) => {
       await signInAs(context, 'member')
-      await page.route(/\/assets\/charts-[^/]+\.js/, (route) => route.abort())
-      await page.goto('/')
-      await expect(page.getByRole('alert').filter({ hasText: "The charts couldn't be loaded. Reload the page to try again." })).toBeVisible()
+      await page.route(/\/assets\/net-worth-chart-[^/]+\.js/, (route) => route.abort())
+      await page.goto(NET_WORTH_PATH)
+      await expect(page.getByRole('alert').filter({ hasText: "The net worth chart couldn't be loaded. Reload the page to try again." })).toBeVisible()
       await expect(netWorth(page)).toHaveCount(0)
-      await expect(spending(page)).toHaveCount(0)
-      await expect(page.getByRole('heading', { level: 1, name: 'Summary' })).toBeVisible()
-      await expect(page.getByRole('region', { name: 'Balances' })).toBeVisible()
-      await expect(page.getByRole('region', { name: 'Recent transactions' })).toBeVisible()
+      await expect(page.getByRole('heading', { level: 1, name: 'Net worth' })).toBeVisible()
+      await openNavGroup(page, 'Reports')
+      await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true') // the shell is there too
     })
   })
 })

@@ -1,13 +1,13 @@
 import type { Locator, Page } from '@playwright/test'
-import { expect } from './fixtures'
+import { expect, settle } from './fixtures'
 
 // The app shell (src/routes/__root.tsx): a sticky header across the top (the page's banner), and the sidebar beside the page. On a phone the sidebar is a sheet and the
 // header's controls are in one menu. These find the same things at every width, so a spec says what it does and not where the control is today.
 
-export type TextSizeName = 'Small' | 'Medium' | 'Large'
+export type TextSizeName = 'Small' | 'Medium' | 'Large' | 'Xtra Large'
 
 /** The value `data-text-size` takes for each size (src/lib/text-size.ts). */
-const TEXT_SIZE_VALUE = { Small: 'small', Medium: 'medium', Large: 'large' } as const
+const TEXT_SIZE_VALUE = { Small: 'small', Medium: 'medium', Large: 'large', 'Xtra Large': 'xlarge' } as const
 
 /** The sticky header across the top of the page. */
 export const siteHeader = (page: Page) => page.getByRole('banner')
@@ -24,7 +24,7 @@ export const mainNav = (page: Page) => page.getByRole('navigation', { name: 'Mai
 /** The button of the header that opens the menu of its controls, which is all a phone's header has of them. Not visible from `md` up. */
 const displayMenuButton = (page: Page) => siteHeader(page).getByRole('button', { name: 'Display settings and sign out' })
 
-/** The header's controls are in its bar from `md` up and in one menu below: opens the menu when the bar doesn't have them. */
+/** The header's controls are in its bar from `md` up, while the bar is 46rem wide, and in one menu otherwise: opens the menu when the bar doesn't have them. */
 export async function openHeaderControls(page: Page) {
   const trigger = displayMenuButton(page)
   await expect(trigger.or(textSizeGroup(page))).toBeVisible() // the header is drawn: `isVisible` below does not wait for it
@@ -43,7 +43,7 @@ export async function closeHeaderControls(page: Page) {
   }
 }
 
-/** The text size buttons, wherever this width has them (the open menu on a phone): a group of three radio buttons. */
+/** The text size buttons, wherever this width has them (the open menu on a phone): a group of four radio buttons. */
 export const textSizeGroup = (page: Page) => page.getByRole('group', { name: 'Text size' })
 
 /** One of the text size buttons (a radio button), by the word on it. */
@@ -58,6 +58,35 @@ export async function chooseTextSize(page: Page, size: TextSizeName) {
   await textSizeButton(page, size).click()
   await expectTextSize(page, size)
   await closeHeaderControls(page)
+}
+
+/**
+ * Runs `check` at each text size the control offers (Small, Medium, Large and Xtra Large: 14px, 16px, 18px and 20px), so a size added to it is covered without the spec being told. It fails
+ * unless there are four, the largest being 20px or more, as README Accessibility promises. The size is chosen at the width the page has when this is called (a laptop's header has the buttons in its bar, a phone's has them in a menu), and `check` may change
+ * the width: the next size is chosen from the width this started at.
+ */
+export async function atEveryTextSize(page: Page, check: (size: string) => Promise<void>) {
+  const start = page.viewportSize()!
+  await openHeaderControls(page)
+  const count = await textSizeGroup(page).getByRole('radio').count()
+  await closeHeaderControls(page)
+  expect(count).toBeGreaterThanOrEqual(4)
+  let largest = 0
+  for (let i = 0; i < count; i++) {
+    await page.setViewportSize(start)
+    await openHeaderControls(page)
+    // The label, which holds the radio button and the word drawn beside it: once a keyboard has been used (closing the phone's menu with Escape) the menu opens with focus on its first
+    // radio button, whose word is then drawn over it, and a click on the radio button itself is refused as intercepted. A click on the label is a click on either.
+    const option = textSizeGroup(page).locator('label').nth(i)
+    await option.click()
+    await expect(option.getByRole('radio')).toBeChecked()
+    await closeHeaderControls(page)
+    const root = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))
+    largest = Math.max(largest, root)
+    await settle(page)
+    await check(`text size ${i + 1} of ${count} (${root}px)`)
+  }
+  expect(largest).toBeGreaterThanOrEqual(20)
 }
 
 /** The text size that is applied to the page, which is what every layout measurement depends on. */

@@ -51,6 +51,20 @@ describe('GET /api/features', () => {
     )
   })
 
+  // The Summary and the Dashboard ask for it on every visit, for the Balances table's Sync column, so it must cost no D1 row (ADR 0004): with a database that throws on any use, it still answers.
+  it('reads nothing from the database, for the Admin or a Member', async () => {
+    const database = new Proxy({}, {
+      get: (_target, property) => {
+        throw new Error(`The database was used: ${String(property)}`)
+      },
+    }) as unknown as D1Database
+    for (const as of ['admin', 'member'] as const) {
+      const { res, body } = await getFeatures(as, { DB: database })
+      expect(res.status, as).toBe(200)
+      expect(body.features.map((feature) => feature.id), as).toEqual([AKAHU_SYNC.id, D1_USAGE.id])
+    }
+  })
+
   it('treats a blank value as missing', async () => {
     const { body } = await getFeatures('admin', { AKAHU_APP_TOKEN: '  ', AKAHU_USER_TOKEN: '' })
     expect(akahu(body).enabled).toBe(false)

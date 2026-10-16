@@ -376,12 +376,12 @@ test.describe('the Reports page', () => {
     await noAxeViolations(page, { within: OPEN_MENU })
   })
 
-  test('is at least 44px for the button and every item of its menu, at the Medium and Large text sizes', async ({ page, context, baseURL }, testInfo) => {
+  test('is at least 44px for the button and every item of its menu, at the Medium and Xtra Large text sizes', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     await keep(context, baseURL, { report: 'budget-vs-actual', from: `${year}-01-01`, to: `${year}-03-31` })
     await page.goto('/reports')
     const name = rowName('Budget vs actual', `${dateText(`${year}-01-01`)} to ${dateText(`${year}-03-31`)}`, 'All Accounts')
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       await chooseTextSize(page, size)
       await expectTextSize(page, size)
       await settle(page)
@@ -409,9 +409,9 @@ test.describe('the Reports page', () => {
     for (const [width, height] of [[640, 360], [320, 256], [316, 256]] as const) {
       await page.setViewportSize({ width, height })
       await page.goto('/reports')
-      await chooseTextSize(page, 'Large')
+      await chooseTextSize(page, 'Xtra Large')
       await expect(page.getByText(/Example account with a long name/)).toBeVisible()
-      await expectTextSize(page, 'Large')
+      await expectTextSize(page, 'Xtra Large')
       await settle(page)
       const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
       expect(scrollWidth, `${width}px wide`).toBeLessThanOrEqual(clientWidth)

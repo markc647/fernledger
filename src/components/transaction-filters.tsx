@@ -151,7 +151,7 @@ export function TransactionFilters({ search, onSearch }: { search: TransactionSe
             <option value="only">Only Transfers</option>
           </Select>
         </div>
-        <div className="grid gap-4 sm:col-span-2 sm:grid-cols-2 lg:col-span-1">
+        <div className="date-fields gap-4 sm:col-span-2">
           {(['from', 'to'] as const).map((field) => (
             <div key={field}>
               <label id={`filter-${field}-label`} htmlFor={`filter-${field}`} className="block font-medium">

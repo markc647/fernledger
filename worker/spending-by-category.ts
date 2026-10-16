@@ -1,6 +1,7 @@
 import { buildSpending, rollUp, type SpendingRange, type SpendingRow } from './spending'
 
-// Spending by Category over a range of NZ dates: one function for everything that shows it, so the chart (chart-spending.ts) and a Report of it can't
+// Spending by Category over a range of NZ dates: one function for everything that shows it, so the Spending by Category Report (and its chart, which is drawn from the Report's answer) and
+// GET /api/charts/spending (chart-spending.ts, which no page asks now) can't
 // differ in what they leave out, how they name a Category or how they order them. What counts as Spending, and in which Category, is spending.ts's alone
 // (ADR 0012): `buildSpending` reads the range's rows with each Category's name as a reader is shown it (so there is no lookup by ID, and a removed Category
 // has already fallen through to the next one or to Uncategorised), and `rollUp` adds its months together and leaves out Transfers, Income and Loans.
@@ -22,7 +23,7 @@ export type SpendingByCategory = SpendingRange & {
 }
 
 /**
- * The one order for Spending Categories, so the Summary's chart and a Report put the same figures in the same order: the most spent first (so a Category that
+ * The one order for Spending Categories, so every answer (the Report and the route behind the old chart) puts the same figures in the same order: the most spent first (so a Category that
  * took in more than it paid out is last), and among equal amounts the named Categories by name, ignoring capitals and accents (`en-NZ`), with Uncategorised after
  * them and a Category's ID the last tiebreak, which settles two with one name.
  */

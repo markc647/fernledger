@@ -8,8 +8,8 @@ import { keepReport } from './test-support'
 
 // Seam 1: the spending-by-Category Report's data (GET /api/reports/spending), through the Worker's exported handler as the local-development
 // Admin or a read-only Member (the dev identity cookie is honoured on localhost only). The Report works out nothing itself: it is
-// `readSpendingByCategory`'s answer (spending-by-category.ts, which has its own tests), the one the Dashboard's chart gives. So the tests here are about
-// what a Report asks of it (the Account, the dates, the Account that does not exist) and that the Report and the chart agree, row for row and in total,
+// `readSpendingByCategory`'s answer (spending-by-category.ts, which has its own tests), the one `GET /api/charts/spending` gives (no page asks it now). So the tests here are about
+// what a Report asks of it (the Account, the dates, the Account that does not exist) and that the Report and that route agree, row for row and in total,
 // and with `buildSpending` and `rollUp` run directly and with Budget vs actual. All the data is made up (bank 99).
 const origin = 'http://localhost:5173'
 type Who = 'admin' | 'member'
@@ -333,7 +333,7 @@ describe('the same figures as everywhere else that totals spending (ADR 0012)', 
     expect(r.totalCents).toBe(expected.totalCents)
   })
 
-  // The Dashboard's chart and a Report of spending by Category are one function's answer (spending-by-category.ts), so the same dates give the same rows, in the
+  // `/api/charts/spending` (which no page asks now) and a Report of spending by Category are one function's answer (spending-by-category.ts), so the same dates give the same rows, in the
   // same order, with the same total. This is the test that holds them to it: a Report that named, ordered or totalled its own would fail it.
   it.each(ranges)('gives, for %s, the very rows and total /api/charts/spending gives for the same dates', async (_what, range) => {
     await history()

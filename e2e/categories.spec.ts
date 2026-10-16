@@ -1,7 +1,8 @@
-import type { BrowserContext, Page } from '@playwright/test'
-import { expect, signInAs, test } from './fixtures'
+import type { BrowserContext, Locator, Page } from '@playwright/test'
+import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { dateText } from './report-helpers'
 import { actionsButton, chooseAction, menuAction, noAxeViolationsFromTop, openActions } from './row-actions-helpers'
-import { mainNav, navigateTo } from './shell-helpers'
+import { atEveryTextSize, mainNav, navigateTo } from './shell-helpers'
 
 /** The light and dark projects share one local database, so each test imports a Transaction of its own, dated to sort first. */
 async function seedTransaction(context: BrowserContext, baseURL: string, projectName: string) {
@@ -47,7 +48,11 @@ test('the Admin sets an Override and a Note, the Transaction leaves the Uncatego
   const row = rowFor(page, description)
   await expect(row).toContainText('Groceries')
   await expect(row).toContainText('Override')
-  await expect(row).toContainText(note)
+  // The Note is behind a button, not written in the row.
+  await expect(row).not.toContainText(note)
+  await row.getByRole('button', { name: /^Read the Note on / }).click()
+  await expect(page.getByRole('dialog', { name: /^Note on / })).toContainText(note)
+  await page.keyboard.press('Escape')
   await noAxeViolationsFromTop(page)
 
   await page.goto('/change-log')
@@ -385,5 +390,236 @@ test.describe('on a phone', () => {
     await noAxeViolationsFromTop(page)
     await page.getByRole('button', { name: 'Cancel' }).click()
     await expect(actionsButton(page, 'Groceries')).toBeFocused()
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// The Note column of All Transactions and Uncategorised (src/components/transaction-list.tsx): a button that opens the Note, not the Note's words
+
+/**
+ * Three Uncategorised Transactions in the project's Account, dated to sort first: A with the Note `noteFor(stamp)`, B with none, and C with a Note of two lines. The stamp finds them, and
+ * is in A's Note so a search can.
+ */
+async function seedWithNote(context: BrowserContext, baseURL: string, projectName: string, noteFor: (stamp: string) => string) {
+  await signInAs(context, 'admin')
+  const stamp = `${projectName}${Date.now()}`
+  const noted = `EXAMPLE NOTESHOP ${stamp} A`
+  const plain = `EXAMPLE NOTESHOP ${stamp} B`
+  const alsoNoted = `EXAMPLE NOTESHOP ${stamp} C`
+  const row = (uniqueId: string, payee: string, amountCents: number) => ({ date: '2026-10-09', uniqueId, tranType: 'EFTPOS', chequeNumber: null, payee, bankMemo: 'EFTPOS', amountCents })
+  const imported = await context.request.post('/api/imports/chunks', {
+    headers: { Origin: baseURL },
+    data: {
+      account: { number: projectName === 'dark' ? '99-9999-9999999-88' : '99-9999-9999999-89' },
+      chunk: { index: 0, count: 1 },
+      file: { adapterId: 'asb', rowCount: 3, skipped: 0, from: '2026-10-09', to: '2026-10-09', ledgerBalance: { cents: 0, date: '2026-10-09' } },
+      rows: [row(`NA${stamp}`, noted, -2345), row(`NB${stamp}`, plain, -1100), row(`NC${stamp}`, alsoNoted, -1700)],
+    },
+  })
+  expect(imported.ok()).toBe(true)
+  const found = (await (await context.request.get(`/api/transactions?q=${encodeURIComponent(stamp)}`)).json()) as { transactions: { id: number; description: string }[] }
+  const note = noteFor(stamp)
+  const alsoNote = 'a\nb'
+  for (const [description, text] of [[noted, note], [alsoNoted, alsoNote]] as const) {
+    const saved = await context.request.put(`/api/transactions/${found.transactions.find((t) => t.description === description)!.id}/note`, { headers: { Origin: baseURL }, data: { note: text } })
+    expect(saved.ok()).toBe(true)
+  }
+  return { stamp, noted, plain, alsoNoted, note, alsoNote }
+}
+
+const noteButton = (scope: Page | Locator) => scope.getByRole('button', { name: /^Read the Note on / })
+const notePopup = (page: Page, description: string) => page.getByRole('dialog', { name: `Note on ${description}` })
+const dataRows = (page: Page) => page.getByRole('row').filter({ has: page.getByRole('cell') })
+/** The Note's own words in an open pop-up: the paragraph, which takes focus when it opens so that a Note too long for a short screen can be scrolled with the keyboard. */
+const noteText = (popup: Locator) => popup.locator('p')
+
+/** Whether the text of `element` is on one line: asked of the text's own rectangles, since a box grows to hold a second line. */
+const onOneLine = (element: Locator) =>
+  element.evaluate((el) => {
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size === 1
+  })
+
+test('a Note is a button that opens it, in All Transactions and in Uncategorised, and a row without a Note shows nothing', async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, noted, plain, note } = await seedWithNote(context, baseURL!, testInfo.project.name, (stamp) => `Receipt in the top drawer ${stamp}`)
+
+  for (const [path, heading] of [[`/transactions?q=${stamp}`, 'Transactions'], ['/uncategorised', 'Uncategorised']] as const) {
+    await page.goto(path)
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+    const row = rowFor(page, noted)
+    await expect(row).toBeVisible()
+    await expect(rowFor(page, plain)).toBeVisible()
+
+    // The Note's words are not in the page; its row has a button named for the row, and the row without a Note has none: no button and no dash, only words for a screen reader.
+    await expect(page.getByText(note)).toHaveCount(0)
+    const withoutNote = rowFor(page, plain)
+    await expect(noteButton(withoutNote)).toHaveCount(0)
+    await expect(withoutNote.getByText('—')).toHaveCount(0)
+    const column = await page.getByRole('columnheader').evaluateAll((headings) => headings.findIndex((heading) => heading.textContent?.trim() === 'Note'))
+    expect(column, 'the Note column').toBeGreaterThan(-1)
+    const emptyCell = withoutNote.getByRole('cell').nth(column)
+    await expect(emptyCell.locator('.sr-only')).toHaveText('No Note')
+    await expect(emptyCell.locator(':scope > :not(.sr-only)')).toHaveCount(0)
+
+    const button = noteButton(row)
+    await expect(button).toHaveAccessibleName(`Read the Note on ${noted}, ${dateText('2026-10-09')}`)
+    const box = (await button.boundingBox())!
+    expect(box.width, `${heading}: the button is 44px wide`).toBeGreaterThanOrEqual(44)
+    expect(box.height, `${heading}: the button is 44px tall`).toBeGreaterThanOrEqual(44)
+
+    // It opens beside the button, ending where the button does, with the Note in it, which is what the pop-up is described by, and focus on the Note.
+    await button.click()
+    const popup = notePopup(page, noted)
+    await expect(popup).toHaveText(note)
+    await expect(popup).toHaveAccessibleDescription(note)
+    await expect(button).toHaveAttribute('aria-expanded', 'true')
+    await expect(noteText(popup)).toBeFocused()
+    const opened = (await popup.boundingBox())!
+    expect(Math.abs(opened.x + opened.width - (box.x + box.width)), `${heading}: the pop-up ends where its button does`).toBeLessThanOrEqual(2) // to within the pixel it is rounded to
+    await noAxeViolationsFromTop(page)
+
+    // Escape closes it and puts focus back on the button, a press outside it closes it too, and the keyboard opens it again.
+    await page.keyboard.press('Escape')
+    await expect(popup).toBeHidden()
+    await expect(button).toBeFocused()
+    await button.click()
+    await expect(popup).toBeVisible()
+    await page.getByRole('heading', { level: 1, name: heading }).click()
+    await expect(popup).toBeHidden()
+    await button.focus()
+    await page.keyboard.press('Enter')
+    await expect(popup).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(popup).toBeHidden()
+    await expect(button).toBeFocused()
+  }
+
+  // Searching still finds the Note's words, though the list no longer writes them.
+  await page.goto('/transactions')
+  await page.getByRole('searchbox', { name: 'Search', exact: true }).fill(note)
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(dataRows(page)).toHaveCount(1)
+  await expect(noteButton(rowFor(page, noted))).toBeVisible()
+
+  // The column is only as wide as it needs to be: its heading is narrower than the 44px button, so the room inside its padding is the button's, at any text size. (Without that the
+  // table shares its spare width out to every column, and this one grows by a few pixels each.)
+  await atEveryTextSize(page, async (size) => {
+    const inside = await page.getByRole('columnheader', { name: 'Note' }).evaluate((heading) => {
+      const style = getComputedStyle(heading)
+      return heading.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    })
+    const button = (await noteButton(rowFor(page, noted)).boundingBox())!
+    expect(inside, `the Note column at ${size}`).toBeLessThanOrEqual(button.width + 1)
+  })
+
+  // And when no row on the page has a Note, nothing holds the column open but its heading, which stays "Note" on one line and is not broken up a letter at a time.
+  await page.goto(`/transactions?q=${encodeURIComponent(plain)}`)
+  await expect(rowFor(page, plain)).toBeVisible()
+  await expect(noteButton(page)).toHaveCount(0)
+  expect(await onOneLine(page.getByRole('columnheader', { name: 'Note' })), 'the heading of a Note column that holds no button is on one line').toBe(true)
+})
+
+test('pressing the Note button of another row while a Note is open opens that Note, and only that one', async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, noted, alsoNoted } = await seedWithNote(context, baseURL!, testInfo.project.name, (stamp) => `Receipt in the top drawer ${stamp}`)
+  await page.setViewportSize({ width: 1280, height: 1400 }) // the rows and the room below the last one are on the screen, so a pop-up opens below its button and not over the one above
+  await page.goto(`/transactions?q=${stamp}`)
+  const first = noteButton(rowFor(page, noted))
+  const second = noteButton(rowFor(page, alsoNoted))
+  await expect(first).toBeVisible()
+  await expect(second).toBeVisible()
+  const [firstBox, secondBox] = [(await first.boundingBox())!, (await second.boundingBox())!]
+  const [upper, lower] = firstBox.y < secondBox.y ? [{ button: first, description: noted }, { button: second, description: alsoNoted }] : [{ button: second, description: alsoNoted }, { button: first, description: noted }]
+
+  await lower.button.click()
+  await expect(notePopup(page, lower.description)).toBeVisible()
+  await upper.button.click()
+  await expect(page.getByRole('dialog')).toHaveCount(1)
+  await expect(notePopup(page, upper.description)).toBeVisible()
+  await expect(upper.button).toHaveAttribute('aria-expanded', 'true')
+  await expect(lower.button).toHaveAttribute('aria-expanded', 'false')
+})
+
+test('a Note near the 500-character cap on a short screen scrolls inside its pop-up, which takes focus to scroll it, and has no WCAG violations', async ({ page, context, baseURL }, testInfo) => {
+  // 479 characters of words, and the stamp: as long as the Admin can save, and with a break between the words to wrap at.
+  const { stamp, noted, note } = await seedWithNote(context, baseURL!, testInfo.project.name, (stamp) => `${stamp} ${'Receipt '.repeat(60)}`.trim())
+  expect(note.length).toBeGreaterThan(450)
+  expect(note.length).toBeLessThanOrEqual(500)
+  await page.setViewportSize({ width: 640, height: 360 }) // 200% zoom on a laptop, where the rows are cards
+  await page.goto(`/transactions?q=${stamp}`)
+  await noteButton(page.getByRole('listitem').filter({ hasText: noted })).click()
+  const popup = notePopup(page, noted)
+  await expect(popup).toContainText(stamp)
+  await expect.poll(() => popup.evaluate((el) => el.scrollHeight > el.clientHeight), 'the Note is taller than the pop-up that holds it').toBe(true)
+  await expect(noteText(popup)).toBeFocused()
+  await noAxeViolations(page)
+})
+
+test('in Windows high contrast the Note button and its pop-up are drawn with borders', { tag: '@theme' }, async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, noted } = await seedWithNote(context, baseURL!, testInfo.project.name, (stamp) => `Receipt in the top drawer ${stamp}`)
+  await page.emulateMedia({ forcedColors: 'active' }) // the reader's palette replaces the app's colours: a fill or shadow is dropped, a border and a stroke are not
+  await page.goto(`/transactions?q=${stamp}`)
+  const button = noteButton(rowFor(page, noted))
+  await button.click()
+  const popup = notePopup(page, noted)
+  await expect(popup).toBeVisible()
+  const drawn = (element: Locator) =>
+    element.evaluate((el) => {
+      const style = getComputedStyle(el)
+      return { width: parseFloat(style.borderTopWidth), style: style.borderTopStyle, colour: style.borderTopColor }
+    })
+  for (const [name, element] of [['button', button], ['pop-up', popup]] as const) {
+    const border = await drawn(element)
+    expect(border.width, `the ${name} has a border`).toBeGreaterThanOrEqual(1)
+    expect(border.style, `the ${name}'s border is a line`).toBe('solid')
+    expect(border.colour, `the ${name}'s border has a colour`).not.toBe('rgba(0, 0, 0, 0)')
+  }
+  expect(await button.locator('svg').evaluate((icon) => getComputedStyle(icon).stroke), 'the icon is drawn with a stroke').not.toBe('none')
+})
+
+test.describe('on a phone, a Note', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+  test('is a button of 44px or more on its card, opens inside the screen even when it is one long word, keeps its line breaks, and a card without one has no Note line', async ({ page, context, baseURL }, testInfo) => {
+    const { stamp, noted, plain, alsoNoted, note } = await seedWithNote(context, baseURL!, testInfo.project.name, (stamp) => `${'Receipt'.repeat(14)} ${stamp}`)
+    await page.goto(`/transactions?q=${stamp}`)
+    await expect(page.getByRole('table')).toHaveCount(0) // cards
+    const card = page.getByRole('listitem').filter({ hasText: noted })
+    const plainCard = page.getByRole('listitem').filter({ hasText: plain })
+    const twoLineCard = page.getByRole('listitem').filter({ hasText: alsoNoted })
+    await expect(plainCard).toBeVisible()
+    await expect(plainCard.getByText('Note', { exact: true })).toHaveCount(0)
+    await expect(noteButton(plainCard)).toHaveCount(0)
+    await expect(card.getByText('Note', { exact: true })).toBeVisible()
+    await expect(page.getByText(note)).toHaveCount(0)
+
+    await atEveryTextSize(page, async (size) => {
+      const button = noteButton(card)
+      const box = (await button.boundingBox())!
+      // 44px at Medium (16px text) and in proportion at the others, as every target is sized in rem: about 38px at Small, which README Accessibility says.
+      const least = ((await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))) * 44) / 16 - 0.5
+      expect(box.width, `${size}: the button is 44px wide, in proportion to the text`).toBeGreaterThanOrEqual(least)
+      expect(box.height, `${size}: the button is 44px tall, in proportion to the text`).toBeGreaterThanOrEqual(least)
+      await button.tap()
+      const popup = notePopup(page, noted)
+      await expect(popup).toHaveText(note)
+      const opened = (await popup.boundingBox())!
+      expect(opened.x, `${size}: its left edge is on the screen`).toBeGreaterThanOrEqual(0)
+      expect(opened.x + opened.width, `${size}: its right edge is on the screen`).toBeLessThanOrEqual(390)
+      // The long word wraps inside the pop-up, which is not wider than itself.
+      expect(await popup.evaluate((el) => el.scrollWidth <= el.clientWidth), `${size}: the pop-up does not scroll sideways`).toBe(true)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `${size}: no sideways scrolling`).toBe(true)
+      await page.keyboard.press('Escape')
+      await expect(popup).toBeHidden()
+      await expect(button).toBeFocused()
+
+      // A Note of two lines keeps them (the paragraph's white-space), which its text as it is drawn shows: "a", a line break and "b".
+      await noteButton(twoLineCard).tap()
+      const twoLines = notePopup(page, alsoNoted)
+      await expect(twoLines).toBeVisible()
+      expect(await noteText(twoLines).evaluate((el) => (el as HTMLElement).innerText), `${size}: the line break in the Note is kept`).toBe('a\nb')
+      await page.keyboard.press('Escape')
+      await expect(twoLines).toBeHidden()
+    })
   })
 })

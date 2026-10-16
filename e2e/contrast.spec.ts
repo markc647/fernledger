@@ -1,5 +1,6 @@
 import type { APIRequestContext, BrowserContext, Page } from '@playwright/test'
-import { netWorth, SPENT, showNetWorth, showSpending, stubNetWorth, stubSpending } from './chart-helpers'
+import { stubBalances } from './balances-helpers'
+import { NET_WORTH_PATH, netWorth, showNetWorth, spendingDrawn, stubNetWorth } from './chart-helpers'
 import { dateField, pickDate, thisMonth } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { ensureCategory, forgetKeptReportsAfterEach, importRows, restoreAppTitleAfterEach, signInToOpen, transactionId, type SeedRow } from './report-helpers'
@@ -78,6 +79,8 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
     if (!row.category) continue
     expect((await context.request.put(`/api/transactions/${await transactionId(context, row.payee)}/override`, { headers: { Origin: baseURL }, data: { categoryId: categories[row.category] } })).ok()).toBe(true)
   }
+  // A Note on the food Transaction, so the list has a Note button and the pop-up it opens.
+  expect((await context.request.put(`/api/transactions/${await transactionId(context, `CONTRAST ${project} SHOP`)}/note`, { headers: { Origin: baseURL }, data: { note: `Receipt in the top drawer, ${project}` } })).ok()).toBe(true)
   seeded.add(project)
 }
 
@@ -148,40 +151,62 @@ const PAGES: {
     },
   },
   {
-    // The Dashboard and the Summary, with both charts drawn and net worth's figures open. The charts are stubbed, as in shell.spec.ts: net worth is refused for more than 49 Accounts, which the specs that share this database can reach.
+    // The Dashboard and the Summary, which are the same three cards: the Balances table with every state of its Checked column (OK, Check and by how much, the dash) and of its Sync column
+    // (Synced, Not Synced), as cards on a phone as well. The answers are stubbed, and Akahu Sync said to be set up: Sync is not built, so the real Worker has no Account that was synced and
+    // says the column is not there.
     path: '/',
     phone: true,
-    setup: async ({ page }) => {
-      await stubNetWorth(page)
-      await stubSpending(page, SPENT, 16_050)
-    },
+    setup: async ({ page }) => stubBalances(page, { syncSetUp: true }),
     visit: async ({ page, role, scan }) => {
       await page.goto('/')
       await heading(page, role === 'admin' ? 'Dashboard' : 'Summary')
-      await expect(page.getByRole('region', { name: 'Balance checks' }).getByRole('listitem').first()).toBeVisible()
+      const balances = page.getByRole('region', { name: 'Balances' })
+      for (const word of ['OK', 'Check', 'Synced', 'Not Synced']) await expect(balances.getByText(word, { exact: true }).first()).toBeVisible()
+      await expect(balances.getByText('—').first()).toBeVisible()
+      await scan()
+    },
+  },
+  {
+    // Net worth, drawn from a stubbed answer (net worth is refused for more than 49 Accounts, which the specs that share this database can reach), with its figures open.
+    path: NET_WORTH_PATH,
+    setup: async ({ page }) => {
+      await stubNetWorth(page)
+    },
+    visit: async ({ page, scan }) => {
+      await page.goto(NET_WORTH_PATH)
+      await heading(page, 'Net worth')
       await showNetWorth(page)
-      await showSpending(page, /^Bar chart of the 3 Categories/)
       await netWorth(page).getByText('Show the figures').click()
       await expect(netWorth(page).getByRole('table').or(netWorth(page).getByRole('list', { name: /Net worth at the end of each month/ }))).toBeVisible()
       await scan()
     },
   },
   {
-    // The list, and for the Admin the edit panel of the Transfer's first half (it points to Not a Transfer), and the question that button asks (nothing is changed: the question is not answered).
+    // The list, with the Note pop-up open, and for the Admin the edit panel of the Transfer's first half (it points to Not a Transfer), and the question that button asks (nothing is changed: the question is not answered).
     path: '/transactions',
     phone: true,
     visit: async ({ page, role, phone, data, scan }) => {
       await page.goto(`/transactions?q=${encodeURIComponent(data.search)}`)
       await heading(page, 'Transactions')
+      const scanNote = async () => {
+        const shop = `CONTRAST ${data.project} SHOP`
+        await page.getByRole('button', { name: `Read the Note on ${shop}` }).click()
+        await expect(page.getByRole('dialog', { name: `Note on ${shop}` })).toBeVisible()
+        await scan('with a Note open', { within: '[data-slot="popover-content"]' })
+        await page.keyboard.press('Escape')
+        await expect(page.getByRole('dialog', { name: `Note on ${shop}` })).toBeHidden()
+      }
       if (phone) {
         await expect(page.getByText('TO SAVINGS').first()).toBeVisible() // cards, not rows
         await scan()
+        await scanNote()
         return
       }
       const rows = page.getByRole('row').filter({ has: page.getByRole('cell') })
       await expect(rows).toHaveCount(7) // the six of this Account (last month's, and this month's five) and the Transfer's other half
       await expect(rows.filter({ hasText: 'TO SAVINGS' })).toContainText('Transfer')
       await scan()
+      await scanNote()
       if (role === 'member') return
       await rows.filter({ hasText: 'TO SAVINGS' }).getByRole('button', { name: /^Edit Category and Note/ }).click()
       await expect(page.getByText('If the pairing is wrong, use Not a Transfer instead.')).toBeVisible()
@@ -342,6 +367,7 @@ const PAGES: {
       await page.goto(`/reports/spending?account=${accountId}&${RANGE}`)
       const report = page.getByRole('article', { name: 'Spending by Category' })
       await expect(report.getByRole('table', { name: 'Spending in each Category' })).toContainText(data.food)
+      await spendingDrawn(page) // with its bars, which the scan is of as well
       await scan()
     },
   },

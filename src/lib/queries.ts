@@ -2,7 +2,7 @@ import { queryOptions } from '@tanstack/react-query'
 import type { PreviewRow } from '@/generated/api/import-rows'
 import { api } from './api'
 import { isLoansKind } from './category-kinds'
-import type { NetWorthRange, SpendingPeriod } from './charts'
+import type { NetWorthRange } from './charts'
 import type { CarryPreview } from './import-carry'
 import { HttpError } from './me'
 import { loadBalances } from './report-balances'
@@ -135,7 +135,7 @@ export const reportBalancesQuery = (accounts: { id: number; name: string; accoun
 
 /**
  * The spending-by-Category Report's data: what each Category spent over the range, for the one Account or, with none, all of them, as the
- * Dashboard's chart is told it (worker/spending-by-category.ts). One request either way. Read once and kept, as the other Reports are: a Report is a snapshot.
+ * `GET /api/charts/spending` gives it (worker/spending-by-category.ts), and the Report's bar chart is drawn from it. One request either way. Read once and kept, as the other Reports are: a Report is a snapshot.
  */
 export const reportSpendingQuery = (accountId: number | undefined, from: string, to: string) =>
   queryOptions({
@@ -312,6 +312,7 @@ export const balancesQuery = queryOptions({
 /** Balance Check warnings (where the bank and the Transactions disagree), and each Account's latest check. */
 export const balanceChecksQuery = queryOptions({
   queryKey: ['balance-checks'],
+  retry: 1, // the Balances table waits for it: one more try, and then it says so, not three tries and a long wait
   queryFn: async () => {
     const res = await api['balance-checks'].$get()
     if (!res.ok) throw new HttpError(res.status)
@@ -345,22 +346,6 @@ export const netWorthQuery = (range: NetWorthRange) =>
     retry: 1, // a failed answer has already read a great deal, so it is asked for once more at most (ADR 0004)
     queryFn: async () => {
       const res = await api.charts['net-worth'].$get({ query: { range } })
-      if (!res.ok) throw new HttpError(res.status)
-      return res.json()
-    },
-  })
-
-/** Which spending the chart is of: a period the Worker names (so "this month" is a NZ month whatever the device's clock), or two dates. */
-export type SpendingChoice = { period: SpendingPeriod } | { from: string; to: string }
-
-/** Spending by Category for a period or two dates, Transfers left out. It reads the Transactions in those dates (ADR 0004), so it is asked again only when the choice changes or the reader asks for it. */
-export const spendingByCategoryQuery = (choice: SpendingChoice) =>
-  queryOptions({
-    queryKey: ['spending', choice],
-    refetchOnWindowFocus: false,
-    retry: 1,
-    queryFn: async () => {
-      const res = await api.charts.spending.$get({ query: choice })
       if (!res.ok) throw new HttpError(res.status)
       return res.json()
     },

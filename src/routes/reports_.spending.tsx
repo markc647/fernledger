@@ -30,7 +30,7 @@ function SpendingReport() {
 
 /**
  * What each Category spent over a range of dates, for all the Accounts or the one chosen (spec story 93). It asks once, whatever the number of Accounts, and adds,
- * names and orders nothing: the Worker gives the Dashboard's own answer (worker/spending-by-category.ts, ADR 0012).
+ * names and orders nothing: the Worker gives the one answer (worker/spending-by-category.ts, ADR 0012), and the chart above the table is drawn from it.
  */
 function Spending({ scope, account }: { scope: ReportScope; account: number | undefined }) {
   const spending = useQuery(reportSpendingQuery(account, scope.from, scope.to))

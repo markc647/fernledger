@@ -72,7 +72,7 @@ const OCT_7: [string, number] = ['2026-10-07', OPENING + 800]
 type Outcome = { status: string; asOfDate: string; since: string | null; differenceCents: number | null }
 const outcomeOf = async (res: Response): Promise<Outcome | null> => ((await res.json()) as { balanceCheck?: Outcome | null }).balanceCheck ?? null
 
-type BalanceRow = { accountId: number; accountName: string; balanceCents: number | null; asOfDate: string | null }
+type BalanceRow = { accountId: number; accountName: string; balanceCents: number | null; asOfDate: string | null; syncedInLast24Hours: boolean }
 const balances = async (who: Who = 'admin'): Promise<BalanceRow[]> => ((await (await call('/api/balances', { who })).json()) as { accounts: BalanceRow[] }).accounts
 type Difference = { accountId: number; accountName: string; asOfDate: string; since: string; differenceCents: number }
 type Checks = { differences: Difference[]; accounts: { accountId: number; asOfDate: string | null; status: string | null }[] }
@@ -188,8 +188,8 @@ describe('current balances', () => {
     await importFile([tx('S4', '2026-10-02', -250)], { ledger: SEPT_30, to: '2026-10-02' })
 
     expect(await balances()).toEqual([
-      { accountId: await accountId(current), accountName: current, balanceCents: 4000, asOfDate: '2026-09-30', cutoverDate: null, latestStatus: 'alone' },
-      { accountId: await accountId(), accountName: savings, balanceCents: 10_250, asOfDate: '2026-10-02', cutoverDate: null, latestStatus: 'alone' },
+      { accountId: await accountId(current), accountName: current, balanceCents: 4000, asOfDate: '2026-09-30', cutoverDate: null, latestStatus: 'alone', syncedInLast24Hours: false },
+      { accountId: await accountId(), accountName: savings, balanceCents: 10_250, asOfDate: '2026-10-02', cutoverDate: null, latestStatus: 'alone', syncedInLast24Hours: false },
     ])
   })
 
@@ -202,6 +202,29 @@ describe('current balances', () => {
 
     expect(account!.balanceCents).toBe(points.at(-1)!.balanceCents)
     expect(account!.asOfDate).toBe(points.at(-1)!.date)
+  })
+
+  it('says whether Akahu last synced each Account in the last 24 hours, to a Member as to the Admin, and does not send the time itself', async () => {
+    await importFile(september, { ledger: SEPT_30 })
+    await importFile([tx('X1', '2026-09-15', -1234)], { number: current, ledger: ['2026-09-30', 4000] })
+    const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
+    await env.DB.prepare('UPDATE accounts SET akahu_synced_at = ?1 WHERE account_number = ?2').bind(hoursAgo(23), savings).run()
+    await env.DB.prepare('UPDATE accounts SET akahu_synced_at = ?1 WHERE account_number = ?2').bind(hoursAgo(25), current).run()
+
+    for (const who of ['admin', 'member'] as const) {
+      const accounts = await balances(who)
+      expect(accounts.map((a) => [a.accountName, a.syncedInLast24Hours])).toEqual([
+        [current, false],
+        [savings, true],
+      ])
+      expect(Object.keys(accounts[0]!), who).not.toContain('akahuSyncedAt')
+    }
+  })
+
+  it('has not been synced, and says so, for an Account Akahu Sync has never reached (as every Account is until Sync is built)', async () => {
+    await importFile(september, { ledger: SEPT_30 })
+
+    expect(await balances()).toMatchObject([{ accountName: savings, syncedInLast24Hours: false }])
   })
 
   it('is null for an Account with no ledger balance yet', async () => {

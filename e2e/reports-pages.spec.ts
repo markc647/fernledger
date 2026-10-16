@@ -28,10 +28,10 @@ test.describe('the pages, as the Admin', () => {
     await signInAs(context, 'admin')
   })
 
-  test('are in the sidebar under Reports, after the Reports page, a row each in the order the Reports are kept, and each is a link to its page', async ({ page }) => {
+  test('are in the sidebar under Reports, after the Reports page and Net worth, a row each in the order the Reports are kept, and each is a link to its page', async ({ page }) => {
     await page.goto('/reports')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
-    await expect(reportsLinks(page)).toHaveText(['Reports', ...EXPECTED.map((report) => report.name)])
+    await expect(reportsLinks(page)).toHaveText(['Reports', 'Net worth', ...EXPECTED.map((report) => report.name)])
     for (const report of EXPECTED) await expect(navLink(page, report.name)).toHaveAttribute('href', report.path)
   })
 
@@ -131,7 +131,7 @@ test.describe('the pages, as a Member', () => {
   test("are not in a Member's sidebar, who makes none: Reports is, and a Report is a page of it, with Reports marked and the breadcrumb a way back to it", async ({ page }) => {
     await page.goto('/reports/balances')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
-    await expect(reportsLinks(page)).toHaveText(['Reports', 'Accounts'])
+    await expect(reportsLinks(page)).toHaveText(['Reports', 'Net worth', 'Accounts']) // Accounts after them, as it was, with Net worth between
     for (const report of EXPECTED) {
       await page.goto(report.path)
       await expect(page.getByRole('heading', { level: 1, name: report.name, exact: true })).toBeVisible()
@@ -158,5 +158,18 @@ test.describe('the pages, as a Member', () => {
     }
     await page.waitForLoadState('networkidle')
     expect(asked).toEqual([])
+  })
+})
+
+// Net worth is a page of its own in the Reports group, not one of the Reports: it has a row for the Admin and a Member alike.
+test.describe('Net worth', () => {
+  test('is a page of its own and not a Report: it has no title block and no way back at its foot, and its breadcrumb is a group and a page, not a link back', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/reports/net-worth')
+    await expect(page.getByRole('heading', { level: 1, name: 'Net worth' })).toBeVisible()
+    await expect(page.getByRole('article')).toHaveCount(0) // a Report is an article, with its title block; this is a chart
+    await expect(page.locator('main').getByRole('link', { name: 'Back to Reports' })).toHaveCount(0)
+    await expect(breadcrumb(page).getByRole('listitem')).toHaveText(['Reports', 'Net worth'])
+    await expect(breadcrumb(page).getByRole('link')).toHaveCount(0)
   })
 })

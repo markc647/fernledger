@@ -1,4 +1,8 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+/* Tailwind reads the app's own files for class names, and only those: not the tests, the scripts or the docs, which write class names as examples (a fixed size in a test would
+   otherwise be made into a rule in the page's stylesheet). */
+@source "../src";
+@source "../index.html";
 
 /* Geist, Latin and Latin Extended only. Latin Extended carries the macrons (ā, ē, ī, ō, ū) that Māori words need;
    the browser downloads it only when a page uses one. */
@@ -64,6 +68,19 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
   --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+/* One size for all text (README, Accessibility). Text that is not a heading is exactly the size the text size control chose, in every part of the page. shadcn's components say
+   `text-sm` for a menu, a button, a caption or a hint, and Tailwind's `text-sm` and `text-xs` are smaller than the page, so here they are the page's size. That keeps the
+   components stock (no edit for the app, and one that arrives with a merge cannot bring a smaller size back) and the size in one place. A heading says `text-lg`, `text-xl` or
+   `text-2xl`, which are 1.125, 1.25 and 1.5 times it, so a heading is larger than the text at every choice. A fixed size (`text-[15px]`, `text-[0.9rem]`) does not follow the
+   choice, so there are none: scripts/one-text-size.test.mjs fails on one. Printed Reports have sizes of their own, in pt (`print:text-[12pt]`), and a chart's axis text is
+   proportional to the page's. The line height is `text-base`'s. `text-xs`, `text-sm` and `text-base` are deliberately all the same size: not a mistake to correct. */
+@theme {
+  --text-xs: 1rem;
+  --text-xs--line-height: calc(1.5 / 1);
+  --text-sm: 1rem;
+  --text-sm--line-height: calc(1.5 / 1);
 }
 
 /* How the sidebar's sheet comes and goes on a phone (src/components/ui/sheet.tsx): a slide, and the fade of what is behind it. A dozen lines here rather than the
@@ -187,6 +204,22 @@
   --sidebar-marker: oklch(0.708 0 0);
 }
 
+/* The room a DatePicker (src/components/date-picker.tsx) needs: its longest date, such as "Wed 30 Sept 2026", on one line, with the button's padding (0.75rem each side), the gap
+   (0.375rem) and the calendar icon (1.25rem) round it. All in rem, as the button is, so it follows the text size. Not in `ch`, which follows the font in use: Geist arrives after the
+   first paint (font-display: swap), and a `ch` width is 24px narrower in the fallback sans-serif and jumps when Geist swaps in, moving whatever is beside the box. Measured over every
+   day from 2000 to 2100 at 16px: the widest, "Wed 20 Sept 2000", is 8.87rem in Geist and 8.27rem in Arial (the fallback on Windows and macOS), and 9.3rem is a little over both. If the
+   font changes, measure again. */
+:root {
+  --date-field-min: calc(9.3rem + 3.125rem + 2px);
+}
+
+/* A row of date fields (or a date field and its neighbours) in a grid: as many columns as have room for a field at its least, so a row that is too narrow for them moves one to
+   the next line, as a phone's does, and never squeezes a date. */
+@utility date-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--date-field-min)), 1fr));
+}
+
 @layer base {
   * {
     @apply border-border outline-ring;
@@ -204,8 +237,8 @@
   html.dark {
     color-scheme: dark;
   }
-  /* The Small / Medium / Large control (src/lib/text-size.ts): 14px, 16px and 20px on a browser set to 16px. Everything is sized in rem, so it all scales together,
-     and the percentage is of the browser's own text size, so a larger browser setting is respected. Medium is the default, and the 16px body text the README promises. */
+  /* The Small / Medium / Large / Xtra Large control (src/lib/text-size.ts): 14px, 16px, 18px and 20px on a browser set to 16px. Everything is sized in rem, so it all scales
+     together, and the percentage is of the browser's own text size, so a larger browser setting is respected. Medium is the default, and the 16px body text the README promises. */
   html[data-text-size="small"] {
     font-size: 87.5%;
   }
@@ -213,6 +246,9 @@
     font-size: 100%;
   }
   html[data-text-size="large"] {
+    font-size: 112.5%;
+  }
+  html[data-text-size="xlarge"] {
     font-size: 125%;
   }
   body {
