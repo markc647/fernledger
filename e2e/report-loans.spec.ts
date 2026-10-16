@@ -25,6 +25,7 @@ import {
   setTitle,
   signInToOpen,
   squash,
+  stubKeeping,
   TITLE,
   type SeedRow,
 } from './report-helpers'
@@ -588,6 +589,7 @@ test.describe('on screen', () => {
   test.describe('with the Worker\'s answers stubbed', () => {
     type Stub = { id: number; name: string; opening?: { cents: number; count: number }; rows: { amountCents: number; date?: string }[] }
     const stubLoans = async (page: Page, loans: Stub[]) => {
+      await stubKeeping(page)
       await page.route('**/api/categories', (route) => route.fulfill({ json: loans.map((l) => ({ id: l.id, name: l.name, kind: 'loans' })) }))
       await page.route('**/api/reports/loans?**', (route) => {
         const params = new URL(route.request().url()).searchParams
@@ -785,6 +787,7 @@ test.describe('printed over several pages', () => {
     await setTitle(request, baseURL, TITLE)
     await signInAs(context, 'admin')
     await context.clock.setFixedTime(NOW)
+    await stubKeeping(page) // Loan – Stub is only in the stubbed answers
     await page.route('**/api/categories', (route) => route.fulfill({ json: [{ id: 1, name: 'Loan – Stub', kind: 'loans' }] }))
     await page.route('**/api/reports/loans?**', (route) =>
       route.fulfill({

@@ -72,6 +72,12 @@ export function forgetKeptReportsAfterEach() {
   test.afterEach(async ({ request, baseURL }) => forgetKeptReports(request, baseURL))
 }
 
+/**
+ * Answers the Admin's keeping of the Report the page shows without the Worker, for a spec that stubs the Categories: the Worker keeps a Loans Report only of a Loans Category that is there,
+ * and the ones the spec names are only in its stubbed answers, so the real keep would be refused (404, which the fixtures report as a console error).
+ */
+export const stubKeeping = (page: Page) => page.route('**/api/kept-reports', (route) => (route.request().method() === 'POST' ? route.fulfill({ status: 201, json: { id: 1 } }) : route.fallback()))
+
 /** What the Admin's showing a Report keeps (worker/kept-reports.ts): the Report by its address's last part, the Account or Category by ID, and the dates. */
 export type KeptChoices = { report: string; accountId?: number; categoryId?: number; from?: string; to: string }
 
