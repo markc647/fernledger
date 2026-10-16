@@ -27,6 +27,29 @@ export const differenceDirection = (differenceCents: number) =>
     ? "The bank's balance is higher than the Transactions add up to. Some money in may be missing, or some money out counted twice."
     : "The bank's balance is lower than the Transactions add up to. Some money out may be missing, or some money in counted twice."
 
+/** How an Account stands with the bank, for the Checked column of Balances: its Balance Checks agree (`ok`), one disagrees (`check`, with every span that does, newest first), or it has not been checked (`none`). */
+export type Checked<Difference> = { kind: 'ok' } | { kind: 'check'; differences: Difference[] } | { kind: 'none' }
+
+/**
+ * Reads the answer of GET /api/balance-checks once, and says how each Account stands. An Account is `check` while any of its spans differs from the bank (`differences`), however its latest
+ * check came out, so a difference is not hidden by a later balance that matches the one before it. Otherwise it is `ok` only when its latest check is `matched`: one balance on its own
+ * (`alone`), one the check could not use, no balance at all, and an Account the answer does not list are `none`, so the table never claims more than was compared.
+ */
+export function checkedBy<Difference extends { accountId: number }>(checks: { differences: Difference[]; accounts: { accountId: number; status: string | null }[] }) {
+  const differing = new Map<number, Difference[]>()
+  for (const difference of checks.differences) differing.set(difference.accountId, [...(differing.get(difference.accountId) ?? []), difference])
+  const latest = new Map(checks.accounts.map((account) => [account.accountId, account.status]))
+  return (accountId: number): Checked<Difference> => {
+    const found = differing.get(accountId)
+    if (found) return { kind: 'check', differences: found }
+    return latest.get(accountId) === 'matched' ? { kind: 'ok' } : { kind: 'none' }
+  }
+}
+
+/** How far the newest difference is, short enough to sit under "Check": "by $5.00", and how many earlier ones disagree too ("by $5.00 (and 1 earlier)"). The differences are newest first. */
+export const checkedAmount = (differences: { differenceCents: number }[]) =>
+  `by ${formatBalance(Math.abs(differences[0]!.differenceCents))}${differences.length > 1 ? ` (and ${differences.length - 1} earlier)` : ''}`
+
 /** What to tell the Admin after an Import, as a tone for `Status`, a headline and a sentence of detail. */
 export function describeBalanceCheck(outcome: BalanceCheckOutcome): { tone: 'success' | 'warning' | 'neutral'; headline: string; detail?: string } {
   switch (outcome.status) {

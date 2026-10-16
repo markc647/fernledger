@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { balanceDiffersMessage, describeBalanceCheck, noBalanceHint, noBalanceReason } from './balance-check'
+import { balanceDiffersMessage, checkedAmount, checkedBy, describeBalanceCheck, noBalanceHint, noBalanceReason } from './balance-check'
 
 describe('noBalanceHint', () => {
   it('says what the Admin can do, for each reason an Account can have no balance', () => {
@@ -26,6 +26,52 @@ describe('balanceDiffersMessage', () => {
 
   it('writes the size of the difference, whichever way it goes, with no sign', () => {
     expect(balanceDiffersMessage(-123456, '2026-10-08')).toBe('Balance differs from bank by $1,234.56 since Thu 8 Oct 2026')
+  })
+})
+
+describe('checkedBy', () => {
+  const difference = (accountId: number, differenceCents: number, asOfDate: string) => ({ accountId, accountName: `Account ${accountId}`, asOfDate, since: '2026-09-30', differenceCents })
+  const latest = (accountId: number, status: string | null) => ({ accountId, accountName: `Account ${accountId}`, asOfDate: status === null ? null : '2026-10-15', status })
+
+  it('is OK for an Account whose latest Balance Check agrees with the bank', () => {
+    expect(checkedBy({ differences: [], accounts: [latest(1, 'matched')] })(1)).toEqual({ kind: 'ok' })
+  })
+
+  it('is Check, with the differences newest first, for an Account where one disagrees, whatever its latest check says', () => {
+    const newest = difference(2, 500, '2026-10-15')
+    const older = difference(2, -250, '2026-10-08')
+    expect(checkedBy({ differences: [newest, older], accounts: [latest(2, 'differs')] })(2)).toEqual({ kind: 'check', differences: [newest, older] })
+    // An older span that still disagrees is a Check although the latest balance matched the one before it.
+    expect(checkedBy({ differences: [older], accounts: [latest(2, 'matched')] })(2)).toEqual({ kind: 'check', differences: [older] })
+  })
+
+  it('is none for an Account that has not been checked: no balance, one balance on its own, or one the check could not use', () => {
+    const none = { kind: 'none' }
+    const checks = { differences: [], accounts: [latest(3, null), latest(4, 'alone'), latest(5, 'after-cutover'), latest(6, 'file-ends-early')] }
+    for (const id of [3, 4, 5, 6, 99]) expect(checkedBy(checks)(id), String(id)).toEqual(none) // 99 is an Account the answer does not list at all
+  })
+
+  it('keeps each Account to its own differences', () => {
+    const one = difference(1, 100, '2026-10-15')
+    const two = difference(2, 200, '2026-10-15')
+    const checked = checkedBy({ differences: [one, two], accounts: [latest(1, 'differs'), latest(2, 'differs'), latest(3, 'matched')] })
+    expect(checked(1)).toEqual({ kind: 'check', differences: [one] })
+    expect(checked(2)).toEqual({ kind: 'check', differences: [two] })
+    expect(checked(3)).toEqual({ kind: 'ok' })
+  })
+})
+
+describe('checkedAmount', () => {
+  const d = (differenceCents: number) => ({ differenceCents })
+
+  it('says how far the newest difference is, whichever way it goes, with no sign', () => {
+    expect(checkedAmount([d(500)])).toBe('by $5.00')
+    expect(checkedAmount([d(-123456)])).toBe('by $1,234.56')
+  })
+
+  it('says how many earlier ones there are', () => {
+    expect(checkedAmount([d(500), d(-250)])).toBe('by $5.00 (and 1 earlier)')
+    expect(checkedAmount([d(500), d(-250), d(10)])).toBe('by $5.00 (and 2 earlier)')
   })
 })
 
