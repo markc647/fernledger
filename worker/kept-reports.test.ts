@@ -109,15 +109,20 @@ describe('the list', () => {
     expect((await list()).map((k) => k.id)).toEqual([second, first])
   })
 
-  it('is one small query: a few rows read for a few kept Reports', async () => {
-    for (let i = 1; i <= 5; i++) await seedKept({ report: 'transactions', accountId: i % 2 ? savings : cheque, to: `2026-10-${String(10 + i)}` })
+  it('is one small query: a few rows read for each kept Report, a full list of KEPT_LIMIT included', async () => {
+    const inserts = days(KEPT_LIMIT).map((to, i) =>
+      i % 2
+        ? env.DB.prepare('INSERT INTO kept_reports (report, account_id, from_date, to_date, made_by) VALUES (?, ?, ?, ?, ?)').bind('transactions', i % 4 === 1 ? savings : cheque, '2000-01-01', to, 'admin@example.com')
+        : env.DB.prepare('INSERT INTO kept_reports (report, category_id, to_date, made_by) VALUES (?, ?, ?, ?)').bind('loans', loanId, to, 'admin@example.com'),
+    )
+    await env.DB.batch(inserts)
     const { db, usage } = meteredDb()
 
     const res = await callAsAdminWith(db, '/api/kept-reports', 'GET', undefined)
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toHaveLength(5)
-    expect(usage.rowsRead).toBeLessThanOrEqual(20)
+    expect(await res.json()).toHaveLength(KEPT_LIMIT)
+    expect(usage.rowsRead).toBeLessThanOrEqual(3 * KEPT_LIMIT) // measured: 2 * KEPT_LIMIT, the index entry and the row of each
   })
 
   it('lists at most KEPT_LIMIT, the newest', async () => {
@@ -274,6 +279,16 @@ describe('showing a Report as the Admin', () => {
         after: '{"report":"Spending by Category","account":"Example savings","from":"2026-10-01","to":"2026-10-31"}',
       },
     ])
+  })
+
+  it('reads the list once, an index walk, to find what a new Report pushes over the limit: about KEPT_LIMIT rows read', async () => {
+    await env.DB.batch(days(KEPT_LIMIT).map((to) => insertKept(to, '2026-10-01T00:00:00.000Z')))
+    const { db, usage } = meteredDb()
+
+    const res = await callAsAdminWith(db, '/api/kept-reports', 'POST', SPENDING)
+
+    expect(res.status).toBe(201)
+    expect(usage.rowsRead).toBeLessThanOrEqual(KEPT_LIMIT + 50) // measured: 218
   })
 
   it('drops every Report over the limit, and names them all, if the list somehow holds more than one over', async () => {
