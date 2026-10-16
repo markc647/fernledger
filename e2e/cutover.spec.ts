@@ -174,8 +174,13 @@ test('a Note on an imported Transaction comes back with it when the history is r
   await expect(page.getByText('lost their Override, Note or Not a Transfer mark. The new file has no Transaction')).toHaveCount(0)
 
   await page.getByRole('link', { name: 'See the transactions' }).click()
-  await expect(page.getByRole('row').filter({ hasText: name }).filter({ hasText: 'EXAMPLE SHOP 11' }).filter({ hasText: 'Example note kept across a replace' })).toBeVisible()
-  await expect(page.getByRole('row').filter({ hasText: name }).filter({ hasText: 'EXAMPLE SHOP 13' }).filter({ hasText: 'Example note kept across a replace' })).toHaveCount(0)
+  // The list has a Note behind a button (not written in the row): the Transaction of the 11th has it, and the new one of the 13th has none.
+  const row = (shop: string) => page.getByRole('row').filter({ hasText: name }).filter({ hasText: shop })
+  await row('EXAMPLE SHOP 11').getByRole('button', { name: /^Read the Note on / }).click()
+  await expect(page.getByRole('dialog', { name: /^Note on EXAMPLE SHOP 11/ })).toContainText('Example note kept across a replace')
+  await page.keyboard.press('Escape')
+  await expect(row('EXAMPLE SHOP 13')).toBeVisible()
+  await expect(row('EXAMPLE SHOP 13').getByRole('button', { name: /^Read the Note on / })).toHaveCount(0)
 })
 
 test('a replace that stopped part way leaves its Notes waiting, an Import says so, and the Admin can discard them', async ({ page, context, baseURL }, testInfo) => {

@@ -450,7 +450,7 @@ test('a Note is a button that opens it, in All Transactions and in Uncategorised
     await expect(button).toHaveAttribute('aria-expanded', 'true')
     await expect(popup).toBeFocused()
     const opened = (await popup.boundingBox())!
-    expect(Math.abs(opened.x + opened.width - (box.x + box.width)), `${heading}: the pop-up ends where its button does`).toBeLessThanOrEqual(1)
+    expect(Math.abs(opened.x + opened.width - (box.x + box.width)), `${heading}: the pop-up ends where its button does`).toBeLessThanOrEqual(2) // to within the pixel it is rounded to
     await noAxeViolationsFromTop(page)
 
     // Escape, a press outside it, and the keyboard each close it and leave focus on the button.
@@ -467,6 +467,16 @@ test('a Note is a button that opens it, in All Transactions and in Uncategorised
     await page.keyboard.press('Escape')
     await expect(popup).toBeHidden()
     await expect(button).toBeFocused()
+
+    // A press that lands on a control leaves focus on that control, and does not take it back to the button (Uncategorised has no field to press).
+    if (heading === 'Transactions') {
+      const searchBox = page.getByRole('searchbox', { name: 'Search', exact: true })
+      await button.click()
+      await expect(popup).toBeVisible()
+      await searchBox.click()
+      await expect(popup).toBeHidden()
+      await expect(searchBox).toBeFocused()
+    }
   }
 
   // Searching still finds the Note's words, though the list no longer writes them.
@@ -476,12 +486,16 @@ test('a Note is a button that opens it, in All Transactions and in Uncategorised
   await expect(dataRows(page)).toHaveCount(1)
   await expect(noteButton(rowFor(page, noted))).toBeVisible()
 
-  // The column is no wider than its heading and the button (about 4.25rem), at any text size, so it is never wider than 5.5rem.
+  // The column is only as wide as it needs to be: its heading is narrower than the 44px button, so the room inside its padding is the button's, at any text size. (Without that the
+  // table shares its spare width out to every column, and this one grows by a few pixels each.)
   for (const size of ['Small', 'Medium', 'Large'] as const) {
     await chooseTextSize(page, size)
-    const root = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))
-    const column = (await page.getByRole('columnheader', { name: 'Note' }).boundingBox())!
-    expect(column.width, `the Note column at ${size}`).toBeLessThanOrEqual(5.5 * root)
+    const inside = await page.getByRole('columnheader', { name: 'Note' }).evaluate((heading) => {
+      const style = getComputedStyle(heading)
+      return heading.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    })
+    const button = (await noteButton(rowFor(page, noted)).boundingBox())!
+    expect(inside, `the Note column at ${size}`).toBeLessThanOrEqual(button.width + 1)
   }
 })
 

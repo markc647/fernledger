@@ -73,7 +73,7 @@ const CONTROL = 'a[href], button, input, select, textarea, summary, [contentedit
 
 /**
  * The Note column: a Note is not written in the list (it can be long, and the list is for scanning), but is behind a button that opens it beside the row. A row without a Note shows nothing
- * (a screen reader is still told, in text only it reads, as it is for the Transaction's details). The button is 44px, named for its row, and the pop-up is the app's Popover: Escape and a press
+ * (a screen reader is still told "No Note", in text only it reads). The button is 44px, named for its row, and the pop-up is the app's Popover: Escape and a press
  * outside close it, and focus goes back to the button. A press outside that lands on a control (a field, a button, a link) leaves focus there, which is where that press meant it to go; one that
  * lands on the page itself, which takes focus for the skip link (`main`), does not count.
  */

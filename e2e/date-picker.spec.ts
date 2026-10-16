@@ -327,7 +327,11 @@ for (const { name, path, fields, admin, ready } of FORM_PAGES) {
     await page.goto(path)
     await ready?.(page)
     await expect(dateField(page, fields[0]!)).toBeVisible()
+    // A box is as wide with no date as with the longest, so choosing a date never moves what is beside it (a Cutover Date is set from the start, so Settings has no "before").
+    const widthOf = (label: string) => dateField(page, label).evaluate((button) => button.getBoundingClientRect().width)
+    const empty = settings ? [] : await Promise.all(fields.map(widthOf))
     if (!settings) for (const label of fields) await pickDate(page, label, WIDEST)
+    for (const [i, width] of empty.entries()) expect(Math.abs((await widthOf(fields[i]!)) - width), `${fields[i]} is as wide with the longest date as with none`).toBeLessThanOrEqual(1)
     await atEveryTextSize(page, async (size) => {
       for (const viewport of VIEWPORTS) {
         await page.setViewportSize(viewport)
