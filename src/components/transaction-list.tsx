@@ -24,7 +24,7 @@ import { KIND_NOTES } from '@/lib/category-kinds'
 import { formatDate } from '@/lib/format'
 import { meQuery } from '@/lib/me'
 import { accountsQuery, categoriesQuery, PAGE_SIZE, transactionCountQuery, transactionsQuery } from '@/lib/queries'
-import { noSuchOf, SORT_KEYS, sortOf, tidy, type DetailOrigin, type SortKey, type TransactionSearch } from '@/lib/transaction-search'
+import { searchProblem, SORT_KEYS, sortOf, tidy, type DetailOrigin, type SortKey, type TransactionSearch } from '@/lib/transaction-search'
 import { transferLabel } from '@/lib/transfers'
 
 type Row = InferResponseType<typeof api.transactions.$get, 200>['transactions'][number]
@@ -130,13 +130,12 @@ export function TransactionList({
 }) {
   const [editing, setEditing] = useState<Row | null>(null)
   const [saved, setSaved] = useState('')
-  // A range that runs backwards can't match anything; the form explains it when typed, and a hand-edited address is explained here.
-  const backwards = !!search.from && !!search.to && search.from > search.to
-  // An Account or Category the address names that doesn't exist is explained by the page (noSuchOf), rather than shown as an error or an empty list.
+  // A range that runs backwards, or an Account or Category the address names that doesn't exist, can't match anything: the form explains the range when it is typed, and the page explains
+  // what a hand-edited address names (searchProblem), rather than showing an error or an empty list.
   const accounts = useQuery({ ...accountsQuery, enabled: search.account !== undefined })
   const categories = useQuery({ ...categoriesQuery, enabled: typeof search.category === 'number' })
-  const noSuch = noSuchOf(search, accounts.data, categories.data)
-  const searchable = !backwards && !noSuch
+  const problem = searchProblem(search, accounts.data, categories.data, 'see')
+  const searchable = problem === null
   const { data, error, isFetching } = useQuery({ ...transactionsQuery(search), placeholderData: keepPreviousData, enabled: searchable })
   // The total is kept while a new search's is fetched, and a page or sort change doesn't ask again.
   const { data: total, error: countError } = useQuery({ ...transactionCountQuery(search), placeholderData: keepPreviousData, enabled: searchable })
@@ -286,13 +285,9 @@ export function TransactionList({
       </p>
       {isAdmin && editing && <EditPanel key={editing.id} row={editing} onSaved={(message) => finish(editing, message ?? `Saved ${editing.description}.`)} onCancel={() => finish(editing, '')} />}
       {showFilters && <TransactionFilters search={search} onSearch={onSearch} />}
-      {backwards ? (
+      {problem ? (
         <p role="alert" className="mt-4 font-medium">
-          The “To” date is before the “From” date. Change one of them to see Transactions.
-        </p>
-      ) : noSuch ? (
-        <p role="alert" className="mt-4 font-medium">
-          There is no such {noSuch}. Choose one in the form above.
+          {problem}
         </p>
       ) : error || countError ? (
         <p role="alert" className="mt-4">Fernledger couldn't load the Transactions. Reload the page to try again.</p>

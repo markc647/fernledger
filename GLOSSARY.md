@@ -151,7 +151,7 @@ The Report of one Loans Category, or of each of them with a section each, from t
 _Avoid_: Loan statement, debt report
 
 **CSV export**:
-A spreadsheet file of the Transactions that match the Transactions page's filters.
+A spreadsheet file of the Transactions that match the filters last searched on the Export page, which has the same filters as the Transactions page.
 _Avoid_: Report
 
 ## Viewing

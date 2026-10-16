@@ -490,6 +490,29 @@ test.describe('zoom', () => {
     }
   })
 
+  // The Export page with the warning that a file would stop short showing, and the count: the longest text it shows. The count is stubbed, so this needs no data in the database.
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
+      test(`/export with the warning showing at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await page.route(/\/api\/transactions\?/, (route) => route.fulfill({ json: { total: 5001, transactions: [] } }))
+        await page.setViewportSize({ width, height })
+        await page.goto('/export')
+        await chooseTextSize(page, size)
+        await expect(page.getByText('Only the oldest up to 5,000 will be saved')).toBeVisible()
+        await expect(page.getByText('5,001 Transactions match')).toBeVisible()
+        // Measure only once the size is applied and the buttons have finished their width transition.
+        await expectTextSize(page, size)
+        await settle(page)
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+      })
+    }
+  }
+
   // The Import screen with a file chosen and the "Replace imported history" question open: the longest text it shows.
   // The Account and its imported-row count are stubbed, so this needs no data in the database.
   for (const { name, width, height } of zoomLevels) {

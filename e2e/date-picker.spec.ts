@@ -283,6 +283,7 @@ const VIEWPORTS = [
 const FROM_TO = ['From', 'To']
 const FORM_PAGES: { name: string; path: string; fields: string[]; admin?: boolean }[] = [
   { name: 'Transactions', path: '/transactions', fields: FROM_TO },
+  { name: 'Export', path: '/export', fields: FROM_TO },
   { name: 'Change Log', path: '/change-log', fields: FROM_TO },
   { name: 'Settings', path: '/settings', fields: ['Cutover Date for Example savings'], admin: true },
   { name: 'Transaction listing Report', path: '/reports/transactions', fields: FROM_TO, admin: true },

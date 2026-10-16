@@ -54,6 +54,7 @@ const routes: NavEntry[] = [
   { to: '/transactions', label: 'All Transactions', group: 'transactions', order: 10 },
   { to: '/uncategorised', label: 'Uncategorised', group: 'transactions', adminOnly: true, order: 15 },
   { to: '/import', label: 'Import', group: 'transactions', adminOnly: true, order: 20 },
+  { to: '/export', label: 'Export', group: 'transactions', order: 30 },
   { to: '/reports', label: 'Reports', group: 'reports', order: 10 },
   // Net worth is no Report but a page of its own in the Reports group: it has a row, though its address begins with Reports', and no `within`, so its breadcrumb does not link back.
   { to: '/reports/net-worth', label: 'Net worth', group: 'reports', order: 15 },
@@ -79,7 +80,7 @@ describe('navSections', () => {
   it('gives the Admin the Dashboard, then each group in its place, with the pages in each by order', () => {
     expect(outline('admin')).toEqual([
       'Dashboard',
-      'Transactions: All Transactions, Uncategorised, Import',
+      'Transactions: All Transactions, Uncategorised, Import, Export',
       'Reports: Reports, Net worth, Loans, Balances over time',
       'Set up: Accounts, Categories, Rules, Budgets, Settings',
       'Help: Change Log, About your data, How to sign in',
@@ -89,7 +90,7 @@ describe('navSections', () => {
   it('gives a Member the Summary and no Set up group at all, with Accounts among the Reports, last', () => {
     expect(outline('member')).toEqual([
       'Summary',
-      'Transactions: All Transactions',
+      'Transactions: All Transactions, Export',
       'Reports: Reports, Net worth, Accounts',
       'Help: Change Log, About your data, How to sign in',
     ])
@@ -145,7 +146,7 @@ describe('navSections', () => {
 
   it('keeps the address of every page, so the sidebar links to the route and not to its label', () => {
     const transactions = navSections(routes, 'admin').find((section) => section.kind === 'group' && section.id === 'transactions')
-    expect(transactions?.kind === 'group' && transactions.items.map((item) => item.to)).toEqual(['/transactions', '/uncategorised', '/import'])
+    expect(transactions?.kind === 'group' && transactions.items.map((item) => item.to)).toEqual(['/transactions', '/uncategorised', '/import', '/export'])
   })
 })
 
@@ -235,6 +236,7 @@ describe('trailFor', () => {
     expect(trailFor(routes, 'member', '/budgets')).toEqual({ group: 'Set up', groupId: 'setup', page: 'Budgets', to: '/budgets' })
     expect(trailFor(routes, 'member', '/rules')).toMatchObject({ group: 'Set up', page: 'Rules' })
     expect(trailFor(routes, 'member', '/import')).toMatchObject({ group: 'Transactions', page: 'Import' })
+    expect(trailFor(routes, 'member', '/export')).toEqual({ group: 'Transactions', groupId: 'transactions', page: 'Export', to: '/export' })
     expect(trailFor(routes, undefined, '/settings')).toMatchObject({ group: 'Set up', page: 'Settings' })
   })
 })

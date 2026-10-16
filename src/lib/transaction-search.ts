@@ -1,6 +1,6 @@
 import { addressId, searchDate } from './report-transactions'
 
-// What the Transactions page keeps in its address, so a search survives a reload and Back returns to it. The API's own
+// What the Transactions page keeps in its address (the Export page keeps its filters, `parseExportSearch`), so a search survives a reload and Back returns to it. The API's own
 // parameters are built from it by `apiQuery`. Everything here is forgiving: an address typed or edited by hand never breaks the page.
 
 /** The sorts the API accepts (worker/transaction-search.test.ts pins the two lists together). */
@@ -101,8 +101,24 @@ export function noSuchOf(search: Pick<TransactionSearch, 'account' | 'category'>
   return missing(search.account, accounts) ? 'Account' : missing(search.category, categories) ? 'Category' : null
 }
 
+/** Whether the dates run backwards, From after To, which no Transaction can match. A form's field with no date is "", and is no date. */
+export const rangeBackwards = ({ from, to }: Pick<TransactionSearch, 'from' | 'to'>) => !!from && !!to && from > to
+
+/**
+ * What a page says in place of a search that can't be run, or null when it can: dates that run backwards, or an Account or Category that doesn't exist (`noSuchOf`). A page that
+ * lists the Transactions says it for a reader who wants to `see` them, and the Export page for one who wants to `save` them. The form explains a range as it is typed; this is for an address typed by hand.
+ */
+export function searchProblem(search: Pick<TransactionSearch, 'account' | 'category' | 'from' | 'to'>, accounts: Listed, categories: Listed, goal: 'see' | 'save'): string | null {
+  if (rangeBackwards(search)) return `The “To” date is before the “From” date. Change one of them to ${goal} Transactions.`
+  const missing = noSuchOf(search, accounts, categories)
+  return missing ? `There is no such ${missing}. Choose one in the form above.` : null
+}
+
 /** The search's filters alone, which are all that decide how many Transactions match: no sort, no page. */
 export const filtersOf = ({ account, category, transfers, from, to, q }: TransactionSearch): TransactionSearch => tidy({ account, category, transfers, from, to, q })
+
+/** What the Export page keeps in its address: the filters alone, read as the Transactions page reads them. It has no list, so a sort or a page in the address is left out. */
+export const parseExportSearch = (raw: Record<string, unknown>): TransactionSearch => filtersOf(parseTransactionSearch(raw))
 
 /** The API's parameters for the filters alone. Blank ones are left out. */
 export function filterQuery(search: TransactionSearch): Record<string, string> {

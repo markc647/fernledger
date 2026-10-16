@@ -369,6 +369,8 @@ test('the Report names a Transfer instead of a Category, and the CSV link carrie
 
   await page.goto(`/transactions?q=${stamp}&transfers=exclude`)
   await expect(dataRows(page)).toHaveCount(1)
+  await page.goto(`/export?q=${stamp}&transfers=exclude`)
+  await expect(page.locator('#filter-download-count')).toHaveText('1 Transaction matches') // the same search, counted
   await expect(page.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', /transfers=exclude/)
 })
 

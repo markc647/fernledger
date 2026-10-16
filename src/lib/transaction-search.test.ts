@@ -1,6 +1,6 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 import { describe, expect, it } from 'vitest'
-import { apiQuery, exportPath, filterQuery, filtersOf, noSuchOf, parseTransactionSearch, sortOf, tidy } from './transaction-search'
+import { apiQuery, exportPath, filterQuery, filtersOf, noSuchOf, parseExportSearch, parseTransactionSearch, rangeBackwards, searchProblem, sortOf, tidy } from './transaction-search'
 
 describe('parseTransactionSearch', () => {
   it('reads every filter the page puts in the address', () => {
@@ -82,6 +82,17 @@ describe('parseTransactionSearch', () => {
   })
 })
 
+describe('parseExportSearch', () => {
+  it('reads the filters and nothing else, so an address with a sort or a page keeps neither on the Export page, which has no list', () => {
+    const filters = { account: 2, category: 'uncategorised', transfers: 'only', from: '2026-01-01', to: '2026-03-31', q: 'cafe' }
+    expect(parseExportSearch({ ...filters, sort: 'amount', dir: 'desc', page: 3 })).toStrictEqual({ ...filters, sort: undefined, dir: undefined, page: undefined })
+  })
+
+  it('is forgiving as the Transactions page is: a named Account that is not an ID is one that does not exist, and a bad date is left out', () => {
+    expect(parseExportSearch({ account: 'abc', from: '2026-02-30' })).toMatchObject({ account: 0, from: undefined })
+  })
+})
+
 describe('sortOf', () => {
   it('is newest first by default', () => {
     expect(sortOf({})).toEqual({ sort: 'date', dir: 'desc' })
@@ -119,6 +130,38 @@ describe('noSuchOf', () => {
     expect(noSuchOf({}, accounts, categories)).toBeNull()
     expect(noSuchOf({ category: 'uncategorised' }, accounts, [])).toBeNull()
     expect(noSuchOf({ account: 9, category: 9 }, undefined, undefined)).toBeNull()
+  })
+})
+
+describe('rangeBackwards', () => {
+  it('is true only when both dates are there and From is after To', () => {
+    expect(rangeBackwards({ from: '2026-10-09', to: '2026-10-08' })).toBe(true)
+    expect(rangeBackwards({ from: '2026-10-08', to: '2026-10-08' })).toBe(false)
+    expect(rangeBackwards({ from: '2026-10-08', to: '2026-10-09' })).toBe(false)
+    expect(rangeBackwards({ from: '2026-10-09' })).toBe(false)
+    expect(rangeBackwards({ to: '2026-10-08' })).toBe(false)
+    expect(rangeBackwards({ from: '', to: '2026-10-08' })).toBe(false) // a form's field with no date
+  })
+})
+
+describe('searchProblem', () => {
+  const accounts = [{ id: 2 }]
+
+  it('says a range that runs backwards cannot be searched, in the words of what the reader is doing', () => {
+    const backwards = { from: '2026-10-09', to: '2026-10-08' }
+    expect(searchProblem(backwards, accounts, [], 'see')).toBe('The “To” date is before the “From” date. Change one of them to see Transactions.')
+    expect(searchProblem(backwards, accounts, [], 'save')).toBe('The “To” date is before the “From” date. Change one of them to save Transactions.')
+  })
+
+  it('says there is no such Account or Category, and sends the reader to the form', () => {
+    expect(searchProblem({ account: 9 }, accounts, [], 'see')).toBe('There is no such Account. Choose one in the form above.')
+    expect(searchProblem({ category: 0 }, undefined, undefined, 'save')).toBe('There is no such Category. Choose one in the form above.')
+  })
+
+  it('says the range first when both are wrong, and nothing of a search that can be run', () => {
+    expect(searchProblem({ account: 9, from: '2026-10-09', to: '2026-10-08' }, accounts, [], 'see')).toContain('before the “From” date')
+    expect(searchProblem({ account: 2, from: '2026-10-08', to: '2026-10-09' }, accounts, [], 'see')).toBeNull()
+    expect(searchProblem({}, undefined, undefined, 'save')).toBeNull()
   })
 })
 
