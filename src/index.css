@@ -189,7 +189,8 @@
 
 /* The room a DatePicker (src/components/date-picker.tsx) needs: its longest date, such as "Wed 30 Sept 2026", on one line, with the button's padding (0.75rem each side), the gap
    (0.375rem) and the calendar icon (1.25rem) round it. The text is counted in `ch` (the width of a "0" in the font in use) so it follows the font and the text size, and the
-   rest in rem, as the button is. Measured over every day from 2000 to 2100 in Geist: the widest, "Wed 20 Sept 2000", is 13.4ch; 14ch leaves a little over for a font that is slow to load. */
+   rest in rem, as the button is. Measured over every day from 2000 to 2100 in Geist: the widest, "Wed 20 Sept 2000", is 13.4ch, so 14ch fits Geist only. Until Geist has loaded (font-display: swap)
+   the page is in the fallback sans-serif, whose widest date can be about 1ch wider than Geist's: it can overflow the field for that moment, and fits once the font swaps in. */
 :root {
   --date-field-min: calc(14ch + 3.125rem + 2px);
 }

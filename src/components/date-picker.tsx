@@ -62,9 +62,7 @@ export function DatePicker({ id, labelId, value, onChange, min = MIN_DATE, max =
             aria-labelledby={`${labelId} ${dateId}`}
             {...button}
           >
-            <span id={dateId} className="whitespace-nowrap">
-              {day ? formatDate(value) : 'Choose a date'}
-            </span>
+            <span id={dateId}>{day ? formatDate(value) : 'Choose a date'}</span>
             <CalendarIcon />
           </Button>
         </PopoverTrigger>
