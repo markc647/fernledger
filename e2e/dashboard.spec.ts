@@ -3,6 +3,7 @@ import { drawn, LINE, NET_WORTH, netWorth, pressShowNetWorth, pressShowSpending,
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
+import { transactionId } from './report-helpers'
 import { chooseTextSize, mainNav, navLink, openNavGroup } from './shell-helpers'
 
 // The Dashboard (where the Admin lands) and the Summary (where a Member does), which are a grid of cards with the charts on two of them, against the real Worker. The light and dark projects share one local
@@ -68,9 +69,7 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
   const categories = (await (await context.request.get('/api/categories')).json()) as { id: number; name: string }[]
   for (const row of rows.everyday) {
     if (!row.category) continue
-    const found = await context.request.get(`/api/transactions?text=${encodeURIComponent(row.payee)}&from=${month}-01&to=${to}&count=false`)
-    const { transactions } = (await found.json()) as { transactions: { id: number }[] }
-    const override = await context.request.put(`/api/transactions/${transactions[0]!.id}/override`, { headers, data: { categoryId: categories.find((c) => c.name === row.category)!.id } })
+    const override = await context.request.put(`/api/transactions/${await transactionId(context, row.payee, `&from=${month}-01&to=${to}`)}/override`, { headers, data: { categoryId: categories.find((c) => c.name === row.category)!.id } })
     expect(override.ok()).toBe(true)
   }
 }
@@ -600,7 +599,7 @@ test('spending is marked busy from its first load, and the old period is marked 
   expect(await liveHistory(page, 'spending-heading')).toEqual(['', 'Loading spending…', 'Spending has loaded.', 'Updating spending…', 'Spending has loaded.'])
 })
 
-test('the charts have no WCAG 2.2 AA violations in this theme, with their data, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
+test('the charts have no WCAG 2.2 AA violations, with their data, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
   const { from, to, words } = dataFor(testInfo.project.name)
   await seed(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')
@@ -608,7 +607,6 @@ test('the charts have no WCAG 2.2 AA violations in this theme, with their data, 
   for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
     await page.goto('/')
-    await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
     await chooseTextSize(page, 'Large')
     await chooseDates(page, from, to)
     await showNetWorth(page)
@@ -620,7 +618,7 @@ test('the charts have no WCAG 2.2 AA violations in this theme, with their data, 
   }
 })
 
-test('the chart colours are the theme\'s, drawn in the text colour when Windows high contrast is on, and nothing moves', async ({ page, context, baseURL }, testInfo) => {
+test('the chart colours are the theme\'s, drawn in the text colour when Windows high contrast is on, and nothing moves', { tag: '@theme' }, async ({ page, context, baseURL }, testInfo) => {
   const { from, to } = dataFor(testInfo.project.name)
   await seed(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')

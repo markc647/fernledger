@@ -3,7 +3,7 @@ import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { navigateTo } from './shell-helpers'
 
 // Ticket 30: the pages every Member can open (About your data, How to sign in) and the Home Screen app. Axe runs on both
-// pages in both themes (the project is the theme), for a Member and for the Admin; the zoom test in display.spec.ts
+// pages, for a Member and for the Admin (without colour contrast, which a scan leaves out: see `noAxeViolations`; e2e/contrast.spec.ts has both pages); the zoom test in display.spec.ts
 // covers both pages too.
 
 // The Settings are shared by every test and both themes, so each test leaves the defaults behind (as settings.spec.ts does).
@@ -189,14 +189,13 @@ test.describe('About your data', () => {
   })
 
   for (const role of ['member', 'admin'] as const) {
-    test(`has no WCAG 2.2 AA violations as a ${role}, filled in or not`, async ({ page, context, request, baseURL }, testInfo) => {
+    test(`has no WCAG 2.2 AA violations as a ${role}, filled in or not`, async ({ page, context, request, baseURL }) => {
       await signInAs(context, role)
       for (const filled of [false, true]) {
         await adminSets(request, baseURL, filled ? { about_contact: 'Sam', about_retention: 'Seven years' } : { about_contact: '', about_retention: '' })
         await page.goto('/about-your-data')
         await expect(page.getByRole('heading', { level: 1, name: 'About your data' })).toBeVisible()
         await expect(section(page, 'Who to ask')).toContainText(filled ? 'Sam' : role === 'admin' ? 'Setup needed' : 'Ask the person who invited you')
-        await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
         await noAxeViolations(page)
       }
     })
@@ -318,7 +317,7 @@ test.describe('How to sign in', () => {
       for (const size of sizes) expect(size).toBeGreaterThanOrEqual(16)
     })
 
-    test('is dark text on white paper, even from the dark theme', async ({ page }) => {
+    test('is dark text on white paper, even from the dark theme', { tag: '@theme' }, async ({ page }) => {
       const { text, paper } = await page.evaluate(() => {
         const rgb = (css: string) => {
           const ctx = document.createElement('canvas').getContext('2d')!
@@ -342,11 +341,10 @@ test.describe('How to sign in', () => {
   })
 
   for (const role of ['member', 'admin'] as const) {
-    test(`has no WCAG 2.2 AA violations as a ${role}`, async ({ page, context }, testInfo) => {
+    test(`has no WCAG 2.2 AA violations as a ${role}`, async ({ page, context }) => {
       await signInAs(context, role)
       await page.goto('/how-to-sign-in')
       await expect(page.getByRole('heading', { level: 1, name: 'How to sign in' })).toBeVisible()
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }

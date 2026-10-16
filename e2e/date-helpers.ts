@@ -4,6 +4,9 @@ import { dateText } from './report-helpers'
 // How a spec chooses and checks a date in a DatePicker (src/components/date-picker.tsx). `pickDate` drives the real calendar the way a person does: open it, choose the year and
 // the month from their lists, press the day. It takes a date written as it is stored, "2026-10-08", and the field's label, so a spec reads as it did when the field was typed into.
 
+/** This NZ month, "2026-10", found the way the Worker does (Pacific/Auckland): what a Budget, the Summary and a spec that dates its Transactions to now are about. */
+export const thisMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7)
+
 type Scope = Page | Locator
 const pageOf = (scope: Scope): Page => ('goto' in scope ? scope : scope.page())
 

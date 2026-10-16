@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { findTransactions } from './report-helpers'
 
 // The light and dark projects share one local database, so each has Accounts of its own, and the Transactions are dated
 // in 2011 and use amounts no other spec does, so nothing from another spec can pair with them (Transfers pair on date and amount).
@@ -286,7 +287,7 @@ test('Not a Transfer comes back with its Transaction when the history is replace
   await page.getByLabel('Account name').fill(savingsName)
   await page.getByRole('button', { name: /^Import 1 transactions?$/ }).click()
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
-  const listed = async () => ((await (await context.request.get(`/api/transactions?text=${stamp}&limit=200`)).json()) as { transactions: { id: number; description: string; transfer: string | null }[] }).transactions
+  const listed = () => findTransactions(context, stamp, '&limit=200')
   expect((await listed()).map((t) => t.transfer)).toEqual(['pair', 'pair'])
 
   // The Admin says it is wrong.

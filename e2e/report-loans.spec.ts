@@ -531,7 +531,6 @@ test.describe('on screen', () => {
       await expect(tableOf(page, d.aliceLoan)).toBeVisible()
       await expect(tableOf(page, d.benLoan)).toContainText(`${d.ben} is owed`)
       await expect(sectionOf(page, 'All loans')).toBeVisible()
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }
@@ -734,7 +733,7 @@ test.describe('printed', () => {
     await expect(page).toHaveTitle(`${TITLE} – Loans – ${d.aliceLoan} – ${range(d.year)}`)
   })
 
-  test('is black text on white paper, even from the dark theme', async ({ page }, testInfo) => {
+  test('is black text on white paper, even from the dark theme', { tag: '@theme' }, async ({ page }, testInfo) => {
     // In the dark project the page is the dark theme on screen, and must still print like this.
     await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
     await expectBlackOnWhite(page, 30) // every word, including the money, is black

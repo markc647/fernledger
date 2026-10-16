@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
-import { addRule, categoryId, pageOrder, removeRule, ruleActions, ruleIds, runningJob, withRules } from './rule-helpers'
+import { findTransactions, transactionId } from './report-helpers'
+import { addRule, categoryId, pageOrder, removeRule, ruleActions, ruleIds, runningJob, usageFigures, usageOn, withRules } from './rule-helpers'
 import { arrowTo, chooseAction, menuAction, noAxeViolationsFromTop, openActions, ruleActionButtons } from './row-actions-helpers'
 import { mainNav, navGroup, navigateTo } from './shell-helpers'
 
@@ -374,10 +375,8 @@ test('the Admin applies a Rule to the Transactions already on file, and one set 
   // Two Transactions on file before there is a Rule. The Admin sets the Category of one by hand.
   await importTransaction(context, baseURL!, testInfo.project.name, `${shop} PLAIN`, `AP${stamp}`)
   await importTransaction(context, baseURL!, testInfo.project.name, `${shop} HAND`, `AH${stamp}`)
-  const list = async (text: string) =>
-    ((await (await context.request.get(`/api/transactions?text=${encodeURIComponent(text)}&count=false`)).json()) as { transactions: { id: number; description: string; categoryName: string | null; categorySource: string | null }[] }).transactions
-  const found = () => list(shop)
-  const handId = (await list(`${shop} HAND`))[0]!.id
+  const found = () => findTransactions(context, shop)
+  const handId = await transactionId(context, `${shop} HAND`)
   expect((await context.request.put(`/api/transactions/${handId}/override`, { headers: { Origin: baseURL! }, data: { categoryId: await categoryId(context, 'Travel') } })).ok()).toBe(true)
   const rule = await addRule(context, baseURL!, { textContains: shop.toLowerCase(), categoryId: await categoryId(context, 'Groceries') })
 
@@ -650,15 +649,6 @@ test('a Member does not see the Rules page, and the API refuses their changes', 
 
 // The D1 usage bar (worker/d1-usage.ts, src/components/d1-usage-bar.tsx). Local development has no CF_ANALYTICS_TOKEN or CF_ACCOUNT_ID, so the
 // real Worker answers Not set up; the "on" tests stub what the Worker would send, so nothing here reaches Cloudflare.
-const usageOn = { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] }
-const usageFigures = (over: Record<string, unknown> = {}) => ({
-  rowsRead: 1_234_567,
-  rowsWritten: 4_321,
-  readLimit: 5_000_000,
-  writeLimit: 100_000,
-  resetsAt: '2026-10-15T00:00:00.000Z',
-  ...over,
-})
 const usagePanel = (page: Page) => page.getByRole('region', { name: 'Free database allowance' })
 const meterFor = (page: Page, label: 'Database rows read today' | 'Database rows written today') => usagePanel(page).getByRole('group', { name: label })
 
@@ -710,7 +700,7 @@ test.describe('the D1 usage bar', () => {
       writes: { level: 'Low', percent: 4, drawn: 4, token: 'success', text: '4,321 of 100,000 rows written' },
     },
   ]) {
-    test(`shows ${runs}: each badge sits with its own bar, and the bar's fill is the level's colour while its track keeps its own`, async ({ page, context }) => {
+    test(`shows ${runs}: each badge sits with its own bar, and the bar's fill is the level's colour while its track keeps its own`, { tag: '@theme' }, async ({ page, context }) => {
       await signInAs(context, 'admin')
       await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
       await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures(figures) }))
