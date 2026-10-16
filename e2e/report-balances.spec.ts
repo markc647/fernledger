@@ -378,7 +378,6 @@ test.describe('on screen', () => {
       await page.goto(`/reports/balances?from=${start}-01-01&to=${end}-12-31`)
       await expect(article(page).getByRole('table').first()).toBeVisible()
       await expect(article(page).getByRole('region', { name: `${cheque.name} (${cheque.number})` }).getByText('Balance differs from bank by $3.00')).toBeVisible()
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }
@@ -448,7 +447,7 @@ test.describe('printed', () => {
     await expect(page).toHaveTitle(`${TITLE} – Balances over time – ${savings.name} – ${range(start, end)}`)
   })
 
-  test('is black text on white paper, even from the dark theme, and a warning is black too', async ({ page, context, baseURL }, testInfo) => {
+  test('is black text on white paper, even from the dark theme, and a warning is black too', { tag: '@theme' }, async ({ page, context, baseURL }, testInfo) => {
     const { start, end } = dataFor(testInfo.project.name)
     const { chequeId } = await seed(context, baseURL!, testInfo.project.name)
     // In the dark project the page is the dark theme on screen, and must still print like this.

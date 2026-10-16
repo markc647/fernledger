@@ -373,7 +373,6 @@ test.describe('on screen', () => {
       await signInToOpen(context, baseURL, role, { report: 'transactions', accountId: savingsId, from: `${year}-01-01`, to: `${year}-12-31` })
       await page.goto(reportAddress(savingsId, year))
       await expect(article(page).getByRole('table')).toBeVisible()
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }
@@ -482,7 +481,7 @@ test.describe('printed', () => {
     await expect(page).toHaveTitle(`${TITLE} – Transaction listing – ${savings.name} – ${first} to ${last}`)
   })
 
-  test('is black text on white paper, even from the dark theme', async ({ page }, testInfo) => {
+  test('is black text on white paper, even from the dark theme', { tag: '@theme' }, async ({ page }, testInfo) => {
     // In the dark project the page is the dark theme on screen, and must still print like this.
     await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
     await expectBlackOnWhite(page, 100) // every word, including the muted ones and the money, is black

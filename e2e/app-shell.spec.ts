@@ -36,7 +36,7 @@ const toggleButton = (page: Page) => siteHeader(page).getByRole('button', { name
 // Layout
 
 test.describe('layout', () => {
-  test('is a sticky header across the whole top, the sidebar below it, and the page in a raised panel beside the sidebar', async ({ page, context }) => {
+  test('is a sticky header across the whole top, the sidebar below it, and the page in a raised panel beside the sidebar', { tag: '@theme' }, async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.setViewportSize({ width: 1280, height: 480 })
     await page.goto('/styleguide') // a page longer than the window
@@ -254,7 +254,7 @@ test.describe('the sidebar navigation', () => {
 
   // The pill alone is a white or grey fill a hair away from the tint (1.1:1), so the row has a bar at its start that is 3:1 against the tint in both themes
   // (--sidebar-marker, pinned in scripts/theme-contrast.test.mjs), as well as the fill, the hairline, a heavier font and aria-current.
-  test('marks the current page in both themes: a bar that is 3:1 against the sidebar, a fill, a heavier font and aria-current', async ({ page, context }) => {
+  test('marks the current page in both themes: a bar that is 3:1 against the sidebar, a fill, a heavier font and aria-current', { tag: '@theme' }, async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/import')
     const current = navLink(page, 'Import')
@@ -660,7 +660,7 @@ test('Ctrl+B and the toggle button are both keyboard ways to the sidebar, and th
 })
 
 // What the browser refuses to keep (private modes, blocked site data) is not what the page needs: the text size, the theme and the sidebar all still work for the visit.
-test('still works, without errors, when the browser blocks storage: the text size, the theme, and the sidebar', async ({ page }, testInfo) => {
+test('still works, without errors, when the browser blocks storage: the text size, the theme, and the sidebar', { tag: '@theme' }, async ({ page }, testInfo) => {
   const deviceIsDark = testInfo.project.name === 'dark'
   await blockStorage(page)
   await page.goto('/') // the fixture fails the test on any console error, uncaught error or CSP violation
@@ -725,7 +725,7 @@ test.describe('focus', () => {
     'the app title': [sidebarTitle(page).getByRole('link')],
   })
 
-  test('is drawn as a 2px outline that is 3:1 against what is behind it, on every kind of control, in this theme', async ({ page, context }) => {
+  test('is drawn as a 2px outline that is 3:1 against what is behind it, on every kind of control, in this theme', { tag: '@theme' }, async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/import')
     await expect(navLink(page, 'Import')).toBeVisible()
@@ -737,7 +737,7 @@ test.describe('focus', () => {
     }
   })
 
-  test('is still drawn in Windows high contrast, as an outline in the reader\'s colour', async ({ page, context }) => {
+  test('is still drawn in Windows high contrast, as an outline in the reader\'s colour', { tag: '@theme' }, async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.emulateMedia({ forcedColors: 'active' })
     await page.goto('/import')
@@ -751,7 +751,7 @@ test.describe('focus', () => {
     expect((await focusIndicator(page, themeToggle(page))).colour).toBe(await systemColour(page, 'Highlight'))
   })
 
-  test('shows the current page and the chosen text size in Windows high contrast, with the reader\'s highlight', async ({ page, context }) => {
+  test('shows the current page and the chosen text size in Windows high contrast, with the reader\'s highlight', { tag: '@theme' }, async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.emulateMedia({ forcedColors: 'active' })
     await page.goto('/import')
@@ -771,7 +771,7 @@ test.describe('focus', () => {
   })
 
   // The link home at the top of the sidebar is current on the Dashboard too (aria-current), but it is a link to the page and not a row for it: only the row is marked.
-  test('does not fill the link home in Windows high contrast on the Dashboard, only the Dashboard\'s own row', async ({ page, context }) => {
+  test('does not fill the link home in Windows high contrast on the Dashboard, only the Dashboard\'s own row', { tag: '@theme' }, async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.emulateMedia({ forcedColors: 'active' })
     await page.goto('/')

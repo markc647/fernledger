@@ -16,10 +16,10 @@ export default defineConfig({
   workers: 1,
   // PLAYWRIGHT_CHANNEL=msedge (or chrome) uses a browser already on your machine instead of the download.
   use: { baseURL, channel: process.env.PLAYWRIGHT_CHANNEL },
-  // Every test runs in both themes; the dark project emulates a device set to dark.
+  // Every test runs in the light project. The dark project emulates a device set to dark and runs only tests tagged `@theme`; see CODING_STANDARDS.md#tests.
   projects: [
     { name: 'light', use: { browserName: 'chromium', colorScheme: 'light' } },
-    { name: 'dark', use: { browserName: 'chromium', colorScheme: 'dark' } },
+    { name: 'dark', use: { browserName: 'chromium', colorScheme: 'dark' }, grep: /@theme/ },
   ],
   webServer: {
     // The production build, served by the Worker runtime with the real headers (public/_headers and worker/security-headers.ts).

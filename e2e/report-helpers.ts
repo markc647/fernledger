@@ -148,6 +148,22 @@ export async function overrideCategories(context: BrowserContext, baseURL: strin
   }
 }
 
+/** A Transaction as the API lists it: the parts the specs read. */
+export type ListedTransaction = { id: number; description: string; categoryName: string | null; categorySource: string | null; transfer: string | null }
+
+/** The Transactions whose description or Note contains `text`, as the API lists them. `extra` is more of the query, such as `&limit=200` or `&from=2026-10-01&to=2026-10-31`. */
+export async function findTransactions(context: BrowserContext, text: string, extra = ''): Promise<ListedTransaction[]> {
+  const res = await context.request.get(`/api/transactions?text=${encodeURIComponent(text)}${extra}&count=false`)
+  return ((await res.json()) as { transactions: ListedTransaction[] }).transactions
+}
+
+/** The ID of the first Transaction whose description or Note contains `text` (a spec finds its own by a stamp that no other has). */
+export async function transactionId(context: BrowserContext, text: string, extra = ''): Promise<number> {
+  const found = await findTransactions(context, text, extra)
+  expect(found.length, `a Transaction containing "${text}"`).toBeGreaterThan(0)
+  return found[0]!.id
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // The page under print media
 

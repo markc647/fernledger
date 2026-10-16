@@ -1,6 +1,8 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { forgetKeptReports } from './report-helpers'
+import { findTransactions, forgetKeptReportsAfterEach } from './report-helpers'
+
+forgetKeptReportsAfterEach() // a Report shown as the Admin is kept on a list every spec shares, so each test leaves it empty
 
 // The light and dark projects share one local database, so each has Accounts of its own, and the Transactions are dated
 // in 2011 and use amounts no other spec does, so nothing from another spec can pair with them (Transfers pair on date and amount).
@@ -287,7 +289,7 @@ test('Not a Transfer comes back with its Transaction when the history is replace
   await page.getByLabel('Account name').fill(savingsName)
   await page.getByRole('button', { name: /^Import 1 transactions?$/ }).click()
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
-  const listed = async () => ((await (await context.request.get(`/api/transactions?text=${stamp}&limit=200`)).json()) as { transactions: { id: number; description: string; transfer: string | null }[] }).transactions
+  const listed = () => findTransactions(context, stamp, '&limit=200')
   expect((await listed()).map((t) => t.transfer)).toEqual(['pair', 'pair'])
 
   // The Admin says it is wrong.
@@ -345,7 +347,7 @@ test('the Import screen says how many Transfers it matched with other Accounts',
   await noAxeViolations(page)
 })
 
-test('the Report names a Transfer instead of a Category, and the CSV link carries the Transfers filter', async ({ page, context, request, baseURL }, testInfo) => {
+test('the Report names a Transfer instead of a Category, and the CSV link carries the Transfers filter', async ({ page, context, baseURL }, testInfo) => {
   const { everyday, savings } = accountsFor(testInfo.project.name)
   const stamp = `${testInfo.project.name}${Date.now()}`
   const out = `TFR TO SAVINGS ${stamp}`
@@ -356,7 +358,7 @@ test('the Report names a Transfer instead of a Category, and the CSV link carrie
   ])
   const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
   const everydayId = accounts.find((a) => a.name === everyday.name)!.id
-  // Only the Admin makes a Report: showing it keeps it on the Reports page's list, which is shared by every spec, so it is taken off again.
+  // Only the Admin makes a Report: showing it keeps it on the Reports page's list (taken off again after each test, as forgetKeptReportsAfterEach says above).
   await signInAs(context, 'admin')
 
   await page.goto(`/reports/transactions?account=${everydayId}&from=2011-01-01&to=2011-12-31`)
@@ -364,8 +366,6 @@ test('the Report names a Transfer instead of a Category, and the CSV link carrie
   await expect(listing.getByRole('row').filter({ hasText: out })).toContainText('Transfer')
   await expect(listing.getByRole('row').filter({ hasText: out })).not.toContainText('Uncategorised')
   await expect(listing.getByRole('row').filter({ hasText: friend })).toContainText('Uncategorised')
-  await expect.poll(async () => (await (await context.request.get('/api/kept-reports')).json()).length).toBeGreaterThan(0) // the page has asked for it to be kept
-  await forgetKeptReports(request, baseURL)
 
   await page.goto(`/transactions?q=${stamp}&transfers=exclude`)
   await expect(dataRows(page)).toHaveCount(1)

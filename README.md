@@ -256,7 +256,7 @@ The Admin also owns the Akahu connection. If they can't continue, viewing and ba
 
 Fernledger is often used by families where some members are older, and by people managing their own money in later life. It's built to be easy to read and use.
 
-- **Standard:** every release meets [WCAG 2.2 AA](https://www.w3.org/TR/WCAG22/). Automated accessibility checks (axe) run on every page in both themes in CI. Before each release we test by keyboard only, with a screen reader (VoiceOver/NVDA), and at 200% zoom.
+- **Standard:** every release meets [WCAG 2.2 AA](https://www.w3.org/TR/WCAG22/). Automated accessibility checks (axe) run on every page in CI, and colour contrast is checked in both the light and the dark theme, on every page and what opens over it. Before each release we test by keyboard only, with a screen reader (VoiceOver/NVDA), and at 200% zoom.
 - **Readable text:** a text-size control in the header (**Small / Medium / Large**: 14px, 16px and 20px) is remembered on each device. **The default is Medium, 16px**, and table text is never smaller than 15px at Medium and Large. **Small (14px) is a choice someone makes, never what they start with**, and it makes everything 12.5% smaller, tables included, so at Small a table's text is about 13px. The sidebar and the breadcrumb are 14px at Medium (and scale with the toggle), while page text is 16px. Everything works at 200% browser zoom with no sideways scrolling.
 - **Plain language:** "Money in" and "Money out", not debit and credit. Dates like "Thu 8 Oct 2026", amounts like "−$1,234.56". Technical settings, such as cutover dates and account links, appear only in the Admin's settings, each with a one-line explanation.
 - **The current page is never shown by colour alone.** In the sidebar it has a heavier font, a filled row and a bar at the start of the row that is 3:1 against the sidebar in both themes, and the link says it is the current page to a screen reader; in high contrast it takes your palette's highlight.
@@ -342,7 +342,7 @@ Only the latest release receives fixes. Please stay current.
 | Routing/data | TanStack Router + Query | Typed routes, caching |
 | Tests | Vitest + Cloudflare's Workers test pool | Business logic and SQL tested against a real local D1 |
 | Browser tests | [Playwright](https://playwright.dev) | Accessibility (axe), print layouts, and phone/tablet layouts in a real browser |
-| Accessibility checks | [axe-core](https://github.com/dequelabs/axe-core) in CI | WCAG 2.2 AA on every page, in both themes |
+| Accessibility checks | [axe-core](https://github.com/dequelabs/axe-core) in CI | WCAG 2.2 AA on every page; colour contrast in both themes |
 | Deploy | Wrangler | Standard Cloudflare tooling |
 
 **Conventions:**
