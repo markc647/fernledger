@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { defineConfig } from '@playwright/test'
 
 // Browser tests (seam 3) run against the production build. The Worker still honours the localhost dev identity,
@@ -6,6 +8,15 @@ import { defineConfig } from '@playwright/test'
 // CI runs them as their own job. The first run needs `npx playwright install chromium`.
 const port = Number(process.env.E2E_PORT ?? 5199) // E2E_PORT lets parallel checkouts each run their own server
 const baseURL = `http://localhost:${port}` // the one place the port is used; the specs get it from Playwright
+// TEST_TEMP_ROOT (a RAM disk, say) takes the tests' throwaway files off the system disk: each run's database, one folder per port
+// so parallel checkouts don't share one, and the temp files of the browsers and the Worker runtime. Without it the database is in the checkout.
+const tempRoot = process.env.TEST_TEMP_ROOT
+if (tempRoot) {
+  const temp = join(tempRoot, 'Temp')
+  mkdirSync(temp, { recursive: true })
+  process.env.TEMP = process.env.TMP = process.env.TMPDIR = temp
+}
+const state = tempRoot ? join(tempRoot, `e2e-state-${port}`) : '.wrangler/e2e-state'
 
 export default defineConfig({
   testDir: './e2e',
@@ -29,6 +40,6 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     // Stand-ins for .dev.vars, so CI needs no file. Made-up values.
     // E2E_PERSIST_TO is a fresh local database of its own, migrated by scripts/e2e-prepare.mjs and read by vite.config.ts.
-    env: { CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true', ADMIN_EMAIL: 'admin@example.com', DEV_USER_EMAIL: 'admin@example.com', E2E_PERSIST_TO: '.wrangler/e2e-state' },
+    env: { CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true', ADMIN_EMAIL: 'admin@example.com', DEV_USER_EMAIL: 'admin@example.com', E2E_PERSIST_TO: state },
   },
 })

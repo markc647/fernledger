@@ -1,10 +1,20 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin'
 import { defineConfig } from 'vitest/config'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 
 // Separate from vite.config.ts: the Cloudflare Vite plugin conflicts with Vitest's server.
 // Tests run inside Cloudflare's local runtime (workerd) with the bindings from wrangler.jsonc,
 // including a real local D1. Access settings are test values; the Access JWKS is faked per test, never fetched.
 const migrations = await readD1Migrations('./migrations')
+
+// TEST_TEMP_ROOT (a RAM disk, say) takes the Worker runtime's temp files off the system disk, as in playwright.config.ts.
+const tempRoot = process.env.TEST_TEMP_ROOT
+if (tempRoot) {
+  const temp = join(tempRoot, 'Temp')
+  mkdirSync(temp, { recursive: true })
+  process.env.TEMP = process.env.TMP = process.env.TMPDIR = temp
+}
 
 export default defineConfig({
   plugins: [
