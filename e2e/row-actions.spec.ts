@@ -105,7 +105,10 @@ test('Windows high contrast keeps the handle and the button as buttons, the high
   })
 })
 
-for (const size of ['Medium', 'Large'] as const) {
+// The page's text size at each choice (src/lib/text-size.ts), on a browser set to 16px.
+const PAGE_TEXT = { Medium: 16, Large: 18, 'Xtra Large': 20 } as const
+
+for (const size of ['Medium', 'Large', 'Xtra Large'] as const) {
   test(`the Actions button, the handle and the menu's items are at least 44px at text size ${size}`, async ({ page, context, baseURL }, testInfo) => {
     await withRule(page, context, baseURL!, testInfo, async (id) => {
       await chooseTextSize(page, size)
@@ -119,8 +122,8 @@ for (const size of ['Medium', 'Large'] as const) {
       await openActions(ruleActions(page, id))
       await settle(page)
       for (const item of await page.getByRole('menuitem').all()) expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44)
-      // The text is the page's 16px at Medium (and 20px at Large), not shadcn's 14px: the menu is read at the size the page is.
-      expect(parseFloat((await style(menuAction(page, 'Edit'), 'font-size'))['font-size']!)).toBe(size === 'Medium' ? 16 : 20)
+      // The text is the page's size (16px, 18px or 20px), not shadcn's 14px: the menu is read at the size the page is.
+      expect(parseFloat((await style(menuAction(page, 'Edit'), 'font-size'))['font-size']!)).toBe(PAGE_TEXT[size])
     })
   })
 }

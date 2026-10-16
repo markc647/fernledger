@@ -18,6 +18,7 @@ import {
   signOutLink,
   textSizeButton,
   textSizeGroup,
+  textSizeLabel,
   themeToggle,
 } from './shell-helpers'
 
@@ -47,45 +48,155 @@ const outsideItsCard = (page: Page) =>
   })
 
 // ---------------------------------------------------------------------------------------------------------------
-// Text size (Small / Medium / Large)
+// Text size (Small / Medium / Large / Xtra Large)
+
+/** The size of the page's text at each choice, on the browser set to 16px that the tests run in (src/lib/text-size.ts). */
+const PIXELS = { Small: 14, Medium: 16, Large: 18, 'Xtra Large': 20 } as const
+type SizeName = keyof typeof PIXELS
+const SIZE_NAMES = Object.keys(PIXELS) as SizeName[]
+
+/** Where the control saves its choice, and what it saves for a size (src/lib/text-size.ts): for a spec that has a size chosen before the page loads. */
+const SAVED_UNDER = 'fernledger-text-size-v2'
+const SAVED_AS = { Small: 'small', Medium: 'medium', Large: 'large', 'Xtra Large': 'xlarge' } as const
+
+/**
+ * What is drawn on the page that is not the size of the page's text, the root's font size (README, Accessibility: all text that is not a heading is exactly the chosen size, in every
+ * part of the page). `off` lists each such word with its size, and each text field, text area and select that is not that size (their text is a value, not a word in the page). A heading
+ * (or a fieldset's legend, which Settings draws as one) is larger by design and is left out of it: `notLarger` lists each one that is not larger than the page's text, `headings` has the
+ * sizes of the h1s and h2s for a spec of how much larger. `words` is how many it looked at, so a spec can tell that it looked.
+ */
+const wordsOffTheSize = (page: Page) =>
+  page.evaluate(() => {
+    const root = parseFloat(getComputedStyle(document.documentElement).fontSize)
+    const off: string[] = []
+    const headings: { level: string; size: number }[] = []
+    const notLarger: string[] = []
+    let words = 0
+    // Not what is not drawn (a closed disclosure's contents, text only for a screen reader), nor what is not words.
+    const drawn = (el: Element) => !el.closest('script, style, noscript, .sr-only') && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const el = node.parentElement
+      if (!el || !node.textContent?.trim() || !drawn(el)) continue
+      const size = parseFloat(getComputedStyle(el).fontSize)
+      if (el.closest('h1, h2, h3, h4, h5, h6, legend')) continue
+      words += 1
+      if (Math.abs(size - root) > 0.01) off.push(`${size}px ${el.tagName.toLowerCase()} "${node.textContent.trim().slice(0, 40)}"`)
+    }
+    for (const field of document.querySelectorAll('input:not([type=radio], [type=checkbox], [type=hidden], [type=file]), textarea, select')) {
+      if (!drawn(field)) continue
+      words += 1
+      const size = parseFloat(getComputedStyle(field).fontSize)
+      if (Math.abs(size - root) > 0.01) off.push(`${size}px ${field.tagName.toLowerCase()} (a field)`)
+    }
+    for (const heading of document.querySelectorAll('h1, h2, h3, h4, h5, h6, legend')) {
+      if (!drawn(heading)) continue
+      const size = parseFloat(getComputedStyle(heading).fontSize)
+      if (/^h[12]$/i.test(heading.tagName)) headings.push({ level: heading.tagName.toLowerCase(), size })
+      if (size <= root + 0.01) notLarger.push(`${size}px ${heading.tagName.toLowerCase()} "${(heading.textContent ?? '').trim().slice(0, 40)}"`)
+    }
+    return { root, off, notLarger, words, headings }
+  })
+
+/** The words on the page are all the page's size, every heading is larger, and there are some words. `atLeast` is how many words it should have found. */
+async function expectOneSize(page: Page, size: SizeName, atLeast = 10) {
+  const found = await wordsOffTheSize(page)
+  expect(found.root).toBe(PIXELS[size])
+  expect(found.words).toBeGreaterThan(atLeast)
+  expect(found.off).toEqual([])
+  expect(found.notLarger).toEqual([]) // a heading at the size of the text is a heading in weight alone
+}
 
 test.describe('text size', () => {
-  test('starts at Medium with 16px body text; Small is 14px and Large is 20px', async ({ page }) => {
+  test('starts at Medium with 16px body text; Small is 14px, Large 18px and Xtra Large 20px', async ({ page }) => {
     await page.goto('/styleguide')
     await expect(textSizeButton(page, 'Medium')).toBeChecked()
     expect(await fontSize(page, 'body')).toBe(16)
 
-    await textSizeButton(page, 'Small').click()
-    await expect(textSizeButton(page, 'Small')).toBeChecked()
-    await expect(textSizeButton(page, 'Medium')).not.toBeChecked()
-    expect(await fontSize(page, 'body')).toBe(14)
+    for (const size of ['Small', 'Large', 'Xtra Large'] as const) {
+      await textSizeButton(page, size).click()
+      await expect(textSizeButton(page, size)).toBeChecked()
+      await expect(textSizeButton(page, 'Medium')).not.toBeChecked()
+      expect(await fontSize(page, 'body')).toBe(PIXELS[size])
+    }
+  })
 
-    await textSizeButton(page, 'Large').click()
-    await expect(textSizeButton(page, 'Large')).toBeChecked()
-    expect(await fontSize(page, 'body')).toBe(20)
+  test('has four sizes, each named by the word on it', async ({ page }) => {
+    await page.goto('/styleguide')
+    await expect(textSizeGroup(page).getByRole('radio')).toHaveCount(4)
+    for (const size of SIZE_NAMES) await expect(textSizeLabel(page, size)).toHaveText(size)
   })
 
   test('is remembered on this device, and applied before the app starts', async ({ page }) => {
     await page.goto('/styleguide')
-    await textSizeButton(page, 'Large').click()
-    await page.reload()
-    await expect(textSizeButton(page, 'Large')).toBeChecked()
-    expect(await fontSize(page, 'body')).toBe(20)
-    // The CSP-safe external script has set it by the time the document has parsed, so the page never jumps.
-    await expectTextSize(page, 'Large')
+    for (const size of ['Large', 'Xtra Large'] as const) {
+      await textSizeButton(page, size).click()
+      await page.reload()
+      await expect(textSizeButton(page, size)).toBeChecked()
+      expect(await fontSize(page, 'body')).toBe(PIXELS[size])
+      // The CSP-safe external script has set it by the time the document has parsed, so the page never jumps.
+      await expectTextSize(page, size)
+    }
   })
 
-  // The first control (A / A+ / A++) saved 'a-plus' or 'a-plus-plus' under the same key. Someone who chose A+ on it gets Large and not the default (src/lib/text-size.test.ts
-  // and scripts/text-size-init.test.mjs hold the other values).
-  test('reads a size the old A / A+ / A++ control saved: A+ is Large', async ({ page }) => {
+  // The three-size control saved its choice under 'fernledger-text-size', where its 'large' was 20px. That is Xtra Large now, so nobody who chose it gets smaller text; the
+  // four-size control saves under a key of its own, so its Large (18px) is not read as the old one (src/lib/text-size.test.ts and scripts/text-size-init.test.mjs hold the other values).
+  test('reads the Large the three-size control saved (20px) as Xtra Large', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('fernledger-text-size', 'large'))
+    await page.goto('/styleguide')
+    await expectTextSize(page, 'Xtra Large')
+    await expect(textSizeButton(page, 'Xtra Large')).toBeChecked()
+    expect(await fontSize(page, 'body')).toBe(20)
+  })
+
+  for (const [saved, size] of [['small', 'Small'], ['medium', 'Medium']] as const) {
+    test(`keeps the ${size} the three-size control saved`, async ({ page }) => {
+      await page.addInitScript((value) => localStorage.setItem('fernledger-text-size', value), saved)
+      await page.goto('/styleguide')
+      await expectTextSize(page, size)
+      await expect(textSizeButton(page, size)).toBeChecked()
+      expect(await fontSize(page, 'body')).toBe(PIXELS[size])
+    })
+  }
+
+  // The first control (A / A+ / A++) saved 'a-plus' or 'a-plus-plus' under the same key. Someone who chose A+ on it gets Xtra Large (both were 20px) and not the default.
+  test('reads a size the old A / A+ / A++ control saved: A+ is Xtra Large', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('fernledger-text-size', 'a-plus'))
     await page.goto('/styleguide')
+    await expectTextSize(page, 'Xtra Large')
+    await expect(textSizeButton(page, 'Xtra Large')).toBeChecked()
+  })
+
+  // public/text-size-init.js sets the size from the document, before first paint and before the app's code has run, so the page never draws at one size and jumps to another. With every
+  // script of the app refused (its stylesheet is let through), the page is empty, and still has the size an earlier control saved, in the size of its text.
+  test.describe('before the app has loaded', () => {
+    test.use({ expectedConsoleErrors: ['Failed to load resource'] })
+    test('the Large an earlier control saved is on the page as Xtra Large, with no app to put it there', async ({ page }) => {
+      await page.addInitScript(() => localStorage.setItem('fernledger-text-size', 'large'))
+      await page.route(/\/assets\/.*\.js/, (route) => route.abort())
+      await page.goto('/styleguide')
+      await expectTextSize(page, 'Xtra Large')
+      expect(await page.locator('#root').evaluate((root) => root.childElementCount)).toBe(0) // the app has not drawn: the size did not come from it
+      expect(await fontSize(page, 'body')).toBe(20)
+    })
+  })
+
+  test('a choice made on the four-size control wins over what an earlier control saved', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('fernledger-text-size', 'large'))
+    await page.goto('/styleguide')
+    await expect(textSizeButton(page, 'Xtra Large')).toBeChecked()
+    await textSizeButton(page, 'Large').click()
+    await page.reload() // the earlier key still says 'large', and is put back by the script above
     await expectTextSize(page, 'Large')
     await expect(textSizeButton(page, 'Large')).toBeChecked()
+    expect(await fontSize(page, 'body')).toBe(18)
   })
 
   test('shrugs off a junk saved value', async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem('fernledger-text-size', 'enormous'))
+    await page.addInitScript(() => {
+      localStorage.setItem('fernledger-text-size', 'enormous')
+      localStorage.setItem('fernledger-text-size-v2', 'enormous')
+    })
     await page.goto('/styleguide')
     await expect(textSizeButton(page, 'Medium')).toBeChecked()
     expect(await fontSize(page, 'body')).toBe(16)
@@ -102,7 +213,7 @@ test.describe('text size', () => {
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
       for (const group of ['Transactions', 'Reports', 'Set up', 'Help']) await openNavGroup(page, group)
       const targets = [
-        ...(['Small', 'Medium', 'Large'] as const).map((name) => textSizeButton(page, name)),
+        ...SIZE_NAMES.map((name) => textSizeButton(page, name)),
         themeToggle(page),
         signOutLink(page),
         page.getByRole('button', { name: 'Toggle sidebar' }),
@@ -115,6 +226,25 @@ test.describe('text size', () => {
         expect(box?.height, await target.innerText().catch(() => 'a control')).toBeGreaterThanOrEqual(44)
         expect(box?.width).toBeGreaterThanOrEqual(44)
       }
+    })
+
+    // The phone's menu has the four sizes as two rows of two, each a button of its own, and each is a target of 44px at the largest text, where the words are longest.
+    test('the four sizes in the phone menu are at least 44px, and fit the menu, at Xtra Large and 320px', async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 640 })
+      await page.goto('/styleguide')
+      await chooseTextSize(page, 'Xtra Large')
+      await openHeaderControls(page)
+      const menu = (await page.locator('[data-slot="popover-content"]').boundingBox())!
+      for (const name of SIZE_NAMES) {
+        const box = (await textSizeLabel(page, name).boundingBox())!
+        expect(box.height, name).toBeGreaterThanOrEqual(44)
+        expect(box.width, name).toBeGreaterThanOrEqual(44)
+        expect(box.x, `${name}: left`).toBeGreaterThanOrEqual(menu.x - 0.5)
+        expect(box.x + box.width, `${name}: right`).toBeLessThanOrEqual(menu.x + menu.width + 0.5)
+      }
+      // Each word is whole in its button: nothing is cut off by it.
+      const cut = await page.locator('[data-slot="text-size-option"]').evaluateAll((options) => options.filter((o) => o.scrollWidth > o.clientWidth).map((o) => o.textContent))
+      expect(cut).toEqual([])
     })
 
     test('the icons of the collapsed sidebar are at least 44px too', async ({ page, context }) => {
@@ -131,15 +261,16 @@ test.describe('text size', () => {
     })
   })
 
-  test('with a mouse the shell is at least 32px at Medium and Large and never under 24px at Small', async ({ page, context }) => {
+  test('with a mouse the shell is at least 32px at Medium, Large and Xtra Large and never under 24px at Small', async ({ page, context }) => {
     await signInAs(context, 'admin')
+    await page.setViewportSize({ width: 1280, height: 800 }) // wide enough that the header has the text size buttons in its bar at every size
     await page.goto('/styleguide')
     for (const group of ['Transactions', 'Reports', 'Set up', 'Help']) await openNavGroup(page, group)
-    for (const [size, least] of [['Medium', 32], ['Large', 32], ['Small', 24]] as const) {
+    for (const [size, least] of [['Medium', 32], ['Large', 32], ['Xtra Large', 32], ['Small', 24]] as const) {
       await chooseTextSize(page, size)
       await settle(page)
       const targets = [
-        ...(['Small', 'Medium', 'Large'] as const).map((name) => textSizeButton(page, name)),
+        ...SIZE_NAMES.map((name) => textSizeButton(page, name)),
         themeToggle(page),
         signOutLink(page),
         ...(await mainNav(page).getByRole('link').all()),
@@ -151,6 +282,123 @@ test.describe('text size', () => {
         expect(box?.width).toBeGreaterThanOrEqual(least)
       }
     }
+  })
+
+  // The bar has the four sizes in it while it is 56rem wide (a container query, in the page's own rem, so it follows the text size): that is the room the four sizes, the theme, Sign out and
+  // a long page's name need together. A narrower bar has them in the menu with the page's name given the room. The edge is 56 times the page's text size in pixels, so at Medium it is 896px and
+  // at Xtra Large 1120px; the window is a scrollbar's width wider than the bar it holds, and 20px either side of the edge clears that.
+  for (const size of ['Medium', 'Xtra Large'] as const) {
+    test(`the header keeps the page name whole: the controls are in the bar from 56rem wide and in the menu below it, at ${size}`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [SAVED_UNDER, SAVED_AS[size]])
+      const edge = 56 * PIXELS[size]
+      const menuButton = siteHeader(page).getByRole('button', { name: 'Display settings and sign out' })
+      const pageName = siteHeader(page).locator('[aria-current="page"]')
+      const expectNameWhole = async (what: string) => {
+        await expect(pageName).toHaveText('Income vs spending by month')
+        expect(await pageName.evaluate((el) => el.scrollWidth <= el.clientWidth), `${what}: the page's name is cut short`).toBe(true)
+      }
+
+      await page.setViewportSize({ width: edge + 20, height: 800 })
+      await page.goto('/reports/income-vs-spending')
+      await expectTextSize(page, size)
+      await settle(page)
+      await expect(textSizeGroup(page)).toBeVisible() // with the room, they are in the bar...
+      await expect(menuButton).toBeHidden()
+      await expectNameWhole('in the bar')
+
+      await page.setViewportSize({ width: edge - 20, height: 800 })
+      await settle(page)
+      await expect(textSizeGroup(page)).toBeHidden() // ...and without it, in the menu
+      await expect(menuButton).toBeVisible()
+      await expectNameWhole('in the menu')
+    })
+  }
+})
+
+// One size for all text: README, Accessibility. Every word that is not a heading is exactly the chosen size, in every part of the view: the sidebar and its sub-menus, the breadcrumb, the header's
+// buttons, tables and cards, buttons, fields, selects, date pickers, menus, tooltips, badges, captions and hints. A page that has a word in another size (an arbitrary pixel size, a prose page set a size up)
+// fails here, and scripts/one-text-size.test.mjs fails the class that would do it. Printed Reports keep their sizes in pt, and are not on screen.
+test.describe('one size for all text', () => {
+  const pages = ['/', '/styleguide', '/settings', '/about-your-data', '/how-to-sign-in', '/reports', '/reports/spending', '/transactions', '/categories', '/rules', '/budgets', '/import', '/change-log']
+
+  for (const size of ['Small', 'Xtra Large'] as const) {
+    for (const path of pages) {
+      test(`${path} at ${size}: every word that is not a heading is ${PIXELS[size]}px`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [SAVED_UNDER, SAVED_AS[size]])
+        await page.goto(path)
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+        await settle(page)
+        await expectOneSize(page, size)
+      })
+    }
+  }
+
+  // The same at each of the four, on the page that shows the shared building blocks (a table, badges, amounts), and the sidebar open with its sub-menus.
+  for (const size of SIZE_NAMES) {
+    test(`the styleguide and the open sidebar at ${size}: the table, cards and navigation are ${PIXELS[size]}px`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [SAVED_UNDER, SAVED_AS[size]])
+      await page.setViewportSize({ width: 1280, height: 900 })
+      await page.goto('/styleguide')
+      for (const group of ['Transactions', 'Reports', 'Set up', 'Help']) await openNavGroup(page, group)
+      await settle(page)
+      await expectOneSize(page, size, 40)
+      for (const selector of ['body', 'table', 'table th', 'table td', '[data-slot="sidebar-menu-button"]', '[data-slot="sidebar-menu-sub-button"]', 'header [data-slot="breadcrumb"] li']) {
+        expect(await fontSize(page, selector), selector).toBe(PIXELS[size])
+      }
+      await page.setViewportSize({ width: 390, height: 844 }) // a phone shows the table as cards
+      await expect(page.locator('ul[aria-label="Sample transactions"]')).toBeVisible()
+      for (const selector of ['ul[aria-label="Sample transactions"] li', 'ul[aria-label="Sample transactions"] dt', 'ul[aria-label="Sample transactions"] dd']) {
+        expect(await fontSize(page, selector), selector).toBe(PIXELS[size])
+      }
+    })
+
+    test(`headings are larger than the text at ${size}, and grow with it`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [SAVED_UNDER, SAVED_AS[size]])
+      await page.goto('/styleguide')
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+      const { root, headings } = await wordsOffTheSize(page)
+      expect(root).toBe(PIXELS[size])
+      expect(headings.filter((h) => h.level === 'h1').length).toBeGreaterThan(0)
+      expect(headings.filter((h) => h.level === 'h2').length).toBeGreaterThan(0)
+      for (const { level, size: px } of headings) expect(px, level).toBe(level === 'h1' ? root * 1.5 : root * 1.25)
+    })
+  }
+
+  // Menus, pickers and tooltips are drawn in the page, outside the part of it that holds the page's words, and are the page's size too.
+  test('a date picker, the phone menu, the sidebar sheet and a rail tooltip are the page\'s size at Xtra Large', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [SAVED_UNDER, SAVED_AS['Xtra Large']])
+
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto('/reports/spending')
+    await page.getByRole('button', { name: /choose a date/i }).first().click()
+    await expect(page.locator('[data-slot="calendar"]')).toBeVisible()
+    await settle(page)
+    await expectOneSize(page, 'Xtra Large', 30)
+    await page.keyboard.press('Escape')
+
+    await page.setViewportSize({ width: 375, height: 700 })
+    await openHeaderControls(page)
+    await settle(page)
+    await expectOneSize(page, 'Xtra Large', 10)
+    await closeHeaderControls(page)
+    await showSidebar(page)
+    for (const group of ['Transactions', 'Reports', 'Set up', 'Help']) await openNavGroup(page, group)
+    await settle(page)
+    await expectOneSize(page, 'Xtra Large', 10)
+
+    await page.setViewportSize({ width: 900, height: 800 }) // the icon rail, which says what its icons are in a tooltip
+    await page.goto('/styleguide')
+    await mainNav(page).getByRole('button', { name: 'Reports' }).hover()
+    const tooltip = page.getByRole('tooltip')
+    await expect(tooltip).toBeVisible()
+    await settle(page)
+    expect(await tooltip.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBe(20)
+    await expectOneSize(page, 'Xtra Large', 10)
   })
 })
 
@@ -170,7 +418,7 @@ test.describe('zoom', () => {
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
-      for (const size of ['Medium', 'Large'] as const) {
+      for (const size of ['Medium', 'Xtra Large'] as const) {
         test(`${path} at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
           await signInAs(context, 'admin')
           await page.setViewportSize({ width, height })
@@ -192,11 +440,11 @@ test.describe('zoom', () => {
 
   // The header is one row on a phone (the sidebar toggle, where the page is, one menu button), and the menu and the sidebar's sheet, open, fit the window however short it is
   // and however large the text: at 400% zoom the window is 256px high, and what does not fit scrolls. (The Admin's sidebar is the longest.)
-  test(`the header is one row at 320px and text size Large, and its menu and the sidebar's sheet fit`, async ({ page, context }) => {
+  test(`the header is one row at 320px and text size Xtra Large, and its menu and the sidebar's sheet fit`, async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.setViewportSize({ width: 320, height: 256 })
     await page.goto('/')
-    await chooseTextSize(page, 'Large')
+    await chooseTextSize(page, 'Xtra Large')
     await settle(page)
     const within = async (locator: Locator, where: { x?: number; y?: number; width: number; height: number }, what: string) => {
       const box = (await locator.boundingBox())!
@@ -207,7 +455,7 @@ test.describe('zoom', () => {
     }
     const screen = { width: 320, height: 256 }
 
-    // One row: the bar is 3rem tall (60px at Large), not two lines of controls, and none of it is wider than the screen.
+    // One row: the bar is 3rem tall (60px at Xtra Large), not two lines of controls, and none of it is wider than the screen.
     const header = siteHeader(page)
     expect((await header.boundingBox())!.height).toBeLessThanOrEqual(60.5)
     await within(header.getByRole('button', { name: 'Toggle sidebar' }), screen, 'the sidebar toggle')
@@ -239,7 +487,7 @@ test.describe('zoom', () => {
   // The Import screen with a file chosen and the "Replace imported history" question open: the longest text it shows.
   // The Account and its imported-row count are stubbed, so this needs no data in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/import with the replace question open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example savings', accountNumber: '99-9999-9999999-97', cutoverDate: '2026-10-01' }] }))
@@ -277,7 +525,7 @@ test.describe('zoom', () => {
   // The Rules page with a long Rule listed, the form open and a check result with a long example: the longest text it shows.
   // The Rules and the check are stubbed, so this needs no data in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/rules with the form open and a check result at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         const description = 'EXAMPLE SHOP WITH A LONG ENOUGH NAME TO WRAP ON A NARROW SCREEN'
@@ -312,7 +560,7 @@ test.describe('zoom', () => {
   // The Rules page with the D1 usage bar on and the day used up: the longest figures and badge it shows (the figures are stubbed, so this needs
   // no token). With it off, the page's own test above covers the longer Setup needed words.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/rules with the D1 usage bar showing the day used up at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         await page.route('**/api/features', (route) => route.fulfill({ json: { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] } }))
@@ -382,7 +630,7 @@ test.describe('zoom', () => {
       }),
     )
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/ with a Balance Check warning at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         await stubLongBalances(page)
@@ -407,7 +655,7 @@ test.describe('zoom', () => {
   // The Budgets page with its longest content: a long Category name, big amounts, a long list of changes, and the Admin's form open
   // with every button it can have. The Budgets are stubbed, so this needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/budgets with long content and the form open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         const longName = 'Health and medical costs for the household and the long-term care fees'
@@ -467,7 +715,7 @@ test.describe('zoom', () => {
     { form: 'the removal question for an Income Category', button: 'Remove', category: 'Wages and salary' },
   ] as const
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       for (const { form, button, category } of categoryForms) {
         test(`/categories with ${form} open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
           await signInAs(context, 'admin')
@@ -534,10 +782,10 @@ test.describe('zoom', () => {
   }
 
   // A row's Actions menu, open, on the Rules page and the Categories page, with a long Rule and a long Category name: it is at the end of its button, which is at the end of a row or of a card,
-  // and it stays whole inside the window at every zoom and text size (a window 256px high is shorter than the menu at Large, which then scrolls inside itself), with nothing scrolling sideways.
+  // and it stays whole inside the window at every zoom and text size (a window 256px high is shorter than the menu at Xtra Large, which then scrolls inside itself), with nothing scrolling sideways.
   // The Rules and the Categories are stubbed.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       for (const { path, row } of [
         { path: '/rules', row: 'Rule 1' },
         { path: '/categories', row: longCategory },
@@ -564,9 +812,9 @@ test.describe('zoom', () => {
   }
 
   // The table of the Rules and of the Categories just above a phone's width, where the zoom widths above do not look: a table starts at 768px (a media query's `48rem` is the browser's 16px,
-  // not the page's text size), so at 768px it is there at every size, with its columns (a handle, the order, When, Then, Actions) at their narrowest and the text at its largest at Large.
+  // not the page's text size), so at 768px it is there at every size, with its columns (a handle, the order, When, Then, Actions) at their narrowest and the text at its largest at Xtra Large.
   // Nothing may scroll sideways, in the table's own box or in the page.
-  for (const size of ['Medium', 'Large'] as const) {
+  for (const size of ['Medium', 'Xtra Large'] as const) {
     for (const path of ['/rules', '/categories'] as const) {
       test(`${path} as a table at 768px wide and text size ${size} fits`, async ({ page, context }) => {
         await signInAs(context, 'admin')
@@ -588,7 +836,7 @@ test.describe('zoom', () => {
 
   // The Summary's Budget vs actual with its longest content: a long Category name, big amounts, and each Status. The data is stubbed.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/ with Budget vs actual at its longest at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         await stubLongBudget(page)
@@ -648,7 +896,7 @@ test.describe('zoom', () => {
     )
   }
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/ with long charts at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         await stubCharts(page)
@@ -689,7 +937,7 @@ test.describe('zoom', () => {
   // The Dashboard as the Admin lands on it, neither chart yet asked for: each card's explanation, its choice and its button (a touch target that may wrap). The charts' data is
   // stubbed, so this needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/ with the Show net worth and Show spending buttons at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         await stubCharts(page)
@@ -726,7 +974,7 @@ test.describe('zoom', () => {
   // cards' contents. The spending period is chosen as dates, which gives that card its two date fields as well.
   for (const { name, width, height, size } of [
     { name: '1440x900', width: 1440, height: 900, size: 'Medium' },
-    { name: '1920x1080', width: 1920, height: 1080, size: 'Large' },
+    { name: '1920x1080', width: 1920, height: 1080, size: 'Xtra Large' },
   ] as const) {
     test(`/ with every card at its longest has nothing sticking out of its card at ${name} and text size ${size}`, async ({ page, context }) => {
       await signInAs(context, 'admin')
@@ -769,7 +1017,7 @@ test.describe('zoom', () => {
   // A Transaction's details with every field filled in and long values, and the Admin's edit panel open: the longest text
   // that page shows. The Transaction is stubbed, so this needs no data in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/transactions/4242 with every detail filled and the edit panel open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         const long = 'EXAMPLE'.padEnd(80, 'x')
@@ -820,7 +1068,7 @@ test.describe('zoom', () => {
   // The Transaction listing Report with its longest content: a long app title and Account name, a long description and Note,
   // a huge amount and totals, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/reports/transactions with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         const long = 'EXAMPLE'.padEnd(80, 'x')
@@ -853,7 +1101,7 @@ test.describe('zoom', () => {
   // The balances-over-time Report with its longest content: a long app title and Account name, the largest balances and a Balance Check
   // difference, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/reports/balances with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
@@ -896,7 +1144,7 @@ test.describe('zoom', () => {
   // The spending-by-Category Report with its longest content: a long app title and Account name, a Category name with no spaces, the largest amounts, money
   // back and a total that is less than nothing, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/reports/spending with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
@@ -938,7 +1186,7 @@ test.describe('zoom', () => {
   // an opening balance, and a loan owed to the person as well as one owed by them, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in
   // the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/reports/loans with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         const person = 'Alexandra'.padEnd(100, 'x')
@@ -982,7 +1230,7 @@ test.describe('zoom', () => {
   // month, a Budget that changed, a month that is not over and the months together, on screen (cards on a narrow window). The data is stubbed, so the test needs
   // nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/reports/budget-vs-actual with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         const long = 'Category with a long name'.padEnd(60, 'z')
@@ -1036,7 +1284,7 @@ test.describe('zoom', () => {
   // below zero, the notice about money in with no Category with a large amount in it, and months with sentences under their names (the dates cover only part of the
   // first, the second is not over, the third has not begun), on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
   for (const { name, width, height } of zoomLevels) {
-    for (const size of ['Medium', 'Large'] as const) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/reports/income-vs-spending with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
         await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
@@ -1206,37 +1454,6 @@ test.describe('responsive table', () => {
     expect(['right', 'end']).toContain(align)
   })
 
-  test('keeps table text at 15px or more at every text size', async ({ page }) => {
-    await page.setViewportSize({ width: 1024, height: 768 })
-    await page.goto('/styleguide')
-    for (const size of ['Medium', 'Large'] as const) {
-      await chooseTextSize(page, size)
-      for (const selector of ['table', 'table th', 'table td']) {
-        expect(await fontSize(page, selector)).toBeGreaterThanOrEqual(15)
-      }
-    }
-  })
-
-  // Small is a choice, and it makes everything 12.5% smaller, tables too (README, Accessibility): so the 15px promise is for Medium and Large. This holds a table's text at
-  // Small to exactly that, 12.5% less than it is at Medium (13.125px), so Small scales it as it scales the page and does not make it smaller still.
-  test('scales table text with the page at Small: 12.5% smaller than at Medium', async ({ page }) => {
-    await page.setViewportSize({ width: 1024, height: 768 })
-    await page.goto('/styleguide')
-    for (const selector of ['table', 'table th', 'table td']) {
-      await chooseTextSize(page, 'Medium')
-      const medium = await fontSize(page, selector)
-      await chooseTextSize(page, 'Small')
-      expect(await fontSize(page, selector)).toBeCloseTo(medium * 0.875, 3)
-    }
-  })
-
-  test('keeps card text at 15px or more on a phone', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.goto('/styleguide')
-    expect(await fontSize(page, 'ul[aria-label="Sample transactions"] li')).toBeGreaterThanOrEqual(15)
-    expect(await fontSize(page, 'ul[aria-label="Sample transactions"] dt')).toBeGreaterThanOrEqual(15)
-  })
-
   test('prints as a table even from a phone-width page', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ media: 'print' })
@@ -1361,7 +1578,7 @@ test.describe('header', () => {
   // lines. The 44px size is held by the touch-target tests, and the lack of sideways scrolling by the 320px header test above.
   for (const { width, size } of [
     { width: 375, size: 'Medium' },
-    { width: 320, size: 'Large' },
+    { width: 320, size: 'Xtra Large' },
   ] as const) {
     test(`Sign out stays whole and inside the screen at ${width}px and text size ${size}`, async ({ page, context }) => {
       await signInAs(context, 'admin')
@@ -1393,6 +1610,6 @@ test.describe('header', () => {
 
 test('the examples page has no WCAG 2.2 AA violations at the largest text size', async ({ page }) => {
   await page.goto('/styleguide')
-  await chooseTextSize(page, 'Large')
+  await chooseTextSize(page, 'Xtra Large')
   await noAxeViolations(page) // right after the click: it waits for the size buttons to finish changing width
 })

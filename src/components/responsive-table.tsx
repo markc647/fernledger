@@ -121,7 +121,7 @@ const TableItem = ({ className, children }: RowProps) => <TableRow className={cl
 
 /**
  * Data as a table on a wide screen and as one card per row on a narrow one (below 768px, which is also what a phone,
- * or a desktop browser at 200% zoom, looks like), so nothing ever scrolls sideways. Text is 15px or more at the Medium and Large text sizes; Small scales it with the rest of the page (README, Accessibility).
+ * or a desktop browser at 200% zoom, looks like), so nothing ever scrolls sideways. Its text is the page's size, whatever the text size (README, Accessibility).
  * `caption` names the data for screen readers in both layouts. Only the layout on screen is rendered, so each cell
  * is built once (a cell with an `id` or a form control never appears twice in the page).
  * A column with `sort` can be sorted by the reader: by its heading in the table, from a "Sort by" menu on cards.
@@ -177,7 +177,7 @@ export function ResponsiveTable<Row>({
       <>
         <SortMenu columns={columns} />
         {/* One column that may shrink to the window: without it a card is as wide as its longest unbroken word (a long web address in a Note). */}
-        <ul aria-label={caption} className="grid grid-cols-1 gap-3 text-[0.9375rem]">
+        <ul aria-label={caption} className="grid grid-cols-1 gap-3 text-base">
           {rows.map((row) => (
             <Item
               key={getRowKey(row)}
@@ -211,7 +211,7 @@ export function ResponsiveTable<Row>({
     return (
       // The box is the shadcn data table's: rounded, with a border the rows and the heading sit inside.
       <div className="overflow-hidden rounded-lg border">
-        <Table className={cn('text-[0.9375rem]', className)}>
+        <Table className={cn('text-base', className)}>
           <TableCaption className="sr-only">{caption}</TableCaption>
           <TableHeader className="bg-muted">
             <TableRow className="hover:bg-transparent">
@@ -243,7 +243,7 @@ export function ResponsiveTable<Row>({
     )
   }
   return (
-    <table className={cn('w-full border-collapse text-[0.9375rem]', className)}>
+    <table className={cn('w-full border-collapse text-base', className)}>
       <caption className="sr-only">{caption}</caption>
       <thead>
         {printHeading && (
