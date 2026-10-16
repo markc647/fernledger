@@ -135,16 +135,16 @@ export function ReportGate({
     if (isMember) return page(<MemberNeeds />)
     return page(chosen ? <Needs message={fromOptional ? 'Choose the last date this Report covers.' : 'Choose the first and last dates this Report covers.'} /> : null)
   }
-  if (from > search.to) return page(<Needs alert message="The “To” date is before the “From” date. Change one of them to show the Report." />)
+  if (from > search.to) return page(<NeedsChange message="The “To” date is before the “From” date. Change one of them to show the Report." />)
   const problem = rangeProblem?.(from, search.to)
-  if (problem) return page(<Needs alert message={problem} />)
+  if (problem) return page(<NeedsChange message={problem} />)
   if (!accounts.data) return page(<p role="status">Loading…</p>)
   const selected = search.account === undefined ? accounts.data : accounts.data.filter((a) => a.id === search.account)
   if (selected.length === 0) {
     return accounts.data.length === 0 ? (
       page(<Needs message={`${noAccounts} An Account is added the first time the Admin imports a file for it.`} />)
     ) : (
-      page(<Needs alert message="There is no such Account. Choose one in the form above." />)
+      page(<NeedsChange message="There is no such Account. Choose one in the form above." />)
     )
   }
   const labels = selected.map(accountLabel).join('; ')
@@ -159,6 +159,15 @@ export function ReportGate({
       })}
     </ShownReportContext.Provider>,
   )
+}
+
+/**
+ * What a Report says when what it was asked for cannot be shown (dates the wrong way round, too many months, an Account or Loans Category that is not there). The Admin is told to
+ * change it in the form above. Anyone else has no form, so is told what a Member is on any Report's page that has no Report to show (`MemberNeeds`). Until who is signed in is known nobody is the Admin.
+ */
+export function NeedsChange({ message }: { message: string }) {
+  const me = useQuery(meQuery)
+  return me.data?.role === 'admin' ? <Needs alert message={message} /> : <MemberNeeds />
 }
 
 /** What a Member is told on a Report's page that has no Report to show: they make none, and the Reports page lists what the Admin has made. */

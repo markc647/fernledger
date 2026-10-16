@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { keepRequest, keptAccount, keptDates, keptHref, keptLoan, keptName, keptRowName, reportOf, slugOf, type KeptReport } from './kept-reports'
+import { keepRequest, keptAccount, keptDates, keptHref, keptInSentence, keptLoan, keptName, keptRowName, reportOf, slugOf, type KeptReport } from './kept-reports'
 import { REPORTS } from './reports'
 
 const kept = (over: Partial<KeptReport> = {}): KeptReport => ({
@@ -75,6 +75,16 @@ describe('a kept Report', () => {
     expect(keptLoan(kept({ report: 'loans', from: null }))).toBe('All loans')
     expect(keptLoan(kept({ report: 'loans', categoryId: 7, categoryName: 'Loan – Alice', categoryRemoved: true }))).toBe('Loan – Alice (removed)')
     expect(keptLoan(kept())).toBeNull()
+  })
+
+  it('reads in a sentence with a capital only on a name or a date: all Accounts, from the first Transaction, all loans', () => {
+    expect(keptInSentence(kept({ accountId: 3, accountName: 'Example savings' }))).toBe('Spending by Category Report, Thu 1 Oct 2026 to Sat 31 Oct 2026, Example savings')
+    expect(keptInSentence(kept())).toBe('Spending by Category Report, Thu 1 Oct 2026 to Sat 31 Oct 2026, all Accounts')
+    expect(keptInSentence(kept({ report: 'loans', from: null }))).toBe('Loans Report for all loans, from the first Transaction to Sat 31 Oct 2026, all Accounts')
+    expect(keptInSentence(kept({ report: 'loans', categoryId: 7, categoryName: 'Loan – Alice', categoryRemoved: true }))).toBe('Loans Report for Loan – Alice (removed), Thu 1 Oct 2026 to Sat 31 Oct 2026, all Accounts')
+    expect(keptInSentence(kept({ report: 'loans', categoryId: 7 }))).toBe('Loans Report for a Category that is no longer here, Thu 1 Oct 2026 to Sat 31 Oct 2026, all Accounts')
+    expect(keptInSentence(kept({ accountId: 3 }))).toBe('Spending by Category Report, Thu 1 Oct 2026 to Sat 31 Oct 2026, an Account that is no longer here')
+    expect(keptInSentence({ ...kept(), report: 'nonsense' as KeptReport['report'] })).toBe('Report that this version does not know, Thu 1 Oct 2026 to Sat 31 Oct 2026, all Accounts')
   })
 
   it('has a name that tells it from the others, for the button of its row\'s actions', () => {

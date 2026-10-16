@@ -3,7 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { LoansCappedNotice, LoansReport } from '@/components/loans-report'
 import { LoansForm } from '@/components/report-form'
 import { ReportFrame } from '@/components/report-frame'
-import { BackToReports, Needs, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
+import { BackToReports, Needs, NeedsChange, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
 import { reportLoansQuery } from '@/lib/queries'
 import { parseLoansSearch, type LoansSearch } from '@/lib/report-loans'
 import { reportNav } from '@/lib/report-nav'
@@ -48,7 +48,7 @@ function Loans({ scope, search }: { scope: ReportScope; search: LoansSearch }) {
     return <Needs message="There are no Loans Categories to report on yet." />
   }
   if (listing.sections.length === 0) {
-    return <Needs alert message="There is no such Loans Category. It may have been removed, or may no longer be a Loans Category. Choose one in the form above." />
+    return <NeedsChange message="There is no such Loans Category. It may have been removed, or may no longer be a Loans Category. Choose one in the form above." />
   }
   const chosen = search.category === undefined ? null : listing.sections[0]!
   return (

@@ -60,5 +60,21 @@ export function keptLoan(kept: KeptReport): string | null {
   return kept.categoryRemoved ? `${kept.categoryName ?? 'A Category'} (removed)` : (kept.categoryName ?? 'A Category that is no longer here')
 }
 
+const lower = (text: string) => text.charAt(0).toLowerCase() + text.slice(1)
+
+/**
+ * The kept Report as a sentence says it, after "Delete the": "Spending by Category Report for Loan – Alice, from the first Transaction to Sat 31 Oct 2026, all Accounts". What the list
+ * writes as a phrase of its own ("All Accounts", "From the first Transaction") loses its capital in the middle of a sentence; a name (an Account, a Category) and a date keep theirs.
+ */
+export function keptInSentence(kept: KeptReport): string {
+  const loan = keptLoan(kept)
+  const account = keptAccount(kept)
+  return [
+    reportOf(kept) ? `${keptName(kept)} Report${loan === null ? '' : ` for ${kept.categoryName === null ? lower(loan) : loan}`}` : 'Report that this version does not know',
+    kept.from === null ? lower(keptDates(kept)) : keptDates(kept),
+    kept.accountName === null ? lower(account) : account,
+  ].join(', ')
+}
+
 /** The kept Report in a few words, for the name of its row's actions and of its questions: "Loans, Loan – Alice, from the first Transaction to Sat 31 Oct 2026, All Accounts". */
 export const keptRowName = (kept: KeptReport) => [keptName(kept), keptLoan(kept), keptDates(kept), keptAccount(kept)].filter((part) => part !== null).join(', ')

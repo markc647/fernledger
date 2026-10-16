@@ -8,9 +8,9 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { api } from '@/lib/api'
 import { formatDateTime } from '@/lib/format'
-import { keptAccount, keptDates, keptHref, keptLoan, keptName, keptRowName, type KeptReport } from '@/lib/kept-reports'
+import { keptAccount, keptDates, keptHref, keptInSentence, keptLoan, keptName, keptRowName, type KeptReport } from '@/lib/kept-reports'
 import { HttpError, meQuery } from '@/lib/me'
-import { askToPrint } from '@/lib/print-request'
+import { askToPrint, clearPrintRequest } from '@/lib/print-request'
 import { keptReportsQuery } from '@/lib/queries'
 
 export const Route = createFileRoute('/reports')({
@@ -129,7 +129,9 @@ function KeptActions({ kept, isAdmin, onDelete }: { kept: KeptReport; isAdmin: b
   const show = (print: boolean) => {
     if (!href) return
     void queryClient.invalidateQueries({ queryKey: ['reports'], refetchType: 'none' })
+    // Open asks for no print, and so ends a Print that never printed (its Report could not be read), which would otherwise print this Report when it arrives.
     if (print) askToPrint(href)
+    else clearPrintRequest()
     void navigate({ href })
   }
   return (
@@ -187,7 +189,7 @@ function DeleteConfirm({ kept, onDone, onCancel }: { kept: KeptReport; onDone: (
   return (
     <div role="group" aria-label={`Delete ${name}`} className="space-y-2 text-start">
       <p>
-        Delete the {keptName(kept)} Report{keptLoan(kept) ? ` for ${keptLoan(kept)}` : ''}, {keptDates(kept)}, {keptAccount(kept)}? It comes off this list, so no Member can open it. Show it again from its page in the sidebar to make it again.
+        Delete the {keptInSentence(kept)}? It comes off this list, so no Member can open it. Show it again from its page in the sidebar to make it again.
       </p>
       <div className="flex flex-wrap gap-2">
         <Button size="touch" aria-label={`Yes, delete ${name}`} disabled={remove.isPending} onClick={() => remove.mutate()}>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { askToPrint, PRINT_REQUEST_LASTS_MS, takePrintRequest } from './print-request'
+import { askToPrint, clearPrintRequest, PRINT_REQUEST_LASTS_MS, takePrintRequest } from './print-request'
 
 const READS = ['account', 'from', 'to'] as const
 const open = (search: string, pathname = '/reports/spending') => ({ pathname, search })
@@ -34,6 +34,17 @@ describe('a request to print a Report when it is shown', () => {
   })
 
   it('is no when nothing was asked for', () => {
+    expect(takePrintRequest(open('?from=2026-10-01&to=2026-10-31'), READS, 1000)).toBe(false)
+  })
+
+  it('is gone once it is cleared, as when the Report is opened without printing: an earlier Print that never arrived does not print this Report', () => {
+    askToPrint(HREF, 1000)
+    clearPrintRequest()
+    expect(takePrintRequest(open('?account=2&from=2026-10-01&to=2026-10-31'), READS, 1100)).toBe(false)
+  })
+
+  it('can be cleared when there is none', () => {
+    clearPrintRequest()
     expect(takePrintRequest(open('?from=2026-10-01&to=2026-10-31'), READS, 1000)).toBe(false)
   })
 

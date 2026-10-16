@@ -14,6 +14,11 @@ export function askToPrint(href: string, now = Date.now()) {
   asked = { href, at: now }
 }
 
+/** Forgets a request to print. A Report opened without one calls this, so a Print whose Report never arrived (it could not be read) does not print this one, or another, later. */
+export function clearPrintRequest() {
+  asked = null
+}
+
 /**
  * Whether the Report shown now is the one asked to be printed, once: the request is used up by this call, whatever the answer. `choices` are the search parameters the Report reads
  * (src/lib/reports.ts), so the same Report written another way (its choices in another order) is the same one.
