@@ -736,7 +736,7 @@ describe('the CSV file and the Report', () => {
     await household()
     const everyday = (await env.DB.prepare('SELECT id FROM accounts WHERE name = ?').bind('Everyday').first<{ id: number }>())!.id
 
-    const res = await call(`/api/reports/transactions?accountId=${everyday}&from=2026-10-01&to=2026-10-31`, { who: 'member' })
+    const res = await call(`/api/reports/transactions?accountId=${everyday}&from=2026-10-01&to=2026-10-31`, { who: 'admin' })
 
     expect(res.status).toBe(200)
     const { transactions } = (await res.json()) as { transactions: { description: string; categoryName: string | null; transfer: string | null }[] }
