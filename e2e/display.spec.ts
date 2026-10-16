@@ -368,7 +368,7 @@ test.describe('one size for all text', () => {
   }
 
   // Menus, pickers and tooltips are drawn in the page, outside the part of it that holds the page's words, and are the page's size too.
-  test('a date picker, the phone menu, the sidebar sheet and a rail tooltip are the page\'s size at Xtra Large', async ({ page, context }) => {
+  test('a date picker, a help sheet, the phone menu, the sidebar sheet and a rail tooltip are the page\'s size at Xtra Large', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [SAVED_UNDER, SAVED_AS['Xtra Large']])
 
@@ -376,6 +376,13 @@ test.describe('one size for all text', () => {
     await page.goto('/reports/spending')
     await page.getByRole('button', { name: /choose a date/i }).first().click()
     await expect(page.locator('[data-slot="calendar"]')).toBeVisible()
+    await settle(page)
+    await expectOneSize(page, 'Xtra Large', 30)
+    await page.keyboard.press('Escape')
+
+    // The page's help sheet: its text and its Close button are the page's size, and its title and headings are larger.
+    await page.getByRole('button', { name: 'About this page' }).click()
+    await expect(page.getByRole('dialog', { name: 'About this page' }).getByRole('heading', { name: 'Printing' })).toBeVisible()
     await settle(page)
     await expectOneSize(page, 'Xtra Large', 30)
     await page.keyboard.press('Escape')
