@@ -2,7 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import { calendarOf, clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
-import { chooseTextSize, closeHeaderControls, openHeaderControls, textSizeGroup } from './shell-helpers'
+import { atEveryTextSize, chooseTextSize } from './shell-helpers'
 
 // The DatePicker (src/components/date-picker.tsx) on the Styleguide's three samples: "Date", "Optional date" and a date from 10 to 20 October 2026. The forms that use it
 // have their own specs, which choose their dates through `pickDate`; this is the picker itself: what it gives, how it is named, the keyboard, the limits, time zones,
@@ -259,31 +259,6 @@ async function expectDateOnOneLine(field: Locator, where: string) {
   })
   expect(lines, `${where}: the date is on one line`).toBe(1)
   expect(clear, `${where}: the date ends before the calendar icon`).toBe(true)
-}
-
-/**
- * Runs `check` at each text size the control offers, so a size added to it (an Xtra Large) is covered without this spec being told. It fails unless the largest is 20px or
- * more, the size README Accessibility promises.
- */
-async function atEveryTextSize(page: Page, check: (size: string) => Promise<void>) {
-  await openHeaderControls(page)
-  const count = await textSizeGroup(page).getByRole('radio').count()
-  await closeHeaderControls(page)
-  expect(count).toBeGreaterThanOrEqual(3)
-  let largest = 0
-  for (let i = 0; i < count; i++) {
-    await page.setViewportSize({ width: 1280, height: 800 }) // where the header's controls are in its bar, not left under a phone's menu by the last width
-    await openHeaderControls(page)
-    const radio = textSizeGroup(page).getByRole('radio').nth(i)
-    await radio.click()
-    await expect(radio).toBeChecked()
-    await closeHeaderControls(page)
-    const root = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))
-    largest = Math.max(largest, root)
-    await settle(page)
-    await check(`text size ${i + 1} of ${count} (${root}px)`)
-  }
-  expect(largest).toBeGreaterThanOrEqual(20)
 }
 
 test('the longest date is on one line in the picker at every text size', async ({ page }) => {

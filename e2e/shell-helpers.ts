@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
-import { expect } from './fixtures'
+import { expect, settle } from './fixtures'
 
 // The app shell (src/routes/__root.tsx): a sticky header across the top (the page's banner), and the sidebar beside the page. On a phone the sidebar is a sheet and the
 // header's controls are in one menu. These find the same things at every width, so a spec says what it does and not where the control is today.
@@ -58,6 +58,33 @@ export async function chooseTextSize(page: Page, size: TextSizeName) {
   await textSizeButton(page, size).click()
   await expectTextSize(page, size)
   await closeHeaderControls(page)
+}
+
+/**
+ * Runs `check` at each text size the control offers, so a size added to it (an Xtra Large) is covered without the spec being told. It fails unless the largest is 20px or more, the size README
+ * Accessibility promises. The size is chosen at the width the page has when this is called (a laptop's header has the buttons in its bar, a phone's has them in a menu), and `check` may change
+ * the width: the next size is chosen from the width this started at.
+ */
+export async function atEveryTextSize(page: Page, check: (size: string) => Promise<void>) {
+  const start = page.viewportSize()!
+  await openHeaderControls(page)
+  const count = await textSizeGroup(page).getByRole('radio').count()
+  await closeHeaderControls(page)
+  expect(count).toBeGreaterThanOrEqual(3)
+  let largest = 0
+  for (let i = 0; i < count; i++) {
+    await page.setViewportSize(start)
+    await openHeaderControls(page)
+    const radio = textSizeGroup(page).getByRole('radio').nth(i)
+    await radio.click()
+    await expect(radio).toBeChecked()
+    await closeHeaderControls(page)
+    const root = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))
+    largest = Math.max(largest, root)
+    await settle(page)
+    await check(`text size ${i + 1} of ${count} (${root}px)`)
+  }
+  expect(largest).toBeGreaterThanOrEqual(20)
 }
 
 /** The text size that is applied to the page, which is what every layout measurement depends on. */
