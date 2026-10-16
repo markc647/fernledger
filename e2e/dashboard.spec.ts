@@ -239,6 +239,9 @@ test('the cards are one column, each as wide as the page and under the one befor
 
   await settled('Medium')
   await page.setViewportSize({ width: 800, height: 900 }) // the sidebar is the icon rail
+  // It becomes the rail when the page hears of the new width, a moment after the resize, and its width then takes 200ms to change: `settle` can run before that starts, find nothing to
+  // wait for, and let the cards be measured one at a time while they slide.
+  await expect(page.locator('[data-slot="sidebar"]:not([data-mobile])')).toHaveAttribute('data-state', 'collapsed')
   await expectOneColumn('800px wide')
   await page.setViewportSize({ width: 390, height: 844 })
   await expectOneColumn('a phone')
