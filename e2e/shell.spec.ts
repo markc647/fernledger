@@ -15,7 +15,7 @@ const pages = [
 const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
 
 for (const { role, path, heading } of pages) {
-  test(`${heading} page as ${role} has no WCAG 2.2 AA violations`, async ({ page, context }, testInfo) => {
+  test(`${heading} page as ${role} has no WCAG 2.2 AA violations`, async ({ page, context }) => {
     await signInAs(context, role)
     // The Net worth page and the Spending by Category Report are where the charts are, and the Worker refuses to add up net worth for more than 49 Accounts, which the specs that share
     // this database can reach. So the answers are stubbed and the charts drawn before the scan (net worth when its button is pressed), and it scans the pictures and not the refusal that a
@@ -26,8 +26,6 @@ for (const { role, path, heading } of pages) {
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
     if (path === NET_WORTH_PATH) await showNetWorth(page)
     if (path === SPENDING_REPORT_PATH) await spendingDrawn(page, /^Bar chart of the 3 Categories/)
-    // The project's theme must really be showing, or the scan would not be testing it.
-    await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
 
     await noAxeViolations(page)
   })
@@ -51,6 +49,23 @@ test('the shared axe check emulates reduced motion for itself and leaves motion 
 
   expect(await reducedMotion()).toBe(false)
   await expect.poll(() => seen).toEqual([true, false]) // on for the check, then off again
+})
+
+// Colour contrast is measured once, by e2e/contrast.spec.ts: a scan leaves it out unless it asks for it, and every other rule still runs on every scan.
+test('the shared axe check leaves colour contrast to the sweep unless it asks, and still reports every other rule', async ({ page }) => {
+  await page.goto('/styleguide')
+  await expect(page.getByRole('heading', { level: 1, name: 'Styleguide' })).toBeVisible()
+  await page.evaluate(() => {
+    const faint = document.createElement('p')
+    faint.textContent = 'Pale grey words on white'
+    faint.style.cssText = 'color: #ddd; background: #fff'
+    document.querySelector('main')!.append(faint)
+  })
+  await noAxeViolations(page) // pale words are not what this scan looks for...
+  await expect(noAxeViolations(page, { contrast: true })).rejects.toThrow('color-contrast') // ...and the sweep's scan reports them
+
+  await page.evaluate(() => document.querySelector('main')!.append(document.createElement('button'))) // a button with no name
+  await expect(noAxeViolations(page)).rejects.toThrow('button-name') // any other rule is still reported without it
 })
 
 test('pages and the API carry the security headers, and the built app is not the dev server', async ({ page, request }) => {
@@ -132,7 +147,7 @@ test.describe('when who is signed in cannot be read', () => {
 })
 
 // The theme: one toggle. A first visit follows the device, and so does a device that changes while the page is open. Once the toggle has been used, the choice is the person's, on this device.
-test.describe('the theme toggle', () => {
+test.describe('the theme toggle', { tag: '@theme' }, () => {
   test('follows the device until it is used, then keeps the choice across a reload and a change of the device', async ({ page }, testInfo) => {
     const deviceIsDark = testInfo.project.name === 'dark'
     await page.goto('/')

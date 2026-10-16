@@ -1,4 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
+import { BALANCES, CHECKS, difference, FEATURES, latestCheck, stubBalances } from './balances-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { chooseTextSize, navLink, openNavGroup } from './shell-helpers'
 
@@ -115,27 +116,11 @@ test('on a phone the balances and Transactions become cards, with the same facts
 // Balances, with the answers stubbed, so that what the Checked and Sync columns say is held to exactly the Accounts below whatever else the shared database holds. The Sync column is
 // there only when Akahu Sync is set up; Sync is not built yet, so no Account has been synced and the real Worker says it is not set up.
 test.describe('the Balances table: Checked and Sync', () => {
-  const account = (accountId: number, accountName: string, balanceCents: number, syncedInLast24Hours = false) => ({
-    accountId,
-    accountName,
-    balanceCents,
-    asOfDate: '2026-10-08',
-    cutoverDate: null,
-    latestStatus: 'matched',
-    akahuSyncedAt: syncedInLast24Hours ? '2026-10-08T01:00:00.000Z' : null,
-    syncedInLast24Hours,
-  })
-  const BALANCES = [account(1, 'Example everyday', 123_400, true), account(2, 'Example savings', 5_000_000), account(3, 'Example card', -45_000)]
-  const difference = (accountId: number, accountName: string, differenceCents: number, asOfDate = '2026-10-08') => ({ accountId, accountName, asOfDate, since: '2026-09-30', differenceCents })
-  const latest = (accountId: number, accountName: string, status: string | null) => ({ accountId, accountName, asOfDate: status === null ? null : '2026-10-08', status })
-  /** Everyday agrees, Savings differs by $12.34, and nothing has been compared for the card. */
-  const CHECKS = { differences: [difference(2, 'Example savings', -1234)], accounts: [latest(1, 'Example everyday', 'matched'), latest(2, 'Example savings', 'differs'), latest(3, 'Example card', null)] }
-  const FEATURES = (syncSetUp: boolean) => ({ features: [{ id: 'akahu-sync', name: 'Akahu Sync', enabled: syncSetUp }, { id: 'd1-usage', name: 'D1 usage bar', enabled: false }] })
+  // This file is serial (the first tests build on each other); these stub every answer and need nothing from one another.
+  test.describe.configure({ mode: 'default' })
 
-  const open = async (page: Page, { checks = CHECKS, syncSetUp = false, balances = BALANCES }: { checks?: object; syncSetUp?: boolean; balances?: object[] } = {}) => {
-    await page.route('**/api/balances', (route) => route.fulfill({ json: { accounts: balances } }))
-    await page.route('**/api/balance-checks', (route) => route.fulfill({ json: checks }))
-    await page.route('**/api/features', (route) => route.fulfill({ json: FEATURES(syncSetUp) }))
+  const open = async (page: Page, options?: Parameters<typeof stubBalances>[1]) => {
+    await stubBalances(page, options)
     await page.goto('/')
     const region = page.getByRole('region', { name: 'Balances' })
     await expect(region.getByRole('row', { name: /Example savings/ }).or(region.getByRole('listitem').filter({ hasText: 'Example savings' }))).toBeVisible()
@@ -171,7 +156,7 @@ test.describe('the Balances table: Checked and Sync', () => {
     await expect(balances.getByText(/differs? from the bank\. /)).toHaveCount(0)
   })
 
-  test('marks Check in red and OK in green with a different icon, so the meaning is not in the colour alone', async ({ page, context }) => {
+  test('marks Check in red and OK in green with a different icon, so the meaning is not in the colour alone', { tag: '@theme' }, async ({ page, context }) => {
     await signInAs(context, 'member')
     const balances = await open(page)
     const [ok, check] = [cell(balances, 'Example everyday', 'Checked').locator('svg'), cell(balances, 'Example savings', 'Checked').locator('svg')]
@@ -182,14 +167,14 @@ test.describe('the Balances table: Checked and Sync', () => {
 
   test('says how many earlier differences an Account has, after the newest', async ({ page, context }) => {
     await signInAs(context, 'member')
-    const checks = { differences: [difference(2, 'Example savings', 500), difference(2, 'Example savings', -250, '2026-09-30')], accounts: [latest(2, 'Example savings', 'differs')] }
+    const checks = { differences: [difference(2, 'Example savings', 500), difference(2, 'Example savings', -250, '2026-09-30')], accounts: [latestCheck(2, 'Example savings', 'differs')] }
     const balances = await open(page, { checks })
     await expect(cell(balances, 'Example savings', 'Checked')).toHaveText('Check: balance differs from the bank by $5.00 (and 1 earlier)')
   })
 
   test('shows a difference that an older span has though the latest balance matched the one before it', async ({ page, context }) => {
     await signInAs(context, 'member')
-    const checks = { differences: [difference(2, 'Example savings', 500, '2026-09-30')], accounts: [latest(2, 'Example savings', 'matched')] }
+    const checks = { differences: [difference(2, 'Example savings', 500, '2026-09-30')], accounts: [latestCheck(2, 'Example savings', 'matched')] }
     const balances = await open(page, { checks })
     await expect(cell(balances, 'Example savings', 'Checked')).toContainText('Check')
   })
@@ -253,7 +238,7 @@ test.describe('the Balances table: Checked and Sync', () => {
       await page.route('**/api/balance-checks', (route) => route.fulfill({ status: 500, json: { error: 'Something went wrong' } }))
       await page.goto('/')
       const balances = page.getByRole('region', { name: 'Balances' })
-      await expect(balances.getByRole('alert')).toHaveText("Fernledger couldn't check the balances against the bank. Reload the page to try again.", { timeout: 30_000 })
+      await expect(balances.getByRole('alert')).toHaveText("Fernledger couldn't check the balances against the bank. Reload the page to try again.")
       await expect(balances.getByRole('row', { name: /Example savings/ })).toBeVisible()
       await expect(headers(balances)).toHaveText(['Account', 'Balance', 'As of'])
     })
@@ -269,7 +254,7 @@ test.describe('the Balances table: Checked and Sync', () => {
       await page.route('**/api/features', (route) => route.fulfill({ status: 500, json: { error: 'Something went wrong' } }))
       await page.goto('/')
       const balances = page.getByRole('region', { name: 'Balances' })
-      await expect(headers(balances)).toHaveText(['Account', 'Balance', 'As of', 'Checked'], { timeout: 30_000 })
+      await expect(headers(balances)).toHaveText(['Account', 'Balance', 'As of', 'Checked'])
       await expect(balances.getByRole('alert')).toHaveCount(0)
     })
   })

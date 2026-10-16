@@ -7,7 +7,7 @@ import { Status } from '@/components/status'
 import { formatDate } from '@/lib/format'
 
 // Not in the navigation. A reference for the shared display building blocks, built from made-up data, so the browser
-// tests (e2e/display.spec.ts) and the accessibility scan exercise each one in both themes and at every text size.
+// tests (e2e/display.spec.ts) and the accessibility scan exercise each one at every text size, and the contrast sweep (e2e/contrast.spec.ts) in both themes.
 export const Route = createFileRoute('/styleguide')({
   component: Styleguide,
 })

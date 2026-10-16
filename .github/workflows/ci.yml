@@ -1,9 +1,16 @@
 name: CI
 
 on:
+  # Push the branch; CI runs the full suite on it. A push uses the workflow file in the pushed commit, so this works from a branch that main has not caught up with.
   push:
-    branches: [main]
+    branches: [main, 'ui/**', 'fix/**', 'chore/**', 'ticket/**', 'update/**']
   pull_request:
+  workflow_dispatch: # runs it by hand from the Actions tab, once this file is on main
+
+# One run for a branch: a push to a branch that has a pull request starts both a push run and a pull request run, and the newer replaces the older.
+concurrency:
+  group: ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -19,7 +26,7 @@ jobs:
       - run: npm ci
       - run: npm run check
 
-  # Browser tests (Playwright + axe, light and dark) are slower than `check`, so they run as their own job.
+  # Browser tests (Playwright + axe) are slower than `check`, so they run as their own job. All run in light; the ones tagged @theme run in dark too (playwright.config.ts).
   e2e:
     runs-on: ubuntu-latest
     steps:

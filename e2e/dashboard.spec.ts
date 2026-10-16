@@ -61,7 +61,6 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
 }
 
 const dollars = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
 
 /** The cards of the Summary and the Dashboard, in the order they are read. */
 const CARDS = ['Balances', 'Budget vs actual', 'Recent transactions']
@@ -135,12 +134,11 @@ test.describe.configure({ mode: 'serial' })
 // ---------------------------------------------------------------------------------------------------------------
 // The Dashboard and the Summary
 
-test('the Admin lands on the Dashboard: the Summary\'s cards and nothing else, with no signed-in line, no tools card and no chart', async ({ page, context }, testInfo) => {
+test('the Admin lands on the Dashboard: the Summary\'s cards and nothing else, with no signed-in line, no tools card and no chart', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.setViewportSize({ width: 1024, height: 900 })
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
-  await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
 
   // The navigation calls the Admin's landing page the Dashboard, and has no separate Summary.
   const nav = mainNav(page)
@@ -288,13 +286,12 @@ test('a Member\'s Summary and the Dashboard have the same Balances, so the Dashb
 // ---------------------------------------------------------------------------------------------------------------
 // The Net worth page
 
-test('the Net worth page waits to be asked: net worth is not read when it opens, and one press reads it once, for the range chosen beside the button', async ({ page, context }, testInfo) => {
+test('the Net worth page waits to be asked: net worth is not read when it opens, and one press reads it once, for the range chosen beside the button', async ({ page, context }) => {
   await signInAs(context, 'admin')
   const requests = await spyNetWorth(page)
   await page.setViewportSize({ width: 1024, height: 900 })
   await page.goto(NET_WORTH_PATH)
   await expect(page.getByRole('heading', { level: 1, name: 'Net worth' })).toBeVisible()
-  await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
 
   const region = netWorth(page)
   const show = region.getByRole('button', { name: 'Show net worth' })
@@ -455,14 +452,13 @@ test('net worth\'s figures are in the printout, though the disclosure is closed 
   await expect(netWorth(page).getByRole('table')).toBeHidden() // and the page is as it was after printing
 })
 
-test('the Net worth page has no WCAG 2.2 AA violations in this theme, with its data, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
+test('the Net worth page has no WCAG 2.2 AA violations, with its data, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
   await seed(context, baseURL!, testInfo.project.name)
   await signInAs(context, 'member')
   await stubNetWorth(page)
   for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
     await page.goto(NET_WORTH_PATH)
-    await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
     await chooseTextSize(page, 'Large')
     await showNetWorth(page)
     await netWorth(page).getByText('Show the figures').click() // the table is part of what is scanned
@@ -471,7 +467,7 @@ test('the Net worth page has no WCAG 2.2 AA violations in this theme, with its d
   }
 })
 
-test('the net worth line is the theme\'s colour, drawn in the text colour when Windows high contrast is on, and nothing moves', async ({ page, context }) => {
+test('the net worth line is the theme\'s colour, drawn in the text colour when Windows high contrast is on, and nothing moves', { tag: '@theme' }, async ({ page, context }) => {
   await signInAs(context, 'member')
   await stubNetWorth(page)
   await page.goto(NET_WORTH_PATH)

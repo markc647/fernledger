@@ -364,7 +364,6 @@ test.describe('on screen', () => {
       await expect(tableOf(page)).toContainText('$25.00 back')
       await expect(tableOf(page)).toContainText(UNCATEGORISED)
       await spendingDrawn(page) // with its bars, which the scan is of as well
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
   }
@@ -526,7 +525,6 @@ test.describe('the chart', () => {
     for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport)
       await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
-      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await chooseTextSize(page, 'Large')
       await spendingDrawn(page, drawnFor(d))
       await expect(bars(page)).toHaveCount(4) // the bars are in, as well as the figure
@@ -534,7 +532,7 @@ test.describe('the chart', () => {
     }
   })
 
-  test('the bars are the theme\'s colour, drawn in the text colour when Windows high contrast is on, and nothing moves', async ({ page, context, baseURL }, testInfo) => {
+  test('the bars are the theme\'s colour, drawn in the text colour when Windows high contrast is on, and nothing moves', { tag: '@theme' }, async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'member')
@@ -635,7 +633,7 @@ test.describe('printed', () => {
     await expect(page).toHaveTitle(`${TITLE} – Spending by Category – ${d.everyday.name} – ${range(d.year)}`)
   })
 
-  test('is black text on white paper, even from the dark theme', async ({ page }, testInfo) => {
+  test('is black text on white paper, even from the dark theme', { tag: '@theme' }, async ({ page }, testInfo) => {
     // In the dark project the page is the dark theme on screen, and must still print like this.
     await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
     await expectBlackOnWhite(page, 20) // every word, including the money and "back", is black
