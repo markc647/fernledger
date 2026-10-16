@@ -29,7 +29,7 @@ export const REPORTS = {
     choices: ['category', 'from', 'to'],
     name: 'Loans',
     about: "How much each person owes, or is owed, on a loan, with the lending and the repayments listed, in the dates you choose. Loans aren't counted as spending or income.",
-    note: 'A Report has a section for each Loans Category you choose: its lending and repayments, oldest first, with what is owed after each and on the last date. Name each Category for its person, like “Loan – Alice”: that is how the Report knows who owes whom. Leave From blank to begin at the first Transaction, or choose a date to see what was owed before it.',
+    note: 'A Report has a section for each Loans Category you choose: its lending and repayments, oldest first, with what is owed after each and on the last date. Name each Category for its person, like “Loan – Alice”: that is how the Report knows who owes whom.',
   },
   transactions: {
     to: '/reports/transactions',

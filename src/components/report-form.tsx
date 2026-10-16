@@ -25,6 +25,9 @@ type DateRules = {
   fromOptional?: boolean
 }
 
+/** The hint for a From date that may be left blank. It stays on the page with the field; the Report's help sheet has the rest of what its form does. */
+const FROM_OPTIONAL_HINT = 'Leave From blank to begin at the first Transaction, or choose a date to see what was owed before it.'
+
 /** What is wrong with the dates, if anything, and the field to mark. */
 function problemWith(from: string, to: string, { rangeProblem, fromOptional = false }: DateRules = {}): { field: 'from' | 'to'; message: string } | null {
   if (from === '' && !fromOptional) return { field: 'from', message: 'Choose a From date.' }
@@ -145,12 +148,17 @@ function ReportForm({
               name={field}
               value={field === 'from' ? from : to}
               aria-invalid={problem?.field === field}
-              aria-describedby={problem?.field === field ? `${id}-problem` : undefined}
+              aria-describedby={[problem?.field === field && `${id}-problem`, field === 'from' && fromOptional && `${id}-from-hint`].filter(Boolean).join(' ') || undefined}
               onChange={field === 'from' ? setFrom : setTo}
             />
           </div>
         ))}
       </div>
+      {fromOptional && (
+        <p id={`${id}-from-hint`} className="mt-3 text-muted-foreground">
+          {FROM_OPTIONAL_HINT}
+        </p>
+      )}
       {problem && (
         <p id={`${id}-problem`} role="alert" className="mt-3 font-medium text-destructive">
           {problem.message}

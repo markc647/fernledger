@@ -164,10 +164,12 @@ test.describe('opening the Report', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
 
     const form = page.getByRole('form', { name: 'Loans' })
-    await expect(form).not.toContainText('Leave From blank')
-    const help = await openHelp(page) // what the form will do, and how the Report knows who owes whom, are in the page's help sheet
-    await expect(help).toContainText('Leave From blank to begin at the first Transaction')
+    // The hint for the From date, which may be left blank, stays with the field; how the Report knows who owes whom is in the page's help sheet.
+    await expect(dateField(form, 'From (optional)')).toHaveAccessibleDescription('Leave From blank to begin at the first Transaction, or choose a date to see what was owed before it.')
+    await expect(form).not.toContainText('Name each Category')
+    const help = await openHelp(page)
     await expect(help).toContainText('Name each Category for its person, like “Loan – Alice”')
+    await expect(help).not.toContainText('Leave From blank')
     await page.keyboard.press('Escape')
     const loan = form.getByLabel('Loan', { exact: true })
     await expect(loan).toHaveValue('') // every Loans Category unless one is chosen
