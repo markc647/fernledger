@@ -77,6 +77,8 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
     if (!row.category) continue
     expect((await context.request.put(`/api/transactions/${await transactionId(context, row.payee)}/override`, { headers: { Origin: baseURL }, data: { categoryId: categories[row.category] } })).ok()).toBe(true)
   }
+  // A Note on the food Transaction, so the list has a Note button and the pop-up it opens.
+  expect((await context.request.put(`/api/transactions/${await transactionId(context, `CONTRAST ${project} SHOP`)}/note`, { headers: { Origin: baseURL }, data: { note: `Receipt in the top drawer, ${project}` } })).ok()).toBe(true)
   seeded.add(project)
 }
 
@@ -165,21 +167,31 @@ const PAGES: {
     },
   },
   {
-    // The list, and for the Admin the edit panel of the Transfer's first half (it points to Not a Transfer), and the question that button asks (nothing is changed: the question is not answered).
+    // The list, with the Note pop-up open, and for the Admin the edit panel of the Transfer's first half (it points to Not a Transfer), and the question that button asks (nothing is changed: the question is not answered).
     path: '/transactions',
     phone: true,
     visit: async ({ page, role, phone, data, scan }) => {
       await page.goto(`/transactions?q=${encodeURIComponent(data.search)}`)
       await heading(page, 'Transactions')
+      const scanNote = async () => {
+        const shop = `CONTRAST ${data.project} SHOP`
+        await page.getByRole('button', { name: `Read the Note on ${shop}` }).click()
+        await expect(page.getByRole('dialog', { name: `Note on ${shop}` })).toBeVisible()
+        await scan('with a Note open', { within: '[data-slot="popover-content"]' })
+        await page.keyboard.press('Escape')
+        await expect(page.getByRole('dialog', { name: `Note on ${shop}` })).toBeHidden()
+      }
       if (phone) {
         await expect(page.getByText('TO SAVINGS').first()).toBeVisible() // cards, not rows
         await scan()
+        await scanNote()
         return
       }
       const rows = page.getByRole('row').filter({ has: page.getByRole('cell') })
       await expect(rows).toHaveCount(7) // the six of this Account (last month's, and this month's five) and the Transfer's other half
       await expect(rows.filter({ hasText: 'TO SAVINGS' })).toContainText('Transfer')
       await scan()
+      await scanNote()
       if (role === 'member') return
       await rows.filter({ hasText: 'TO SAVINGS' }).getByRole('button', { name: /^Edit Category and Note/ }).click()
       await expect(page.getByText('If the pairing is wrong, use Not a Transfer instead.')).toBeVisible()
