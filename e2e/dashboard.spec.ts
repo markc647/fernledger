@@ -405,11 +405,14 @@ test('net worth is drawn as a line, and the page\'s help sheet says what it is: 
   const figure = await showNetWorth(page)
   await expect(figure.locator('path.recharts-line-curve')).toHaveAttribute('d', /^M[\d.]+/)
   expect(await figure.getAttribute('aria-label')).toContain('It was $10,000.00 at the end of August 2026 and $10,800.00 on Wed 7 Oct 2026.')
-  await expect(netWorth(page)).not.toContainText('Only the money in these Accounts') // the card keeps the line and its figures; what it is, is in the page's sheet
+  // The card keeps the warning about the figures, which a printout has too; what the chart is, is in the page's sheet.
+  await expect(netWorth(page)).toContainText("Months before an Account's first Transaction use the balance it had when its Transactions begin, so they are an estimate: money that moved into it by then may be counted twice.")
+  await expect(netWorth(page)).not.toContainText('Only the money in these Accounts') // the line is drawn, so this is the card as the sheet's text would have shown
   await expect(netWorth(page)).not.toContainText(/\bwe\b/i)
   const help = await openHelp(page)
   await expect(help).toContainText("Only the money in these Accounts, added up at the end of each month from the bank balances Fernledger holds. A loan to or from someone whose account isn't tracked shows as a fall or a rise.")
-  await expect(help).toContainText("Months before an Account's first Transaction use the balance it had when its Transactions begin, so they are an estimate")
+  await expect(help).toContainText('After its last Transaction an Account keeps its last balance.')
+  await expect(help).not.toContainText('estimate') // the warning is on the page, once
   await expect(help).not.toContainText(/\bwe\b/i)
   await expect(help).not.toContainText('Loans Report')
 })
@@ -481,6 +484,7 @@ test('net worth\'s figures are in the printout, though the disclosure is closed 
 
   const text = pages.map(textOf).join(' ')
   expect(text).toContain('Net worth over time')
+  expect(text, 'the warning about the early months is in the printout, which the help sheet is not').toContain("so they are an estimate: money that moved into it by then may be counted twice.")
   for (const figure of ['Mon 31 Aug 2026', '$10,000.00', 'Wed 30 Sept 2026', '$10,500.00', 'Wed 7 Oct 2026', '$10,800.00']) expect(text, figure).toContain(figure)
   await expect(netWorth(page).getByRole('table')).toBeHidden() // and the page is as it was after printing
 })

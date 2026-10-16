@@ -10,6 +10,7 @@ import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type Ch
 import { Select } from '@/components/ui/select'
 import {
   DEFAULT_NET_WORTH_RANGE,
+  NET_WORTH_ESTIMATE,
   NET_WORTH_RANGE_LABELS,
   NET_WORTH_RANGES,
   netWorthSummary,
@@ -129,6 +130,8 @@ export function NetWorthChart() {
               ]}
             />
           </details>
+          {/* A warning about the figures, so it stays with them on the page and in a printout, which the page's help sheet is not. */}
+          <p className="mt-3 text-muted-foreground">{NET_WORTH_ESTIMATE}</p>
           {early.length > 0 && (
             <div className="mt-3 text-muted-foreground">
               <p>Some Accounts' Transactions stop before the end of the line, so their balances are carried forward and the line is flatter than the money was:</p>

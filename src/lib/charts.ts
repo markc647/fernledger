@@ -60,11 +60,15 @@ export function spendingSummary(dates: string, drawn: number) {
   return `Bar chart of the ${drawn === 1 ? 'one Category' : `${drawn} Categories`} that spent the most in ${dates}. The figures for every Category are in the table below.`
 }
 
-/** What the chart is of, in the Net worth page's help sheet: the money in the Accounts and nothing else, and how the months before an Account's history are drawn. */
+/** What the chart is of, in the Net worth page's help sheet: the money in the Accounts and nothing else, and how the line ends. The warning about its early months is not here: it is on the chart (NET_WORTH_ESTIMATE). */
 export const NET_WORTH_ABOUT = [
   "Only the money in these Accounts, added up at the end of each month from the bank balances Fernledger holds. A loan to or from someone whose account isn't tracked shows as a fall or a rise.",
-  "Months before an Account's first Transaction use the balance it had when its Transactions begin, so they are an estimate: money that moved into it by then may be counted twice. After its last Transaction an Account keeps its last balance. The last point is the latest date Fernledger holds, not the end of the month.",
+  'After its last Transaction an Account keeps its last balance. The last point is the latest date Fernledger holds, not the end of the month.',
 ] as const
+
+/** The warning about the figures, one line under the chart whenever it is drawn, so it is on the page and in a printout, which the help sheet is not. */
+export const NET_WORTH_ESTIMATE =
+  "Months before an Account's first Transaction use the balance it had when its Transactions begin, so they are an estimate: money that moved into it by then may be counted twice."
 
 /** What the page says when there are more Accounts than one request can add up. */
 export const tooManyAccountsMessage = (count: number, limit: number) =>
