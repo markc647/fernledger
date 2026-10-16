@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   expectBareMargins,
@@ -107,7 +108,7 @@ test.describe('opening a Report', () => {
     await signInAs(context, 'admin')
     await page.goto(`/transactions?account=${savingsId}&from=${year}-01-01&to=${year}-12-31`)
 
-    const link = page.getByRole('link', { name: /Transaction listing Report/ })
+    const link = (await openHelp(page)).getByRole('link', { name: /Transaction listing Report/ }) // the Report line is in the page's help sheet
     await expect(link).toHaveAttribute('target', '_blank')
     await expect(link).toHaveAttribute('rel', /noopener/)
     const href = new URL((await link.getAttribute('href'))!, baseURL)
@@ -124,8 +125,9 @@ test.describe('opening a Report', () => {
     await signInAs(context, 'admin')
     await page.goto('/transactions')
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
-    await expect(page.getByRole('link', { name: /Open a Transaction listing Report/ })).toHaveCount(0)
-    await page.getByRole('link', { name: "choose dates on the Transaction listing Report's page" }).click()
+    const help = await openHelp(page)
+    await expect(help.getByRole('link', { name: /Open a Transaction listing Report/ })).toHaveCount(0)
+    await help.getByRole('link', { name: "choose dates on the Transaction listing Report's page" }).click()
     await expect(page.getByRole('heading', { level: 1, name: 'Transaction listing' })).toBeVisible()
     await expect(page.getByRole('form', { name: 'Transaction listing' })).toBeVisible()
   })
@@ -272,7 +274,7 @@ test.describe('opening a Report', () => {
     await expect(page.getByRole('form', { name: 'Transaction listing' }).getByLabel('Account')).toHaveValue('')
   })
 
-  test('the Print button opens the print window', async ({ page, context, baseURL }, testInfo) => {
+  test('the Print button opens the print window, and is beside "Show Report" once there is a Report to print', async ({ page, context, baseURL }, testInfo) => {
     const { year } = dataFor(testInfo.project.name)
     const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'admin')
@@ -280,9 +282,57 @@ test.describe('opening a Report', () => {
       ;(window as unknown as { printed: number }).printed = 0
       window.print = () => void ((window as unknown as { printed: number }).printed += 1)
     })
+    const print = page.getByRole('button', { name: 'Print or save as PDF' })
+    await page.goto('/reports/transactions')
+    await expect(page.getByRole('button', { name: 'Show Report' })).toBeVisible()
+    await expect(print).toHaveCount(0) // nothing to print until a Report shows
+
     await page.goto(reportAddress(savingsId, year))
-    await page.getByRole('button', { name: 'Print or save as PDF' }).click()
+    const form = page.getByRole('form', { name: 'Transaction listing' })
+    await expect(print).toBeVisible()
+    await expect(form.getByRole('button', { name: 'Print or save as PDF' })).toBeVisible() // it is in the form's row of buttons
+    const show = (await form.getByRole('button', { name: 'Show Report' }).boundingBox())!
+    const printAt = (await print.boundingBox())!
+    expect(Math.abs(show.y - printAt.y), 'on the same row as Show Report').toBeLessThan(4)
+    expect(printAt.x, 'after it').toBeGreaterThan(show.x + show.width)
+    await print.click()
     expect(await page.evaluate(() => (window as unknown as { printed: number }).printed)).toBe(1)
+
+    // How to use the print window is said once, in the page's help sheet, and not beside the button.
+    await expect(page.getByText('In the print window')).toBeHidden()
+    await expect(await openHelp(page)).toContainText('In the print window, choose “Save as PDF” to keep a copy.')
+  })
+
+  test('on a phone the Print button wraps under "Show Report" and stays in the window', async ({ page, context, baseURL }, testInfo) => {
+    const { year } = dataFor(testInfo.project.name)
+    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'admin')
+    await page.setViewportSize({ width: 320, height: 700 })
+    await page.goto(reportAddress(savingsId, year))
+    const form = page.getByRole('form', { name: 'Transaction listing' })
+    const print = form.getByRole('button', { name: 'Print or save as PDF' })
+    await expect(print).toBeVisible()
+    const show = (await form.getByRole('button', { name: 'Show Report' }).boundingBox())!
+    const printAt = (await print.boundingBox())!
+    expect(printAt.y, 'under Show Report, where the row has no room').toBeGreaterThan(show.y + show.height - 1)
+    expect(printAt.x + printAt.width).toBeLessThanOrEqual(320)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'no sideways scrolling').toBe(true)
+  })
+
+  test('a Member, who has no form, has the Print button above the Report, and the same help sheet without the form\'s words', async ({ page, context, baseURL }, testInfo) => {
+    const { year } = dataFor(testInfo.project.name)
+    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
+    await signInToOpen(context, baseURL, 'member', { report: 'transactions', accountId: savingsId, from: `${year}-01-01`, to: `${year}-12-31` })
+    await page.goto(reportAddress(savingsId, year))
+    await expect(article(page)).toBeVisible()
+    await expect(page.getByRole('form')).toHaveCount(0)
+    const print = page.getByRole('button', { name: 'Print or save as PDF' })
+    await expect(print).toBeVisible()
+    expect((await print.boundingBox())!.y, 'above the Report').toBeLessThan((await article(page).boundingBox())!.y)
+    const help = await openHelp(page)
+    await expect(help).toContainText('Every Transaction in the dates you choose')
+    await expect(help).toContainText('In the print window, choose')
+    await expect(help).not.toContainText('A Report lists up to') // what the Admin's form will do is not for a Member
   })
 })
 

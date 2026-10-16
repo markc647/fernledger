@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   dateText,
@@ -164,11 +165,14 @@ test.describe('opening the Report', () => {
     await expect(page.getByRole('heading', { level: 1, name: NAME })).toBeVisible()
 
     const form = page.getByRole('form', { name: NAME })
-    await expect(form).toContainText('one row for each month in your dates, with the income, the spending and the difference between them')
-    // The form says how the dates are counted, and the most months a Report covers, since Budget vs actual's form says the opposite of the first and a different number of the second.
-    await expect(form).toContainText('Your dates are counted exactly: a month they begin or end part way through counts only those dates, and the row says so.')
-    await expect(form).toContainText('up to 120 months')
-    await expect(page.getByRole('heading', { level: 1, name: NAME }).locator('xpath=following-sibling::p[1]')).toContainText(NOT_COUNTED_AS_SPENDING_OR_INCOME)
+    // The page's help sheet says what the Report holds, how the dates are counted, and the most months a Report covers, since Budget vs actual's says the opposite of the first and a different number of the second.
+    await expect(form).not.toContainText('one row for each month')
+    const help = await openHelp(page)
+    await expect(help).toContainText(NOT_COUNTED_AS_SPENDING_OR_INCOME)
+    await expect(help).toContainText('one row for each month in your dates, with the income, the spending and the difference between them')
+    await expect(help).toContainText('Your dates are counted exactly: a month they begin or end part way through counts only those dates, and the row says so.')
+    await expect(help).toContainText('up to 120 months')
+    await page.keyboard.press('Escape')
     await expect(form.getByLabel('Account')).toHaveValue('') // every Account unless one is chosen
     await pickDate(form, 'From', from)
     await pickDate(form, 'To', to)

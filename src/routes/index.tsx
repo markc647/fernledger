@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { SummaryCards } from '@/components/summary/summary-cards'
+import { PageHeading } from '@/components/help-sheet'
+import { SummaryCards, SummaryHelp } from '@/components/summary/summary-cards'
 import { meQuery } from '@/lib/me'
 
 export const Route = createFileRoute('/')({
@@ -18,7 +19,7 @@ function Landing() {
   if (!me) return <p role="status">Loading…</p>
   return (
     <>
-      <h1 className="text-2xl font-semibold">{me.role === 'admin' ? 'Dashboard' : 'Summary'}</h1>
+      <PageHeading help={<SummaryHelp />}>{me.role === 'admin' ? 'Dashboard' : 'Summary'}</PageHeading>
       <SummaryCards />
     </>
   )

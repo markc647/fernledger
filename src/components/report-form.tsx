@@ -3,18 +3,18 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { useId, useState, type ReactNode } from 'react'
 import { DatePicker } from '@/components/date-picker'
 import { LiveStatus } from '@/components/live-status'
-import { useReportScroll } from '@/components/report-gate'
+import { PrintReportButton, useReportPrint, useReportScroll } from '@/components/report-gate'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { isLoansKind } from '@/lib/category-kinds'
 import { isSearchDate } from '@/lib/date-range'
 import { nzDate } from '@/lib/format'
-import { MAX_INCOME_MONTHS, tooManyIncomeMonths } from '@/lib/income-vs-spending'
+import { tooManyIncomeMonths } from '@/lib/income-vs-spending'
 import { accountsQuery, categoriesQuery } from '@/lib/queries'
 import { isSameReport, reportHref } from '@/lib/report-address'
-import { MAX_REPORT_MONTHS, tooManyMonths } from '@/lib/report-budget'
+import { tooManyMonths } from '@/lib/report-budget'
 import type { LoansSearch } from '@/lib/report-loans'
-import { REPORT_ROW_CAP, type ReportSearch } from '@/lib/report-transactions'
+import type { ReportSearch } from '@/lib/report-transactions'
 import { REPORTS, type ReportInfo } from '@/lib/reports'
 
 /** What a Report's form checks about its dates beyond that they are real dates in order. */
@@ -24,6 +24,9 @@ type DateRules = {
   /** The Report can begin at the first Transaction (Loans), so the From date may be left blank. */
   fromOptional?: boolean
 }
+
+/** The hint for a From date that may be left blank. It stays on the page with the field; the Report's help sheet has the rest of what its form does. */
+const FROM_OPTIONAL_HINT = 'Leave From blank to begin at the first Transaction, or choose a date to see what was owed before it.'
 
 /** What is wrong with the dates, if anything, and the field to mark. */
 function problemWith(from: string, to: string, { rangeProblem, fromOptional = false }: DateRules = {}): { field: 'from' | 'to'; message: string } | null {
@@ -81,15 +84,15 @@ function AccountField({ id, defaultAccount, address }: { id: string; defaultAcco
 
 /**
  * Asks which Account (or all of them) and which dates, then shows the Report below it, on the same page. The choice goes in the Report's address (`?account=2&from=…&to=…`),
- * as a plain form would send it, so the Report can be reopened, bookmarked or sent on from its address. `defaults` fills the form in from that address, and `note` says what the
- * Report will hold. Asking again for the Report that is open reads it again: a Report is a snapshot, and says when it was generated. Each Report's page has one, so it names itself
+ * as a plain form would send it, so the Report can be reopened, bookmarked or sent on from its address. `defaults` fills the form in from that address. What the Report will hold is
+ * the Report's `note`, in the page's help sheet. Asking again for the Report that is open reads it again: a Report is a snapshot, and says when it was generated. Each Report's page has one, so it names itself
  * (its `aria-label`) and its fields have ids of their own. `report` is the Report (src/lib/reports.ts): its name, its page, and the choices of the address it reads. A Report that is of all Accounts together asks for dates alone (`askAccount={false}`), or for a choice of its own in
  * the Account's place (`chooser`: the Loans Report asks which Loans Category). `fromOptional` lets the From date stay blank, for a Report that can begin at the first Transaction.
+ * Once a Report is on the page, "Print or save as PDF" is in the row of buttons, beside "Show Report", and wraps under it where the row is narrow.
  */
 function ReportForm({
   report,
   defaults = {},
-  note,
   askAccount = true,
   chooser,
   rangeProblem,
@@ -97,7 +100,6 @@ function ReportForm({
 }: {
   report: ReportInfo
   defaults?: ReportSearch & LoansSearch
-  note: ReactNode
   askAccount?: boolean
   chooser?: ReactNode
 } & DateRules) {
@@ -105,6 +107,7 @@ function ReportForm({
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const scroll = useReportScroll()
+  const { printable } = useReportPrint()
   const address = addressOf(defaults)
   const [from, setFrom] = useKeyed(defaults.from ?? '', address)
   const [to, setTo] = useKeyed(defaults.to ?? '', address)
@@ -145,22 +148,27 @@ function ReportForm({
               name={field}
               value={field === 'from' ? from : to}
               aria-invalid={problem?.field === field}
-              aria-describedby={problem?.field === field ? `${id}-problem` : undefined}
+              aria-describedby={[problem?.field === field && `${id}-problem`, field === 'from' && fromOptional && `${id}-from-hint`].filter(Boolean).join(' ') || undefined}
               onChange={field === 'from' ? setFrom : setTo}
             />
           </div>
         ))}
       </div>
+      {fromOptional && (
+        <p id={`${id}-from-hint`} className="mt-3 text-muted-foreground">
+          {FROM_OPTIONAL_HINT}
+        </p>
+      )}
       {problem && (
         <p id={`${id}-problem`} role="alert" className="mt-3 font-medium text-destructive">
           {problem.message}
         </p>
       )}
-      <p className="mt-4">{note}</p>
-      <div className="mt-3">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <Button type="submit" size="touch">
           Show Report
         </Button>
+        {printable && <PrintReportButton variant="outline" />}
       </div>
     </form>
   )
@@ -168,35 +176,22 @@ function ReportForm({
 
 /** The Transaction listing Report's form (spec stories 97 to 99). */
 export function TransactionListingForm({ defaults }: { defaults?: ReportSearch }) {
-  return <ReportForm report={REPORTS.transactions} defaults={defaults} note={`A Report lists up to ${REPORT_ROW_CAP.toLocaleString('en-NZ')} Transactions.`} />
+  return <ReportForm report={REPORTS.transactions} defaults={defaults} />
 }
 
 /** The spending-by-Category Report's form (spec story 93). */
 export function SpendingForm({ defaults }: { defaults?: ReportSearch }) {
-  return (
-    <ReportForm
-      report={REPORTS.spending}
-      defaults={defaults}
-      note="A Report has one row for each Category with spending in your dates, the most spent first, and one for Uncategorised when there is any."
-    />
-  )
+  return <ReportForm report={REPORTS.spending} defaults={defaults} />
 }
 
 /** The income-vs-spending-by-month Report's form (spec story 95). */
 export function IncomeVsSpendingForm({ defaults }: { defaults?: ReportSearch }) {
-  return (
-    <ReportForm
-      report={REPORTS.incomeVsSpending}
-      defaults={defaults}
-      rangeProblem={tooManyIncomeMonths}
-      note={`A Report has one row for each month in your dates, with the income, the spending and the difference between them, and the totals above, up to ${MAX_INCOME_MONTHS} months. Your dates are counted exactly: a month they begin or end part way through counts only those dates, and the row says so.`}
-    />
-  )
+  return <ReportForm report={REPORTS.incomeVsSpending} defaults={defaults} rangeProblem={tooManyIncomeMonths} />
 }
 
 /** The balances-over-time Report's form (spec story 96). */
 export function BalancesForm({ defaults }: { defaults?: ReportSearch }) {
-  return <ReportForm report={REPORTS.balances} defaults={defaults} note="A Report has one balance for the end of each month, with the balance when your dates begin and when they end." />
+  return <ReportForm report={REPORTS.balances} defaults={defaults} />
 }
 
 /**
@@ -219,7 +214,6 @@ export function LoansForm({ defaults }: { defaults?: LoansSearch }) {
       defaults={shown}
       askAccount={false}
       fromOptional
-      note="A Report has a section for each Loans Category you choose: its lending and repayments, oldest first, with what is owed after each and on the last date. Name each Category for its person, like “Loan – Alice”: that is how the Report knows who owes whom. Leave From blank to begin at the first Transaction, or choose a date to see what was owed before it."
       chooser={
         <div>
           <label htmlFor={`${id}-category`} className="block font-medium">
@@ -256,13 +250,5 @@ export function LoansForm({ defaults }: { defaults?: LoansSearch }) {
 
 /** The Budget vs actual Report's form (spec story 94): dates only, because a Budget is for all Accounts together. */
 export function BudgetVsActualForm({ defaults }: { defaults?: ReportSearch }) {
-  return (
-    <ReportForm
-      report={REPORTS.budgetVsActual}
-      defaults={defaults}
-      askAccount={false}
-      rangeProblem={tooManyMonths}
-      note={`A Budget is for a whole month, so a Report shows every month your dates touch, in full, up to ${MAX_REPORT_MONTHS} months. It is of all Accounts together.`}
-    />
-  )
+  return <ReportForm report={REPORTS.budgetVsActual} defaults={defaults} askAccount={false} rangeProblem={tooManyMonths} />
 }

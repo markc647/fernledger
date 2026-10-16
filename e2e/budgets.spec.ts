@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { thisMonth } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { openHelp } from './help-helpers'
 import { transactionId } from './report-helpers'
 import { navigateTo } from './shell-helpers'
 
@@ -49,7 +50,9 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await navigateTo(page, 'Budgets', 'Set up')
   await expect(page.getByRole('heading', { level: 1, name: 'Budgets' })).toBeVisible()
   await expect(page.getByText(`This month is ${monthWords}, in New Zealand time.`)).toBeVisible()
-  await expect(page.getByText('Each month stands alone')).toBeVisible()
+  await expect(page.getByText('Each month stands alone')).toBeHidden() // it is in the page's help sheet, not under the heading
+  await expect(await openHelp(page)).toContainText('Each month stands alone')
+  await page.keyboard.press('Escape')
   await expect(rowFor(page, name)).toContainText('No Budget')
 
   // WCAG 2.5.3: the button's accessible name contains the text it shows, so voice control can say what it sees.
@@ -181,7 +184,8 @@ test('a Member sees the Budgets and how spending compares, and cannot change the
 
   await page.getByRole('link', { name: 'See all Budgets' }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Budgets' })).toBeVisible()
-  await expect(page.getByText('Only the Admin can change them.')).toBeVisible()
+  await expect(await openHelp(page)).toContainText('Only the Admin can change them.') // in the page's help sheet
+  await page.keyboard.press('Escape')
   await expect(rowFor(page, name)).toContainText('$50.00 a month')
   await expect(page.getByRole('button', { name: /Edit Budget/ })).toHaveCount(0)
   await expect(page.getByRole('columnheader', { name: 'Actions' })).toHaveCount(0)

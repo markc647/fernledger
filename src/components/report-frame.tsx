@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { LiveStatus } from '@/components/live-status'
-import { useReportScroll, useShownReport } from '@/components/report-gate'
-import { Button } from '@/components/ui/button'
+import { PrintReportButton, useReportPrint, useReportScroll, useShownReport } from '@/components/report-gate'
 import { api } from '@/lib/api'
 import { keepRequest } from '@/lib/kept-reports'
 import { HttpError, meQuery } from '@/lib/me'
@@ -43,7 +42,7 @@ export function useReportIdentity() {
  * and a row never splits across pages. The two lines that identify the Report come back on every page in every browser, in
  * each table's heading. Page numbers ("Page 2 of 5") sit in the Report's own page margin, which only Chrome and Edge 131 and later
  * draw; other browsers print the Report without them, and number the pages in their own header and footer if the reader turns
- * that on, which the hint on screen says.
+ * that on, which the page's help sheet says (`PRINT_HELP`, src/lib/reports.ts).
  *
  * `generatedAt` is when the data arrived. The email is the signed-in Member's own, from Access; it is printed, never logged.
  */
@@ -114,6 +113,14 @@ export function ReportFrame({
   // already (a Member's view is not a showing: the Worker would refuse it). A Report is the choices and not the figures, so this is all that is kept.
   const shown = useShownReport()
   const onPage = identity !== null
+  // Tells the page there is a Report to print, so its form can show the button beside "Show Report" (`useReportPrint`); gone when the Report is.
+  const print = useReportPrint()
+  const { setPrintable } = print
+  useEffect(() => {
+    if (!onPage) return
+    setPrintable(true)
+    return () => setPrintable(false)
+  }, [onPage, setPrintable])
   const isAdmin = me.data?.role === 'admin'
   const queryClient = useQueryClient()
   const request = useMemo(() => (shown ? keepRequest(shown.report, shown.chosen) : null), [shown])
@@ -159,15 +166,12 @@ export function ReportFrame({
           </p>
         )}
       </div>
-      <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 print:hidden">
-        <Button size="touch" onClick={() => window.print()}>
-          Print or save as PDF
-        </Button>
-        <p className="min-w-0 flex-1 basis-64">
-          In the print window, choose “Save as PDF” to keep a copy. Chrome and Edge (version 131 or later) number the pages (“Page 2 of 5”) themselves. Firefox and
-          Safari may need you to turn on the browser's headers and footers in the print dialog.
-        </p>
-      </div>
+      {/* The Admin's button is with "Show Report" in the form. A Member has no form, so theirs is here, above the Report. */}
+      {!print.inForm && (
+        <div className="mb-6 print:hidden">
+          <PrintReportButton variant="default" />
+        </div>
+      )}
       <article aria-label={name} className="report-frame">
         <header>
           <p className="text-lg font-semibold print:text-[14pt]">{appTitle}</p>

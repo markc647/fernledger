@@ -3,6 +3,7 @@ import { stubBalances } from './balances-helpers'
 import { NET_WORTH_PATH, netWorth, showNetWorth, spendingDrawn, stubNetWorth } from './chart-helpers'
 import { dateField, pickDate, thisMonth } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
+import { helpButton, helpSheet } from './help-helpers'
 import { ensureCategory, forgetKeptReportsAfterEach, importRows, restoreAppTitleAfterEach, signInToOpen, transactionId, type SeedRow } from './report-helpers'
 import { arrowTo, menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
 import { categoryId, ruleActions, runningJob, usageFigures, usageOn, withRules } from './rule-helpers'
@@ -164,6 +165,10 @@ const PAGES: {
       for (const word of ['OK', 'Check', 'Synced', 'Not Synced']) await expect(balances.getByText(word, { exact: true }).first()).toBeVisible()
       await expect(balances.getByText('—').first()).toBeVisible()
       await scan()
+      // The page's help sheet, with its headings and its Close button (every page's is the same sheet).
+      await helpButton(page).click()
+      await expect(helpSheet(page)).toBeVisible()
+      await scan('with the help sheet open', { within: '[role="dialog"]' })
     },
   },
   {

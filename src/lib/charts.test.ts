@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { barsOf, CHART_BARS, describeDates, NET_WORTH_ABOUT, NET_WORTH_RANGE_LABELS, NET_WORTH_RANGES, netWorthSummary, notCountedLine, shorten, spendingSummary, stoppedEarly, stoppedEarlyLine, tooManyAccountsMessage } from './charts'
+import { barsOf, CHART_BARS, describeDates, NET_WORTH_ABOUT, NET_WORTH_ESTIMATE, NET_WORTH_RANGE_LABELS, NET_WORTH_RANGES, netWorthSummary, notCountedLine, shorten, spendingSummary, stoppedEarly, stoppedEarlyLine, tooManyAccountsMessage } from './charts'
 
 const category = (cents: number, id = cents) => ({ categoryId: id, name: `Category ${id}`, cents })
 
@@ -99,9 +99,14 @@ describe('what net worth says about itself', () => {
     expect(NET_WORTH_ABOUT.join(' ')).not.toMatch(/Loans Report/)
   })
 
-  it('says the months before an Account\'s history are an estimate, and that after its last Transaction it keeps its last balance', () => {
-    expect(NET_WORTH_ABOUT[1]).toContain('are an estimate')
+  it('says that after its last Transaction an Account keeps its last balance', () => {
     expect(NET_WORTH_ABOUT[1]).toContain('keeps its last balance')
+  })
+
+  it('warns, on the chart and not in the sheet, that the months before an Account\'s history are an estimate that may count money twice', () => {
+    expect(NET_WORTH_ESTIMATE).toContain('are an estimate')
+    expect(NET_WORTH_ESTIMATE).toContain('may be counted twice')
+    expect(NET_WORTH_ABOUT.join(' ')).not.toContain('estimate')
   })
 
   it('does not name Imports as where the balances come from, since Sync will supply some', () => {
@@ -110,7 +115,7 @@ describe('what net worth says about itself', () => {
   })
 
   it('does not say "we"', () => {
-    expect([...NET_WORTH_ABOUT, tooManyAccountsMessage(52, 49)].join(' ')).not.toMatch(/\bwe\b/i)
+    expect([...NET_WORTH_ABOUT, NET_WORTH_ESTIMATE, tooManyAccountsMessage(52, 49)].join(' ')).not.toMatch(/\bwe\b/i)
   })
 
   it('says the most Accounts it can draw in plain language, with how many there are', () => {

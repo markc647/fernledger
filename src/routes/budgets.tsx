@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useId, useRef, useState } from 'react'
+import { PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -130,12 +131,17 @@ function Budgets() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold">Budgets</h1>
-      <p className="mt-2">
-        A Budget is the amount you plan to spend on a Category each month. A new Budget applies from the month you choose, and earlier months keep the Budget they had.
-        Each month stands alone: what you don't spend isn't carried over. Only Spending Categories have a Budget. Transfers between your own Accounts, Pending Transactions and Loans aren't counted as spending, and money back, such as a refund, comes off what you spent.{' '}
-        {isAdmin ? 'Choose Edit on a Category to set or end its Budget.' : 'Only the Admin can change them.'}
-      </p>
+      <PageHeading
+        help={
+          <p>
+            A Budget is the amount you plan to spend on a Category each month. A new Budget applies from the month you choose, and earlier months keep the Budget they had.
+            Each month stands alone: what you don't spend isn't carried over. Only Spending Categories have a Budget. Transfers between your own Accounts, Pending Transactions and Loans aren't counted as spending, and money back, such as a refund, comes off what you spent.{' '}
+            {isAdmin ? 'Choose Edit on a Category to set or end its Budget.' : 'Only the Admin can change them.'}
+          </p>
+        }
+      >
+        Budgets
+      </PageHeading>
       {thisMonth && <p className="mt-2">This month is {formatMonth(thisMonth)}, in New Zealand time.</p>}
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">

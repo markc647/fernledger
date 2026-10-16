@@ -10,7 +10,7 @@ import { ChartContainer, ChartFigure, ChartTooltip, ChartTooltipContent, type Ch
 import { Select } from '@/components/ui/select'
 import {
   DEFAULT_NET_WORTH_RANGE,
-  NET_WORTH_ABOUT,
+  NET_WORTH_ESTIMATE,
   NET_WORTH_RANGE_LABELS,
   NET_WORTH_RANGES,
   netWorthSummary,
@@ -92,11 +92,6 @@ export function NetWorthChart() {
       ) : (
         <>
           {isPlaceholderData && <p className="mb-2 font-medium">Updating…</p>}
-          {NET_WORTH_ABOUT.map((paragraph) => (
-            <p key={paragraph} className="mb-3 text-muted-foreground">
-              {paragraph}
-            </p>
-          ))}
           <div className={isPlaceholderData ? 'opacity-60' : undefined}>
             <ChartFigure label={netWorthSummary(data.points)}>
               <ChartContainer config={config} className="h-64 sm:h-80">
@@ -122,6 +117,8 @@ export function NetWorthChart() {
               </ChartContainer>
             </ChartFigure>
           </div>
+          {/* A warning about the figures, under the chart and above the table that opens beneath it, so it stays with the line on the page and in a printout, which the page's help sheet is not. */}
+          <p className="mt-2 text-muted-foreground">{NET_WORTH_ESTIMATE}</p>
           {range === 'all' && <p className="mt-2 text-muted-foreground">Every month Fernledger holds, which can make a long line.</p>}
           <details ref={figures} className="mt-3">
             <summary className="min-h-11 cursor-pointer py-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">Show the figures</summary>

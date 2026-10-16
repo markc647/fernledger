@@ -10,6 +10,10 @@ import { budgetVsActualQuery } from '@/lib/queries'
 
 const columns = budgetColumns()
 
+/** How the Budget vs actual card's months and figures work, in the page's help sheet (SummaryHelp): the card itself keeps only the month it is of and the table. */
+export const BUDGET_ABOUT =
+  "Each month stands alone: a Budget you don't spend isn't carried over. Money back, such as a refund, comes off what you spent, so what's left can be more than the Budget. Transfers between your own Accounts, Pending Transactions and Loans aren't counted as spending."
+
 /**
  * Summary card: this month's Budget for each Spending Category that has one, against what it spent, and whether it is over or under,
  * then what the rest spent, and Uncategorised on its own. Which Budget a month has and what was spent come from the Worker (ADR 0012); the browser only words how they compare.
@@ -23,15 +27,7 @@ export function BudgetVsActualWidget() {
     <DashboardCard
       headingId="budget-heading"
       title="Budget vs actual"
-      description={
-        data &&
-        rows.length > 0 && (
-          <>
-            {formatMonth(data.month)}. Each month stands alone: a Budget you don't spend isn't carried over. Money back, such as a refund, comes off what you spent, so what's left can be more than the Budget.
-            Transfers between your own Accounts, Pending Transactions and Loans aren't counted as spending.
-          </>
-        )
-      }
+      description={data && rows.length > 0 && formatMonth(data.month)}
     >
       {error ? (
         <p role="alert">Fernledger couldn't load the Budgets. Reload the page to try again.</p>

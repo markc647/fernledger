@@ -83,11 +83,13 @@
   --text-sm--line-height: calc(1.5 / 1);
 }
 
-/* How the sidebar's sheet comes and goes on a phone (src/components/ui/sheet.tsx): a slide, and the fade of what is behind it. A dozen lines here rather than the
-   tw-animate-css package the stock Sheet needs. Under reduced motion (below) they take no time, but still end, which is what lets the sheet leave the page. */
+/* How the sidebar's sheet comes and goes on a phone, and a page's help sheet from the right (src/components/ui/sheet.tsx): a slide, and the fade of what is behind it. A dozen lines
+   here rather than the tw-animate-css package the stock Sheet needs. Under reduced motion (below) they take no time, but still end, which is what lets the sheet leave the page. */
 @theme {
   --animate-sheet-in: sheet-in 200ms ease-out;
   --animate-sheet-out: sheet-out 150ms ease-in forwards;
+  --animate-sheet-in-end: sheet-in-end 200ms ease-out;
+  --animate-sheet-out-end: sheet-out-end 150ms ease-in forwards;
   --animate-fade-in: fade-in 200ms ease-out;
   --animate-fade-out: fade-out 150ms ease-in forwards;
   @keyframes sheet-in {
@@ -98,6 +100,16 @@
   @keyframes sheet-out {
     to {
       translate: -100% 0;
+    }
+  }
+  @keyframes sheet-in-end {
+    from {
+      translate: 100% 0;
+    }
+  }
+  @keyframes sheet-out-end {
+    to {
+      translate: 100% 0;
     }
   }
   @keyframes fade-in {

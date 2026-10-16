@@ -38,6 +38,10 @@ function CheckedCell({ checked }: { checked: Checked<{ differenceCents: number }
   )
 }
 
+/** What the Balances card's figures are, in the page's help sheet (SummaryHelp): the card itself keeps only the table. */
+export const BALANCES_ABOUT =
+  'Balance as of the last Transaction we hold, worked out from the bank balance in your Imports. It is not a live figure from the bank. The Balances over time Report lists each difference and when it began.'
+
 /**
  * Summary card: the balance of each Account, from its latest bank balance, with a Checked column and, only when Akahu Sync is set up (ADR 0008), a Sync column (README, What it does,
  * says what each shows). The table waits for the Balance Checks and for whether Sync is set up as well as for the balances, so the columns do not appear after the rows. If the checks cannot be read the
@@ -75,11 +79,7 @@ export function BalancesWidget() {
   ]
 
   return (
-    <DashboardCard
-      headingId="balances-heading"
-      title="Balances"
-      description={accounts && 'Balance as of the last Transaction we hold, worked out from the bank balance in your Imports. It is not a live figure from the bank. The Balances over time Report lists each difference and when it began.'}
-    >
+    <DashboardCard headingId="balances-heading" title="Balances">
       {error ? (
         <p role="alert">Fernledger couldn't load the balances. Reload the page to try again.</p>
       ) : !accounts || checks.isPending || features.isPending ? (

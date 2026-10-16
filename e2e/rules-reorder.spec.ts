@@ -21,7 +21,9 @@ async function centreOf(target: Locator) {
  * in steps and not in one jump. `hold` is what is looked at while the Rule is held, before it is dropped.
  */
 async function dragHandle(page: Page, from: number, to: number, hold?: () => Promise<void>) {
-  await ruleGrip(page, to).scrollIntoViewIfNeeded()
+  // The target goes to the middle of the window, and the Rule that is picked up is a few rows from it. Near the window's top or bottom edge dnd-kit scrolls the page for a pointer that is
+  // held there, which carries the drop to another row, and where the table sits in the window is up to what is above it on the page.
+  await ruleGrip(page, to).evaluate((el) => el.scrollIntoView({ block: 'center' }))
   const start = await centreOf(ruleGrip(page, from))
   const end = await centreOf(ruleGrip(page, to))
   await page.mouse.move(start.x, start.y)

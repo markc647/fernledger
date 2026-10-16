@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { calendarOf, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { openHelp } from './help-helpers'
 
 // The light and dark projects run side by side against one local database, so each uses its own made-up Account.
 const suffix = (testInfo: { project: { name: string } }) => (testInfo.project.name === 'dark' ? '92' : '93')
@@ -59,7 +60,9 @@ test('the Admin changes and clears the Cutover Date in Settings, which explains 
   await signInAs(context, 'admin')
   await page.goto('/settings')
   await expect(page.getByRole('heading', { level: 2, name: 'Cutover Dates' })).toBeVisible()
-  await expect(page.getByText('Setting or clearing it deletes nothing already saved: imported rows already saved on or after the date stay')).toBeVisible()
+  await expect(page.getByText('Setting or clearing it deletes nothing already saved')).toBeHidden() // what a Cutover Date does is in the page's help sheet
+  await expect(await openHelp(page)).toContainText('Setting or clearing it deletes nothing already saved: imported rows already saved on or after the date stay')
+  await page.keyboard.press('Escape')
   const label = `Cutover Date for ${name}`
   await expectDate(page, label, '2026-10-01')
   await noAxeViolations(page)

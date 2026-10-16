@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { DatePicker } from '@/components/date-picker'
+import { PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Button } from '@/components/ui/button'
 import { changeFields, type ChangeRow } from '@/lib/change-log'
@@ -54,8 +55,7 @@ function ChangeLog() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold">Change Log</h1>
-      <p className="mt-2">Everything the Admin has changed, newest first.</p>
+      <PageHeading help={<p>Everything the Admin has changed, newest first.</p>}>Change Log</PageHeading>
 
       <form className="mt-4 flex flex-wrap items-end gap-4" aria-label="Filter the Change Log" onSubmit={(event) => event.preventDefault()}>
         <div>

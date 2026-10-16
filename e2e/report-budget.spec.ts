@@ -1,6 +1,7 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   dateText,
@@ -171,7 +172,9 @@ test.describe('opening the Report', () => {
 
     const form = page.getByRole('form', { name: 'Budget vs actual' })
     await expect(form.getByLabel('Account')).toHaveCount(0) // a Budget is for all Accounts together
-    await expect(form).toContainText('A Budget is for a whole month, so a Report shows every month your dates touch, in full, up to 24 months.')
+    await expect(form).not.toContainText('A Budget is for a whole month') // the form's note is in the page's help sheet
+    await expect(await openHelp(page)).toContainText('A Budget is for a whole month, so a Report shows every month your dates touch, in full, up to 24 months.')
+    await page.keyboard.press('Escape')
     await pickDate(form, 'From', `${year}-01-01`)
     await pickDate(form, 'To', `${year}-06-30`)
     await form.getByRole('button', { name: 'Show Report' }).click()

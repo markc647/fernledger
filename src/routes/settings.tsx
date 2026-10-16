@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, type ChangeEvent } from 'react'
 import { DatePicker } from '@/components/date-picker'
+import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { Status } from '@/components/status'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
@@ -31,8 +32,23 @@ function SettingsScreen() {
   if (!me) return null
   return (
     <>
-      <h1 className="text-2xl font-semibold">Settings</h1>
+      <PageHeading help={me.role === 'admin' && <SettingsHelp />}>Settings</PageHeading>
       {me.role === 'admin' ? <AdminSettings /> : <p className="mt-2">Only the Admin can change settings.</p>}
+    </>
+  )
+}
+
+/** The page's help sheet: who the Admin is, and, under its own heading, what a Cutover Date does (ADR 0003). */
+function SettingsHelp() {
+  return (
+    <>
+      <p>The Admin is set when Fernledger is deployed and can't be changed here.</p>
+      <HelpHeading>Cutover Dates</HelpHeading>
+      <p>
+        A Cutover Date is the day an Account stops taking Transactions from imported files. Imports cover the dates before it, Sync (the daily pull from Akahu) covers it and later, and an Import skips
+        every row dated on or after it. Setting or clearing it deletes nothing already saved: imported rows already saved on or after the date stay, to remove them, use "Replace imported history" on
+        the Import screen. Leave it blank if the Account is not synced with Akahu. When you import a file, Fernledger offers the file's last date as the Cutover Date.
+      </p>
     </>
   )
 }
@@ -89,9 +105,6 @@ function SettingsForm({ saved }: { saved: Settings }) {
         save.mutate(values)
       }}
     >
-      <p>
-        The Admin is set when Fernledger is deployed and can't be changed here.
-      </p>
       <div>
         <label htmlFor="app_title" className="font-medium">
           {FIELD_LABELS.app_title}
@@ -143,9 +156,6 @@ function CutoverDates() {
       <h2 id="cutover-dates" className="text-lg font-semibold">
         Cutover Dates
       </h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        A Cutover Date is the day an Account stops taking Transactions from imported files. Imports cover the dates before it, Sync (the daily pull from Akahu) covers it and later, and an Import skips every row dated on or after it. Setting or clearing it deletes nothing already saved: imported rows already saved on or after the date stay, to remove them, use "Replace imported history" on the Import screen. Leave it blank if the Account is not synced with Akahu. When you import a file, Fernledger offers the file's last date as the Cutover Date.
-      </p>
       {isError ? (
         <p role="alert" className="mt-3">
           Fernledger couldn't load the Accounts. Reload the page to try again.

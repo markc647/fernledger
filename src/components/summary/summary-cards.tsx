@@ -1,5 +1,6 @@
-import { BalancesWidget } from '@/components/summary/balances-widget'
-import { BudgetVsActualWidget } from '@/components/summary/budget-vs-actual-widget'
+import { HelpHeading } from '@/components/help-sheet'
+import { BALANCES_ABOUT, BalancesWidget } from '@/components/summary/balances-widget'
+import { BUDGET_ABOUT, BudgetVsActualWidget } from '@/components/summary/budget-vs-actual-widget'
 import { SummaryGrid } from '@/components/summary/dashboard-card'
 import { RecentTransactionsWidget } from '@/components/summary/recent-transactions-widget'
 
@@ -15,5 +16,20 @@ export function SummaryCards() {
       <BudgetVsActualWidget />
       <RecentTransactionsWidget />
     </SummaryGrid>
+  )
+}
+
+/**
+ * The text of the cards, for the page's "?" (the cards keep their tables and not their explanations): a part for each card that has any, in the order the cards are. A new card with
+ * something to explain adds its part here.
+ */
+export function SummaryHelp() {
+  return (
+    <>
+      <HelpHeading>Balances</HelpHeading>
+      <p>{BALANCES_ABOUT}</p>
+      <HelpHeading>Budget vs actual</HelpHeading>
+      <p>{BUDGET_ABOUT}</p>
+    </>
   )
 }

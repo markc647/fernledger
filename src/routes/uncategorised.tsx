@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useCallback, useMemo } from 'react'
+import { PageHeading } from '@/components/help-sheet'
 import { TransactionList } from '@/components/transaction-list'
 import { meQuery } from '@/lib/me'
 import { parseTransactionSearch, tidy, type TransactionSearch } from '@/lib/transaction-search'
@@ -27,17 +28,23 @@ function Uncategorised() {
   )
   // Hiding the navigation is a courtesy; the API serves the same list to every Member, and refuses a Member's write.
   if (!me) return null
+  const admin = me.role === 'admin'
   return (
     <>
-      <h1 className="text-2xl font-semibold">Uncategorised</h1>
-      {me.role === 'admin' ? (
-        <TransactionList
-          search={search}
-          onSearch={onSearch}
-          origin="uncategorised"
-          intro={<p className="mt-2">Transactions with no Category. Edit one to set an Override; it leaves this list once it has a Category. Transfers between your own Accounts are left out, as they are not spending. Until a Transaction has a Category it counts as Spending, so money in left here, such as a wage, reduces Spending.</p>}
-          emptyMessage="There are no Uncategorised Transactions."
-        />
+      <PageHeading
+        help={
+          admin && (
+            <p>
+              Transactions with no Category. Edit one to set an Override; it leaves this list once it has a Category. Transfers between your own Accounts are left out, as they are not spending. Until a
+              Transaction has a Category it counts as Spending, so money in left here, such as a wage, reduces Spending.
+            </p>
+          )
+        }
+      >
+        Uncategorised
+      </PageHeading>
+      {admin ? (
+        <TransactionList search={search} onSearch={onSearch} origin="uncategorised" emptyMessage="There are no Uncategorised Transactions." />
       ) : (
         <p className="mt-2">Only the Admin can use this list. Every Member can see each Transaction's Category on the Transactions page.</p>
       )}
