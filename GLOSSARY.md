@@ -135,12 +135,16 @@ The record of every change the Admin makes: who, what and when; visible to all M
 _Avoid_: Audit trail, history
 
 **Change type**:
-What a Change Log entry changed, such as Settings, Import, Account, Category, Rule, Budget, Transaction or Transfer; Members can filter the Change Log by it. Not a Category, and not a Category kind.
+What a Change Log entry changed, such as Settings, Import, Account, Category, Rule, Budget, Transaction, Transfer or Report; Members can filter the Change Log by it. Not a Category, and not a Category kind.
 _Avoid_: Type on its own
 
 **Report**:
-A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, of Budget vs actual, of Income and Spending by month, or of what is owed on a loan, over a date range, which any Member can print or save as PDF.
+A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, of Budget vs actual, of Income and Spending by month, or of what is owed on a loan, over a date range. Only the Admin makes one, by choosing it on its page; any Member can then open it, and print it or save it as PDF.
 _Avoid_: Statement, export
+
+**Kept Report**:
+A Report the Admin has made, kept in the Reports page's list as its choices only: which Report, its dates, and its Account (or, for the Loans Report, its Loans Category). It is not a snapshot: opening it works it out again from today's data. Showing the same Report with the same choices again keeps no second one; it updates when the Report was last made. A Member can open only a Report that is kept. The Admin can delete one from the list.
+_Avoid_: Saved Report, snapshot, history
 
 **Loans Report**:
 The Report of one Loans Category, or of each of them with a section each, from the first Transaction or a start date up to a date. A section lists the Category's Transactions with what is owed after each and on the last date: "Alice owes $300.00 to the Accounts" when more money went out than came in, "Alice is owed $300.00" when more came in. The person is named by the Category ("Loan – Alice"), and "the Accounts" are the household's side. It never says "we owe", because in Fernledger "we" is Fernledger itself ("the last Transaction we hold"). A start date begins it with what was owed before that date.
