@@ -3,11 +3,11 @@ import { LazyNetWorthChart } from '@/components/charts/lazy-charts'
 import { SummaryGrid } from '@/components/summary/dashboard-card'
 
 // A page of its own in the sidebar's Reports group, next to the Reports page and not one of the Reports (it is a chart, not a page laid out for paper), so it has a row of its own
-// (`group`) where a Report is named under Reports (`parent`). `order` puts it after Reports (50) and before Accounts, which a Member finds there (60). The "reports_" in the file name
+// (`group`, and no `within`) where a Report is named under Reports. `order` puts it after the Reports page (10) and before the six Reports, which the Admin has rows for (20 to 70), and Accounts, which a Member finds there (60). The "reports_" in the file name
 // keeps it from being a page inside the Reports page, as the Reports' own pages are.
 export const Route = createFileRoute('/reports_/net-worth')({
   component: NetWorth,
-  staticData: { nav: { label: 'Net worth', group: 'reports', order: 55 } },
+  staticData: { nav: { label: 'Net worth', group: 'reports', order: 15 } },
 })
 
 /**

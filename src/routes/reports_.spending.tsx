@@ -6,6 +6,7 @@ import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/co
 import { SpendingByCategoryReport } from '@/components/spending-report'
 import { reportSpendingQuery } from '@/lib/queries'
 import { parseReportSearch } from '@/lib/report-transactions'
+import { reportNav } from '@/lib/report-nav'
 import { REPORTS } from '@/lib/reports'
 
 // Like the other Reports, this one lives in its address (?account=2&from=2026-10-01&to=2026-10-31, the Account left out for all of them), so it can
@@ -13,7 +14,7 @@ import { REPORTS } from '@/lib/reports'
 export const Route = createFileRoute('/reports_/spending')({
   component: SpendingReport,
   validateSearch: parseReportSearch,
-  staticData: { nav: { label: REPORTS.spending.name, parent: '/reports' } },
+  staticData: { nav: reportNav(REPORTS.spending) },
 })
 
 const REPORT = REPORTS.spending

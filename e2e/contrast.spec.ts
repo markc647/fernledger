@@ -3,8 +3,8 @@ import { stubBalances } from './balances-helpers'
 import { NET_WORTH_PATH, netWorth, showNetWorth, spendingDrawn, stubNetWorth } from './chart-helpers'
 import { dateField, pickDate, thisMonth } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
-import { ensureCategory, importRows, restoreAppTitleAfterEach, transactionId, type SeedRow } from './report-helpers'
-import { arrowTo, menuAction, OPEN_MENU } from './row-actions-helpers'
+import { ensureCategory, forgetKeptReportsAfterEach, importRows, restoreAppTitleAfterEach, signInToOpen, transactionId, type SeedRow } from './report-helpers'
+import { arrowTo, menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
 import { categoryId, ruleActions, runningJob, usageFigures, usageOn, withRules } from './rule-helpers'
 import { navGroup, openHeaderControls, openNavGroup, siteHeader } from './shell-helpers'
 
@@ -19,6 +19,7 @@ const lastMonth = (() => {
 })()
 /** The dates of the Reports: from the first of last month to the 28th of this one, which has a month that is not over and dates that are part of a month. */
 const RANGE = `from=${lastMonth}-01&to=${thisMonth}-28`
+const DATES = { from: `${lastMonth}-01`, to: `${thisMonth}-28` } // the same dates, as the Admin's showing a Report keeps them
 const PHONE = { width: 390, height: 844 }
 
 const dataFor = (project: string) => {
@@ -114,6 +115,7 @@ const ROLES: Role[] = ['admin', 'member']
 type Visit = {
   page: Page
   context: BrowserContext
+  baseURL: string
   role: Role
   phone: boolean
   data: ReturnType<typeof dataFor>
@@ -307,19 +309,37 @@ const PAGES: {
     },
   },
   {
+    // The table of the kept Reports (cards on a phone), with the Loans Category on a muted line under its Report. It is looked at as it opens, with a row's "⋯" menu open (Open and Print, and Save and Share
+    // dimmed, with "Coming later" beside them) and, for the Admin, with the question Delete asks. Delete is not answered.
     path: '/reports',
-    visit: async ({ page, scan }) => {
+    phone: true,
+    visit: async ({ page, context, baseURL, role, phone, data, scan }) => {
+      await signInToOpen(context, baseURL, role, { report: 'transactions', accountId: await accountIdOf(context, data.everyday.name), ...DATES })
+      await signInToOpen(context, baseURL, role, { report: 'loans', categoryId: await categoryId(context, data.loan), ...DATES })
       await page.goto('/reports')
       await heading(page, 'Reports')
-      await expect(page.getByRole('link', { name: /Budget vs actual/ })).toBeVisible()
+      const kept = phone ? page.getByRole('list', { name: 'Kept Reports' }) : page.getByRole('table', { name: 'Kept Reports' })
+      await expect(kept).toContainText(data.loan) // the muted line under "Loans"
+      await expect(kept).toContainText(data.everyday.name)
       await scan()
+      const actions = page.getByRole('button', { name: new RegExp(`^Actions for Loans, ${data.loan},`) })
+      await openActions(actions)
+      await expect(page.getByRole('menuitem', { name: /^Save\s*Coming later$/ })).toHaveAttribute('aria-disabled', 'true')
+      await expect(page.getByRole('menuitem', { name: /^Share\s*Coming later$/ })).toHaveAttribute('aria-disabled', 'true')
+      await scan('with a row menu open, and Save and Share dimmed', { within: OPEN_MENU })
+      if (role === 'member') return
+      await menuAction(page, 'Delete').click()
+      await expect(page.getByRole('group', { name: new RegExp(`^Delete Loans, ${data.loan},`) })).toBeVisible()
+      await scan('with the Delete question open')
     },
   },
   {
-    // The Everyday Account's Reports, each with a result: the listing of its Transactions with their Categories.
+    // The Everyday Account's Reports, each with a result: the listing of its Transactions with their Categories. Each is kept first, as the Admin's showing it keeps it, so that a Member may open it.
     path: '/reports/transactions',
-    visit: async ({ page, context, data, scan }) => {
-      await page.goto(`/reports/transactions?account=${await accountIdOf(context, data.everyday.name)}&${RANGE}`)
+    visit: async ({ page, context, baseURL, role, data, scan }) => {
+      const accountId = await accountIdOf(context, data.everyday.name)
+      await signInToOpen(context, baseURL, role, { report: 'transactions', accountId, ...DATES })
+      await page.goto(`/reports/transactions?account=${accountId}&${RANGE}`)
       const report = page.getByRole('article', { name: 'Transaction listing' })
       await expect(report.getByRole('table').first()).toBeVisible()
       await expect(report).toContainText(data.food)
@@ -329,8 +349,10 @@ const PAGES: {
   {
     // Its balances month by month, with the $5.00 the bank disagrees by.
     path: '/reports/balances',
-    visit: async ({ page, context, data, scan }) => {
-      await page.goto(`/reports/balances?account=${await accountIdOf(context, data.everyday.name)}&${RANGE}`)
+    visit: async ({ page, context, baseURL, role, data, scan }) => {
+      const accountId = await accountIdOf(context, data.everyday.name)
+      await signInToOpen(context, baseURL, role, { report: 'balances', accountId, ...DATES })
+      await page.goto(`/reports/balances?account=${accountId}&${RANGE}`)
       const report = page.getByRole('article', { name: 'Balances over time' })
       await expect(report.getByRole('table').first()).toBeVisible()
       await expect(report.getByText('Balance differs from bank by $5.00').first()).toBeVisible()
@@ -339,8 +361,10 @@ const PAGES: {
   },
   {
     path: '/reports/spending',
-    visit: async ({ page, context, data, scan }) => {
-      await page.goto(`/reports/spending?account=${await accountIdOf(context, data.everyday.name)}&${RANGE}`)
+    visit: async ({ page, context, baseURL, role, data, scan }) => {
+      const accountId = await accountIdOf(context, data.everyday.name)
+      await signInToOpen(context, baseURL, role, { report: 'spending', accountId, ...DATES })
+      await page.goto(`/reports/spending?account=${accountId}&${RANGE}`)
       const report = page.getByRole('article', { name: 'Spending by Category' })
       await expect(report.getByRole('table', { name: 'Spending in each Category' })).toContainText(data.food)
       await spendingDrawn(page) // with its bars, which the scan is of as well
@@ -350,8 +374,10 @@ const PAGES: {
   {
     // The months, with the one that is not over yet and a notice for dates that are part of a month.
     path: '/reports/income-vs-spending',
-    visit: async ({ page, context, data, scan }) => {
-      await page.goto(`/reports/income-vs-spending?account=${await accountIdOf(context, data.everyday.name)}&${RANGE}`)
+    visit: async ({ page, context, baseURL, role, data, scan }) => {
+      const accountId = await accountIdOf(context, data.everyday.name)
+      await signInToOpen(context, baseURL, role, { report: 'income-vs-spending', accountId, ...DATES })
+      await page.goto(`/reports/income-vs-spending?account=${accountId}&${RANGE}`)
       await expect(page.getByRole('article', { name: 'Income vs spending by month' }).getByRole('table', { name: 'Income and spending by month' })).toBeVisible()
       await scan()
     },
@@ -359,8 +385,10 @@ const PAGES: {
   {
     // What is owed on the money lent from the Everyday Account.
     path: '/reports/loans',
-    visit: async ({ page, context, data, scan }) => {
-      await page.goto(`/reports/loans?category=${await categoryId(context, data.loan)}&${RANGE}`)
+    visit: async ({ page, context, baseURL, role, data, scan }) => {
+      const loan = await categoryId(context, data.loan)
+      await signInToOpen(context, baseURL, role, { report: 'loans', categoryId: loan, ...DATES })
+      await page.goto(`/reports/loans?category=${loan}&${RANGE}`)
       await expect(page.getByRole('article', { name: 'Loans', exact: true }).getByRole('table', { name: `Transactions in ${data.loan}` })).toBeVisible()
       await scan()
     },
@@ -368,7 +396,8 @@ const PAGES: {
   {
     // A Report with a result: the Budget vs actual Report has a status on every row, and a notice for a month that is not over and for dates that are part of a month.
     path: '/reports/budget-vs-actual',
-    visit: async ({ page, data, scan }) => {
+    visit: async ({ page, context, baseURL, role, data, scan }) => {
+      await signInToOpen(context, baseURL, role, { report: 'budget-vs-actual', from: `${thisMonth}-01`, to: `${thisMonth}-28` })
       await page.goto(`/reports/budget-vs-actual?from=${thisMonth}-01&to=${thisMonth}-28`)
       const report = page.getByRole('article', { name: 'Budget vs actual' })
       await expect(report.getByText(data.food).first()).toBeVisible()
@@ -422,6 +451,7 @@ const PAGES: {
 ]
 
 restoreAppTitleAfterEach() // the Settings page is saved from, and the Settings are shared by every test and both themes
+forgetKeptReportsAfterEach() // a Report is kept for a Member to open (and the Admin's showing one keeps it), and the list is shared by every spec and both themes
 
 test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
   for (const { path, roles = ROLES, phone, setup, visit } of PAGES) {
@@ -436,7 +466,7 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
         if (onPhone) await page.setViewportSize(PHONE)
         for (const role of who) {
           await signInAs(context, role)
-          await visit({ page, context, role, phone: onPhone, data, scan: scanner(page, project, onPhone ? `${path} on a phone` : path, role) })
+          await visit({ page, context, baseURL: baseURL!, role, phone: onPhone, data, scan: scanner(page, project, onPhone ? `${path} on a phone` : path, role) })
         }
       })
     }

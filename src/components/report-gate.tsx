@@ -2,9 +2,11 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { createContext, useContext, useMemo, useRef, type ReactNode } from 'react'
 import { MIN_DATE } from '@/lib/date-range'
+import type { Chosen } from '@/lib/kept-reports'
+import { HttpError, meQuery } from '@/lib/me'
 import { accountsQuery } from '@/lib/queries'
 import { accountLabel } from '@/lib/report-frame'
-import type { ReportSearch } from '@/lib/report-transactions'
+import { addressId, type ReportSearch } from '@/lib/report-transactions'
 import type { ReportInfo } from '@/lib/reports'
 
 /** An Account as the Reports read it (the Accounts API's). */
@@ -23,6 +25,14 @@ export type ReportScope = {
 }
 
 const RESULT_ID = 'report-result'
+
+/**
+ * What the Report being shown chose: the Report and its address's choices. The Report's frame reads it when the Report is on the page, to keep it for the Reports page (only the Admin
+ * makes Reports: worker/kept-reports.ts), and to start the print a row of that page asked for. Nothing outside a Report's page has it.
+ */
+export type ShownReport = { report: ReportInfo; chosen: Chosen }
+const ShownReportContext = createContext<ShownReport | null>(null)
+export const useShownReport = () => useContext(ShownReportContext)
 
 /**
  * Moving the page to the Report that was asked for, which on a phone is below the window when the form's button is pressed. The form `request`s it and moves the page at once, to
@@ -100,11 +110,20 @@ export function ReportGate({
   children: (scope: ReportScope) => ReactNode
 }) {
   const accounts = useQuery(accountsQuery)
+  const me = useQuery(meQuery)
+  // Only the Admin makes Reports, so only the Admin has the form. Until who is signed in is known nobody is the Admin (the API refuses a Member's Report that has not been kept, whatever the page shows).
+  const isAdmin = me.data?.role === 'admin'
+  const isMember = me.data !== undefined && !isAdmin
   // What the address chooses, which `search` does not say for a Category (the Loans page gives it only its dates).
   const address = useRouterState({ select: (state) => state.location.search }) as Record<string, unknown>
   const chosen = ['account', 'category', 'from', 'to'].some((key) => address[key] !== undefined && address[key] !== null && address[key] !== '')
+  const category = addressId(address.category)
+  const shown = useMemo<ShownReport | null>(
+    () => (search.to === undefined ? null : { report, chosen: { account: search.account, category, from: search.from, to: search.to } }),
+    [report, search.account, category, search.from, search.to],
+  )
   const page = (body: ReactNode, withForm = true) => (
-    <ReportPage report={report} form={withForm && form}>
+    <ReportPage report={report} form={withForm && isAdmin && form}>
       {body}
     </ReportPage>
   )
@@ -112,34 +131,74 @@ export function ReportGate({
   if (accounts.error) return page(<p role="alert">Fernledger couldn't load the Accounts. Reload the page to try again.</p>, false)
   const from = search.from ?? (fromOptional ? MIN_DATE : undefined)
   if (!from || !search.to) {
+    // A Member has no form to choose with: the Reports page lists the ones the Admin has made.
+    if (isMember) return page(<MemberNeeds />)
     return page(chosen ? <Needs message={fromOptional ? 'Choose the last date this Report covers.' : 'Choose the first and last dates this Report covers.'} /> : null)
   }
-  if (from > search.to) return page(<Needs alert message="The “To” date is before the “From” date. Change one of them to show the Report." />)
+  if (from > search.to) return page(<NeedsChange message="The “To” date is before the “From” date. Change one of them to show the Report." />)
   const problem = rangeProblem?.(from, search.to)
-  if (problem) return page(<Needs alert message={problem} />)
+  if (problem) return page(<NeedsChange message={problem} />)
   if (!accounts.data) return page(<p role="status">Loading…</p>)
   const selected = search.account === undefined ? accounts.data : accounts.data.filter((a) => a.id === search.account)
   if (selected.length === 0) {
     return accounts.data.length === 0 ? (
       page(<Needs message={`${noAccounts} An Account is added the first time the Admin imports a file for it.`} />)
     ) : (
-      page(<Needs alert message="There is no such Account. Choose one in the form above." />)
+      page(<NeedsChange message="There is no such Account. Choose one in the form above." />)
     )
   }
   const labels = selected.map(accountLabel).join('; ')
   return page(
-    children({
-      accounts: selected,
-      from,
-      to: search.to,
-      accountsText: search.account === undefined ? `All Accounts: ${labels}` : labels,
-      accountsInTitle: search.account === undefined ? 'All Accounts' : selected[0]!.name,
-    }),
+    <ShownReportContext.Provider value={shown}>
+      {children({
+        accounts: selected,
+        from,
+        to: search.to,
+        accountsText: search.account === undefined ? `All Accounts: ${labels}` : labels,
+        accountsInTitle: search.account === undefined ? 'All Accounts' : selected[0]!.name,
+      })}
+    </ShownReportContext.Provider>,
   )
 }
 
-/** What a Report says while its data is on the way or could not be read; null once it has arrived. A failed read fails the whole Report, so an incomplete one never looks complete. */
+/**
+ * What a Report says when what it was asked for cannot be shown (dates the wrong way round, too many months, an Account or Loans Category that is not there). The Admin is told to
+ * change it in the form above. Anyone else has no form, so is told what a Member is on any Report's page that has no Report to show (`MemberNeeds`). Until who is signed in is known nobody is the Admin.
+ */
+export function NeedsChange({ message }: { message: string }) {
+  const me = useQuery(meQuery)
+  return me.data?.role === 'admin' ? <Needs alert message={message} /> : <MemberNeeds />
+}
+
+/** What a Member is told on a Report's page that has no Report to show: they make none, and the Reports page lists what the Admin has made. */
+function MemberNeeds() {
+  return (
+    <p role="status">
+      Only the Admin makes Reports. Open one from the{' '}
+      <Link to="/reports" className="underline underline-offset-4">
+        list of Reports
+      </Link>
+      .
+    </p>
+  )
+}
+
+/**
+ * What a Report says while its data is on the way or could not be read; null once it has arrived. A failed read fails the whole Report, so an incomplete one never looks complete.
+ * A Member who asks for a Report the Admin has not made is refused by the Worker (403), and is told that, and where the Reports that are made are.
+ */
 export function reportWaiting(query: { error: unknown; data: unknown }): ReactNode {
+  if (query.error instanceof HttpError && query.error.status === 403) {
+    return (
+      <p role="alert">
+        The Admin has not made this Report, so it can't be opened. Open one from the{' '}
+        <Link to="/reports" className="underline underline-offset-4">
+          list of Reports
+        </Link>
+        .
+      </p>
+    )
+  }
   if (query.error) return <p role="alert">Fernledger couldn't load this Report. Reload the page to try again.</p>
   return query.data ? null : <p role="status">Loading…</p>
 }

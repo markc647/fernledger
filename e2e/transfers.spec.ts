@@ -1,6 +1,8 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { findTransactions } from './report-helpers'
+import { findTransactions, forgetKeptReportsAfterEach } from './report-helpers'
+
+forgetKeptReportsAfterEach() // a Report shown as the Admin is kept on a list every spec shares, so each test leaves it empty
 
 // The light and dark projects share one local database, so each has Accounts of its own, and the Transactions are dated
 // in 2011 and use amounts no other spec does, so nothing from another spec can pair with them (Transfers pair on date and amount).
@@ -356,7 +358,8 @@ test('the Report names a Transfer instead of a Category, and the CSV link carrie
   ])
   const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
   const everydayId = accounts.find((a) => a.name === everyday.name)!.id
-  await signInAs(context, 'member')
+  // Only the Admin makes a Report: showing it keeps it on the Reports page's list (taken off again after each test, as forgetKeptReportsAfterEach says above).
+  await signInAs(context, 'admin')
 
   await page.goto(`/reports/transactions?account=${everydayId}&from=2011-01-01&to=2011-12-31`)
   const listing = page.getByRole('article', { name: 'Transaction listing' })

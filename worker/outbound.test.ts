@@ -56,7 +56,7 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
 type Opts = { method?: string; body?: unknown }
 type Exercise = { route: string; path: (accountId: number) => string; opts?: Opts | ((accountId: number) => Opts) }
 // IDs made by earlier exercises, for the later ones that need them (the Category and Transaction are read lazily, after they exist).
-const made = { categoryId: 0, transactionId: 0, ruleId: 0 }
+const made = { categoryId: 0, transactionId: 0, ruleId: 0, keptId: 0 }
 const EXERCISES: Exercise[] = [
   // A second Account, with the other half of a Transfer: the next chunk's $10.00 out pairs with this $10.00 in, so the Not a Transfer routes
   // below have a pairing to say no to. Its name sorts after the first Account's number, so the first Account is still the first listed.
@@ -141,6 +141,10 @@ const EXERCISES: Exercise[] = [
   { route: 'GET /api/reports/budget-vs-actual', path: () => '/api/reports/budget-vs-actual?from=2026-09-15&to=2026-10-31' },
   { route: 'GET /api/reports/spending', path: (id) => `/api/reports/spending?accountId=${id}&from=2026-10-01&to=2026-10-31` },
   { route: 'GET /api/reports/income-vs-spending', path: (id) => `/api/reports/income-vs-spending?accountId=${id}&from=2026-10-01&to=2026-10-31` },
+  // The Reports the Admin has made: showing the Report above keeps it (the page asks), then the list, and last the Report is taken off the list.
+  { route: 'POST /api/kept-reports', path: () => '/api/kept-reports', opts: (id) => ({ method: 'POST', body: { report: 'transactions', accountId: id, from: '2026-10-01', to: '2026-10-31' } }) },
+  { route: 'GET /api/kept-reports', path: () => '/api/kept-reports' },
+  { route: 'DELETE /api/kept-reports/:id', path: () => `/api/kept-reports/${made.keptId}`, opts: { method: 'DELETE', body: {} } },
   { route: 'PATCH /api/settings', path: () => '/api/settings', opts: { method: 'PATCH', body: { app_title: 'Example family' } } },
   { route: 'PATCH /api/accounts/:id', path: (id) => `/api/accounts/${id}`, opts: { method: 'PATCH', body: { name: 'Example savings' } } },
 ]
@@ -151,7 +155,7 @@ const OTHER_PATHS = ['/api/no-such-route', '/not-api']
 async function exerciseEveryRoute(secrets?: Partial<Env>) {
   // The database keeps what an earlier test in this file wrote, and the exercises start from none (a Transfer's pairing, an Account's history).
   // The starter Categories and the Settings stay: the exercises add and remove their own.
-  const tables = ['carry_over', 'balance_checks', 'budgets', 'rules', 'transactions', 'accounts', 'change_log', 'data_migration_progress']
+  const tables = ['kept_reports', 'carry_over', 'balance_checks', 'budgets', 'rules', 'transactions', 'accounts', 'change_log', 'data_migration_progress']
   await env.DB.batch(tables.map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
   let accountId = 0
   for (const { route, path, opts } of EXERCISES) {
@@ -168,6 +172,10 @@ async function exerciseEveryRoute(secrets?: Partial<Env>) {
     if (route === 'POST /api/rules') {
       expect(res.status).toBe(201)
       made.ruleId = ((await res.json()) as { id: number }).id
+    }
+    if (route === 'POST /api/kept-reports') {
+      expect(res.status).toBe(201)
+      made.keptId = ((await res.json()) as { id: number }).id
     }
     // Each exercise must reach its handler's success path, or it proves nothing about that route. (Clear-history refuses a small history.)
     // The usage route is Not set up (503) without its secrets, and with them it reaches its call, which the recorder refuses: Usage unavailable (502).

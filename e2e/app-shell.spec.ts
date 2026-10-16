@@ -82,11 +82,12 @@ test.describe('layout', () => {
     await expect(trail.getByRole('listitem')).toHaveText(['Transactions', 'All Transactions'])
     await page.goto('/reports')
     await expect(trail.getByRole('listitem')).toHaveText(['Reports', 'Reports'])
-    await page.goto('/reports/spending') // a Report is a page of Reports: named in the trail, with Reports marked in the sidebar
+    await page.goto('/reports/spending') // a Report is the Admin's: it has a row of its own under Reports, which is marked, and the trail names it under Reports
     await expect(trail.getByRole('listitem')).toHaveText(['Reports', 'Spending by Category'])
     await expect(trail.locator('[aria-current="page"]')).toHaveText('Spending by Category')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
-    await expect(navLink(page, 'Reports')).toHaveAttribute('data-active', 'true')
+    await expect(navLink(page, 'Spending by Category')).toHaveAttribute('data-active', 'true')
+    await expect(navLink(page, 'Reports')).not.toHaveAttribute('data-active', 'true')
     // Net worth is no Report but a page with a row of its own under Reports: named in the trail, and it (not Reports) is the row marked.
     await page.goto('/reports/net-worth')
     await expect(trail.getByRole('listitem')).toHaveText(['Reports', 'Net worth'])
@@ -173,7 +174,7 @@ test.describe('the sidebar navigation', () => {
     expect(await outline(page)).toEqual([
       'Dashboard',
       'Transactions: All Transactions, Uncategorised, Import',
-      'Reports: Reports, Net worth',
+      'Reports: Reports, Net worth, Spending by Category, Income vs spending by month, Loans, Transaction listing, Balances over time, Budget vs actual',
       'Set up: Accounts, Categories, Rules, Budgets, Settings',
       'Help: Change Log, About your data, How to sign in',
     ])

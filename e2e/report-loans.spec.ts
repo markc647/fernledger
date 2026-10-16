@@ -15,6 +15,7 @@ import {
   expectOwnPage,
   expectPageNumbers,
   expectTitleBlock,
+  forgetKeptReportsAfterEach,
   GENERATED,
   importRows,
   money,
@@ -22,7 +23,9 @@ import {
   overrideCategories,
   restoreAppTitleAfterEach,
   setTitle,
+  signInToOpen,
   squash,
+  stubKeeping,
   TITLE,
   type SeedRow,
 } from './report-helpers'
@@ -129,6 +132,7 @@ async function seed(context: BrowserContext, baseURL: string, project: string): 
 }
 
 restoreAppTitleAfterEach() // the Settings are shared by every test and both themes (as reports.spec.ts does)
+forgetKeptReportsAfterEach() // so is the list of kept Reports, which the Admin showing a Report adds to
 
 /** The Report's address: `category` is left out for every Loans Category, `from` for the first Transaction. */
 const address = (category: number | null, from: string | null, to: string) => `/reports/loans?${category === null ? '' : `category=${category}&`}${from === null ? '' : `from=${from}&`}to=${to}`
@@ -153,7 +157,7 @@ test.describe('opening the Report', () => {
   test('its page has a form of its own, for one Loans Category or all of them, that shows the Report under it', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { aliceId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await context.clock.setFixedTime(NOW)
     await page.goto('/reports/loans')
     await expect(page.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
@@ -190,7 +194,7 @@ test.describe('opening the Report', () => {
   test('the Back button puts the Loan back as the address has it, a choice that was not asked for included', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { aliceId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(aliceId, null, `${d.year}-12-31`))
     const form = page.getByRole('form', { name: 'Loans' })
     const loan = form.getByLabel('Loan', { exact: true })
@@ -207,7 +211,7 @@ test.describe('opening the Report', () => {
   })
 
   test('its form needs only the date to go up to: the start date may be left blank, and a start date must be a date, in order', async ({ page, context }) => {
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto('/reports/loans')
     const form = page.getByRole('form', { name: 'Loans' })
     const show = form.getByRole('button', { name: 'Show Report' })
@@ -232,7 +236,7 @@ test.describe('opening the Report', () => {
 
   test('an address without the date to go up to, with dates the wrong way round, or with no such Loans Category explains itself and offers the form', async ({ page, context, baseURL }, testInfo) => {
     const { groceriesId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     for (const [path, words, alert] of [
       ['/reports/loans?from=2001-01-01', 'Choose the last date this Report covers.', false],
       ['/reports/loans?category=3', 'Choose the last date this Report covers.', false],
@@ -254,14 +258,14 @@ test.describe('opening the Report', () => {
   test('an address from before the form was on the page, with a blank Loan and a blank From, is the Report of every Loans Category from the first Transaction', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(`/reports/loans?category=&from=&to=${d.year}-12-31`) // what the form used to send for All loans and no start date
     await expect(article(page).locator('header')).toContainText('Loans: All Loans Categories')
     await expect(page.getByRole('alert')).toHaveCount(0)
   })
 
   test('its page with nothing in the address is the form alone, with no complaint that nothing is chosen', async ({ page, context }) => {
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto('/reports/loans')
     await expect(page.getByRole('form', { name: 'Loans' })).toBeVisible()
     await expect(page.getByRole('alert')).toHaveCount(0)
@@ -270,7 +274,7 @@ test.describe('opening the Report', () => {
   })
 
   test('says there are no Loans Categories yet, and links to where to make one, when there are none', async ({ page, context }) => {
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.route('**/api/categories', (route) => route.fulfill({ json: [{ id: 1, name: 'Groceries', kind: 'spending' }, { id: 2, name: 'Wages and salary', kind: 'income' }] }))
     await page.goto('/reports/loans?to=2001-12-31')
     await expect(page.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
@@ -286,7 +290,7 @@ test.describe('opening the Report', () => {
   test('the Print button opens the print window', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.addInitScript(() => {
       ;(window as unknown as { printed: number }).printed = 0
       window.print = () => void ((window as unknown as { printed: number }).printed += 1)
@@ -309,7 +313,7 @@ test.describe('on screen', () => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, "Mum's finances")
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(null, null, `${d.year}-12-31`))
 
     const report = article(page)
@@ -354,7 +358,7 @@ test.describe('on screen', () => {
   test('says once, in the words of the Report, which Loans Categories nothing has happened on yet, and leaves them out of the sections', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(null, null, `${d.year}-12-31`))
     const report = article(page)
     await expect(sectionOf(page, d.aliceLoan)).toBeVisible()
@@ -368,7 +372,7 @@ test.describe('on screen', () => {
   test('lists a loan\'s lending and repayments oldest first, from either Account, with the Account, the Note and what is owed after each', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(null, null, `${d.year}-12-31`))
 
     const table = tableOf(page, d.aliceLoan)
@@ -397,7 +401,7 @@ test.describe('on screen', () => {
   test('leaves out what is not a loan: wages, the other half of a Transfer, and the other person\'s loan', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(null, null, `${d.year}-12-31`))
     const alice = sectionOf(page, d.aliceLoan)
     await expect(alice.getByRole('table')).toBeVisible()
@@ -413,7 +417,7 @@ test.describe('on screen', () => {
     const d = dataFor(testInfo.project.name)
     const { aliceId } = await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, "Mum's finances")
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(aliceId, null, `${d.year}-12-31`))
 
     await expect(article(page).locator('header')).toContainText(`Loans: ${d.aliceLoan}`)
@@ -427,7 +431,7 @@ test.describe('on screen', () => {
   test('with several loans, begins with what each owes on the last date and the totals owed to and by the Accounts, which it never nets', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(null, null, `${d.year}-12-31`))
 
     const summary = sectionOf(page, 'All loans')
@@ -449,7 +453,7 @@ test.describe('on screen', () => {
   test('with a start date, begins with what was owed before it, and goes on from there to the same amount owed on the last date', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { aliceId, benId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     const start = `${d.year}-11-01`
 
     await page.goto(address(aliceId, start, `${d.year}-12-31`))
@@ -478,7 +482,7 @@ test.describe('on screen', () => {
   test('stops at the date chosen: what was owed up to it, and nothing after', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { aliceId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
 
     await page.goto(address(aliceId, null, `${d.year}-11-30`))
     expect((await rowsOf(tableOf(page, d.aliceLoan))).map((r) => r[1])).toEqual([`LOANRPT ${d.project} lent`, `LOANRPT ${d.project} repaid first`])
@@ -488,7 +492,7 @@ test.describe('on screen', () => {
   test('says what is owed when a loan has nothing in the dates, and plainly that it was never used when it was not', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { aliceId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
 
     // Before the first Transaction: nothing has been lent or repaid up to the date.
     await page.goto(address(aliceId, null, `${d.year}-09-30`))
@@ -512,7 +516,7 @@ test.describe('on screen', () => {
   test('is in no spending: the Spending by Category Report for the same months says nothing was spent, with the loans, the wages and the Transfer all in them', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(`/reports/spending?from=${d.year}-10-01&to=${d.year}-12-31`)
     const spending = page.getByRole('article', { name: 'Spending by Category' })
     // Nobody else has Transactions in these months (see the note on this spec's data), so this is only what this spec holds.
@@ -522,11 +526,11 @@ test.describe('on screen', () => {
     await expect(spending).not.toContainText(d.benLoan)
   })
 
-  for (const role of ['member', 'admin'] as const) {
-    test(`has no WCAG 2.2 AA violations as a ${role}, with a loan owed to and one owed by`, async ({ page, context, baseURL }, testInfo) => {
+  for (const role of ['admin', 'member'] as const) {
+    test(`has no WCAG 2.2 AA violations as ${role === 'admin' ? 'the Admin' : 'a Member, who opens the Report the Admin kept'}, with a loan owed to and one owed by`, async ({ page, context, baseURL }, testInfo) => {
       const d = dataFor(testInfo.project.name)
       await seed(context, baseURL!, testInfo.project.name)
-      await signInAs(context, role)
+      await signInToOpen(context, baseURL, role, { report: 'loans', from: `${d.year}-11-01`, to: `${d.year}-12-31` })
       await page.goto(address(null, `${d.year}-11-01`, `${d.year}-12-31`))
       await expect(tableOf(page, d.aliceLoan)).toBeVisible()
       await expect(tableOf(page, d.benLoan)).toContainText(`${d.ben} is owed`)
@@ -538,7 +542,7 @@ test.describe('on screen', () => {
   test('is cards on a phone, with the same facts', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const { aliceId } = await seed(context, baseURL!, testInfo.project.name)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(address(aliceId, null, `${d.year}-12-31`))
     const cards = article(page).getByRole('list', { name: `Transactions in ${d.aliceLoan}` }).getByRole('listitem')
@@ -552,12 +556,12 @@ test.describe('on screen', () => {
     await expect(cards.nth(1)).toContainText('First repayment')
   })
 
-  test('shows every Member the same Report as the Admin', async ({ page, context, baseURL }, testInfo) => {
+  test('shows a Member the same Report as the Admin, once the Admin has kept it', async ({ page, context, baseURL }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     const seen: string[] = []
-    for (const role of ['member', 'admin'] as const) {
-      await signInAs(context, role)
+    for (const role of ['admin', 'member'] as const) {
+      await signInToOpen(context, baseURL, role, { report: 'loans', to: `${d.year}-12-31` })
       await page.goto(address(null, null, `${d.year}-12-31`))
       await expect(tableOf(page, d.aliceLoan)).toBeVisible()
       seen.push(JSON.stringify([await rowsOf(tableOf(page, d.aliceLoan)), await figuresOf(sectionOf(page, d.aliceLoan)), await figuresOf(sectionOf(page, d.benLoan))]))
@@ -571,7 +575,7 @@ test.describe('on screen', () => {
     test('there is no Report: a loan that was not read never looks like one with nothing owed', async ({ page, context, baseURL }, testInfo) => {
       const d = dataFor(testInfo.project.name)
       await seed(context, baseURL!, testInfo.project.name)
-      await signInAs(context, 'member')
+      await signInAs(context, 'admin')
       await page.route('**/api/reports/loans?**', (route) => route.fulfill({ status: 500, json: { error: 'Something went wrong' } }))
       await page.goto(address(null, null, `${d.year}-12-31`))
       await expect(page.getByRole('alert')).toContainText("couldn't load this Report", { timeout: 20_000 })
@@ -585,6 +589,7 @@ test.describe('on screen', () => {
   test.describe('with the Worker\'s answers stubbed', () => {
     type Stub = { id: number; name: string; opening?: { cents: number; count: number }; rows: { amountCents: number; date?: string }[] }
     const stubLoans = async (page: Page, loans: Stub[]) => {
+      await stubKeeping(page)
       await page.route('**/api/categories', (route) => route.fulfill({ json: loans.map((l) => ({ id: l.id, name: l.name, kind: 'loans' })) }))
       await page.route('**/api/reports/loans?**', (route) => {
         const params = new URL(route.request().url()).searchParams
@@ -601,7 +606,7 @@ test.describe('on screen', () => {
     }
 
     test('adds up what the Accounts are owed and what they owe, each on its own and never as the difference, and leaves out a loan with no amount', async ({ page, context }) => {
-      await signInAs(context, 'member')
+      await signInAs(context, 'admin')
       await stubLoans(page, [
         { id: 1, name: 'Loan – Alice', rows: [{ amountCents: -50_000 }, { amountCents: 20_000 }] }, // owes $300.00
         { id: 2, name: 'Loan – Ben', rows: [{ amountCents: 30_000 }] }, // is owed $300.00
@@ -621,7 +626,7 @@ test.describe('on screen', () => {
     })
 
     test('leaves the Loans Categories nothing has happened on out of the sections, naming them once, and says so when that is every one', async ({ page, context }) => {
-      await signInAs(context, 'member')
+      await signInAs(context, 'admin')
       await stubLoans(page, [
         { id: 1, name: 'Loan – Alice', rows: [{ amountCents: -50_000 }] },
         { id: 2, name: 'Loans', rows: [] }, // the starter Category, never used
@@ -653,7 +658,7 @@ test.describe('on screen', () => {
   test.describe('when it stops at the cap of 5,000 Transactions', () => {
     test('says so at the top and the end, marks the loan it stopped in partly listed with no amount owed at the end, and the loans after it not listed, unread', async ({ page, context }) => {
       test.setTimeout(120_000) // five full pages, and five thousand rows to draw
-      await signInAs(context, 'member')
+      await signInAs(context, 'admin')
       // Three loans, the first with more than the cap in the range: every page is full, and there is always one more. The cap falls part way through the first.
       const loans = [{ id: 1, name: 'Loan – First', kind: 'loans' }, { id: 2, name: 'Loan – Second', kind: 'loans' }, { id: 3, name: 'Loan – Third', kind: 'loans' }]
       await page.route('**/api/categories', (route) => route.fulfill({ json: loans }))
@@ -704,7 +709,7 @@ test.describe('printed', () => {
     const d = dataFor(testInfo.project.name)
     const { aliceId } = await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, TITLE)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await context.clock.setFixedTime(NOW)
     await page.emulateMedia({ media: 'print' })
     await page.goto(address(aliceId, `${d.year}-11-01`, `${d.year}-12-31`))
@@ -780,8 +785,9 @@ test.describe('printed over several pages', () => {
 
   test.beforeEach(async ({ page, context, request, baseURL }) => {
     await setTitle(request, baseURL, TITLE)
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await context.clock.setFixedTime(NOW)
+    await stubKeeping(page) // Loan – Stub is only in the stubbed answers
     await page.route('**/api/categories', (route) => route.fulfill({ json: [{ id: 1, name: 'Loan – Stub', kind: 'loans' }] }))
     await page.route('**/api/reports/loans?**', (route) =>
       route.fulfill({
@@ -839,7 +845,7 @@ test.describe('around the Report', () => {
     const d = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await setTitle(request, baseURL, "Mum's finances")
-    await signInAs(context, 'member')
+    await signInAs(context, 'admin')
     await page.goto(address(null, null, `${d.year}-12-31`))
     await expect(page).toHaveTitle(`Mum's finances – Loans – All loans – From the first Transaction to ${dateText(`${d.year}-12-31`)}`)
     await page.getByRole('link', { name: 'Back to Reports' }).click()

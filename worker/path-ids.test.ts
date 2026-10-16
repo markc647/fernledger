@@ -38,7 +38,7 @@ async function refusesReadsOtherWay(path: (id: string) => string) {
 }
 
 beforeEach(async () => {
-  await env.DB.batch(['transactions', 'rules', 'budgets', 'balance_checks', 'accounts', 'change_log', 'categories'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch(['kept_reports', 'transactions', 'rules', 'budgets', 'balance_checks', 'accounts', 'change_log', 'categories'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
   // Account 10 and Category 10 are the rows the routes are asked for by ID. A family that needs another row with ID 10 adds it in its own block.
   await env.DB.batch([
     env.DB.prepare("INSERT INTO accounts (id, account_number, name) VALUES (10, '99-9999-9999999-99', 'Example savings')"),
@@ -126,6 +126,18 @@ describe('the Rule routes', () => {
 
     expect((await send('DELETE', '/api/rules/10', {})).status).toBe(200)
     expect(await rowsOf(rule)).toEqual([{ textContains: 'EXAMPLE', categoryId: 10, removedAt: expect.any(String) }])
+  })
+})
+
+describe('the kept Report route', () => {
+  const kept = 'SELECT report, to_date FROM kept_reports WHERE id = 10'
+
+  it('removes kept Report 10 for 10 as written, and for no other way', async () => {
+    await env.DB.prepare("INSERT INTO kept_reports (id, report, from_date, to_date, made_by) VALUES (10, 'budget-vs-actual', '2026-10-01', '2026-10-31', 'admin@example.com')").run()
+    await refusesWritesOtherWay('DELETE', (id) => `/api/kept-reports/${id}`, {}, kept)
+
+    expect((await send('DELETE', '/api/kept-reports/10', {})).status).toBe(200)
+    expect(await rowsOf(kept)).toEqual([])
   })
 })
 

@@ -99,6 +99,14 @@ export async function callAsAdminWith(db: D1Database, path: string, method: stri
   return res
 }
 
+/**
+ * The Admin has kept a Report with these choices (the Report page asks for that when it shows one: worker/kept-reports.ts), so a Member may read it. The tests of a Report's figures read as
+ * the Admin, who is not held to the list; the ones that show a Member reads the same call this first. A test that does clears `kept_reports` in its `beforeEach`.
+ */
+export async function keepReport(report: string, { accountId = null, categoryId = null, from = null, to }: { accountId?: number | null; categoryId?: number | null; from?: string | null; to: string }) {
+  await env.DB.prepare('INSERT OR IGNORE INTO kept_reports (report, account_id, category_id, from_date, to_date, made_by) VALUES (?, ?, ?, ?, ?, ?)').bind(report, accountId, categoryId, from, to, 'admin@example.com').run()
+}
+
 /** A statement that sets a Setting outright, for the tests of `recordChange` and the schema, which need some change to log. The Admin's own change is `updateSettings` (settings.ts). */
 export const putSetting = (db: D1Database, key: SettingKey, value: string): D1PreparedStatement =>
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').bind(key, value)

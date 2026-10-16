@@ -3,17 +3,18 @@ import { createFileRoute } from '@tanstack/react-router'
 import { LoansCappedNotice, LoansReport } from '@/components/loans-report'
 import { LoansForm } from '@/components/report-form'
 import { ReportFrame } from '@/components/report-frame'
-import { BackToReports, Needs, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
+import { BackToReports, Needs, NeedsChange, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
 import { reportLoansQuery } from '@/lib/queries'
 import { parseLoansSearch, type LoansSearch } from '@/lib/report-loans'
+import { reportNav } from '@/lib/report-nav'
 import { REPORTS } from '@/lib/reports'
 
-// The Report lives in its address (?category=3&from=2026-01-01&to=2026-10-31), so it can be reopened or sent on, and the Reports page links to the page. The form is on the
-// page with the Report. Without a category it is every Loans Category; without `from` it begins at the first Transaction.
+// The Report lives in its address (?category=3&from=2026-01-01&to=2026-10-31), so it can be reopened or sent on, and a kept Report on the Reports page opens at it. The Admin's form is on the
+// page with the Report; a Member has none. Without a category it is every Loans Category; without `from` it begins at the first Transaction.
 export const Route = createFileRoute('/reports_/loans')({
   component: LoansReportPage,
   validateSearch: parseLoansSearch,
-  staticData: { nav: { label: REPORTS.loans.name, parent: '/reports' } },
+  staticData: { nav: reportNav(REPORTS.loans) },
 })
 
 const REPORT = REPORTS.loans
@@ -47,7 +48,7 @@ function Loans({ scope, search }: { scope: ReportScope; search: LoansSearch }) {
     return <Needs message="There are no Loans Categories to report on yet." />
   }
   if (listing.sections.length === 0) {
-    return <Needs alert message="There is no such Loans Category. It may have been removed, or may no longer be a Loans Category. Choose one in the form above." />
+    return <NeedsChange message="There is no such Loans Category. It may have been removed, or may no longer be a Loans Category. Choose one in the form above." />
   }
   const chosen = search.category === undefined ? null : listing.sections[0]!
   return (

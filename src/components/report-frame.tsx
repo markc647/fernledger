@@ -1,9 +1,12 @@
-import { useQuery } from '@tanstack/react-query'
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { LiveStatus } from '@/components/live-status'
-import { useReportScroll } from '@/components/report-gate'
+import { useReportScroll, useShownReport } from '@/components/report-gate'
 import { Button } from '@/components/ui/button'
-import { meQuery } from '@/lib/me'
+import { api } from '@/lib/api'
+import { keepRequest } from '@/lib/kept-reports'
+import { HttpError, meQuery } from '@/lib/me'
+import { takePrintRequest } from '@/lib/print-request'
 import { describeRange, generatedLine, reportHeading } from '@/lib/report-frame'
 import { settingsQuery } from '@/lib/settings'
 
@@ -107,6 +110,39 @@ export function ReportFrame({
 
   const identity = useMemo(() => (appTitle && generated ? { appTitle, name, range, generated } : null), [appTitle, name, range, generated])
 
+  // The Report is on the page once it can say what it is. Each time the Admin shows it (it arrives, or is read again) its choices are kept for the Reports page, and updated if they were
+  // already (a Member's view is not a showing: the Worker would refuse it). A Report is the choices and not the figures, so this is all that is kept.
+  const shown = useShownReport()
+  const onPage = identity !== null
+  const isAdmin = me.data?.role === 'admin'
+  const queryClient = useQueryClient()
+  const request = useMemo(() => (shown ? keepRequest(shown.report, shown.chosen) : null), [shown])
+  const keep = useMutation({
+    mutationFn: async (body: NonNullable<typeof request>) => {
+      const res = await api['kept-reports'].$post({ json: body })
+      if (!res.ok) throw new HttpError(res.status)
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['kept-reports'] }),
+  })
+  const { mutate: keepReport } = keep
+  useEffect(() => {
+    if (isAdmin && onPage && request) keepReport(request)
+  }, [isAdmin, onPage, request, generatedAt, keepReport])
+
+  // A row of the Reports page asked for this Report to be printed: the print window opens once it is on the page, titled as "Save as PDF" will name the file (the effect above that set the title
+  // has run, and a microtask has set it). Two frames later, so the Report has been painted.
+  const printing = useRef(false)
+  useEffect(() => {
+    if (!onPage || !shown || printing.current || !takePrintRequest(window.location, shown.report.choices)) return
+    printing.current = true
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        window.print()
+        printing.current = false
+      }),
+    )
+  }, [onPage, shown])
+
   // Without the app title and who is signed in the printout would not say what it is or who made it, so it waits for both.
   if (settings.error) return <p role="alert">Fernledger couldn't load the details this Report needs. Reload the page to try again.</p>
   if (identity === null) return <p role="status">Loading…</p>
@@ -116,7 +152,12 @@ export function ReportFrame({
       <div className="print:hidden">
         {/* Said once the Report is there, and again when it is read again: a Report that was asked for on the page above appears under the form, where a screen reader is not
             looking. A new one for each reading (its key), since its words are the same. */}
-        <LiveStatus key={generatedAt} message={`${name} Report is ready, below the form.`} />
+        <LiveStatus key={generatedAt} message={`${name} Report is ready${isAdmin ? ', below the form' : ''}.`} />
+        {keep.isError && (
+          <p role="alert" className="mb-6 font-medium text-destructive">
+            Fernledger couldn't add this Report to the list on the Reports page, so Members can't open it yet. Show it again to try once more.
+          </p>
+        )}
       </div>
       <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 print:hidden">
         <Button size="touch" onClick={() => window.print()}>

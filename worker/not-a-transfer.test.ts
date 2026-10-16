@@ -185,7 +185,7 @@ describe('marking a pairing as Not a Transfer', () => {
     const dataLines = async (query: string) => ((await (await call(`/api/transactions/export.csv${query}`, { who: 'member' })).text()).match(/^\d{4}-\d{2}-\d{2},.*$/gm) ?? []).length
     const everyday = await accountIdOf('Everyday')
     const reported = async () =>
-      ((await (await call(`/api/reports/transactions?accountId=${everyday}&from=2026-10-01&to=2026-10-31`, { who: 'member' })).json()) as { transactions: { transfer: string | null }[] }).transactions.map((t) => t.transfer)
+      ((await (await call(`/api/reports/transactions?accountId=${everyday}&from=2026-10-01&to=2026-10-31`, { who: 'admin' })).json()) as { transactions: { transfer: string | null }[] }).transactions.map((t) => t.transfer)
     expect(await dataLines('?transfers=only')).toBe(2)
     expect(await reported()).toEqual(['pair'])
 

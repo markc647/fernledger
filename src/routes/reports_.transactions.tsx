@@ -6,14 +6,15 @@ import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/co
 import { CappedNotice, TransactionListing } from '@/components/transaction-listing'
 import { reportListingQuery } from '@/lib/queries'
 import { parseReportSearch } from '@/lib/report-transactions'
+import { reportNav } from '@/lib/report-nav'
 import { REPORTS } from '@/lib/reports'
 
 // The Report lives in its address (?account=2&from=2026-10-01&to=2026-10-31), so it can be reopened or sent on, and the
-// Transactions page and the Reports page link to it. The form is on the page with the Report.
+// Transactions page links the Admin to it and a kept Report on the Reports page opens at it. The Admin's form is on the page with the Report; a Member has none.
 export const Route = createFileRoute('/reports_/transactions')({
   component: TransactionListingReport,
   validateSearch: parseReportSearch,
-  staticData: { nav: { label: REPORTS.transactions.name, parent: '/reports' } },
+  staticData: { nav: reportNav(REPORTS.transactions) },
 })
 
 const REPORT = REPORTS.transactions

@@ -273,6 +273,7 @@ const overlap = (a: Box, b: Box) => a.x < b.x + b.width - 1 && b.x < a.x + a.wid
 
 // Every page with a DatePicker, with the longest date chosen in each box, at each text size and at the widths where a box is squeezed: a laptop, a phone, 200% zoom and 400% zoom.
 // A box is wide enough, or it moves to the next line (a pair stacks on a phone): the date never wraps, nothing sticks out sideways, and no box sits over the one beside it.
+// `admin`: the page is the Admin's. A Report's form is the Admin's alone, who makes Reports; a Member's page of one has no form, only the Report the Admin kept.
 const VIEWPORTS = [
   { name: 'a laptop', width: 1280, height: 800 },
   { name: 'a phone', width: 390, height: 844 },
@@ -284,12 +285,12 @@ const FORM_PAGES: { name: string; path: string; fields: string[]; admin?: boolea
   { name: 'Transactions', path: '/transactions', fields: FROM_TO },
   { name: 'Change Log', path: '/change-log', fields: FROM_TO },
   { name: 'Settings', path: '/settings', fields: ['Cutover Date for Example savings'], admin: true },
-  { name: 'Transaction listing Report', path: '/reports/transactions', fields: FROM_TO },
-  { name: 'Balances Report', path: '/reports/balances', fields: FROM_TO },
-  { name: 'Spending Report', path: '/reports/spending', fields: FROM_TO },
-  { name: 'Budget vs actual Report', path: '/reports/budget-vs-actual', fields: FROM_TO },
-  { name: 'Income vs spending Report', path: '/reports/income-vs-spending', fields: FROM_TO },
-  { name: 'Loans Report', path: '/reports/loans', fields: ['From (optional)', 'To'] },
+  { name: 'Transaction listing Report', path: '/reports/transactions', fields: FROM_TO, admin: true },
+  { name: 'Balances Report', path: '/reports/balances', fields: FROM_TO, admin: true },
+  { name: 'Spending Report', path: '/reports/spending', fields: FROM_TO, admin: true },
+  { name: 'Budget vs actual Report', path: '/reports/budget-vs-actual', fields: FROM_TO, admin: true },
+  { name: 'Income vs spending Report', path: '/reports/income-vs-spending', fields: FROM_TO, admin: true },
+  { name: 'Loans Report', path: '/reports/loans', fields: ['From (optional)', 'To'], admin: true },
 ]
 
 for (const { name, path, fields, admin } of FORM_PAGES) {
