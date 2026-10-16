@@ -259,7 +259,7 @@ describe('showing a Report as the Admin', () => {
     }
   })
 
-  it('keeps no more than KEPT_LIMIT: a new Report drops the oldest made, in the same Change Log entry, which names it', async () => {
+  it('keeps no more than KEPT_LIMIT: a new Report drops the oldest made, and the Change Log has an entry for the drop that names it', async () => {
     await env.DB.batch(days(KEPT_LIMIT - 1).map((to) => insertKept(to, '2026-10-01T00:00:00.000Z')))
     const oldest = await seedKept({ report: 'budget-vs-actual', from: '2000-01-01', lastMadeAt: '2020-01-01T00:00:00.000Z', to: '2026-12-31' }) // the last of the limit, and made longest ago
     expect(await rows()).toHaveLength(KEPT_LIMIT)
@@ -272,26 +272,33 @@ describe('showing a Report as the Admin', () => {
     expect(all.some((r) => r.report === 'spending')).toBe(true) // the new one is kept
     expect(await changeLog()).toEqual([
       {
-        summary: `Kept the Spending by Category Report for Example savings, 2026-10-01 to 2026-10-31, and dropped the oldest to stay within ${KEPT_LIMIT}: the Budget vs actual Report for all Accounts, 2000-01-01 to 2026-12-31`,
+        summary: `Dropped the oldest kept Report to stay within ${KEPT_LIMIT}: the Budget vs actual Report for all Accounts, 2000-01-01 to 2026-12-31`,
         actor: 'admin@example.com',
         type: 'report',
         before: '{"report":"Budget vs actual","account":"all Accounts","from":"2000-01-01","to":"2026-12-31"}',
+        after: null,
+      },
+      {
+        summary: 'Kept the Spending by Category Report for Example savings, 2026-10-01 to 2026-10-31',
+        actor: 'admin@example.com',
+        type: 'report',
+        before: null,
         after: '{"report":"Spending by Category","account":"Example savings","from":"2026-10-01","to":"2026-10-31"}',
       },
     ])
   })
 
-  it('reads the list once, an index walk, to find what a new Report pushes over the limit: about KEPT_LIMIT rows read', async () => {
+  it('reads the list twice, two index walks, when a new Report pushes one over the limit: to name what is over, and to check in the batch that it still is. About 2 * KEPT_LIMIT rows read', async () => {
     await env.DB.batch(days(KEPT_LIMIT).map((to) => insertKept(to, '2026-10-01T00:00:00.000Z')))
     const { db, usage } = meteredDb()
 
     const res = await callAsAdminWith(db, '/api/kept-reports', 'POST', SPENDING)
 
     expect(res.status).toBe(201)
-    expect(usage.rowsRead).toBeLessThanOrEqual(KEPT_LIMIT + 50) // measured: 218
+    expect(usage.rowsRead).toBeLessThanOrEqual(2 * KEPT_LIMIT + 50) // measured: 425 (it was 218 with the first walk alone)
   })
 
-  it('drops every Report over the limit, and names them all, if the list somehow holds more than one over', async () => {
+  it('drops every Report over the limit, and names them all in one entry, if the list somehow holds more than one over', async () => {
     await env.DB.batch(days(KEPT_LIMIT - 1).map((to) => insertKept(to, '2026-10-01T00:00:00.000Z')))
     await seedKept({ report: 'budget-vs-actual', from: '2000-01-01', lastMadeAt: '2020-01-01T00:00:00.000Z', to: '2026-12-31' })
     await seedKept({ report: 'budget-vs-actual', from: '2000-01-01', lastMadeAt: '2019-01-01T00:00:00.000Z', to: '2026-12-30' })
@@ -301,9 +308,11 @@ describe('showing a Report as the Admin', () => {
 
     expect(await rows()).toHaveLength(KEPT_LIMIT)
     const log = await changeLog()
-    expect(log).toHaveLength(1)
-    expect(log[0]!.summary).toContain('and 1 more')
+    expect(log).toHaveLength(2)
+    expect(log[0]!.summary).toBe(`Dropped the oldest kept Reports to stay within ${KEPT_LIMIT}: the Budget vs actual Report for all Accounts, 2000-01-01 to 2026-12-31 and 1 more`)
     expect(JSON.parse(log[0]!.before as string)).toHaveLength(2)
+    expect(log[1]!.summary).toBe('Kept the Spending by Category Report for all Accounts, 2026-10-01 to 2026-10-31')
+    expect(log[1]!.before).toBeNull()
   })
 
   it('drops nothing, and names nothing, when the list was not over the limit', async () => {
@@ -419,6 +428,97 @@ describe('when another request lands between the read and the write', () => {
     expect((await rows()).map((r) => r.id)).toContain(oldest)
     expect(await rows()).toHaveLength(KEPT_LIMIT + 1)
     expect(await changeLog()).toEqual([])
+  })
+
+  /** How many Reports the Change Log says were dropped, counting each one an entry names. Each of them must be a Report that is no longer in the list. */
+  const droppedInLog = async () =>
+    (await changeLog()).reduce((n, entry) => {
+      if (!/dropped/i.test(entry.summary as string)) return n
+      const before = JSON.parse(entry.before as string)
+      return n + (Array.isArray(before) ? before.length : 1)
+    }, 0)
+  const OLDEST = { report: 'budget-vs-actual', from: '2000-01-01', to: '2026-12-31' } // the choices of the oldest Report `seedFullList` keeps
+  /** The list at the limit, with the Report made longest ago the last of it: 199 made on one day, and this. Returns their IDs, the oldest last. */
+  const seedFullList = async () => {
+    await env.DB.batch(days(KEPT_LIMIT - 1).map((to) => insertKept(to, '2026-10-01T00:00:00.000Z')))
+    await seedKept({ ...OLDEST, lastMadeAt: '2020-01-01T00:00:00.000Z' })
+    const ids = (await rows()).map((r) => r.id as number)
+    expect(ids).toHaveLength(KEPT_LIMIT)
+    return ids
+  }
+
+  it('two new Reports at the limit that both read the same Report as over it drop it once, and the Change Log names it once; the next new Report brings the list back', async () => {
+    const ids = await seedFullList()
+    const oldest = ids.at(-1)!
+
+    // The second keep has read that the oldest is over the limit when the first keeps its Report, which drops it. The second finds nothing of what it read to drop.
+    const res = await callWhileInterrupted('/api/kept-reports', 'POST', { ...SPENDING, accountId: cheque }, async () => void (await keep({ ...SPENDING, accountId: savings })))
+
+    expect(res.status).toBe(201)
+    expect((await rows()).map((r) => r.id)).toEqual([...ids.slice(0, -1), expect.any(Number), expect.any(Number)]) // both are kept, and only the oldest is gone
+    expect((await rows()).map((r) => r.id)).not.toContain(oldest)
+    expect(await droppedInLog()).toBe(1) // the one Report that was dropped is named once, not by the second keep too
+    expect((await changeLog()).map((e) => e.summary)).toEqual([
+      `Dropped the oldest kept Report to stay within ${KEPT_LIMIT}: the Budget vs actual Report for all Accounts, 2000-01-01 to 2026-12-31`,
+      'Kept the Spending by Category Report for Example savings, 2026-10-01 to 2026-10-31',
+      'Kept the Spending by Category Report for Example cheque, 2026-10-01 to 2026-10-31',
+    ])
+
+    // The list is one over the limit now (the second keep dropped nothing). The next new Report reads everything over the limit, drops it, and names it.
+    expect(await rows()).toHaveLength(KEPT_LIMIT + 1)
+    expect((await keep(SPENDING)).status).toBe(201)
+    expect(await rows()).toHaveLength(KEPT_LIMIT)
+    expect((await rows()).map((r) => r.id)).not.toContain(ids[0]) // the two made longest ago of those left
+    expect((await rows()).map((r) => r.id)).not.toContain(ids[1])
+    expect(await droppedInLog()).toBe(3) // 200 + 3 kept - 200 left
+    expect(await changeLog()).toHaveLength(5)
+  })
+
+  it('a Report that is made again after a keep read it as over the limit is not dropped by that keep, and the next new Report finds what is over then', async () => {
+    const ids = await seedFullList()
+    const oldest = ids.at(-1)!
+
+    // The Admin shows the oldest Report again between the read and the batch, so it is the newest now and the Report to drop is another.
+    const res = await callWhileInterrupted('/api/kept-reports', 'POST', { ...SPENDING, accountId: savings }, async () => {
+      expect((await keep(OLDEST)).status).toBe(200)
+    })
+
+    expect(res.status).toBe(201)
+    const left = await rows()
+    expect(left.map((r) => r.id)).toContain(oldest)
+    expect(left.find((r) => r.id === oldest)!.last_made_at).not.toBe('2020-01-01T00:00:00.000Z')
+    expect(left).toHaveLength(KEPT_LIMIT + 1) // nothing was dropped: the Report it read is not over the limit any more
+    expect(await droppedInLog()).toBe(0)
+    expect((await changeLog()).map((e) => e.summary)).toEqual(['Kept the Spending by Category Report for Example savings, 2026-10-01 to 2026-10-31']) // showing the oldest again is not a change
+
+    expect((await keep(SPENDING)).status).toBe(201)
+    const healed = await rows()
+    expect(healed).toHaveLength(KEPT_LIMIT)
+    expect(healed.map((r) => r.id)).toContain(oldest) // it is still there: what is dropped is the two that are over now
+    expect(healed.map((r) => r.id)).not.toContain(ids[0])
+    expect(healed.map((r) => r.id)).not.toContain(ids[1])
+    expect(await droppedInLog()).toBe(2)
+  })
+
+  it('a keep that read two Reports as over the limit drops both or neither, so its entry never names one that was not dropped', async () => {
+    const ids = await seedFullList()
+    const second = await seedKept({ report: 'budget-vs-actual', from: '2000-01-01', lastMadeAt: '2019-01-01T00:00:00.000Z', to: '2026-12-30' }) // the list is one over the limit
+    expect(await rows()).toHaveLength(KEPT_LIMIT + 1)
+
+    // The Admin shows the second of the two again after the read, so it is no longer over the limit while the oldest still is.
+    const res = await callWhileInterrupted('/api/kept-reports', 'POST', { ...SPENDING, accountId: savings }, async () => {
+      expect((await keep({ ...OLDEST, to: '2026-12-30' })).status).toBe(200)
+    })
+
+    expect(res.status).toBe(201)
+    expect((await rows()).map((r) => r.id)).toContain(ids.at(-1)) // the oldest is not dropped either
+    expect((await rows()).map((r) => r.id)).toContain(second)
+    expect(await rows()).toHaveLength(KEPT_LIMIT + 2)
+    expect(await droppedInLog()).toBe(0)
+
+    expect((await keep(SPENDING)).status).toBe(201) // the next new Report drops what is over then: three
+    expect(await rows()).toHaveLength(KEPT_LIMIT)
+    expect(await droppedInLog()).toBe(3)
   })
 })
 

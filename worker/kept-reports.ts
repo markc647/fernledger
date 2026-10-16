@@ -4,7 +4,7 @@ import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { findCategory } from './categories'
 import { isLoansKind } from './category-kinds'
-import { recordChange } from './changelog'
+import { changeLogStatement, recordChange } from './changelog'
 import { isQueryDate } from './dates'
 import { ID, nothing, pathId, validate } from './validate'
 
@@ -151,6 +151,12 @@ const SELECT_KEPT = `
 
 const view = ({ fromDate, toDate, categoryRemoved, ...row }: KeptRow): KeptReport => ({ ...row, categoryRemoved: categoryRemoved === 1, from: fromDate, to: toDate })
 
+/**
+ * The IDs of the Reports that a new one would push over the limit: those from KEPT_LIMIT - 1 down in the order of the list below (newest made first, the ID breaking a tie), an index
+ * walk that reads the entries to there. Both the read that names them and the DELETE that drops them take this, so they cannot disagree about which are over.
+ */
+const BEYOND = `SELECT id FROM kept_reports ORDER BY last_made_at DESC, id DESC LIMIT -1 OFFSET ${KEPT_LIMIT - 1}`
+
 /** The Reports kept, the newest made first: at most KEPT_LIMIT rows, in one query. */
 const listKept = async (db: D1Database) => (await db.prepare(`${SELECT_KEPT} ORDER BY k.last_made_at DESC, k.id DESC LIMIT ?`).bind(KEPT_LIMIT).all<KeptRow>()).results.map(view)
 
@@ -198,29 +204,42 @@ export const keptReports = new Hono<AppEnv>()
     if (category === null || (category && !isLoansKind(category.kind))) return c.json({ error: 'Not found', field: 'categoryId' }, 404)
 
     const kept = { report: body.report, ...choices, accountName: account?.name ?? null, categoryName: category?.name ?? null }
-    // A new Report goes to the top of the list, so it pushes the one at KEPT_LIMIT - 1 now, and any below it, over the limit. They are chosen here, before the write, so that the batch drops
-    // exactly them and the Change Log names them. The ID of a kept Report is never used again (AUTOINCREMENT), so the batch cannot drop a different Report than the one named.
-    const over = (await db.prepare(`${SELECT_KEPT} WHERE k.id IN (SELECT id FROM kept_reports ORDER BY last_made_at DESC, id DESC LIMIT -1 OFFSET ?) ORDER BY k.last_made_at DESC, k.id DESC`).bind(KEPT_LIMIT - 1).all<KeptRow>()).results.map(view)
+    // A new Report goes to the top of the list, so it pushes the one at KEPT_LIMIT - 1 now, and any below it, over the limit. They are read here, before the write, so that the Change Log
+    // can name them in words (the Reports' Accounts and Categories). Another request can land between this read and the batch, so the batch drops them only if they are all still
+    // over the limit then, and writes the drop's entry only if it dropped them: the entry names exactly what was dropped, or there is no drop and no entry. A list that is left over
+    // the limit by that (two requests that read the same Report) is brought back by the next new Report, which reads everything over the limit.
+    const over = (await db.prepare(`${SELECT_KEPT} WHERE k.id IN (${BEYOND}) ORDER BY k.last_made_at DESC, k.id DESC`).all<KeptRow>()).results.map(view)
     const email = c.var.member.email
     const same: (string | number)[] = [body.report, choices.to, choices.from ?? '', choices.accountId ?? 0, choices.categoryId ?? 0]
-    // The INSERT is the last statement, which `onlyIfChanged` looks at: it changes a row only when no Report with these choices was kept. The drop is only for a Report that is new: nothing
-    // is dropped when the UPDATE found it (which would also leave no entry in the Change Log), however the request that kept it was interleaved with this one.
-    const [updated, , inserted] = await recordChange(
+    const overIds = JSON.stringify(over.map((r) => r.id))
+    // The ID of a kept Report is never used again (AUTOINCREMENT), so an ID that was read cannot now be a different Report. The DELETE is for a Report that is new only: nothing is
+    // dropped when the UPDATE found it, however the request that kept it was interleaved with this one. Its entry follows it, and is written only if it deleted (`changes()`).
+    const drop =
+      over.length === 0
+        ? []
+        : [
+            db
+              .prepare(`DELETE FROM kept_reports WHERE id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM json_each(?) WHERE value NOT IN (${BEYOND})) AND NOT EXISTS (SELECT 1 FROM kept_reports WHERE ${SAME})`)
+              .bind(overIds, overIds, ...same),
+            changeLogStatement(db, {
+              actor: c.var.member,
+              type: 'report',
+              summary: `Dropped the oldest kept ${over.length === 1 ? 'Report' : 'Reports'} to stay within ${KEPT_LIMIT}: the ${describe(over[0]!)}${over.length > 1 ? ` and ${over.length - 1} more` : ''}`,
+              before: over.length === 1 ? recordOf(over[0]!) : over.map(recordOf),
+              onlyIfChanged: true,
+            }),
+          ]
+    // The INSERT is the last statement, which `onlyIfChanged` looks at: it changes a row only when no Report with these choices was kept.
+    const [updated, ...rest] = await recordChange(
       db,
       [
         db.prepare(`UPDATE kept_reports SET last_made_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), made_by = ? WHERE ${SAME} RETURNING id`).bind(email, ...same),
-        db.prepare(`DELETE FROM kept_reports WHERE id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM kept_reports WHERE ${SAME})`).bind(JSON.stringify(over.map((r) => r.id)), ...same),
+        ...drop,
         db.prepare('INSERT OR IGNORE INTO kept_reports (report, account_id, category_id, from_date, to_date, made_by) VALUES (?, ?, ?, ?, ?, ?) RETURNING id').bind(body.report, choices.accountId, choices.categoryId, choices.from, choices.to, email),
       ],
-      {
-        actor: c.var.member,
-        type: 'report',
-        summary: over.length === 0 ? sentence('Kept the', kept) : `${sentence('Kept the', kept)}, and dropped the oldest to stay within ${KEPT_LIMIT}: the ${describe(over[0]!)}${over.length > 1 ? ` and ${over.length - 1} more` : ''}`,
-        before: over.length === 0 ? undefined : over.length === 1 ? recordOf(over[0]!) : over.map(recordOf),
-        after: recordOf(kept),
-        onlyIfChanged: true,
-      },
+      { actor: c.var.member, type: 'report', summary: sentence('Kept the', kept), after: recordOf(kept), onlyIfChanged: true },
     )
+    const inserted = rest.at(-1)
     const created = inserted!.results.length > 0
     const keptId = ((inserted!.results[0] ?? updated!.results[0]) as { id: number } | undefined)?.id
     if (keptId === undefined) return c.json({ error: 'Something went wrong' }, 500) // neither found it nor added it: a row that was removed between the two, which one batch cannot do
