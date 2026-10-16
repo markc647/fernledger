@@ -99,8 +99,11 @@ function NoteCell({ row }: { row: Row }) {
   )
 }
 
-/** The Note column asks for the least room it can have, so a table gives it what its heading and the button need and no more. */
-const NOTE_COLUMN = 'w-px'
+/**
+ * The Note column asks for the least room it can have, so a table gives it what its heading and the button need and no more. The plain table's heading wraps anywhere (`overflow-wrap` in
+ * src/index.css), so `whitespace-nowrap` is what keeps "Note" whole when no row on the page has a button to hold the column open.
+ */
+const NOTE_COLUMN = 'w-px whitespace-nowrap'
 
 const hasFilter = (search: TransactionSearch) => search.account !== undefined || search.category !== undefined || search.transfers !== undefined || !!search.from || !!search.to || !!search.q
 
