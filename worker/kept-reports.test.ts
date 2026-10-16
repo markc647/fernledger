@@ -5,8 +5,8 @@ import * as z from 'zod/mini'
 import { REPORTS } from '../src/lib/reports'
 import { app } from './app'
 import worker from './index'
-import { KEPT_LIMIT, keepBody, REPORT_IDS, requestedChoices, SHAPES, type ReportId } from './kept-reports'
-import { callAsAdminWith, meteredDb } from './test-support'
+import { KEPT_LIMIT, keepBody, NOT_KEPT, REPORT_IDS, requestedChoices, SHAPES, type ReportId } from './kept-reports'
+import { callAsAdminWith, callWhileInterrupted, meteredDb } from './test-support'
 
 // Seam 1: the list of kept Reports, through the Worker's exported handler as the local-development Admin or a read-only Member. A kept Report is a Report's CHOICES (which
 // Report, the dates, the Account or Category), never its figures. Only the Admin makes Reports: the Admin showing one keeps it, and a Member can read only a Report that is kept.
@@ -236,10 +236,28 @@ describe('showing a Report as the Admin', () => {
     expect(await changeLog()).toEqual([])
   })
 
-  it('keeps no more than KEPT_LIMIT: a new Report drops the oldest made, and the Change Log says so', async () => {
-    await env.DB.batch(days(KEPT_LIMIT).map((to) => insertKept(to, '2026-10-01T00:00:00.000Z')))
-    const oldest = await seedKept({ report: 'budget-vs-actual', from: '2000-01-01', lastMadeAt: '2020-01-01T00:00:00.000Z', to: '2026-12-31' }) // one more than the limit, and made longest ago
-    expect(await rows()).toHaveLength(KEPT_LIMIT + 1)
+  it('refuses a Category that is not a live Loans one (404): a Spending or Income Category, or a Loans one that has been removed', async () => {
+    const spendingId = (await env.DB.prepare("INSERT INTO categories (name, kind) VALUES ('Groceries – kept', 'spending') RETURNING id").first<{ id: number }>())!.id
+    const incomeId = (await env.DB.prepare("INSERT INTO categories (name, kind) VALUES ('Wages – kept', 'income') RETURNING id").first<{ id: number }>())!.id
+    try {
+      for (const categoryId of [spendingId, incomeId]) {
+        const res = await keep({ report: 'loans', to: '2026-10-31', categoryId })
+        expect(res.status, String(categoryId)).toBe(404)
+        expect(await res.json()).toEqual({ error: 'Not found', field: 'categoryId' })
+      }
+      await env.DB.prepare("UPDATE categories SET removed_at = '2026-10-16T02:00:00.000Z' WHERE id = ?").bind(loanId).run()
+      expect((await keep({ report: 'loans', to: '2026-10-31', categoryId: loanId })).status).toBe(404)
+      expect(await rows()).toEqual([])
+      expect(await changeLog()).toEqual([])
+    } finally {
+      await env.DB.prepare('DELETE FROM categories WHERE id IN (?, ?)').bind(spendingId, incomeId).run()
+    }
+  })
+
+  it('keeps no more than KEPT_LIMIT: a new Report drops the oldest made, in the same Change Log entry, which names it', async () => {
+    await env.DB.batch(days(KEPT_LIMIT - 1).map((to) => insertKept(to, '2026-10-01T00:00:00.000Z')))
+    const oldest = await seedKept({ report: 'budget-vs-actual', from: '2000-01-01', lastMadeAt: '2020-01-01T00:00:00.000Z', to: '2026-12-31' }) // the last of the limit, and made longest ago
+    expect(await rows()).toHaveLength(KEPT_LIMIT)
 
     expect((await keep({ ...SPENDING, accountId: savings })).status).toBe(201)
 
@@ -247,13 +265,47 @@ describe('showing a Report as the Admin', () => {
     expect(all).toHaveLength(KEPT_LIMIT)
     expect(all.map((r) => r.id)).not.toContain(oldest)
     expect(all.some((r) => r.report === 'spending')).toBe(true) // the new one is kept
-    const log = await changeLog()
-    expect(log.map((e) => e.type)).toEqual(['report', 'report'])
-    expect(log[1]!.summary).toContain(String(KEPT_LIMIT))
+    expect(await changeLog()).toEqual([
+      {
+        summary: `Kept the Spending by Category Report for Example savings, 2026-10-01 to 2026-10-31, and dropped the oldest to stay within ${KEPT_LIMIT}: the Budget vs actual Report for all Accounts, 2000-01-01 to 2026-12-31`,
+        actor: 'admin@example.com',
+        type: 'report',
+        before: '{"report":"Budget vs actual","account":"all Accounts","from":"2000-01-01","to":"2026-12-31"}',
+        after: '{"report":"Spending by Category","account":"Example savings","from":"2026-10-01","to":"2026-10-31"}',
+      },
+    ])
   })
 
-  it('writes no second entry when the list was not over the limit', async () => {
+  it('drops every Report over the limit, and names them all, if the list somehow holds more than one over', async () => {
+    await env.DB.batch(days(KEPT_LIMIT - 1).map((to) => insertKept(to, '2026-10-01T00:00:00.000Z')))
+    await seedKept({ report: 'budget-vs-actual', from: '2000-01-01', lastMadeAt: '2020-01-01T00:00:00.000Z', to: '2026-12-31' })
+    await seedKept({ report: 'budget-vs-actual', from: '2000-01-01', lastMadeAt: '2019-01-01T00:00:00.000Z', to: '2026-12-30' })
+    expect(await rows()).toHaveLength(KEPT_LIMIT + 1)
+
+    expect((await keep(SPENDING)).status).toBe(201)
+
+    expect(await rows()).toHaveLength(KEPT_LIMIT)
+    const log = await changeLog()
+    expect(log).toHaveLength(1)
+    expect(log[0]!.summary).toContain('and 1 more')
+    expect(JSON.parse(log[0]!.before as string)).toHaveLength(2)
+  })
+
+  it('drops nothing, and names nothing, when the list was not over the limit', async () => {
+    await env.DB.batch(days(KEPT_LIMIT - 1).map((to) => insertKept(to, '2026-10-01T00:00:00.000Z')))
     await keep(SPENDING)
+    expect(await rows()).toHaveLength(KEPT_LIMIT)
+    expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Kept the Spending by Category Report for all Accounts, 2026-10-01 to 2026-10-31', before: null })])
+  })
+
+  it('drops nothing when it only shows a Report again, even with the list at the limit', async () => {
+    await keep(SPENDING)
+    await env.DB.batch(days(KEPT_LIMIT - 1).map((to) => insertKept(to, '2020-01-01T00:00:00.000Z')))
+    expect(await rows()).toHaveLength(KEPT_LIMIT)
+
+    expect((await keep(SPENDING)).status).toBe(200)
+
+    expect(await rows()).toHaveLength(KEPT_LIMIT)
     expect(await changeLog()).toHaveLength(1)
   })
 })
@@ -315,6 +367,43 @@ describe('deleting a kept Report', () => {
     await forget(keptId)
     const again = (await (await keep({ ...SPENDING, accountId: savings })).json()) as { id: number }
     expect(again.id).not.toBe(keptId)
+  })
+})
+
+describe('when another request lands between the read and the write', () => {
+  it("a delete of a kept Report that the other request deleted first answers 404, and the Change Log has only the other request's entry", async () => {
+    const keptId = await seedKept({ report: 'transactions', accountId: savings })
+
+    const res = await callWhileInterrupted(`/api/kept-reports/${keptId}`, 'DELETE', {}, () => forget(keptId))
+
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Not found' })
+    expect(await rows()).toEqual([])
+    expect(await changeLog()).toEqual([expect.objectContaining({ summary: 'Removed the kept Transaction listing Report for Example savings, 2026-10-01 to 2026-10-31' })])
+  })
+
+  it('a keep of choices that the other request kept first is the same row, shown again, and the Change Log has the one entry', async () => {
+    let other: { id: number } | undefined
+    const res = await callWhileInterrupted('/api/kept-reports', 'POST', SPENDING, async () => void (other = (await (await keep(SPENDING)).json()) as { id: number }))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ id: other!.id })
+    expect(await rows()).toHaveLength(1)
+    expect(await changeLog()).toHaveLength(1)
+  })
+
+  it('a keep that finds the Report already kept drops nothing, and so writes no entry that is missing a dropped Report', async () => {
+    await env.DB.batch(days(KEPT_LIMIT - 1).map((to) => insertKept(to, '2026-10-01T00:00:00.000Z')))
+    const oldest = await seedKept({ report: 'budget-vs-actual', from: '2000-01-01', lastMadeAt: '2020-01-01T00:00:00.000Z', to: '2026-12-31' })
+    expect(await rows()).toHaveLength(KEPT_LIMIT)
+
+    // The other request added these choices without trimming the list, so this one's Report is not new, and the Report it chose to drop is not dropped.
+    const res = await callWhileInterrupted('/api/kept-reports', 'POST', SPENDING, async () => void (await seedKept({ ...SPENDING, lastMadeAt: '2026-10-16T01:00:00.000Z' })))
+
+    expect(res.status).toBe(200)
+    expect((await rows()).map((r) => r.id)).toContain(oldest)
+    expect(await rows()).toHaveLength(KEPT_LIMIT + 1)
+    expect(await changeLog()).toEqual([])
   })
 })
 
@@ -382,7 +471,6 @@ describe('a Member reading a Report', () => {
     'budget-vs-actual': (_a, from, to) => `/api/reports/budget-vs-actual?from=${from}&to=${to}`,
   }
   const read = (path: string, who: Who | null = 'member') => call(path, { who })
-  const NOT_KEPT = { error: 'Only the Admin makes Reports. This one has not been made.', reason: 'not-kept' }
 
   it('is refused every Report that has not been kept, and the refusal names no choice', async () => {
     for (const id of REPORT_IDS) {
@@ -460,6 +548,17 @@ describe('a Member reading a Report', () => {
     expect((await read('/api/reports/spending?from=2026-10-01&to=2026-10-31')).status).toBe(200)
     await forget(id)
     expect((await read('/api/reports/spending?from=2026-10-01&to=2026-10-31')).status).toBe(403)
+  })
+
+  it('fails closed: a path under /api/reports that is not one of the six, or is one written another way, is refused to a Member whatever is kept', async () => {
+    await keep(SPENDING)
+    const range = 'from=2026-10-01&to=2026-10-31'
+    expect((await read('/api/reports/spending?' + range)).status).toBe(200) // kept, so the refusals below are of the path alone
+    for (const path of ['/api/reports/nonsense', `/api/reports/nonsense?${range}`, '/api/reports/', `/api/reports/spending/?${range}`, `/api/reports/spending/extra?${range}`, `/api/reports/Spending?${range}`]) {
+      const res = await read(path)
+      expect(res.status, path).toBe(403)
+      expect(await res.json(), path).toEqual(NOT_KEPT)
+    }
   })
 
   it('does not hold the Admin to the list: the Admin reads any Report, which is how it is made', async () => {
