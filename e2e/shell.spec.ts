@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { SPENT, showNetWorth, showSpending, stubNetWorth, stubSpending } from './chart-helpers'
+import { NET_WORTH_PATH, showNetWorth, SPENDING_REPORT_PATH, SPENT, spendingDrawn, stubNetWorth, stubSpendingReport } from './chart-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { changeDeviceScheme, mainNav, openHeaderControls, openNavGroup, signOutLink, themeToggle } from './shell-helpers'
 
@@ -8,6 +8,8 @@ const pages = [
   { role: 'admin', path: '/settings', heading: 'Settings' },
   { role: 'member', path: '/', heading: 'Summary' },
   { role: 'member', path: '/styleguide', heading: 'Styleguide' },
+  { role: 'member', path: NET_WORTH_PATH, heading: 'Net worth' },
+  { role: 'admin', path: SPENDING_REPORT_PATH, heading: 'Spending by Category' },
 ] as const
 
 const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
@@ -15,20 +17,15 @@ const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
 for (const { role, path, heading } of pages) {
   test(`${heading} page as ${role} has no WCAG 2.2 AA violations`, async ({ page, context }, testInfo) => {
     await signInAs(context, role)
-    // The Summary and the Dashboard are where the charts are, and the Worker refuses to add up net worth for more than 49 Accounts, which the specs that share this database can
-    // reach. So the charts are stubbed and drawn before the scan (each when its button is pressed), and it scans the pictures and not the refusal that a long run of specs
-    // would put in their place.
-    const charts = path === '/'
-    if (charts) {
-      await stubNetWorth(page)
-      await stubSpending(page, SPENT, 16_050)
-    }
+    // The Net worth page and the Spending by Category Report are where the charts are, and the Worker refuses to add up net worth for more than 49 Accounts, which the specs that share
+    // this database can reach. So the answers are stubbed and the charts drawn before the scan (net worth when its button is pressed), and it scans the pictures and not the refusal that a
+    // long run of specs would put in their place.
+    if (path === NET_WORTH_PATH) await stubNetWorth(page)
+    if (path === SPENDING_REPORT_PATH) await stubSpendingReport(page, SPENT, 16_050)
     await page.goto(path)
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
-    if (charts) {
-      await showNetWorth(page)
-      await showSpending(page, /^Bar chart of the 3 Categories/)
-    }
+    if (path === NET_WORTH_PATH) await showNetWorth(page)
+    if (path === SPENDING_REPORT_PATH) await spendingDrawn(page, /^Bar chart of the 3 Categories/)
     // The project's theme must really be showing, or the scan would not be testing it.
     await expect(page.locator('html')).toHaveClass(darkClass(testInfo.project.name === 'dark'))
 

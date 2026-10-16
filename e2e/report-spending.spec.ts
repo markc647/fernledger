@@ -1,7 +1,9 @@
 import type { BrowserContext, Page } from '@playwright/test'
+import { spendingChart, spendingDrawn, spyApi } from './chart-helpers'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { readPdf, textOf } from './pdf-text'
+import { chooseTextSize } from './shell-helpers'
 import {
   dateText,
   ensureCategory,
@@ -32,7 +34,8 @@ import {
 // Ticket 20: the spending-by-Category Report (spec story 93). It uses the Report frame of ticket 18, so it is shown on its own page, under its form, says on its face
 // what it is, and prints with its table heading on every page. The Report's numbers are held to the Worker's spending totals in
 // worker/report-spending.test.ts; this file checks what a reader sees and what comes out of the printer: the page under print media, and the PDF it
-// makes (page count, the text on each page, the margins and the size of the type).
+// makes (page count, the text on each page, the margins and the size of the type). On the screen the Report also has a bar chart of its biggest Categories between the total and
+// the table, drawn from the Report's own figures and left out of print.
 
 test.describe.configure({ mode: 'serial' })
 
@@ -360,6 +363,7 @@ test.describe('on screen', () => {
       await expect(tableOf(page)).toBeVisible()
       await expect(tableOf(page)).toContainText('$25.00 back')
       await expect(tableOf(page)).toContainText(UNCATEGORISED)
+      await spendingDrawn(page) // with its bars, which the scan is of as well
       await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
       await noAxeViolations(page)
     })
@@ -407,6 +411,180 @@ test.describe('on screen', () => {
       await expect(page.getByRole('table')).toHaveCount(0)
       await expect(page.getByText('Nothing was spent in')).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Print or save as PDF' })).toHaveCount(0)
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// The chart: bars of the Report's own figures, between its total and its table, for the screen
+
+test.describe('the chart', () => {
+  test.beforeEach(async ({ context }) => {
+    await context.clock.setFixedTime(NOW) // keeps running; only the date is fixed
+  })
+
+  const bars = (page: Page) => spendingChart(page).locator('.recharts-bar-rectangle')
+  const drawnFor = (d: ReturnType<typeof dataFor>) => new RegExp(`^Bar chart of the 4 Categories that spent the most in ${dateText(`${d.year}-01-01`)} to ${dateText(`${d.year}-12-31`)}`)
+
+  test('draws the Report\'s own figures as bars between the total and the table, and asks the Worker for nothing more', async ({ page, context, baseURL }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    const asked = spyApi(page)
+    await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
+    const figure = await spendingDrawn(page, drawnFor(d))
+    expect(await figure.getAttribute('aria-label')).toContain('The figures for every Category are in the table below.')
+    // The Categories that spent something: the rates, the fuel, the food and Uncategorised. The Category that took money back is in the table and has no bar.
+    await expect(bars(page)).toHaveCount(4)
+    await bars(page).first().hover()
+    await expect(page.locator('.recharts-tooltip-wrapper')).toContainText(d.rates)
+    await expect(page.locator('.recharts-tooltip-wrapper')).toContainText(spent(ALL.rates))
+    await bars(page).nth(1).hover()
+    await expect(page.locator('.recharts-tooltip-wrapper')).toContainText(d.fuel)
+    await expect(page.locator('.recharts-tooltip-wrapper')).toContainText(spent(ALL.fuel))
+
+    // Above the table, and below the total.
+    const [total, picture, table] = [
+      (await article(page).getByRole('region', { name: 'Spending in each Category' }).locator('dl').boundingBox())!,
+      (await figure.boundingBox())!,
+      (await tableOf(page).boundingBox())!,
+    ]
+    expect(picture.y).toBeGreaterThanOrEqual(total.y + total.height - 1)
+    expect(table.y).toBeGreaterThanOrEqual(picture.y + picture.height - 1)
+    await expect(page.getByText('The chart shows the biggest')).toHaveCount(0) // all four fit
+
+    // One request for the Report, and that is all: the chart is drawn from its answer (the Dashboard's chart read of its own, which is gone).
+    await page.waitForLoadState('networkidle')
+    const reads = asked.filter((address) => address.startsWith('/api/reports') || address.startsWith('/api/charts'))
+    expect(reads).toHaveLength(1)
+    expect(reads[0]).toContain('/api/reports/spending?')
+  })
+
+  test('changing the Account or the dates asks for the Report again, and the chart is drawn from the new answer', async ({ page, context, baseURL }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
+    await spendingDrawn(page, drawnFor(d))
+    const asked = spyApi(page)
+    await page.goto(address(savingsId, `${d.year}-01-01`, `${d.year}-12-31`)) // only the food: one Category, one bar
+    const figure = await spendingDrawn(page, /^Bar chart of the one Category that spent the most/)
+    await expect(bars(page)).toHaveCount(1)
+    expect(await figure.getAttribute('aria-label')).toContain(`in ${dateText(`${d.year}-01-01`)} to ${dateText(`${d.year}-12-31`)}`)
+    expect(asked.filter((address) => address.startsWith('/api/reports') || address.startsWith('/api/charts'))).toHaveLength(1)
+  })
+
+  test('is left out of the printout, where the Report is as it always was', async ({ page, context, baseURL }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    const { everydayId } = await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    await page.goto(address(everydayId, `${d.year}-01-01`, `${d.year}-12-31`))
+    await spendingDrawn(page, drawnFor(d)) // drawn on the screen first, so that its absence from the page is the print layout's and not a chart that had not arrived
+    await page.emulateMedia({ media: 'print' })
+    await expect(spendingChart(page)).toBeHidden()
+    await expect(article(page)).not.toContainText('The chart shows')
+    await expect(tableOf(page)).toBeVisible()
+    const pages = await readPdf(await page.pdf({ format: 'A4' }))
+    expect(pages).toHaveLength(1)
+    expect(textOf(pages[0]!)).toContain(`Total spending ${spent(total(EVERYDAY))}`)
+  })
+
+  test('says so when no Category spent anything above zero, and draws no bar, but lists what came back', async ({ page, context, baseURL }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    // Fuel took back more than it spent; Groceries spent $40.00 and had it all refunded; Uncategorised had a payment and the same money back.
+    await page.route('**/api/reports/spending?**', (route) =>
+      route.fulfill({ json: { ...wholeYear(d.year), totalCents: -2500, categories: [{ categoryId: 2, name: 'Fuel', cents: -2500 }, { categoryId: 3, name: 'Groceries', cents: 0 }, { categoryId: null, name: 'Uncategorised', cents: 0 }] } }),
+    )
+    await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
+    await expect(tableOf(page)).toBeVisible()
+    await expect(article(page)).toContainText(`Nothing was spent above zero in ${dateText(`${d.year}-01-01`)} to ${dateText(`${d.year}-12-31`)}: every Category took back as much as it spent, or more. The table shows what came back.`)
+    await expect(article(page).locator('svg.recharts-surface')).toHaveCount(0)
+    await expect(tableOf(page).getByRole('row')).toHaveCount(4) // the heading and three Categories: money that went out and came back stays in view
+    await expect(tableOf(page).getByRole('row').nth(1)).toContainText('$25.00 back') // Fuel, the first row: it took back more than it spent
+    await expect(tableOf(page).getByRole('row').nth(2)).toContainText('$0.00') // Groceries, refunded in full
+  })
+
+  test('draws the biggest 12 Categories and says the table has the others', async ({ page, context, baseURL }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    const categories = Array.from({ length: 14 }, (_, i) => ({ categoryId: i + 1, name: `Stub category ${String(i + 1).padStart(2, '0')}`, cents: 100_000 - i * 1000 }))
+    await page.route('**/api/reports/spending?**', (route) => route.fulfill({ json: { ...wholeYear(d.year), totalCents: 1_000_000, categories } }))
+    await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
+    await spendingDrawn(page, /^Bar chart of the 12 Categories that spent the most/)
+    await expect(bars(page)).toHaveCount(12)
+    await expect(article(page)).toContainText('The chart shows the biggest 12 Categories. The table has the other 2 too.')
+    await expect(tableOf(page).getByRole('row')).toHaveCount(15) // the heading and all 14
+  })
+
+  test('has no WCAG 2.2 AA violations in this theme with the bars drawn, at the largest text size, and on a phone', async ({ page, context, baseURL }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    for (const viewport of [{ width: 1024, height: 900 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport)
+      await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
+      await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
+      await chooseTextSize(page, 'Large')
+      await spendingDrawn(page, drawnFor(d))
+      await expect(bars(page)).toHaveCount(4) // the bars are in, as well as the figure
+      await noAxeViolations(page)
+    }
+  })
+
+  test('the bars are the theme\'s colour, drawn in the text colour when Windows high contrast is on, and nothing moves', async ({ page, context, baseURL }, testInfo) => {
+    const d = dataFor(testInfo.project.name)
+    await seed(context, baseURL!, testInfo.project.name)
+    await signInAs(context, 'member')
+    await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
+    await spendingDrawn(page, drawnFor(d))
+    const bar = bars(page).locator('path').first()
+    await expect(bar).toBeVisible()
+
+    // Nothing is animating in a chart, whatever the reader's motion setting: it draws itself at once, and so does its tooltip.
+    expect(await page.evaluate(() => document.querySelector('[data-slot="chart"]')!.getAnimations({ subtree: true }).length)).toBe(0)
+
+    const fill = (locator: typeof bar) => locator.evaluate((el) => getComputedStyle(el).fill)
+    const themed = await fill(bar)
+    const text = await page.locator('body').evaluate((el) => getComputedStyle(el).color)
+    expect(themed).not.toBe(text) // the theme's own chart colour, not the page's text
+
+    await page.emulateMedia({ forcedColors: 'active' })
+    const canvasText = await page.evaluate(() => {
+      const probe = document.createElement('span')
+      probe.style.color = 'CanvasText'
+      document.body.append(probe)
+      const colour = getComputedStyle(probe).color
+      probe.remove()
+      return colour
+    })
+    expect(await fill(bar)).toBe(canvasText)
+
+    // The pointer's own highlight behind a bar is not one of the bars: it is not drawn in the text colour, or it would hide the bar it marks.
+    await bar.hover()
+    const cursor = page.locator('.recharts-tooltip-cursor')
+    await expect(cursor).toBeVisible()
+    expect(await cursor.evaluate((el) => getComputedStyle(el).fill)).not.toBe(canvasText)
+  })
+
+  // A tab left open across a deploy asks for a chunk of code that is no longer there. The browser and React both log that, which is what this test expects of them; what it holds the
+  // page to is that the chart's place says so and the Report, which does not need the chunk, is all there (without a boundary the whole page goes).
+  test.describe("when the chart's code cannot be loaded", () => {
+    test.use({ expectedConsoleErrors: ['Failed to load resource: net::ERR_FAILED', 'dynamically imported module'] })
+
+    test('says so where the chart would be, and leaves the Report', async ({ page, context, baseURL }, testInfo) => {
+      const d = dataFor(testInfo.project.name)
+      await seed(context, baseURL!, testInfo.project.name)
+      await signInAs(context, 'member')
+      await page.route(/\/assets\/spending-chart-[^/]+\.js/, (route) => route.abort())
+      await page.goto(address(null, `${d.year}-01-01`, `${d.year}-12-31`))
+      await expect(page.getByRole('alert').filter({ hasText: "The chart couldn't be loaded. Reload the page to try again." })).toBeVisible()
+      await expect(spendingChart(page)).toHaveCount(0)
+      await expect(tableOf(page)).toBeVisible()
+      await expect(article(page).getByRole('region', { name: 'Spending in each Category' }).locator('dl')).toContainText(spent(total(ALL)))
+      await expect(page.getByRole('heading', { level: 1, name: 'Spending by Category' })).toBeVisible()
     })
   })
 })

@@ -131,18 +131,28 @@ test.describe('the pages', () => {
 })
 
 test.describe('the sidebar', () => {
-  test('lists only the Reports page under Reports for the Admin, and none of the six Reports', async ({ page, context }) => {
+  test('lists the Reports page and Net worth under Reports for the Admin, and none of the six Reports', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/reports/loans')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
-    await expect(reportsLinks(page)).toHaveText(['Reports'])
+    await expect(reportsLinks(page)).toHaveText(['Reports', 'Net worth'])
     await expect(navLink(page, 'Loans')).toHaveCount(0)
   })
 
-  test('puts a Member\'s Accounts after them, as it did', async ({ page, context }) => {
+  test('puts a Member\'s Accounts after them, as it did, with Net worth between', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/reports/balances')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
-    await expect(reportsLinks(page)).toHaveText(['Reports', 'Accounts'])
+    await expect(reportsLinks(page)).toHaveText(['Reports', 'Net worth', 'Accounts'])
+  })
+
+  test('Net worth is a page of its own and not a Report: it has no title block and no way back at its foot, and its breadcrumb is a group and a page, not a link back', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/reports/net-worth')
+    await expect(page.getByRole('heading', { level: 1, name: 'Net worth' })).toBeVisible()
+    await expect(page.getByRole('article')).toHaveCount(0) // a Report is an article, with its title block; this is a chart
+    await expect(page.locator('main').getByRole('link', { name: 'Back to Reports' })).toHaveCount(0)
+    await expect(breadcrumb(page).getByRole('listitem')).toHaveText(['Reports', 'Net worth'])
+    await expect(breadcrumb(page).getByRole('link')).toHaveCount(0)
   })
 })

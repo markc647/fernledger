@@ -1,23 +1,13 @@
-import type { SpendingPeriod } from '@/generated/api/chart-spending'
 import type { CountedAccount, DEFAULT_NET_WORTH_RANGE as WORKER_DEFAULT_NET_WORTH_RANGE, NetWorthRange, UncountedAccount } from '@/generated/api/net-worth'
 import type { SpendingCategory } from '@/generated/api/spending-by-category'
 import { noBalanceHint, noBalanceReason } from './balance-check'
-import { isSearchDate, lastDay } from './date-range'
+import { lastDay } from './date-range'
 import { formatBalance, formatDate, formatMonth } from './format'
 
-// The words and choices of the charts (the cards of the Summary and the Dashboard). The numbers come from the Worker (worker/net-worth.ts,
+// The words and choices of the two charts: net worth over time (the Net worth page) and spending by Category (a Report). The numbers come from the Worker (worker/net-worth.ts,
 // worker/spending-by-category.ts) and are shown as they arrive: this file chooses which to draw and how to say what they are. It adds up no money.
 
-export type { NetWorthRange, SpendingCategory, SpendingPeriod }
-
-/** The periods the Worker names (a NZ month is whatever the Worker's clock says, not the device's), in the order they are offered. A new one the Worker adds fails to compile until it has words here. */
-export const PERIOD_LABELS: Record<SpendingPeriod, string> = {
-  'this-month': 'This month',
-  'last-month': 'Last month',
-  'past-3-months': 'Past 3 months',
-  'past-12-months': 'Past 12 months',
-}
-export const PERIODS = Object.keys(PERIOD_LABELS) as SpendingPeriod[]
+export type { NetWorthRange, SpendingCategory }
 
 /** The ranges of months net worth can be drawn for, in the order they are offered. The first is the one drawn first. */
 export const NET_WORTH_RANGE_LABELS: Record<NetWorthRange, string> = {
@@ -55,17 +45,6 @@ export function describeDates(from: string, to: string) {
   if (from === `${month}-01` && to === `${month}-${lastDay(month)}`) return formatMonth(month)
   if (from === to) return formatDate(from)
   return `${formatDate(from)} to ${formatDate(to)}`
-}
-
-/** What is wrong with the dates chosen, if anything, and the field to mark. Both must be real dates in the years the Worker takes, in order. */
-export function datesProblem(from: string, to: string): { field: 'from' | 'to'; message: string } | null {
-  if (from === '') return { field: 'from', message: 'Choose a From date.' }
-  if (to === '') return { field: 'to', message: 'Choose a To date.' }
-  for (const [field, value] of [['from', from], ['to', to]] as const) {
-    if (!isSearchDate(value)) return { field, message: `The “${field === 'from' ? 'From' : 'To'}” date must be a real date from the year 2000 to 2100.` }
-  }
-  if (from > to) return { field: 'to', message: 'The “To” date is before the “From” date. Change one of them to see the chart.' }
-  return null
 }
 
 /** What a screen reader says for the net worth chart, which it takes as one image: where the line starts and ends, and where the figures are. */

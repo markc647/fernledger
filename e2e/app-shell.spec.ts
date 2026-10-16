@@ -87,6 +87,14 @@ test.describe('layout', () => {
     await expect(trail.locator('[aria-current="page"]')).toHaveText('Spending by Category')
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
     await expect(navLink(page, 'Reports')).toHaveAttribute('data-active', 'true')
+    // Net worth is no Report but a page with a row of its own under Reports: named in the trail, and it (not Reports) is the row marked.
+    await page.goto('/reports/net-worth')
+    await expect(trail.getByRole('listitem')).toHaveText(['Reports', 'Net worth'])
+    await expect(trail.locator('[aria-current="page"]')).toHaveText('Net worth')
+    await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
+    await expect(navLink(page, 'Net worth')).toHaveAttribute('data-active', 'true')
+    await expect(navLink(page, 'Reports')).not.toHaveAttribute('data-active', 'true')
+    await expect(mainNav(page).locator('[data-active="true"]')).toHaveCount(1)
   })
 
   test('is one skip link, then the header, then the sidebar, then the page, and the skip link goes to the page', async ({ page }) => {
@@ -165,21 +173,21 @@ test.describe('the sidebar navigation', () => {
     expect(await outline(page)).toEqual([
       'Dashboard',
       'Transactions: All Transactions, Uncategorised, Import',
-      'Reports: Reports',
+      'Reports: Reports, Net worth',
       'Set up: Accounts, Categories, Rules, Budgets, Settings',
       'Help: Change Log, About your data, How to sign in',
     ])
     await noAxeViolations(page) // with every group open
   })
 
-  test('lists a Member\'s: the Summary, Accounts among the Reports, and no Set up group at all', async ({ page, context }) => {
+  test('lists a Member\'s: the Summary, Net worth and Accounts among the Reports, and no Set up group at all', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/')
     await expect(navLink(page, 'Summary')).toBeVisible()
     expect(await outline(page)).toEqual([
       'Summary',
       'Transactions: All Transactions',
-      'Reports: Reports, Accounts',
+      'Reports: Reports, Net worth, Accounts',
       'Help: Change Log, About your data, How to sign in',
     ])
     await expect(navGroup(page, 'Set up')).toHaveCount(0)
@@ -242,13 +250,13 @@ test.describe('the sidebar navigation', () => {
     await expect(navLink(page, 'Uncategorised')).toHaveCount(0)
   })
 
-  test('opens the group of a page you arrive at from somewhere else, such as a Dashboard shortcut', async ({ page, context }) => {
+  test('opens the group of a page you arrive at from somewhere else, such as a link on the Dashboard', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/')
-    await expect(navGroup(page, 'Transactions')).toHaveAttribute('aria-expanded', 'false') // the Dashboard holds no group
-    await page.getByRole('region', { name: 'Your tools' }).getByRole('link', { name: /^Import/ }).click()
-    await expect(page.getByRole('heading', { level: 1, name: 'Import' })).toBeVisible()
-    await expect(navGroup(page, 'Transactions')).toHaveAttribute('aria-expanded', 'true')
+    await expect(navGroup(page, 'Set up')).toHaveAttribute('aria-expanded', 'false') // the Dashboard holds no group
+    await page.getByRole('region', { name: 'Budget vs actual' }).getByRole('link', { name: 'Set or change Budgets' }).click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Budgets' })).toBeVisible()
+    await expect(navGroup(page, 'Set up')).toHaveAttribute('aria-expanded', 'true')
   })
 
   // The pill alone is a white or grey fill a hair away from the tint (1.1:1), so the row has a bar at its start that is 3:1 against the tint in both themes
