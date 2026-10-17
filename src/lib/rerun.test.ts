@@ -145,7 +145,7 @@ describe('what a screen reader is told', () => {
 })
 
 describe('what the frame of its progress is titled', () => {
-  const none = { waiting: false, failed: false }
+  const none = { waiting: false, failed: false, holding: false }
   it('says what it is doing while it works, and what became of it when it has ended', () => {
     expect(frameTitle(job(), none)).toBe('Applying the Rules to all Transactions')
     expect(frameTitle(job({ status: 'done' }), none)).toBe('Applied the Rules to all Transactions')
@@ -153,11 +153,16 @@ describe('what the frame of its progress is titled', () => {
   })
 
   it("says it is paused until the allowance resets when it waits for the free plan's day, and never says tomorrow", () => {
-    expect(frameTitle(job({ paused: true }), { waiting: true, failed: false })).toBe('Paused until the allowance resets')
-    expect(frameTitle(job(), { waiting: true, failed: false })).not.toMatch(/tomorrow/i)
+    expect(frameTitle(job({ paused: true }), { waiting: true, failed: false, holding: false })).toBe('Paused until the allowance resets')
+    expect(frameTitle(job(), { waiting: true, failed: false, holding: false })).not.toMatch(/tomorrow/i)
+  })
+
+  it('says it waits while a Rule is changed, because it is not working then, and that is not what it says when it works', () => {
+    expect(frameTitle(job(), { waiting: false, failed: false, holding: true })).toBe('Applying the Rules waits while you change a Rule')
+    expect(frameTitle(job(), none)).not.toBe(frameTitle(job(), { waiting: false, failed: false, holding: true }))
   })
 
   it('says it stopped with a problem when a step failed', () => {
-    expect(frameTitle(job(), { waiting: false, failed: true })).toBe('Applying the Rules stopped with a problem')
+    expect(frameTitle(job(), { waiting: false, failed: true, holding: false })).toBe('Applying the Rules stopped with a problem')
   })
 })

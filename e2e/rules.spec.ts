@@ -25,6 +25,9 @@ async function importTransaction(context: BrowserContext, baseURL: string, proje
   expect(res.ok()).toBe(true)
 }
 
+/** Waits until the page has asked for everything it is going to, so that a count of its requests is not read before a late one. */
+const quiet = (page: Page) => page.waitForLoadState('networkidle')
+
 const rowFor = (page: Page, text: string) => page.getByRole('row', { name: new RegExp(text) })
 
 test.describe.configure({ mode: 'serial' })
@@ -511,6 +514,7 @@ test.describe('Apply the Rules to all Transactions, beside Add a Rule', () => {
     await page.keyboard.press('Escape')
     await expect(applyDialog(page)).toHaveCount(0)
     await expect(applyButton(page)).toBeFocused()
+    await quiet(page)
     expect(started).toBe(0) // nothing above started the run
 
     await openApplyDialog(page)
@@ -766,6 +770,33 @@ test.describe('while the Rules are being applied', () => {
     await expect(page.getByRole('status').filter({ hasText: 'The Rules changed again, so it started again (2 times). Going through up to 3,000 Transactions.' })).toBeVisible()
   })
 
+  // A run that ends by itself takes away the Stop button, and focus on it with it.
+  for (const { where, name } of [
+    { where: 'Stop applying the Rules', name: 'a run that finishes by itself while Stop has focus puts focus on the title of its frame' },
+    { where: 'Add a Rule', name: 'a run that finishes by itself while focus is on Add a Rule leaves it there' },
+  ] as const) {
+    test(name, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      let finish = () => {}
+      const finishing = new Promise<void>((resolve) => (finish = resolve))
+      await page.route('**/api/rules/rerun/step', async (route) => {
+        await finishing
+        await route.fulfill({ json: { job: runningJob({ status: 'done', doneRows: 20_000, changedRows: 1_234, percent: 100, finishedAt: '2026-10-11T02:09:00.000Z' }) } })
+      })
+      await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
+      await page.goto('/rules')
+      await expect(frameHeading(page)).toHaveText('Applying the Rules to all Transactions')
+      const control = page.getByRole('button', { name: where })
+      await control.focus()
+      await expect(control).toBeFocused()
+
+      finish()
+      await expect(frameHeading(page)).toHaveText('Applied the Rules to all Transactions')
+      if (where === 'Add a Rule') await expect(control).toBeFocused()
+      else await expect(frameHeading(page)).toBeFocused() // and not the page, which is where focus goes when the button it was on is taken away
+    })
+  }
+
   test('the spinner turns, and does not turn when the device asks for less motion', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.route('**/api/rules/rerun/step', () => new Promise(() => {}))
@@ -832,12 +863,17 @@ test.describe('while the Rules are being applied', () => {
       await page.getByRole('button', { name: 'Add a Rule' }).click()
       await expect(page.getByText('A run is going. Saving starts it again from the first Transaction.')).toBeVisible()
       await expect(page.getByText('Waiting while you change a Rule.')).toBeVisible()
+      // Nothing is being done, and the frame says so: no spinner, and a title of its own.
+      await expect(frameHeading(page)).toHaveText('Applying the Rules waits while you change a Rule')
+      await expect(spinner(page)).toHaveCount(0)
       await noAxeViolationsFromTop(page)
       const whenOpened = steps
       await page.waitForTimeout(600)
       expect(steps - whenOpened).toBeLessThanOrEqual(1) // ...until the form is open: at most the one already out
       await page.getByRole('button', { name: 'Cancel' }).click()
       await expect.poll(() => steps).toBeGreaterThan(whenOpened + 2) // and then on again
+      await expect(frameHeading(page)).toHaveText('Applying the Rules to all Transactions')
+      await expect(spinner(page)).toBeVisible()
 
       await chooseAction(ruleActionButtons(page).last(), 'Remove')
       await expect(page.getByRole('group', { name: /^Remove Rule/ })).toContainText('A run is going. Removing the Rule starts it again from the first Transaction.')
@@ -969,19 +1005,23 @@ test.describe('the D1 usage bar', () => {
 
     const dialog = await openApplyDialog(page)
     await expect(dialog.getByText('1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
+    await quiet(page)
     expect(asked).toBe(1) // (a bar on the page would have asked as the page loaded, and the second opening below would then ask for nothing)
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     await openApplyDialog(page)
     await expect(dialog.getByText('2,750,000 of 5,000,000 rows read · 55%')).toBeVisible()
+    await quiet(page)
     expect(asked).toBe(2)
 
     await applyAnswer(page).click()
     await expect(progressFrame(page)).toContainText('Finished. Looked at all 20,000 Transactions')
     expect(steps).toBe(2)
+    await quiet(page)
     expect(asked).toBe(2) // two steps and an end, and the bar was shut: nothing was asked
 
     await openApplyDialog(page)
     await expect(dialog.getByText('4,200,000 of 5,000,000 rows read · 84%')).toBeVisible() // the figures after the run, not the ones from before it
+    await quiet(page)
     expect(asked).toBe(3)
   })
 

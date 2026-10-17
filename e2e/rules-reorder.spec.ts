@@ -119,8 +119,9 @@ test('the Admin moves a Rule with the keyboard, hears where it is, and can chang
     const now = number(c) // it is where the third was
     await page.keyboard.press('Space')
     await expect(status(page, /Picked up/)).toHaveText(`Picked up Rule ${now} of ${total}.`)
-    // dnd-kit has measured the rows once the held row has a transform of its own (a sorting strategy needs their rects): an arrow key pressed before then moves nothing.
-    await expect.poll(() => page.locator('tr[data-dragging="true"]').evaluate((row) => (row as HTMLElement).style.transform)).not.toBe('')
+    // An arrow key pressed in the moments after the announcement can move nothing: dnd-kit is not ready for it until a frame has been drawn (a Rule that has a transform of its own does not say so: 4 of 8
+    // runs lost the key with one). So a frame, and another, go by first, as a person's next key would; without this the key was lost in most runs, and on CI in all of them.
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
     await page.keyboard.press('ArrowUp')
     await expect(status(page, /is over position/)).toHaveText(`Rule ${now} is over position ${now - 1} of ${total}.`)
     await page.keyboard.press('Escape')

@@ -280,6 +280,7 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
   const apply = useRef<HTMLButtonElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   const frame = useRef<HTMLHeadingElement>(null)
+  const frameBox = useRef<HTMLDivElement>(null)
   const title = useId()
   // Where focus goes once the page has drawn what the Admin has just done: the question has closed (or a Stop was pressed) and the button that was pressed is off, so keyboard focus
   // goes to the frame's title rather than being lost; if Apply could not start a run, it goes back to the button, which Radix cannot do while it is off.
@@ -290,6 +291,20 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
     focusNext.current = null
     target.focus()
   })
+  // Where focus last was: in the frame or not. A run that ends by itself takes away the button focus was on (Stop), and focus then drops to the page; the browser says nothing of that (it
+  // says the same for a click on the page), so the page watches where focus goes (a key into another control, a press outside) and knows that if it was last in the frame, it was lost there.
+  const focusWasInFrame = useRef(false)
+  useEffect(() => {
+    const note = (event: Event) => {
+      focusWasInFrame.current = event.target instanceof Node && frameBox.current?.contains(event.target) === true
+    }
+    document.addEventListener('focusin', note)
+    document.addEventListener('pointerdown', note)
+    return () => {
+      document.removeEventListener('focusin', note)
+      document.removeEventListener('pointerdown', note)
+    }
+  }, [])
 
   const start = useMutation({
     mutationFn: async () => {
@@ -388,6 +403,16 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
   const shown = job ? watching || running : false
   // It works only while it is asking for steps: not when it waits for the day, or for a Rule to be changed, or has gone wrong.
   const spinning = running && !waitingForTheDay && !holding && problem !== 'failed'
+  const heading = job ? frameTitle(job, { waiting: waitingForTheDay, failed: problem === 'failed', holding: running && holding }) : ''
+  // When the frame changes what it is (it is titled for what it is) and focus was in it, focus is on the control that has gone (Stop, Try again) or on the page: it goes to the title, as it does
+  // when the Admin starts or stops a run. Focus that has gone to another control, or that the Admin took to the page, is left where it is.
+  useEffect(() => {
+    if (!focusWasInFrame.current) return
+    const active = document.activeElement
+    if (active && active !== document.body) return // on a control that is still there, in the frame or out of it
+    focusWasInFrame.current = false
+    frame.current?.focus()
+  }, [heading])
   return (
     <>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -424,7 +449,7 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
         {job && (watching || running) ? announcement(job) : ''}
       </p>
       {shown && job && (
-        <Empty className="mt-4 w-full max-w-xl border border-solid p-4 md:p-6">
+        <Empty ref={frameBox} className="mt-4 w-full max-w-xl border border-solid p-4 md:p-6">
           <EmptyHeader>
             {spinning && (
               <EmptyMedia variant="icon">
@@ -432,7 +457,7 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
               </EmptyMedia>
             )}
             <EmptyTitle ref={frame} id={title} tabIndex={-1} className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-              {frameTitle(job, { waiting: waitingForTheDay, failed: problem === 'failed' })}
+              {heading}
             </EmptyTitle>
             <EmptyDescription className="text-foreground">
               {running && <progress aria-labelledby={title} className="block h-4 w-full accent-primary" value={job.percent} max={100} />}

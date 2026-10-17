@@ -56,13 +56,15 @@ export function estimateSentence(job: RerunJob): string | null {
 
 /**
  * What the frame of a run's progress is titled (the Rules page): what it is doing, or what became of it. A run that waits for the free plan's day to change (`waiting`: its own pause, or the
- * plan refusing a step) is paused until the allowance resets, which is at 00:00 UTC and not "tomorrow"; one that went wrong (`failed`) says so and keeps its place.
+ * plan refusing a step) is paused until the allowance resets, which is at 00:00 UTC and not "tomorrow"; one that went wrong (`failed`) says so and keeps its place; one that waits while the
+ * Admin changes a Rule (`holding`) is not working either, and says so (the page shows no spinner for it).
  */
-export function frameTitle(job: RerunJob, { waiting, failed }: { waiting: boolean; failed: boolean }): string {
+export function frameTitle(job: RerunJob, { waiting, failed, holding }: { waiting: boolean; failed: boolean; holding: boolean }): string {
   if (job.status === 'done') return 'Applied the Rules to all Transactions'
   if (job.status === 'stopped') return 'Stopped applying the Rules'
   if (waiting) return 'Paused until the allowance resets'
   if (failed) return 'Applying the Rules stopped with a problem'
+  if (holding) return 'Applying the Rules waits while you change a Rule'
   return 'Applying the Rules to all Transactions'
 }
 

@@ -588,10 +588,11 @@ test.describe('zoom', () => {
         await page.getByRole('button', { name: 'About Text contains' }).click()
         const hint = page.getByRole('dialog', { name: 'About Text contains' })
         await expect(hint).toContainText('A letter with an accent or macron')
-        expectInside(await hint.boundingBox(), { width, height })
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
         await settle(page)
+        // Its place is worked out after it is drawn (it is first drawn where it is not yet), so the box is read until it is on the screen and not once, as it appears.
+        await expect(async () => expectInside(await hint.boundingBox(), { width, height })).toPass()
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
