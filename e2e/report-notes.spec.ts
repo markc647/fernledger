@@ -1,8 +1,9 @@
-import type { BrowserContext, Locator, Page } from '@playwright/test'
-import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
+import type { BrowserContext, Page } from '@playwright/test'
+import { expect, signInAs, test } from './fixtures'
 import { helpButton } from './help-helpers'
 import {
   BALANCES_NOTES_TITLE,
+  closeNotes,
   ensureCategory,
   forgetKeptReportsAfterEach,
   importRows,
@@ -15,7 +16,8 @@ import {
 
 // A Report's notes (`ReportNotes`, src/components/report-frame.tsx, CODING_STANDARDS.md#ui): what a reader reads once about its figures is not on the screen under the Report's title, where it
 // would push the figures down. It is in a sheet, the same HelpSheet as the page's "?", behind a "?" beside the Report's own title, and on paper it stays a section before the figures. The
-// Spending by Category Report is tested through, and the other four are held to what they have in common. What each says, and the paper layout it takes part in, are in the Reports' own specs.
+// sheet is the page's component, tested once in help-sheet.spec.ts; here the Spending by Category Report is tested for where its "?" is and that Esc gives focus back to it, and each of the
+// five for what they share. What each says, and the paper layout it takes part in, are in the Reports' own specs.
 
 forgetKeptReportsAfterEach() // the Admin showing a Report keeps it on the Reports page's list, which every spec shares
 
@@ -61,19 +63,8 @@ async function showing(page: Page, c: Case) {
   return articleOf(page, c)
 }
 
-/** The paragraphs of the notes as the sheet has them, then closed. */
-async function sheetParagraphs(page: Page, report: Locator, c: Case) {
-  const sheet = await openNotes(page, report, c.title)
-  await expect(sheet.getByRole('heading', { name: c.title })).toBeVisible()
-  await expect(sheet.getByRole('region', { name: c.title })).toContainText(c.says)
-  const paragraphs = await sheet.getByRole('region', { name: c.title }).locator('p').allTextContents()
-  await page.keyboard.press('Escape')
-  await expect(sheet).toHaveCount(0)
-  return paragraphs
-}
-
 test.describe('the Spending by Category Report', () => {
-  test('has its notes behind a "?" beside its own title, not on the screen; the sheet opens from the right with Close at its foot, and gives focus back', async ({ page, context, baseURL }) => {
+  test('has its notes behind a "?" beside its own title, not on the screen, and Esc gives focus back to the "?"', async ({ page, context, baseURL }) => {
     await signInAs(context, 'admin')
     const accountId = await seed(context, baseURL!)
     await page.goto(address(SPENDING, accountId))
@@ -103,39 +94,13 @@ test.describe('the Spending by Category Report', () => {
     await expect(report.getByRole('region', { name: NOTES_TITLE })).toHaveCount(0)
     await expect(notesSheet(page)).toHaveCount(0)
 
-    // From the right, with the notes, and Close is the last thing in it, under the text, at its foot.
-    await own.click()
-    const sheet = notesSheet(page)
-    await expect(sheet).toBeVisible()
-    await settle(page) // the slide has ended
-    const viewport = page.viewportSize()!
-    const box = (await sheet.boundingBox())!
-    expect(viewport.width - (box.x + box.width), "the sheet's right edge is the window's, or the page's scrollbar's if it has one").toBeLessThanOrEqual(20)
-    expect(viewport.width - (box.x + box.width)).toBeGreaterThanOrEqual(0)
-    expect(box.x, 'and it leaves the page showing on the left').toBeGreaterThan(0)
+    // It opens with the notes, and Esc gives focus back to this "?" (the sheet itself, from the right with Close at its foot, is tested once, in e2e/help-sheet.spec.ts).
+    const sheet = await openNotes(page, report)
     const text = sheet.getByRole('region', { name: NOTES_TITLE })
     await expect(text).toContainText('money out less money back, such as a refund.')
     await expect(text).toContainText(SPENDING.says)
     await expect(text).toContainText("Transfers between your own Accounts, Pending Transactions, Income and Loans aren't counted.")
-    const close = sheet.getByRole('button', { name: 'Close' })
-    const closeBox = (await close.boundingBox())!
-    const textBox = (await text.boundingBox())!
-    expect(closeBox.y).toBeGreaterThanOrEqual(textBox.y + textBox.height)
-    expect(box.y + box.height - (closeBox.y + closeBox.height), "close to the sheet's bottom edge").toBeLessThan(40)
-    await expect(sheet.locator('button, a[href], [tabindex="0"]').last()).toHaveText('Close')
-    await noAxeViolations(page, { within: '[role="dialog"]' }) // behind a modal, the rest of the page is hidden from a screen reader
-
-    // Esc, and Close, give focus back to the "?" that opened it; the keyboard opens it too.
-    await page.keyboard.press('Escape')
-    await expect(sheet).toHaveCount(0)
-    await expect(own).toBeFocused()
-    await own.click()
-    await close.click()
-    await expect(sheet).toHaveCount(0)
-    await expect(own).toBeFocused()
-    await page.keyboard.press('Enter')
-    await expect(sheet).toBeVisible()
-    await page.keyboard.press('Escape')
+    await closeNotes(page)
     await expect(own).toBeFocused()
   })
 })
@@ -151,8 +116,12 @@ for (const c of [SPENDING, ...OTHERS]) {
     await expect(notesButton(report, c.title)).toBeVisible()
     await expect(report.getByText(c.says)).toBeHidden() // not on the screen
     await expect(report.getByRole('region', { name: c.title })).toHaveCount(0)
-    const onScreen = await sheetParagraphs(page, report, c)
+    const sheet = await openNotes(page, report, c.title)
+    await expect(sheet.getByRole('heading', { name: c.title })).toBeVisible()
+    await expect(sheet.getByRole('region', { name: c.title })).toContainText(c.says)
+    const onScreen = await sheet.getByRole('region', { name: c.title }).locator('p').allTextContents()
     expect(onScreen.length).toBeGreaterThan(1)
+    await closeNotes(page, c.title)
 
     await page.emulateMedia({ media: 'print' })
     const printed = report.getByRole('region', { name: c.title })

@@ -18,7 +18,7 @@ export function HelpHeading({ children }: { children: ReactNode }) {
 /**
  * The "?" button and the sheet it opens, from the right, with `children` for its text and a Close button at the foot (always in reach: the text scrolls, and Close does not). Esc, Close or
  * a tap on the page beside it closes the sheet, and focus goes back to the "?". The sheet is a dialog, so it opens with focus on itself and the text is read from the top; Tab then reaches the
- * text's links and Close. The "?" is a touch target (44px, a circle), as every button is. Use `PageHeading`, which puts the button where it belongs.
+ * text's links and Close. The "?" is a touch target (44px, a circle), as every button is. Use `PageHeading`, which puts the button where it belongs, or `ReportFrame`'s `notes`.
  * `label` is what the "?" is called and the sheet is titled when it is not the page's own: a Report's notes ("About these figures", beside the Report's title in `ReportFrame`).
  */
 export function HelpSheet({ children, label = HELP_LABEL }: { children: ReactNode; label?: string }) {

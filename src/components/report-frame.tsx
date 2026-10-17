@@ -17,8 +17,8 @@ const Identity = createContext<ReportIdentity | null>(null)
 /**
  * What a Report says about its figures that a reader reads once: what is counted, how a figure is worked out, what is left out. `title` is "About these figures" ("About these
  * balances" for Balances) and `body` is its paragraphs (plain `<p>`s). It is written once and shown twice (`ReportFrame`'s `notes`): on screen in a sheet behind the "?" beside the
- * Report's title, so the figures are not pushed down the page by it, and on paper as a section before the figures, because a printout has no "?". The Report's route makes it,
- * because the route has the figures, so notes can say something that depends on them.
+ * Report's title, so the figures are not pushed down the page by it, and on paper as a section before the figures, because a printout has no "?". The Report's component exports its
+ * notes (a constant) and its route passes them to the frame.
  */
 export type ReportNotes = { title: string; body: ReactNode }
 
@@ -106,8 +106,7 @@ export function ReportFrame({
   const me = useQuery(meQuery)
   const appTitle = settings.data?.app_title
   const range = describeRange(from, to)
-  // Who is signed in is waited for too: it says whether the Admin's showing is kept, and whether the live message mentions the form.
-  const generated = me.data ? generatedLine(generatedAt) : undefined
+  const generated = generatedLine(generatedAt)
 
   // The page's title names the file "Save as PDF" suggests, and it is what a browser's own print header shows.
   const title = appTitle ? reportHeading({ appTitle, name, accounts: accountsInTitle, range }) : undefined
@@ -132,7 +131,10 @@ export function ReportFrame({
     if (scroll.consume()) scroll.show()
   }, [generatedAt, scroll])
 
-  const identity = useMemo(() => (appTitle && generated ? { appTitle, name, range, generated } : null), [appTitle, name, range, generated])
+  // The Report waits for who is signed in as well as for the app title, though it no longer prints who: the Admin or a Member decides where the Print button is (in the form beside "Show
+  // Report", or above a Member's Report), what the live message says ("below the form"), and whether this showing is kept. Without it the button would start above the Report and move.
+  const known = me.data !== undefined
+  const identity = useMemo(() => (appTitle && known ? { appTitle, name, range, generated } : null), [appTitle, known, name, range, generated])
 
   // The Report is on the page once it can say what it is. Each time the Admin shows it (it arrives, or is read again) its choices are kept for the Reports page, and updated if they were
   // already (a Member's view is not a showing: the Worker would refuse it). A Report is the choices and not the figures, so this is all that is kept.
