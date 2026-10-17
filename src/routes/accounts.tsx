@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
-import { RowAction, RowActions } from '@/components/row-actions'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { HttpError, meQuery } from '@/lib/me'
@@ -24,16 +24,10 @@ function Accounts() {
   const { data: accounts, error } = useQuery(accountsQuery)
   const [renaming, setRenaming] = useState<number | null>(null)
 
-  // Back to the row's Actions button when the form is closed, saved or not, so keyboard focus is never lost.
-  const focusAfter = useRef<number | null>(null)
-  useEffect(() => {
-    if (renaming !== null || focusAfter.current === null) return
-    const id = focusAfter.current
-    focusAfter.current = null
-    document.getElementById(actionsId(id))?.focus()
-  }, [renaming])
+  // Back to the row's Actions button when the form is closed, saved or not.
+  const focusBack = useFocusBack(renaming)
   const closeForm = (id: number) => {
-    focusAfter.current = id
+    focusBack(actionsId(id))
     setRenaming(null)
   }
 

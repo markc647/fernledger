@@ -16,7 +16,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { Amount } from '@/components/amount'
 import { EditPanel } from '@/components/edit-panel'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
-import { RowAction, RowActions } from '@/components/row-actions'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -101,7 +101,7 @@ function NoteCell({ row }: { row: Row }) {
 }
 
 /**
- * The Note column asks for the least room it can have, so a table gives it what its heading and the button need and no more. The plain table's heading wraps anywhere (`overflow-wrap` in
+ * The Note column asks for the least room it can have, so a table gives it what its heading and the button need and no more. A table's heading wraps anywhere (`overflow-wrap` in
  * src/index.css), so `whitespace-nowrap` is what keeps "Note" whole when no row on the page has a button to hold the column open.
  */
 const NOTE_COLUMN = 'w-px whitespace-nowrap'
@@ -109,7 +109,7 @@ const NOTE_COLUMN = 'w-px whitespace-nowrap'
 /** The id of a row's "⋯" button, which focus goes back to when the Edit panel it opened is closed. */
 const actionsId = (id: number) => `transaction-${id}-actions`
 
-const hasFilter =(search: TransactionSearch) => search.account !== undefined || search.category !== undefined || search.transfers !== undefined || !!search.from || !!search.to || !!search.q
+const hasFilter = (search: TransactionSearch) => search.account !== undefined || search.category !== undefined || search.transfers !== undefined || !!search.from || !!search.to || !!search.q
 
 /**
  * Transactions, a page at a time, with their Category and Note. `search` is what is asked for (filters, sort, page) and
@@ -151,13 +151,7 @@ export function TransactionList({
 
   // After a save or cancel, focus goes back to the row's Actions button; if the row has left this list (it was categorised), to the status line.
   const status = useRef<HTMLParagraphElement>(null)
-  const returnTo = useRef<number | null>(null)
-  useEffect(() => {
-    if (editing !== null || returnTo.current === null) return
-    const button = document.getElementById(actionsId(returnTo.current))
-    returnTo.current = null
-    ;(button ?? status.current)?.focus()
-  }, [editing, data])
+  const focusBack = useFocusBack(editing, status, data)
 
   // After Previous or Next, the list starts again at its top. If the press left that button disabled (the first or last page)
   // focus would be lost, so it moves to the "Showing …" line, which also announces the new page.
@@ -272,7 +266,7 @@ export function TransactionList({
   })
 
   const finish = (row: Row, message: string) => {
-    returnTo.current = row.id
+    focusBack(actionsId(row.id))
     setSaved(message)
     setEditing(null)
   }

@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
-import { RowAction, RowActions } from '@/components/row-actions'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -60,17 +60,11 @@ function Budgets() {
   // Until `me` arrives nobody is the Admin: the controls fail closed. The API refuses a Member's write whatever the page shows.
   const isAdmin = me?.role === 'admin'
 
-  // Back to the button that opened the panel (or, if that is gone, the message), so keyboard focus is never lost.
+  // Back to the button that opened the panel (or, if that is gone, the message).
   const status = useRef<HTMLParagraphElement>(null)
-  const focusAfter = useRef<{ id?: string } | null>(null)
-  useEffect(() => {
-    if (editing !== null || focusAfter.current === null) return
-    const id = focusAfter.current.id
-    focusAfter.current = null
-    ;((id ? document.getElementById(id) : null) ?? status.current)?.focus()
-  }, [editing])
+  const focusBack = useFocusBack(editing, status)
   const done = (message: string, focusId?: string) => {
-    focusAfter.current = { id: focusId }
+    focusBack(focusId)
     setNotice(message)
     setEditing(null)
   }

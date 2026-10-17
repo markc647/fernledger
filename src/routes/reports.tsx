@@ -4,7 +4,7 @@ import { FolderOpen, Printer, Save, Share2, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
-import { RowAction, RowActions } from '@/components/row-actions'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
 import { Button } from '@/components/ui/button'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { api } from '@/lib/api'
@@ -32,17 +32,11 @@ function Reports() {
   const [deleting, setDeleting] = useState<number | null>(null)
   const [notice, setNotice] = useState('')
 
-  // Back to the row's Actions button when a question is closed without a change (or, if its row is gone, the message), so keyboard focus is never lost.
+  // Back to the row's Actions button when a question is closed without a change (or, if its row is gone, the message).
   const status = useRef<HTMLParagraphElement>(null)
-  const focusAfter = useRef<{ id?: string } | null>(null)
-  useEffect(() => {
-    if (deleting !== null || focusAfter.current === null) return
-    const id = focusAfter.current.id
-    focusAfter.current = null
-    ;((id ? document.getElementById(id) : null) ?? status.current)?.focus()
-  }, [deleting])
+  const focusBack = useFocusBack(deleting, status)
   const done = (message: string, focusId?: string) => {
-    focusAfter.current = { id: focusId }
+    focusBack(focusId)
     setNotice(message)
     setDeleting(null)
   }
