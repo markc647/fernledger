@@ -105,7 +105,7 @@ An Admin-defined pattern that gives matching Transactions a Category, or marks t
 _Avoid_: Filter, mapping
 
 **Re-run**:
-Applying the Rules as they are now to every Transaction already on file, in steps that keep their place, so a Rule change reaches the past as well as new Imports. It gives each Transaction the result of the first Rule that matches, or none, and never touches an Override or a Note. The Rules page's button for it says "Apply the Rules to all Transactions", which is the same thing in the words an Admin would use. How it runs is in README [How it works](README.md#how-it-works).
+Applying the Rules as they are now to every Transaction already on file, in steps that keep their place, so a Rule change reaches the past as well as new Imports. It gives each Transaction the result of the first Rule that matches, or none, and never touches an Override or a Note. The Rules page's button for it, beside "Add a Rule", says "Apply the Rules to all Transactions", which is the same thing in the words an Admin would use; it asks first. How it runs is in README [How it works](README.md#how-it-works).
 _Avoid_: Reapply, backfill, refresh
 
 **Override**:
@@ -179,7 +179,7 @@ A value the Admin chooses in the app, such as the app title or the About your da
 _Avoid_: Preference, option, config
 
 **D1 usage bar**:
-What the Rules page shows the Admin, in the "Apply the Rules to all Transactions" panel, when the Deployer has added the two Cloudflare secrets for it: the Cloudflare account's rows read and rows written today, against D1 Free's 5,000,000 and 100,000 a day, as bars with a Low, Medium or High badge and the figures in words. It counts the whole account, runs a few minutes behind, and is optional, so its Setup needed can be ignored (ADR 0010).
+What the Rules page shows the Admin, in the question it asks before "Apply the Rules to all Transactions", when the Deployer has added the two Cloudflare secrets for it: the Cloudflare account's rows read and rows written today, against D1 Free's 5,000,000 and 100,000 a day, as bars with a Low, Medium or High badge and the figures in words. It counts the whole account, runs a few minutes behind, and is optional, so its Setup needed can be ignored (ADR 0010).
 _Avoid_: Quota meter, analytics
 
 **Setup needed**:
