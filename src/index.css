@@ -273,9 +273,12 @@
 /* A menu, a sheet or a question locks the page's scroll while it is open (Radix, with react-remove-scroll). That hides the page's scrollbar, and to make up for the room it took the
    library adds the scrollbar's width to the body's right margin (`body[data-scroll-locked]`, with `!important`). The page keeps that room itself (`scrollbar-gutter: stable`, above), so the
    margin made up for room that was still there, and the header, the page and the header's buttons all moved sideways when anything opened (e2e/scroll-lock.spec.ts). Nothing here is
-   in a layer and `html body` is more specific than the library's own selector, so this wins over its `!important` and holds for every overlay that locks the scroll, now and later. */
-html body[data-scroll-locked] {
-  margin-right: 0 !important;
+   in a layer and `html body` is more specific than the library's own selector, so this wins over its `!important` and holds for every overlay that locks the scroll, now and later. Only where the
+   browser keeps the gutter: one without `scrollbar-gutter` has nothing reserved, and the library's margin is what stops the page from widening when the scrollbar goes. */
+@supports (scrollbar-gutter: stable) {
+  html body[data-scroll-locked] {
+    margin-right: 0 !important;
+  }
 }
 
 /* Reduced motion: no animation or smooth scrolling for anyone who asks the device for less. */
@@ -355,7 +358,7 @@ html body[data-scroll-locked] {
 
 /* Reports (src/components/report-frame.tsx; README: Reports). A Report is a named page, so these margins and the number in
    them are the Report's alone: How to sign in keeps the browser's own margins.
-   Everything a reader needs to identify a page (what it is, which Account and dates, who generated it and when) is in the page
+   Everything a reader needs to identify a page (what it is, which Account and dates, when it was generated) is in the page
    itself, in each table's heading, so it comes back on every page in every browser, and the text is 12pt or more. The one thing
    that comes from the page margin is "Page 2 of 5": CSS margin boxes, which only Chrome and Edge 131 and later draw. Firefox and
    Safari print the Report without them, and can number the pages in their own header and footer if the reader turns that on
