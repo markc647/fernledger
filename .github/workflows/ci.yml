@@ -1,9 +1,16 @@
 name: CI
 
 on:
+  # Push the branch; CI runs the full suite on it. A push uses the workflow file in the pushed commit, so this works from a branch that main has not caught up with.
   push:
-    branches: [main]
+    branches: [main, 'ui/**', 'fix/**', 'chore/**', 'ticket/**', 'update/**']
   pull_request:
+  workflow_dispatch: # runs it by hand from the Actions tab, once this file is on main
+
+# One run for a branch: a push to a branch that has a pull request starts both a push run and a pull request run, and the newer replaces the older.
+concurrency:
+  group: ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -17,9 +24,22 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      - run: npm run check
 
+  # Browser tests (Playwright + axe) are slower than `check`, so they run as their own job. All run in light; the ones tagged @theme run in dark too (playwright.config.ts).
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  # gitleaks runs twice on purpose: `check` scans the working tree, this job scans git history.
   secrets-scan:
     runs-on: ubuntu-latest
     steps:
@@ -29,3 +49,4 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.24.3 # keep equal to VERSION in scripts/gitleaks.mjs

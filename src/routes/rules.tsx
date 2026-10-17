@@ -1,0 +1,833 @@
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createFileRoute } from '@tanstack/react-router'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { Amount } from '@/components/amount'
+import { D1UsageBar } from '@/components/d1-usage-bar'
+import { FieldLabel } from '@/components/field-label'
+import { HelpHeading, PageHeading } from '@/components/help-sheet'
+import { ResponsiveTable, type Column } from '@/components/responsive-table'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
+import { DragHandle, SortableFrame, SortableRow } from '@/components/sortable-rows'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
+import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { Input } from '@/components/ui/input'
+import { Spinner } from '@/components/ui/spinner'
+import { api } from '@/lib/api'
+import { formatCount, formatDate } from '@/lib/format'
+import { HttpError, meQuery, reasonOf } from '@/lib/me'
+import { categoriesQuery } from '@/lib/queries'
+import { announcement, estimateSentence, frameTitle, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
+import { dollarsForInput, DRAG_INSTRUCTIONS, DRAG_ROLE, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, type RuleView } from '@/lib/rules'
+
+export const Route = createFileRoute('/rules')({
+  component: Rules,
+  staticData: { nav: { label: 'Rules', group: 'setup', adminOnly: true, order: 45 } },
+})
+
+/** The Rules in use, in the order they are checked. */
+const rulesQuery = queryOptions({
+  queryKey: ['rules'],
+  queryFn: async (): Promise<RuleView[]> => {
+    const res = await api.rules.$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+/** The latest time the Rules were applied to every Transaction (worker/rule-rerun.ts), running or finished; null if never. */
+const rerunQuery = queryOptions({
+  queryKey: ['rerun'],
+  queryFn: async (): Promise<RerunJob | null> => {
+    const res = await api.rules.rerun.$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return (await res.json()).job
+  },
+  // The page itself keeps this up to date while a run is going; a refetch in the middle of that would only show an older step, and one
+  // still out when a step answers is cancelled in the loop below.
+  staleTime: Infinity,
+  refetchOnWindowFocus: false,
+})
+
+const INTRO = 'A Rule is used for new Transactions as they are imported. The Transactions you already have change only when you choose Apply the Rules to all Transactions.'
+
+/** The page's help sheet: what a Rule is and when it is used, and, under its own heading, what applying the Rules does. */
+function RulesHelp() {
+  return (
+    <>
+      <p>
+        A Rule puts the Transactions that match it into a Category, or marks them as Transfers. Rules are checked from the top of the list, and the first one that matches is used. A Category you set by hand
+        on a Transaction (an Override) always beats a Rule, and a Rule beats the category Akahu suggests, if you use Akahu Sync. So does Not a Transfer, which the Admin chooses on a Transaction a Rule wrongly marks as a Transfer.
+      </p>
+      <p>{INTRO}</p>
+      <HelpHeading>Apply the Rules to all Transactions</HelpHeading>
+      <p>
+        Fernledger goes through every Transaction you have, a few at a time, and gives each the Category of the first Rule that matches it. A Transaction that no Rule matches any more loses the
+        Category a Rule gave it. A Category you set by hand (an Override) is never changed.
+      </p>
+      <p>Change the Rules first, then apply them once.</p>
+    </>
+  )
+}
+
+/** Said after any change to the Rules, and before one while a run is going: that run starts again, so it uses the change. */
+const THEN_APPLY = 'To use the change on the Transactions you already have, choose Apply the Rules to all Transactions, below.'
+const RUN_GOING_BEFORE = 'A run is going. Saving starts it again from the first Transaction.'
+const afterChange = (runGoing: boolean) => (runGoing ? 'The run that is going starts again from the first Transaction, so that it uses the change.' : THEN_APPLY)
+
+const sentence = (parts: string[]) => {
+  const text = parts.join(' and ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+type Item = { rule: RuleView; number: number; first: boolean; last: boolean }
+type Editing = { kind: 'add' } | { kind: 'edit'; rule: RuleView } | null
+
+function Rules() {
+  const { data: me } = useQuery(meQuery)
+  // Until `me` arrives nobody is the Admin, so nothing is shown (fail closed). Hiding the navigation is a courtesy: the
+  // API refuses a Member's write whatever this page shows.
+  if (!me) return null
+  return (
+    <>
+      <PageHeading help={me.role === 'admin' && <RulesHelp />}>Rules</PageHeading>
+      {me.role === 'admin' ? <AdminRules /> : <p className="mt-2">Only the Admin can use this page.</p>}
+    </>
+  )
+}
+
+function AdminRules() {
+  const queryClient = useQueryClient()
+  const { data: rules, error } = useQuery(rulesQuery)
+  const [editing, setEditing] = useState<Editing>(null)
+  const [removing, setRemoving] = useState<number | null>(null)
+  const [notice, setNotice] = useState('')
+  const [problem, setProblem] = useState('')
+  // While a run is going, a change to the Rules sends it back to the first Transaction, and the form and the confirmation say so.
+  const { data: rerun } = useQuery(rerunQuery)
+  const runGoing = rerun?.status === 'running'
+
+  // After a form or a confirmation closes, focus goes back to the button that opened it (or, if that is gone, to the message).
+  const status = useRef<HTMLParagraphElement>(null)
+  const focusBack = useFocusBack(editing ?? removing, status)
+  const closed = (message: string, focusId?: string) => {
+    focusBack(focusId)
+    setNotice(message)
+    setEditing(null)
+    setRemoving(null)
+  }
+
+  // After a move the Rule is somewhere else in the list: keep keyboard focus on a control that still works for it (its Actions button after a Move up or Move down, its handle after a drag).
+  const moveFocus = useRef<string | null>(null)
+  // The order is shown as soon as it is chosen, so a Rule that was dropped stays where it was dropped while the Worker saves. If the Worker refuses it or the save fails, the order before
+  // comes back, and the Worker's own order is read again (it may not be the one before, if the Rules changed meanwhile).
+  const move = useMutation({
+    mutationFn: async (change: { ids: number[]; message: string }) => {
+      const res = await api.rules.order.$put({ json: { ids: change.ids } })
+      if (!res.ok) throw new HttpError(res.status)
+    },
+    onMutate: async (change) => {
+      await queryClient.cancelQueries({ queryKey: rulesQuery.queryKey })
+      const before = queryClient.getQueryData(rulesQuery.queryKey)
+      if (before) queryClient.setQueryData(rulesQuery.queryKey, inOrder(before, change.ids))
+      return { before }
+    },
+    onSuccess: async (_data, change) => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
+      // An earlier failure's alert is taken away when a move works, not as it is dropped: taking the line away moves the table up the page under the pointer.
+      setProblem('')
+      setNotice(change.message)
+    },
+    onError: (failure, _change, context) => {
+      if (context?.before) queryClient.setQueryData(rulesQuery.queryKey, context.before)
+      void queryClient.invalidateQueries({ queryKey: rulesQuery.queryKey })
+      // What was said of the last change is not true of this one. (It is cleared here and not as a Rule is dropped, because taking the line away moves the table up the page under the pointer.)
+      setNotice('')
+      setProblem(failure instanceof HttpError && (failure.status === 400 || failure.status === 409) ? 'The Rules have changed since this page loaded. The list is up to date now; try again.' : 'That did not work. Try again.')
+    },
+  })
+
+  // The controls are off while a move is in flight, so this waits until it has finished and the order on the page is the Worker's.
+  useEffect(() => {
+    if (!moveFocus.current || move.isPending) return
+    const target = document.getElementById(moveFocus.current)
+    moveFocus.current = null
+    target?.focus()
+  }, [rules, move.isPending])
+
+  const items: Item[] = (rules ?? []).map((rule, i, all) => ({ rule, number: i + 1, first: i === 0, last: i === all.length - 1 }))
+  const ids = items.map((i) => i.rule.id)
+  const reorder = (next: number[], message: string, focus: string) => {
+    moveFocus.current = focus
+    move.mutate({ ids: next, message: `${message} ${afterChange(runGoing)}` })
+  }
+  /** One place up or down: the menu's Move up and Move down. */
+  const moveRule = (item: Item, by: -1 | 1) => {
+    const next = moveRuleBy(ids, item.rule.id, by)
+    if (next) reorder(next, `Moved Rule ${item.number} ${by < 0 ? 'up' : 'down'}. It is now Rule ${item.number + by} of ${items.length}.`, `rule-${item.rule.id}-actions`)
+  }
+  /** A Rule dropped on another's place. */
+  const dropRule = (id: number, overId: number) => {
+    const next = moveRuleTo(ids, id, overId)
+    if (next) reorder(next, `Moved Rule ${ids.indexOf(id) + 1} to position ${next.indexOf(id) + 1} of ${items.length}.`, `rule-${id}-grip`)
+  }
+
+  // With one Rule there is nothing to put in order, so no handle.
+  const handle: Column<Item>[] = [{ key: 'reorder', header: 'Reorder', handle: true, cell: (item) => <DragHandle id={`rule-${item.rule.id}-grip`} label={`Drag to reorder Rule ${item.number}`} /> }]
+  const columns: Column<Item>[] = [
+    ...(items.length > 1 ? handle : []),
+    { key: 'order', header: 'Order', className: 'whitespace-nowrap', cell: (item) => item.number },
+    { key: 'when', header: 'When', cell: (item) => sentence(ruleConditions(item.rule)) },
+    { key: 'then', header: 'Then', cell: (item) => ruleResult(item.rule) },
+    {
+      key: 'actions',
+      header: 'Action',
+      align: 'end',
+      cell: (item) =>
+        removing === item.rule.id ? (
+          <RemoveConfirm item={item} runGoing={runGoing} onDone={(message) => closed(message)} onCancel={() => closed('', `rule-${item.rule.id}-actions`)} />
+        ) : (
+          <RowActions row={`Rule ${item.number}`} id={`rule-${item.rule.id}-actions`}>
+            <RowAction run={() => { setNotice(''); setProblem(''); setEditing({ kind: 'edit', rule: item.rule }) }}>Edit</RowAction>
+            {/* The single-pointer way to move a Rule, for anyone who cannot drag (WCAG 2.5.7). */}
+            <RowAction disabled={item.first || move.isPending} run={() => moveRule(item, -1)}>
+              Move up
+            </RowAction>
+            <RowAction disabled={item.last || move.isPending} run={() => moveRule(item, 1)}>
+              Move down
+            </RowAction>
+            <DropdownMenuSeparator />
+            <RowAction variant="destructive" run={() => { setNotice(''); setProblem(''); setRemoving(item.rule.id) }}>Remove</RowAction>
+          </RowActions>
+        ),
+    },
+  ]
+
+  return (
+    <>
+      {/* Always in the page, so a screen reader announces the text when it appears. */}
+      <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+        {notice}
+      </p>
+      {problem && <p role="alert" className="mt-2 font-medium text-destructive">{problem}</p>}
+      {/* While a Rule is being changed (the form open, a removal being confirmed or a move going through) the run waits: what it did would be done again. */}
+      <ApplyToHistory holding={editing !== null || removing !== null || move.isPending}>
+        {/* Off, not gone, while a form is open (it is the form's own): the button beside it stays where it is under the pointer. */}
+        <Button id="add-rule-button" size="touch" disabled={editing !== null} onClick={() => { setNotice(''); setProblem(''); setRemoving(null); setEditing({ kind: 'add' }) }}>
+          Add a Rule
+        </Button>
+      </ApplyToHistory>
+      {editing !== null && (
+        <RuleForm
+          key={editing.kind === 'edit' ? editing.rule.id : 'add'}
+          rule={editing.kind === 'edit' ? editing.rule : undefined}
+          runGoing={runGoing}
+          onDone={(message) => closed(message, editing.kind === 'edit' ? `rule-${editing.rule.id}-actions` : 'add-rule-button')}
+          onCancel={() => closed('', editing.kind === 'edit' ? `rule-${editing.rule.id}-actions` : 'add-rule-button')}
+        />
+      )}
+      <div className="mt-6">
+        {error ? (
+          <p role="alert">Fernledger couldn't load the Rules. Reload the page to try again.</p>
+        ) : !rules ? (
+          <p role="status">Loading…</p>
+        ) : (
+          <>
+            {items.length > 1 && <p className="mb-3">To change the order, drag a Rule by its handle, or choose Move up or Move down in its Actions menu.</p>}
+            <SortableFrame ids={ids} disabled={move.isPending} onReorder={dropRule} announcements={dragAnnouncements(ids)} instructions={DRAG_INSTRUCTIONS} roleDescription={DRAG_ROLE}>
+              <ResponsiveTable
+                caption="Rules, in the order they are checked"
+                columns={columns}
+                rows={items}
+                getRowKey={(item) => item.rule.id}
+                emptyMessage="There are no Rules yet. Add one above."
+                RowElement={SortableRow}
+              />
+            </SortableFrame>
+          </>
+        )}
+      </div>
+    </>
+  )
+}
+
+/**
+ * Applying the Rules to every Transaction on file. The Worker does it a chunk at a time, one chunk for each request (worker/rule-rerun.ts), so
+ * this page asks for the next chunk for as long as a run is going and it is open, and shows how far it has got. A run is not lost when the page
+ * is closed: it keeps its place and the Worker carries on by itself, slowly, and the page carries on again where it was when it is opened.
+ * `holding` is true while the Admin is changing a Rule: the run waits, since a change sends it back to the start.
+ * A run pauses itself when it has used its share of the free plan's day (the Worker says so in the job, `paused`), and the plan can
+ * refuse a step outright (429) when the day's allowance is gone; either way the page asks again when the day changes, at 00:00 UTC.
+ * The button that starts a run is on the row of the Rules page's buttons, after `children` (Add a Rule); it asks first, and the question shows how much of that day the Cloudflare
+ * account has used (D1UsageBar, if the Deployer turned it on). A run that is going turns the button off, so the figures are also in the frame of a run that is paused for the allowance
+ * (its own pause, or the plan refusing a step), which is when they matter. Each is read when it shows (the query is dropped as it goes: gcTime 0), so they are never the figures from before:
+ * the question opening, the run pausing, and Check again; nothing reads them at each step, or on a timer.
+ * Under the row, a run that is going, paused, or has ended since this page was opened is shown in a frame (Empty): a spinner while it works, what it says, and its Stop button. The frame is
+ * titled for its state (frameTitle), and takes focus when the Admin starts or stops a run, so the words they caused are what a screen reader reads and keyboard focus is not lost.
+ */
+function ApplyToHistory({ holding, children }: { holding: boolean; children?: ReactNode }) {
+  const queryClient = useQueryClient()
+  const { data: job, error } = useQuery(rerunQuery)
+  // 'limit' is the free plan's allowance for the day being used up; the run keeps its place either way.
+  const [problem, setProblem] = useState<'' | 'limit' | 'failed'>('')
+  const [attempt, setAttempt] = useState(0)
+  // Words are announced for a run the Admin is watching, not for the last finished run found when the page opens.
+  const [watching, setWatching] = useState(false)
+  // How many times the page has asked whether the day has changed and been told to wait, since the run was last moving.
+  const asked = useRef(0)
+  // Where the question opens with focus: the answer that carries on, so that Enter is the answer.
+  const apply = useRef<HTMLButtonElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const frame = useRef<HTMLHeadingElement>(null)
+  const frameBox = useRef<HTMLDivElement>(null)
+  const title = useId()
+  // Where focus goes once the page has drawn what the Admin has just done: the question has closed (or a Stop was pressed) and the button that was pressed is off, so keyboard focus
+  // goes to the frame's title rather than being lost; if Apply could not start a run, it goes back to the button, which Radix cannot do while it is off.
+  const focusNext = useRef<'frame' | 'trigger' | null>(null)
+  useEffect(() => {
+    const target = focusNext.current === 'frame' ? frame.current : focusNext.current === 'trigger' && !trigger.current?.disabled ? trigger.current : null
+    if (!target) return
+    focusNext.current = null
+    target.focus()
+  })
+  // Where focus last was: in the frame or not. A run that ends by itself takes away the button focus was on (Stop), and focus then drops to the page; the browser says nothing of that (it
+  // says the same for a click on the page), so the page watches where focus goes (a key into another control, a press outside) and knows that if it was last in the frame, it was lost there.
+  const focusWasInFrame = useRef(false)
+  useEffect(() => {
+    const note = (event: Event) => {
+      focusWasInFrame.current = event.target instanceof Node && frameBox.current?.contains(event.target) === true
+    }
+    document.addEventListener('focusin', note)
+    document.addEventListener('pointerdown', note)
+    return () => {
+      document.removeEventListener('focusin', note)
+      document.removeEventListener('pointerdown', note)
+    }
+  }, [])
+
+  const start = useMutation({
+    mutationFn: async () => {
+      const res = await api.rules.rerun.$post({ json: {} })
+      if (res.status === 409) return null // one is already going (another page, or a second click): carry on with that one
+      if (!res.ok) throw new HttpError(res.status)
+      return (await res.json()).job
+    },
+    onSuccess: async (started) => {
+      setProblem('')
+      setWatching(true)
+      focusNext.current = 'frame'
+      if (started) {
+        await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
+        queryClient.setQueryData(rerunQuery.queryKey, started)
+      } else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
+    },
+    onError: () => {
+      focusNext.current = 'trigger'
+    },
+  })
+
+  const stop = useMutation({
+    mutationFn: async () => {
+      const res = await api.rules.rerun.stop.$post({ json: {} })
+      if (res.status === 409) return null // it ended first
+      if (!res.ok) throw new HttpError(res.status)
+      return (await res.json()).job
+    },
+    onSuccess: async (stopped) => {
+      focusNext.current = 'frame'
+      if (stopped) {
+        await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
+        queryClient.setQueryData(rerunQuery.queryKey, stopped)
+      } else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
+    },
+  })
+
+  const running = job?.status === 'running'
+  const waitingForTheDay = running && (job?.paused === true || problem === 'limit')
+  useEffect(() => {
+    if (running) setWatching(true)
+  }, [running])
+
+  // The loop: one step at a time, never two at once, until the job is done, something goes wrong, or the page goes. It depends on whether a
+  // run is going and not on how far it has got, so a step's answer does not restart it. It waits while a Rule is being changed, and while the
+  // run is waiting for the day to change.
+  const paused = job?.paused === true
+  useEffect(() => {
+    if (!running || paused || problem || holding) return
+    let stopped = false
+    ;(async () => {
+      while (!stopped) {
+        const res = await api.rules.rerun.step.$post({ json: {} })
+        if (stopped) return
+        if (!res.ok) return setProblem(res.status === 429 ? 'limit' : 'failed')
+        const { job: next } = await res.json()
+        if (stopped) return
+        // A reading of the job asked for before this step (the one asked for when the day changes, say) is dropped: landing after this
+        // answer, it would put a finished run back to running and ask for another step.
+        await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
+        if (stopped) return
+        queryClient.setQueryData(rerunQuery.queryKey, next)
+        if (!next?.paused) asked.current = 0
+        if (next?.status !== 'running' || next.paused) {
+          // Every Category shown in a list may have changed.
+          await queryClient.invalidateQueries({ queryKey: ['transactions'] })
+          return
+        }
+      }
+    })().catch(() => {
+      if (!stopped) setProblem('failed')
+    })
+    return () => {
+      stopped = true
+    }
+  }, [running, paused, problem, holding, attempt, queryClient])
+
+  // When the day changes (00:00 UTC) a run that was waiting for it is asked again. A page left open overnight carries it on. This device's
+  // clock may be ahead of the Worker's, in which case the answer can still be to wait: the page then asks every few minutes (waitBeforeAsking),
+  // and `attempt` is among the dependencies so that the timer is set again each time it has gone off.
+  useEffect(() => {
+    if (!waitingForTheDay) return
+    const timer = setTimeout(() => {
+      asked.current += 1
+      setProblem('')
+      setAttempt((n) => n + 1)
+      void queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
+    }, waitBeforeAsking(new Date(), asked.current))
+    return () => clearTimeout(timer)
+  }, [waitingForTheDay, attempt, queryClient])
+
+  const note = job ? restartNote(job) : null
+  const estimate = job && !problem ? estimateSentence(job) : null
+  // The frame is for a run that is going and one that has ended since this page was opened. A run that ended before it was opened is not news, and the Rules page has no history of runs (the Change Log does).
+  const shown = job ? watching || running : false
+  // It works only while it is asking for steps: not when it waits for the day, or for a Rule to be changed, or has gone wrong.
+  const spinning = running && !waitingForTheDay && !holding && problem !== 'failed'
+  const heading = job ? frameTitle(job, { waiting: waitingForTheDay, failed: problem === 'failed', holding: running && holding }) : ''
+  // When the frame changes what it is (it is titled for what it is) and focus was in it, focus is on the control that has gone (Stop, Try again) or on the page: it goes to the title, as it does
+  // when the Admin starts or stops a run. Focus that has gone to another control, or that the Admin took to the page, is left where it is.
+  useEffect(() => {
+    if (!focusWasInFrame.current) return
+    const active = document.activeElement
+    if (active && active !== document.body) return // on a control that is still there, in the frame or out of it
+    focusWasInFrame.current = false
+    frame.current?.focus()
+  }, [heading])
+  return (
+    <>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {children}
+        {/* Asks first: the Admin reads how much of the free plan's day is left before sending the run off. Enter, with focus on Apply the Rules, is the answer. */}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button ref={trigger} className="max-w-full py-2 whitespace-normal" size="touch" disabled={running || start.isPending || job === undefined}>
+              Apply the Rules to all Transactions
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent
+            onOpenAutoFocus={(event) => {
+              event.preventDefault()
+              apply.current?.focus()
+            }}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>Apply the Rules to all Transactions</AlertDialogTitle>
+              <AlertDialogDescription>Goes through every Transaction, a few at a time. A Category you set by hand is never changed.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <D1UsageBar />
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction ref={apply} onClick={() => start.mutate()}>
+                Apply the Rules
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+      {/* Always in the page, so a screen reader announces the words when they change; it is not drawn, because the frame says them. They change a few times in a run, not at every step. */}
+      <p role="status" className="sr-only">
+        {job && (watching || running) ? announcement(job) : ''}
+      </p>
+      {shown && job && (
+        <Empty ref={frameBox} className="mt-4 w-full max-w-xl border border-solid p-4 md:p-6">
+          <EmptyHeader>
+            {spinning && (
+              <EmptyMedia variant="icon">
+                <Spinner />
+              </EmptyMedia>
+            )}
+            <EmptyTitle ref={frame} id={title} tabIndex={-1} className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+              {heading}
+            </EmptyTitle>
+            <EmptyDescription className="text-foreground">
+              {running && <progress aria-labelledby={title} className="block h-4 w-full accent-primary" value={job.percent} max={100} />}
+              <p className="mt-1">{progressSentence(job)}</p>
+              {!waitingForTheDay && <p className="mt-1 text-muted-foreground">{updatedSentence(job)}</p>}
+              {note && <p className="mt-1">{note}</p>}
+              {running && holding && <p className="mt-1">Waiting while you change a Rule.</p>}
+              {estimate && !holding && <p className="mt-1">{estimate}</p>}
+              {running && job.paused && <p className="mt-1">Paused: it has used the share of today's free database allowance that it keeps for itself. {pausedSentence()}</p>}
+            </EmptyDescription>
+          </EmptyHeader>
+          {running && (
+            <EmptyContent>
+              {problem === 'limit' && (
+                <p role="alert" className="font-medium text-destructive">
+                  Fernledger has used up the database allowance the free plan gives for today. It has kept its place. {pausedSentence()}
+                </p>
+              )}
+              {problem === 'failed' && (
+                <div role="alert" className="space-y-2 font-medium text-destructive">
+                  <p>That did not work. Fernledger has kept its place, so you can try again.</p>
+                  <Button size="touch" variant="outline" onClick={() => { setProblem(''); setAttempt(attempt + 1) }}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+              {/* The button that starts a run is off while this one is going, so the allowance (if the Deployer turned it on) is here when the run waits for it. */}
+              {waitingForTheDay && (
+                <div className="w-full text-start">
+                  <D1UsageBar />
+                </div>
+              )}
+              <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" disabled={stop.isPending} onClick={() => stop.mutate()}>
+                Stop applying the Rules
+              </Button>
+            </EmptyContent>
+          )}
+        </Empty>
+      )}
+      {(error || start.isError || stop.isError) && (
+        <p role="alert" className="mt-2 font-medium text-destructive">
+          {error ? "Fernledger couldn't find out whether the Rules are being applied. Reload the page to try again." : stop.isError ? 'The run could not be stopped. Try again.' : 'The Rules could not be applied. Try again.'}
+        </p>
+      )}
+    </>
+  )
+}
+
+function RemoveConfirm({ item, runGoing, onDone, onCancel }: { item: Item; runGoing: boolean; onDone: (message: string) => void; onCancel: () => void }) {
+  const queryClient = useQueryClient()
+  // Opens on the safe answer. Cancelling puts focus back on the row's Actions button, and a removal on the message.
+  const keep = useRef<HTMLButtonElement>(null)
+  useEffect(() => keep.current?.focus(), [])
+  const remove = useMutation({
+    mutationFn: async () => {
+      const res = await api.rules[':id'].$delete({ param: { id: String(item.rule.id) }, json: {} })
+      if (res.status === 404) return 'already gone' as const // another page, or a second click, removed it first: the list on this page is out of date, and nothing is left to remove
+      if (!res.ok) throw new HttpError(res.status)
+      return 'removed' as const
+    },
+    onSuccess: async (outcome) => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
+      if (outcome === 'already gone') return onDone('That Rule had already been removed, so nothing was changed. The list is up to date now.')
+      onDone(
+        `Removed Rule ${item.number}. It is no longer used for new Transactions. ${
+          runGoing ? 'The run that is going starts again from the first Transaction, so that it no longer uses the Rule.' : 'Transactions it already put in a Category keep that Category until you apply the Rules to all Transactions.'
+        }`,
+      )
+    },
+  })
+
+  return (
+    <div role="group" aria-label={`Remove Rule ${item.number}`} className="space-y-2 text-start">
+      <p>Remove Rule {item.number}? It will no longer be used for new Transactions. Transactions it already put in a Category keep that Category until you apply the Rules to all Transactions.</p>
+      {runGoing && <p className="font-medium">A run is going. Removing the Rule starts it again from the first Transaction.</p>}
+      <div className="flex flex-wrap gap-2">
+        <Button size="touch" aria-label={`Yes, remove Rule ${item.number}`} disabled={remove.isPending} onClick={() => remove.mutate()}>
+          Yes, remove
+        </Button>
+        <Button ref={keep} size="touch" variant="outline" onClick={onCancel}>
+          Keep it
+        </Button>
+      </div>
+      {remove.isError && <p role="alert" className="font-medium text-destructive">That did not work. Try again.</p>}
+    </div>
+  )
+}
+
+const selectStyle =
+  'block min-h-11 w-full rounded-lg border border-input bg-background px-3 py-2 text-base focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring aria-invalid:border-2 aria-invalid:border-destructive'
+
+type FormValues = { text: string; type: string; direction: '' | 'in' | 'out'; from: string; to: string; target: string }
+type FieldId = 'criteria' | 'from' | 'to' | 'target'
+/** Where focus goes for each kind of problem. */
+const FIELD_ELEMENT: Record<FieldId, string> = { criteria: 'rule-text', from: 'rule-from', to: 'rule-to', target: 'rule-target' }
+
+const initialValues = (rule?: RuleView): FormValues =>
+  rule
+    ? {
+        text: rule.textContains ?? '',
+        type: rule.bankType ?? '',
+        direction: rule.direction ?? '',
+        from: dollarsForInput(rule.minCents),
+        to: dollarsForInput(rule.maxCents),
+        // A Rule whose Category was removed starts with none chosen, so the Admin picks another.
+        target: rule.transfer ? 'transfer' : rule.categoryId !== null && !rule.categoryRemoved ? String(rule.categoryId) : '',
+      }
+    : { text: '', type: '', direction: '', from: '', to: '', target: '' }
+
+type Criteria = { textContains: string | null; bankType: string | null; direction: 'in' | 'out' | null; minCents: number | null; maxCents: number | null }
+
+/** The criteria the form holds, or what is wrong with them. */
+function readCriteria(values: FormValues): { criteria: Criteria; problems: Partial<Record<Exclude<FieldId, 'target'>, string>> } {
+  const from = readDollars(values.from)
+  const to = readDollars(values.to)
+  const criteria: Criteria = {
+    textContains: values.text.trim() || null,
+    bankType: values.type.trim() || null,
+    direction: values.direction || null,
+    minCents: from.valid ? from.cents : null,
+    maxCents: to.valid ? to.cents : null,
+  }
+  const problems: Partial<Record<Exclude<FieldId, 'target'>, string>> = {}
+  if (!from.valid) problems.from = 'Enter an amount in dollars, such as 12.50.'
+  if (!to.valid) problems.to = 'Enter an amount in dollars, such as 12.50.'
+  if (criteria.minCents !== null && criteria.maxCents !== null && criteria.minCents > criteria.maxCents) problems.to = 'This must not be less than the amount it starts from.'
+  if (Object.values(criteria).every((value) => value === null) && from.valid && to.valid) problems.criteria = 'Fill in at least one of the boxes above. A Rule with nothing to look for would match every Transaction.'
+  return { criteria, problems }
+}
+
+type Sample = { id: number; date: string; description: string; bankType: string; amountCents: number }
+
+/** Which criteria a result belongs to. Two sets of criteria are the same when they read the same. */
+const criteriaKey = (criteria: Criteria) => JSON.stringify(criteria)
+
+/** Adds a Rule, or changes `rule`. The Admin has to see how many Transactions the criteria match before saving them. */
+function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGoing: boolean; onDone: (message: string) => void; onCancel: () => void }) {
+  const queryClient = useQueryClient()
+  const { data: categories, isError: categoriesFailed } = useQuery(categoriesQuery)
+  const [values, setValues] = useState(() => initialValues(rule))
+  const [tried, setTried] = useState<'check' | 'save' | null>(null)
+  const [checked, setChecked] = useState<{ key: string; matches: number; samples: Sample[] } | null>(null)
+
+  const { criteria, problems } = readCriteria(values)
+  const key = criteriaKey(criteria)
+  // Saving a Rule as it is stored needs no check; any change to what it looks for does.
+  const savedKey = rule ? criteriaKey(readCriteria(initialValues(rule)).criteria) : null
+  const hasBeenChecked = Object.keys(problems).length === 0 && (checked?.key === key || key === savedKey)
+  const shown = checked?.key === key ? checked : null
+
+  const set = (change: Partial<FormValues>) => setValues({ ...values, ...change })
+  const targetProblem = values.target === '' ? 'Choose a Category, or Mark as a Transfer.' : undefined
+  // Problems show once the Admin has tried to check or save; the missing target only once they have tried to save.
+  const error = (field: FieldId): string | undefined => (field === 'target' ? (tried === 'save' ? targetProblem : undefined) : tried ? problems[field] : undefined)
+  // Takes the Admin to the first box with a problem.
+  const focusFirst = (includeTarget: boolean) => {
+    const first = problems.criteria ? 'criteria' : problems.from ? 'from' : problems.to ? 'to' : includeTarget && targetProblem ? 'target' : null
+    if (first) document.getElementById(FIELD_ELEMENT[first])?.focus()
+  }
+
+  // The criteria asked about travel as the mutation's variables, and the result is filed under them. A callback that read
+  // `key` instead would get the latest render's, since TanStack Query hands a pending mutation its newest options: boxes
+  // edited while the check was out would then take the result for the old criteria as their own and enable Save.
+  const check = useMutation({
+    mutationFn: async (asked: Criteria) => {
+      const res = await api.rules.preview.$post({ json: asked })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+    onSuccess: (data, asked) => setChecked({ key: criteriaKey(asked), matches: data.matches, samples: data.samples }),
+  })
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const json = { ...criteria, categoryId: values.target === 'transfer' ? null : Number(values.target), transfer: values.target === 'transfer' }
+      const res = rule ? await api.rules[':id'].$put({ param: { id: String(rule.id) }, json }) : await api.rules.$post({ json })
+      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined) // 409: 100 Rules already, or the Rule changed under the Admin
+    },
+    onSuccess: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
+      onDone(`${rule ? 'Saved the changes to the Rule.' : 'Added the Rule.'} It is used for new Transactions as they are imported. ${afterChange(runGoing)}`)
+    },
+  })
+
+  const onCheck = () => {
+    setTried('check')
+    if (Object.keys(problems).length > 0) return focusFirst(false)
+    check.mutate(criteria)
+  }
+  const onSave = () => {
+    setTried('save')
+    if (Object.keys(problems).length > 0 || targetProblem) return focusFirst(true)
+    save.mutate()
+  }
+
+  const saveFailure =
+    save.error instanceof HttpError && save.error.status === 409
+      ? save.error.reason === 'changed'
+        ? 'This Rule was changed just now. Try again.'
+        : 'There are already 100 Rules. Remove one before adding another.'
+      : save.isError
+        ? 'The Rule could not be saved. Check the boxes above and try again.'
+        : ''
+
+  return (
+    <section aria-labelledby="rule-form-heading" className="mt-4 max-w-xl rounded-xl border-2 p-4">
+      <h2 id="rule-form-heading" className="text-lg font-semibold">
+        {rule ? 'Change this Rule' : 'Add a Rule'}
+      </h2>
+      <p className="mt-1">A Transaction matches when it meets every box you fill in. Leave a box blank to ignore it.</p>
+      {runGoing && <p className="mt-1 font-medium">{RUN_GOING_BEFORE}</p>}
+      <form
+        noValidate
+        className="mt-3 space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          onSave()
+        }}
+      >
+        {/* A hint is behind the "?" beside its label, and is also the box's accessible description (FieldLabel). */}
+        <div>
+          <FieldLabel
+            htmlFor="rule-text"
+            label="Text contains"
+            hintId="rule-text-hint"
+            hint="Looked for in the description and the bank's memo, ignoring capital letters A to Z. A letter with an accent or macron, such as Ā, has to match as typed. For example, Woolworths."
+          />
+          <Input
+            id="rule-text"
+            autoFocus
+            value={values.text}
+            maxLength={100}
+            aria-invalid={error('criteria') ? true : undefined}
+            aria-describedby={error('criteria') ? 'rule-text-hint rule-criteria-error' : 'rule-text-hint'}
+            onChange={(event) => set({ text: event.target.value })}
+          />
+          {error('criteria') && <p id="rule-criteria-error" role="alert" className="mt-1 font-medium text-destructive">{error('criteria')}</p>}
+        </div>
+        <div>
+          <FieldLabel
+            htmlFor="rule-type"
+            label="Transaction type"
+            hintId="rule-type-hint"
+            hint="The bank's own type, as the bank's export shows it (Tran Type), such as EFTPOS. It has to match all of it, ignoring capital letters A to Z."
+          />
+          <Input id="rule-type" value={values.type} maxLength={40} aria-describedby="rule-type-hint" onChange={(event) => set({ type: event.target.value })} />
+        </div>
+        <div>
+          <label htmlFor="rule-direction" className="block font-medium">
+            Money in or out
+          </label>
+          <select id="rule-direction" className={selectStyle} value={values.direction} onChange={(event) => set({ direction: event.target.value as FormValues['direction'] })}>
+            <option value="">Either</option>
+            <option value="in">Money in only</option>
+            <option value="out">Money out only</option>
+          </select>
+        </div>
+        <div>
+          <div className="flex flex-wrap gap-4">
+            <div className="min-w-0 grow basis-40">
+              <FieldLabel
+                htmlFor="rule-from"
+                label="Amount from ($)"
+                about="Amount from and up to"
+                hintId="rule-amount-hint"
+                hint="Both ends count. The amount is its size, whichever way the money went, so $50 covers $50 in and $50 out. Use Money in or out above to keep just one."
+              />
+              <Input
+                id="rule-from"
+                inputMode="decimal"
+                value={values.from}
+                aria-invalid={error('from') ? true : undefined}
+                aria-describedby={error('from') ? 'rule-amount-hint rule-from-error' : 'rule-amount-hint'}
+                onChange={(event) => set({ from: event.target.value })}
+              />
+              {error('from') && <p id="rule-from-error" role="alert" className="mt-1 font-medium text-destructive">{error('from')}</p>}
+            </div>
+            <div className="min-w-0 grow basis-40">
+              <FieldLabel htmlFor="rule-to" label="Amount up to ($)" />
+              <Input
+                id="rule-to"
+                inputMode="decimal"
+                value={values.to}
+                aria-invalid={error('to') ? true : undefined}
+                aria-describedby={error('to') ? 'rule-amount-hint rule-to-error' : 'rule-amount-hint'}
+                onChange={(event) => set({ to: event.target.value })}
+              />
+              {error('to') && <p id="rule-to-error" role="alert" className="mt-1 font-medium text-destructive">{error('to')}</p>}
+            </div>
+          </div>
+        </div>
+        <div>
+          <label htmlFor="rule-target" className="block font-medium">
+            What the Rule does
+          </label>
+          <select
+            id="rule-target"
+            className={selectStyle}
+            value={values.target}
+            aria-invalid={error('target') ? true : undefined}
+            aria-describedby={error('target') ? 'rule-target-error' : values.target === 'transfer' ? 'rule-transfer-note' : undefined}
+            onChange={(event) => set({ target: event.target.value })}
+          >
+            <option value="">Choose…</option>
+            {categories?.map((category) => (
+              <option key={category.id} value={category.id}>
+                Put in the Category {category.name}
+              </option>
+            ))}
+            <option value="transfer">Mark as a Transfer</option>
+          </select>
+          {error('target') && <p id="rule-target-error" role="alert" className="mt-1 font-medium text-destructive">{error('target')}</p>}
+          {values.target === 'transfer' && (
+            <p id="rule-transfer-note" className="mt-1 text-muted-foreground">
+              A Transaction this Rule marks is a Transfer even if no matching Transaction is found in another Account, so it is not counted as spending. The mark goes on new Transactions as they are imported, and on the ones you already have when you apply the Rules to all Transactions. If the banks date the two halves of a Transfer on different days, write a Rule that marks them as a Transfer. If it marks something that is not a Transfer, choose Not a Transfer on that Transaction: it outranks this Rule, and applying the Rules again leaves it alone. An Override outranks this Rule too: a Transaction with an Override counts under the Override's Category and is not a Transfer.
+            </p>
+          )}
+          {categoriesFailed && <p role="alert" className="mt-1 font-medium text-destructive">The Categories could not be loaded. Reload the page to try again.</p>}
+          {rule?.categoryRemoved && <p className="mt-1 text-muted-foreground">This Rule's Category, {rule.categoryName}, was removed. Choose another to make the Rule work again.</p>}
+        </div>
+
+        <div>
+          {/* The longest label here. A Button does not wrap by default; at 320px and text size Xtra Large this one is wider than the form around it, so it may wrap. */}
+          <Button type="button" size="touch" variant="outline" className="max-w-full py-1 whitespace-normal" disabled={check.isPending} onClick={onCheck}>
+            Check how many match
+          </Button>
+          {/* Always in the page, so a screen reader announces the result when it appears. */}
+          <div role="status" className="mt-2">
+            {shown && (
+              <>
+                <p className="font-medium">
+                  {shown.matches === 0
+                    ? 'No Transactions you already have match.'
+                    : `${formatCount(shown.matches)} ${shown.matches === 1 ? 'Transaction' : 'Transactions'} you already have ${shown.matches === 1 ? 'matches' : 'match'}.`}
+                </p>
+                <p className="mt-1">Saving the Rule won't change {shown.matches === 1 ? 'it' : 'them'}. {shown.matches === 1 ? 'It changes' : 'They change'} when you apply the Rules to all Transactions.</p>
+                {shown.samples.length > 0 && (
+                  <>
+                    <p className="mt-2">The newest {shown.samples.length === 1 ? 'one' : shown.samples.length}:</p>
+                    <ul className="mt-1 space-y-1">
+                      {shown.samples.map((sample) => (
+                        <li key={sample.id} className="flex flex-wrap items-start justify-between gap-x-4">
+                          <span className="min-w-0 break-words">
+                            {formatDate(sample.date)}, {sample.description}
+                            {sample.bankType && <>, type {sample.bankType}</>}
+                          </span>
+                          <Amount cents={sample.amountCents} />
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </>
+            )}
+            {!shown && checked && Object.keys(problems).length === 0 && <p>You have changed what the Rule looks for. Check how many match again before you save.</p>}
+          </div>
+          {check.isError && <p role="alert" className="mt-2 font-medium text-destructive">Fernledger could not check how many match. Try again.</p>}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="submit" size="touch" disabled={save.isPending || !categories || !hasBeenChecked}>
+            Save Rule
+          </Button>
+          <Button type="button" size="touch" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+        {!hasBeenChecked && <p className="text-muted-foreground">Check how many Transactions match before you save.</p>}
+        {saveFailure && <p role="alert" className="font-medium text-destructive">{saveFailure}</p>}
+      </form>
+    </section>
+  )
+}

@@ -3,8 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Add to Home Screen. `use-credentials` because Cloudflare Access sits in front of this origin: a manifest request
+         without the sign-in cookie would be sent to the Access login page instead of getting the file. No service worker. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Fernledger</title>
+    <script src="/theme-init.js"></script>
+    <script src="/text-size-init.js"></script>
   </head>
   <body>
     <div id="root"></div>
