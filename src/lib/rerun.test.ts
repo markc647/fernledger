@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { announcement, estimateSentence, nextAllowanceReset, pausedSentence, progressSentence, RECHECK_MS, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from './rerun'
+import { announcement, estimateSentence, frameTitle, nextAllowanceReset, pausedSentence, progressSentence, RECHECK_MS, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from './rerun'
 
 const job = (over: Partial<RerunJob> = {}): RerunJob => ({
   id: 1,
@@ -62,18 +62,18 @@ describe('what the Admin reads', () => {
 describe('how long it has to go', () => {
   it('estimates steps if the page stays open and days if it is closed, from what is left', () => {
     // 16,000 left: 16 steps of 1,000; the crons do 6,000 a day, so 3 days.
-    expect(estimateSentence(job())).toBe('About 16 more steps if you keep this page open, or about 3 days if you close it. Keep this page open to finish sooner.')
+    expect(estimateSentence(job())).toBe('About 16 more steps if you keep this page open, or about 3 days if you close it.')
   })
 
   it('says a step in the singular, and "less than a day" when the crons would do what is left in one', () => {
-    expect(estimateSentence(job({ doneRows: 19_500, totalRows: 20_000 }))).toBe('About 1 more step if you keep this page open, or less than a day if you close it. Keep this page open to finish sooner.')
-    expect(estimateSentence(job({ doneRows: 14_000, totalRows: 20_000 }))).toBe('About 6 more steps if you keep this page open, or less than a day if you close it. Keep this page open to finish sooner.')
-    expect(estimateSentence(job({ doneRows: 13_999, totalRows: 20_000 }))).toBe('About 7 more steps if you keep this page open, or about 2 days if you close it. Keep this page open to finish sooner.')
+    expect(estimateSentence(job({ doneRows: 19_500, totalRows: 20_000 }))).toBe('About 1 more step if you keep this page open, or less than a day if you close it.')
+    expect(estimateSentence(job({ doneRows: 14_000, totalRows: 20_000 }))).toBe('About 6 more steps if you keep this page open, or less than a day if you close it.')
+    expect(estimateSentence(job({ doneRows: 13_999, totalRows: 20_000 }))).toBe('About 7 more steps if you keep this page open, or about 2 days if you close it.')
   })
 
   it('bases it on the steps the Rules allow, which are smaller when there are many', () => {
     expect(estimateSentence(job({ doneRows: 0, totalRows: 4_540, stepRows: 227, cronRowsPerDay: 1_362 }))).toBe(
-      'About 20 more steps if you keep this page open, or about 4 days if you close it. Keep this page open to finish sooner.',
+      'About 20 more steps if you keep this page open, or about 4 days if you close it.',
     )
   })
 
@@ -141,5 +141,28 @@ describe('what a screen reader is told', () => {
     expect(announcement(job({ status: 'stopped', doneRows: 7_000, changedRows: 300 }))).toBe(
       'Stopped. Looked at 7,000 Transactions and updated 300 of them. Those keep the result they were given and the rest are as they were.',
     )
+  })
+})
+
+describe('what the frame of its progress is titled', () => {
+  const none = { waiting: false, failed: false, holding: false }
+  it('says what it is doing while it works, and what became of it when it has ended', () => {
+    expect(frameTitle(job(), none)).toBe('Applying the Rules to all Transactions')
+    expect(frameTitle(job({ status: 'done' }), none)).toBe('Applied the Rules to all Transactions')
+    expect(frameTitle(job({ status: 'stopped' }), none)).toBe('Stopped applying the Rules')
+  })
+
+  it("says it is paused until the allowance resets when it waits for the free plan's day, and never says tomorrow", () => {
+    expect(frameTitle(job({ paused: true }), { waiting: true, failed: false, holding: false })).toBe('Paused until the allowance resets')
+    expect(frameTitle(job(), { waiting: true, failed: false, holding: false })).not.toMatch(/tomorrow/i)
+  })
+
+  it('says it waits while a Rule is changed, because it is not working then, and that is not what it says when it works', () => {
+    expect(frameTitle(job(), { waiting: false, failed: false, holding: true })).toBe('Applying the Rules waits while you change a Rule')
+    expect(frameTitle(job(), none)).not.toBe(frameTitle(job(), { waiting: false, failed: false, holding: true }))
+  })
+
+  it('says it stopped with a problem when a step failed', () => {
+    expect(frameTitle(job(), { waiting: false, failed: true, holding: false })).toBe('Applying the Rules stopped with a problem')
   })
 })

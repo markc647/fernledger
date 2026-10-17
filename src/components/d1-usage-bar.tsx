@@ -20,7 +20,9 @@ const FILL: Record<Level, string> = {
 const TONE = { low: 'success', medium: 'warning', high: 'danger' } as const
 
 /**
- * The Admin's D1 usage, in the "Apply the Rules to all Transactions" panel: rows read and rows written today against the free plan's
+ * The Admin's D1 usage, in two places on the Rules page: the question that opens before the Rules are applied to all Transactions (an alert dialog), and the frame of a run that is
+ * paused for the allowance (the button that opens the question is off while a run is going). It is read when it shows, in either, and not while it is shut or the run is working: rows
+ * read and rows written today against the free plan's
  * allowance, each a label and a badge, the bar, then the figures and the percentage. When Cloudflare gave no figures, the panel says so and no
  * bars are drawn, so figures from before a failed refresh are not shown as today's.
  */

@@ -6,7 +6,7 @@ import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { helpButton, helpSheet } from './help-helpers'
 import { ensureCategory, forgetKeptReportsAfterEach, importRows, restoreAppTitleAfterEach, signInToOpen, transactionId, type SeedRow } from './report-helpers'
 import { arrowTo, chooseAction, menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
-import { categoryId, ruleActions, runningJob, usageFigures, usageOn, withRules } from './rule-helpers'
+import { categoryId, openApplyDialog, ruleActions, runningJob, spinner, usageFigures, usageOn, withRules } from './rule-helpers'
 import { navGroup, openHeaderControls, openNavGroup, siteHeader } from './shell-helpers'
 
 // Colour contrast, measured once for the whole app, in both themes (CODING_STANDARDS.md#tests). Every page is scanned with `contrast: true`, as the Admin and as a Member where the page differs,
@@ -493,8 +493,9 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
     }
   }
 
-  // The Rules page: the table of Rules (cards on a phone) and the D1 usage bar (switched on, with the Medium and High levels showing). A Member is told it is the Admin's. The Admin's Rule has its "⋯"
-  // menu opened with the keyboard, as far as Remove, whose words are red on a pale red when it is highlighted; and the page is looked at again with a run of the Rules that is paused.
+  // The Rules page: the table of Rules (cards on a phone). A Member is told it is the Admin's. The Admin's Rule has its "⋯" menu opened with the keyboard, as far as Remove, whose words are red on a pale
+  // red when it is highlighted; Apply the Rules to all Transactions asks its question, with the D1 usage bar in it (switched on, with the Medium and High levels showing); and the page is looked at
+  // again with a run of the Rules that is going, and one that is paused (the frame of its progress).
   for (const onPhone of [false, true]) {
     test(`/rules has no colour contrast violations${onPhone ? ' on a phone' : ''}, as ${onPhone ? 'the Admin' : 'the Admin and as a Member'}`, async ({ page, context, baseURL }, testInfo) => {
       const project = testInfo.project.name
@@ -510,7 +511,6 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
             await heading(page, 'Rules')
             if (role === 'admin') {
               await expect(ruleActions(page, rule)).toBeVisible()
-              await expect(page.getByRole('region', { name: 'Free database allowance' }).getByRole('progressbar')).toHaveCount(2)
             } else {
               await expect(page.getByText('Only the Admin can use this page.')).toBeVisible()
             }
@@ -523,6 +523,17 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
               await arrowTo(page, 'Remove')
               await scan('with the row menu open and Remove highlighted', { within: OPEN_MENU })
               await page.keyboard.press('Escape')
+
+              const dialog = await openApplyDialog(page)
+              await expect(dialog.getByRole('region', { name: 'Free database allowance' }).getByRole('progressbar')).toHaveCount(2)
+              await scan('with the question before applying the Rules open', { within: '[role="alertdialog"]' })
+              await page.keyboard.press('Escape')
+
+              await page.route('**/api/rules/rerun/step', () => new Promise(() => {}))
+              await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
+              await page.goto('/rules')
+              await expect(spinner(page)).toBeVisible()
+              await scan('with a run going')
 
               await page.route('**/api/rules/rerun/step', (route) => route.fulfill({ json: { job: runningJob({ paused: true }) } }))
               await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob({ paused: true }) } }) : route.fallback()))

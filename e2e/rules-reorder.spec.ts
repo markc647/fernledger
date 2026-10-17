@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
-import { expect, noAxeViolations, test } from './fixtures'
+import { expect, noAxeViolations, settle, test } from './fixtures'
 import { pageOrder, ruleActions, ruleGrip, ruleIds, runningJob, withRules } from './rule-helpers'
 import { menuAction, noAxeViolationsFromTop, OPEN_MENU, openActions } from './row-actions-helpers'
 
@@ -112,10 +112,16 @@ test('the Admin moves a Rule with the keyboard, hears where it is, and can chang
     expect(await pageOrder(page, a, b, c)).toEqual([a, c, b])
     expect(puts).toHaveLength(1)
 
-    // Escape puts it down where it was picked up, and saves nothing.
+    // Escape puts it down where it was picked up, and saves nothing. The drop has settled first: its order is saved and read again (the message above is said after that) and the rows have stopped
+    // moving into their places, so what the keyboard is about to measure is where they are.
+    await settle(page)
+    await expect.poll(() => page.locator('tbody tr').evaluateAll((rows) => rows.every((row) => !(row as HTMLElement).style.transform))).toBe(true)
     const now = number(c) // it is where the third was
     await page.keyboard.press('Space')
     await expect(status(page, /Picked up/)).toHaveText(`Picked up Rule ${now} of ${total}.`)
+    // An arrow key pressed in the moments after the announcement can move nothing: dnd-kit is not ready for it until a frame has been drawn (a Rule that has a transform of its own does not say so: 4 of 8
+    // runs lost the key with one). So a frame, and another, go by first, as a person's next key would; without this the key was lost in most runs, and on CI in all of them.
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
     await page.keyboard.press('ArrowUp')
     await expect(status(page, /is over position/)).toHaveText(`Rule ${now} is over position ${now - 1} of ${total}.`)
     await page.keyboard.press('Escape')
@@ -257,7 +263,8 @@ test.describe('on a phone', () => {
 
       // A finger on a handle drags the card (touch events, as a phone sends them), and the page does not scroll with it.
       const cdp = await context.newCDPSession(page)
-      await ruleGrip(page, a).scrollIntoViewIfNeeded()
+      // The Rule between the two goes to the middle of the window, so that both handles are in it and the card that is held starts away from its edges.
+      await ruleGrip(page, c).evaluate((element) => element.scrollIntoView({ block: 'center' }))
       const scrolled = await page.evaluate(() => window.scrollY)
       const start = await centreOf(ruleGrip(page, a))
       const end = await centreOf(ruleGrip(page, b))

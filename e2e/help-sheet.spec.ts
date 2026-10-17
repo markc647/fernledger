@@ -161,7 +161,7 @@ const PAGES: Case[] = [
     path: '/rules',
     heading: 'Rules',
     says: ['Rules are checked from the top of the list', 'The Transactions you already have change only when you choose', 'Fernledger goes through every Transaction you have', 'Change the Rules first, then apply them once.'],
-    ready: (page) => expect(card(page, 'Apply the Rules to all Transactions')).toBeVisible(),
+    ready: (page) => expect(page.getByRole('button', { name: 'Apply the Rules to all Transactions' })).toBeVisible(),
   },
   { path: '/budgets', heading: 'Budgets', says: ['A Budget is the amount you plan to spend'], adminSays: ["Choose Edit Budget in a Category's Actions menu"], memberSays: ['Only the Admin can change them.'], roles: BOTH },
   { path: '/settings', heading: 'Settings', says: ["The Admin is set when Fernledger is deployed", 'A Cutover Date is the day an Account stops taking Transactions'], ready: (page) => expect(page.getByLabel('App title')).toBeVisible() },

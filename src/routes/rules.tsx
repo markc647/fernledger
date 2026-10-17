@@ -1,21 +1,24 @@
-import { queryOptions, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Amount } from '@/components/amount'
 import { D1UsageBar } from '@/components/d1-usage-bar'
+import { FieldLabel } from '@/components/field-label'
 import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
-import { RowAction, RowActions } from '@/components/row-actions'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
 import { DragHandle, SortableFrame, SortableRow } from '@/components/sortable-rows'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
+import { Spinner } from '@/components/ui/spinner'
 import { api } from '@/lib/api'
-import { d1UsageQuery } from '@/lib/d1-usage-query'
 import { formatCount, formatDate } from '@/lib/format'
 import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
-import { announcement, estimateSentence, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
+import { announcement, estimateSentence, frameTitle, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
 import { dollarsForInput, DRAG_INSTRUCTIONS, DRAG_ROLE, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, type RuleView } from '@/lib/rules'
 
 export const Route = createFileRoute('/rules')({
@@ -47,12 +50,9 @@ const rerunQuery = queryOptions({
   refetchOnWindowFocus: false,
 })
 
-/** Read the D1 usage bar's figures again (a query that is not on, because the feature is not set up, is left alone). */
-const refreshUsage = (queryClient: QueryClient) => queryClient.invalidateQueries({ queryKey: d1UsageQuery.queryKey })
-
 const INTRO = 'A Rule is used for new Transactions as they are imported. The Transactions you already have change only when you choose Apply the Rules to all Transactions.'
 
-/** The page's help sheet: what a Rule is and when it is used, and, under its own heading, what the Apply box does. */
+/** The page's help sheet: what a Rule is and when it is used, and, under its own heading, what applying the Rules does. */
 function RulesHelp() {
   return (
     <>
@@ -110,15 +110,9 @@ function AdminRules() {
 
   // After a form or a confirmation closes, focus goes back to the button that opened it (or, if that is gone, to the message).
   const status = useRef<HTMLParagraphElement>(null)
-  const focusAfter = useRef<{ id?: string } | null>(null)
-  useEffect(() => {
-    if (editing !== null || removing !== null || focusAfter.current === null) return
-    const id = focusAfter.current.id
-    focusAfter.current = null
-    ;((id ? document.getElementById(id) : null) ?? status.current)?.focus()
-  }, [editing, removing])
+  const focusBack = useFocusBack(editing ?? removing, status)
   const closed = (message: string, focusId?: string) => {
-    focusAfter.current = { id: focusId }
+    focusBack(focusId)
     setNotice(message)
     setEditing(null)
     setRemoving(null)
@@ -217,11 +211,14 @@ function AdminRules() {
         {notice}
       </p>
       {problem && <p role="alert" className="mt-2 font-medium text-destructive">{problem}</p>}
-      {editing === null ? (
-        <Button id="add-rule-button" className="mt-4" size="touch" onClick={() => { setNotice(''); setProblem(''); setRemoving(null); setEditing({ kind: 'add' }) }}>
+      {/* While a Rule is being changed (the form open, a removal being confirmed or a move going through) the run waits: what it did would be done again. */}
+      <ApplyToHistory holding={editing !== null || removing !== null || move.isPending}>
+        {/* Off, not gone, while a form is open (it is the form's own): the button beside it stays where it is under the pointer. */}
+        <Button id="add-rule-button" size="touch" disabled={editing !== null} onClick={() => { setNotice(''); setProblem(''); setRemoving(null); setEditing({ kind: 'add' }) }}>
           Add a Rule
         </Button>
-      ) : (
+      </ApplyToHistory>
+      {editing !== null && (
         <RuleForm
           key={editing.kind === 'edit' ? editing.rule.id : 'add'}
           rule={editing.kind === 'edit' ? editing.rule : undefined}
@@ -230,8 +227,6 @@ function AdminRules() {
           onCancel={() => closed('', editing.kind === 'edit' ? `rule-${editing.rule.id}-actions` : 'add-rule-button')}
         />
       )}
-      {/* While a Rule is being changed (the form open, a removal being confirmed or a move going through) the run waits: what it did would be done again. */}
-      <ApplyToHistory holding={editing !== null || removing !== null || move.isPending} />
       <div className="mt-6">
         {error ? (
           <p role="alert">Fernledger couldn't load the Rules. Reload the page to try again.</p>
@@ -247,7 +242,6 @@ function AdminRules() {
                 rows={items}
                 getRowKey={(item) => item.rule.id}
                 emptyMessage="There are no Rules yet. Add one above."
-                look="shadcn"
                 RowElement={SortableRow}
               />
             </SortableFrame>
@@ -265,10 +259,14 @@ function AdminRules() {
  * `holding` is true while the Admin is changing a Rule: the run waits, since a change sends it back to the start.
  * A run pauses itself when it has used its share of the free plan's day (the Worker says so in the job, `paused`), and the plan can
  * refuse a step outright (429) when the day's allowance is gone; either way the page asks again when the day changes, at 00:00 UTC.
- * The panel also shows how much of that day the Cloudflare account has used (D1UsageBar, if the Deployer turned it on). It is read when the
- * panel shows and again when a run ends, pauses or is stopped, or the plan refuses a step: not at each step, and not on a timer.
+ * The button that starts a run is on the row of the Rules page's buttons, after `children` (Add a Rule); it asks first, and the question shows how much of that day the Cloudflare
+ * account has used (D1UsageBar, if the Deployer turned it on). A run that is going turns the button off, so the figures are also in the frame of a run that is paused for the allowance
+ * (its own pause, or the plan refusing a step), which is when they matter. Each is read when it shows (the query is dropped as it goes: gcTime 0), so they are never the figures from before:
+ * the question opening, the run pausing, and Check again; nothing reads them at each step, or on a timer.
+ * Under the row, a run that is going, paused, or has ended since this page was opened is shown in a frame (Empty): a spinner while it works, what it says, and its Stop button. The frame is
+ * titled for its state (frameTitle), and takes focus when the Admin starts or stops a run, so the words they caused are what a screen reader reads and keyboard focus is not lost.
  */
-function ApplyToHistory({ holding }: { holding: boolean }) {
+function ApplyToHistory({ holding, children }: { holding: boolean; children?: ReactNode }) {
   const queryClient = useQueryClient()
   const { data: job, error } = useQuery(rerunQuery)
   // 'limit' is the free plan's allowance for the day being used up; the run keeps its place either way.
@@ -276,9 +274,37 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
   const [attempt, setAttempt] = useState(0)
   // Words are announced for a run the Admin is watching, not for the last finished run found when the page opens.
   const [watching, setWatching] = useState(false)
-  const status = useRef<HTMLParagraphElement>(null)
   // How many times the page has asked whether the day has changed and been told to wait, since the run was last moving.
   const asked = useRef(0)
+  // Where the question opens with focus: the answer that carries on, so that Enter is the answer.
+  const apply = useRef<HTMLButtonElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const frame = useRef<HTMLHeadingElement>(null)
+  const frameBox = useRef<HTMLDivElement>(null)
+  const title = useId()
+  // Where focus goes once the page has drawn what the Admin has just done: the question has closed (or a Stop was pressed) and the button that was pressed is off, so keyboard focus
+  // goes to the frame's title rather than being lost; if Apply could not start a run, it goes back to the button, which Radix cannot do while it is off.
+  const focusNext = useRef<'frame' | 'trigger' | null>(null)
+  useEffect(() => {
+    const target = focusNext.current === 'frame' ? frame.current : focusNext.current === 'trigger' && !trigger.current?.disabled ? trigger.current : null
+    if (!target) return
+    focusNext.current = null
+    target.focus()
+  })
+  // Where focus last was: in the frame or not. A run that ends by itself takes away the button focus was on (Stop), and focus then drops to the page; the browser says nothing of that (it
+  // says the same for a click on the page), so the page watches where focus goes (a key into another control, a press outside) and knows that if it was last in the frame, it was lost there.
+  const focusWasInFrame = useRef(false)
+  useEffect(() => {
+    const note = (event: Event) => {
+      focusWasInFrame.current = event.target instanceof Node && frameBox.current?.contains(event.target) === true
+    }
+    document.addEventListener('focusin', note)
+    document.addEventListener('pointerdown', note)
+    return () => {
+      document.removeEventListener('focusin', note)
+      document.removeEventListener('pointerdown', note)
+    }
+  }, [])
 
   const start = useMutation({
     mutationFn: async () => {
@@ -290,12 +316,14 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
     onSuccess: async (started) => {
       setProblem('')
       setWatching(true)
+      focusNext.current = 'frame'
       if (started) {
         await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
         queryClient.setQueryData(rerunQuery.queryKey, started)
       } else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
-      // The button is off while it runs, so keyboard focus moves to the progress rather than being lost.
-      status.current?.focus()
+    },
+    onError: () => {
+      focusNext.current = 'trigger'
     },
   })
 
@@ -307,12 +335,11 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
       return (await res.json()).job
     },
     onSuccess: async (stopped) => {
+      focusNext.current = 'frame'
       if (stopped) {
         await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
         queryClient.setQueryData(rerunQuery.queryKey, stopped)
       } else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
-      status.current?.focus()
-      void refreshUsage(queryClient)
     },
   })
 
@@ -333,11 +360,7 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
       while (!stopped) {
         const res = await api.rules.rerun.step.$post({ json: {} })
         if (stopped) return
-        if (!res.ok) {
-          // The plan refusing a step is the day's allowance gone: the usage bar is worth reading again.
-          if (res.status === 429) void refreshUsage(queryClient)
-          return setProblem(res.status === 429 ? 'limit' : 'failed')
-        }
+        if (!res.ok) return setProblem(res.status === 429 ? 'limit' : 'failed')
         const { job: next } = await res.json()
         if (stopped) return
         // A reading of the job asked for before this step (the one asked for when the day changes, say) is dropped: landing after this
@@ -347,8 +370,7 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
         queryClient.setQueryData(rerunQuery.queryKey, next)
         if (!next?.paused) asked.current = 0
         if (next?.status !== 'running' || next.paused) {
-          // Every Category shown in a list may have changed, and the run has used some of the day's allowance.
-          void refreshUsage(queryClient)
+          // Every Category shown in a list may have changed.
           await queryClient.invalidateQueries({ queryKey: ['transactions'] })
           return
         }
@@ -377,56 +399,110 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
 
   const note = job ? restartNote(job) : null
   const estimate = job && !problem ? estimateSentence(job) : null
+  // The frame is for a run that is going and one that has ended since this page was opened. A run that ended before it was opened is not news, and the Rules page has no history of runs (the Change Log does).
+  const shown = job ? watching || running : false
+  // It works only while it is asking for steps: not when it waits for the day, or for a Rule to be changed, or has gone wrong.
+  const spinning = running && !waitingForTheDay && !holding && problem !== 'failed'
+  const heading = job ? frameTitle(job, { waiting: waitingForTheDay, failed: problem === 'failed', holding: running && holding }) : ''
+  // When the frame changes what it is (it is titled for what it is) and focus was in it, focus is on the control that has gone (Stop, Try again) or on the page: it goes to the title, as it does
+  // when the Admin starts or stops a run. Focus that has gone to another control, or that the Admin took to the page, is left where it is.
+  useEffect(() => {
+    if (!focusWasInFrame.current) return
+    const active = document.activeElement
+    if (active && active !== document.body) return // on a control that is still there, in the frame or out of it
+    focusWasInFrame.current = false
+    frame.current?.focus()
+  }, [heading])
   return (
-    <section aria-labelledby="rerun-heading" className="mt-6 max-w-xl rounded-xl border-2 p-4">
-      <h2 id="rerun-heading" className="text-lg font-semibold">
-        Apply the Rules to all Transactions
-      </h2>
-      <D1UsageBar />
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button id="rerun-button" className="max-w-full py-2 whitespace-normal" size="touch" disabled={running || start.isPending || job === undefined} onClick={() => start.mutate()}>
-          Apply the Rules to all Transactions
-        </Button>
-        {running && (
-          <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" disabled={stop.isPending} onClick={() => stop.mutate()}>
-            Stop applying the Rules
-          </Button>
-        )}
+    <>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {children}
+        {/* Asks first: the Admin reads how much of the free plan's day is left before sending the run off. Enter, with focus on Apply the Rules, is the answer. */}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button ref={trigger} className="max-w-full py-2 whitespace-normal" size="touch" disabled={running || start.isPending || job === undefined}>
+              Apply the Rules to all Transactions
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent
+            onOpenAutoFocus={(event) => {
+              event.preventDefault()
+              apply.current?.focus()
+            }}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>Apply the Rules to all Transactions</AlertDialogTitle>
+              <AlertDialogDescription>Goes through every Transaction, a few at a time. A Category you set by hand is never changed.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <D1UsageBar />
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction ref={apply} onClick={() => start.mutate()}>
+                Apply the Rules
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
-      {/* Always in the page, so a screen reader announces the words when they change. They change a few times in a run, not at every step. */}
-      <p role="status" ref={status} tabIndex={-1} className="mt-3 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+      {/* Always in the page, so a screen reader announces the words when they change; it is not drawn, because the frame says them. They change a few times in a run, not at every step. */}
+      <p role="status" className="sr-only">
         {job && (watching || running) ? announcement(job) : ''}
       </p>
-      {job && (
-        <div className="mt-2">
-          {running && <progress aria-labelledby="rerun-heading" className="block h-4 w-full accent-primary" value={job.percent} max={100} />}
-          <p className="mt-1">{progressSentence(job)}</p>
-          <p className="mt-1 text-muted-foreground">{updatedSentence(job)}</p>
-          {note && <p className="mt-1">{note}</p>}
-          {running && holding && <p className="mt-1">Waiting while you change a Rule.</p>}
-          {estimate && !holding && <p className="mt-1">{estimate}</p>}
-          {running && job.paused && <p className="mt-1">Paused: it has used the share of today's free database allowance that it keeps for itself. {pausedSentence()}</p>}
-        </div>
-      )}
-      {problem === 'limit' && (
-        <p role="alert" className="mt-2 font-medium text-destructive">
-          Fernledger has used up the database allowance the free plan gives for today. It has kept its place. {pausedSentence()}
-        </p>
-      )}
-      {problem === 'failed' && (
-        <div role="alert" className="mt-2 space-y-2 font-medium text-destructive">
-          <p>That did not work. Fernledger has kept its place, so you can try again.</p>
-          <Button size="touch" variant="outline" onClick={() => { setProblem(''); setAttempt(attempt + 1) }}>
-            Try again
-          </Button>
-        </div>
+      {shown && job && (
+        <Empty ref={frameBox} className="mt-4 w-full max-w-xl border border-solid p-4 md:p-6">
+          <EmptyHeader>
+            {spinning && (
+              <EmptyMedia variant="icon">
+                <Spinner />
+              </EmptyMedia>
+            )}
+            <EmptyTitle ref={frame} id={title} tabIndex={-1} className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+              {heading}
+            </EmptyTitle>
+            <EmptyDescription className="text-foreground">
+              {running && <progress aria-labelledby={title} className="block h-4 w-full accent-primary" value={job.percent} max={100} />}
+              <p className="mt-1">{progressSentence(job)}</p>
+              {!waitingForTheDay && <p className="mt-1 text-muted-foreground">{updatedSentence(job)}</p>}
+              {note && <p className="mt-1">{note}</p>}
+              {running && holding && <p className="mt-1">Waiting while you change a Rule.</p>}
+              {estimate && !holding && <p className="mt-1">{estimate}</p>}
+              {running && job.paused && <p className="mt-1">Paused: it has used the share of today's free database allowance that it keeps for itself. {pausedSentence()}</p>}
+            </EmptyDescription>
+          </EmptyHeader>
+          {running && (
+            <EmptyContent>
+              {problem === 'limit' && (
+                <p role="alert" className="font-medium text-destructive">
+                  Fernledger has used up the database allowance the free plan gives for today. It has kept its place. {pausedSentence()}
+                </p>
+              )}
+              {problem === 'failed' && (
+                <div role="alert" className="space-y-2 font-medium text-destructive">
+                  <p>That did not work. Fernledger has kept its place, so you can try again.</p>
+                  <Button size="touch" variant="outline" onClick={() => { setProblem(''); setAttempt(attempt + 1) }}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+              {/* The button that starts a run is off while this one is going, so the allowance (if the Deployer turned it on) is here when the run waits for it. */}
+              {waitingForTheDay && (
+                <div className="w-full text-start">
+                  <D1UsageBar />
+                </div>
+              )}
+              <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" disabled={stop.isPending} onClick={() => stop.mutate()}>
+                Stop applying the Rules
+              </Button>
+            </EmptyContent>
+          )}
+        </Empty>
       )}
       {(error || start.isError || stop.isError) && (
         <p role="alert" className="mt-2 font-medium text-destructive">
           {error ? "Fernledger couldn't find out whether the Rules are being applied. Reload the page to try again." : stop.isError ? 'The run could not be stopped. Try again.' : 'The Rules could not be applied. Try again.'}
         </p>
       )}
-    </section>
+    </>
   )
 }
 
@@ -601,10 +677,14 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
           onSave()
         }}
       >
+        {/* A hint is behind the "?" beside its label, and is also the box's accessible description (FieldLabel). */}
         <div>
-          <label htmlFor="rule-text" className="block font-medium">
-            Text contains
-          </label>
+          <FieldLabel
+            htmlFor="rule-text"
+            label="Text contains"
+            hintId="rule-text-hint"
+            hint="Looked for in the description and the bank's memo, ignoring capital letters A to Z. A letter with an accent or macron, such as Ā, has to match as typed. For example, Woolworths."
+          />
           <Input
             id="rule-text"
             autoFocus
@@ -614,19 +694,16 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
             aria-describedby={error('criteria') ? 'rule-text-hint rule-criteria-error' : 'rule-text-hint'}
             onChange={(event) => set({ text: event.target.value })}
           />
-          <p id="rule-text-hint" className="mt-1 text-muted-foreground">
-            Looked for in the description and the bank's memo, ignoring capital letters A to Z. A letter with an accent or macron, such as Ā, has to match as typed. For example, Woolworths.
-          </p>
           {error('criteria') && <p id="rule-criteria-error" role="alert" className="mt-1 font-medium text-destructive">{error('criteria')}</p>}
         </div>
         <div>
-          <label htmlFor="rule-type" className="block font-medium">
-            Transaction type
-          </label>
+          <FieldLabel
+            htmlFor="rule-type"
+            label="Transaction type"
+            hintId="rule-type-hint"
+            hint="The bank's own type, as the bank's export shows it (Tran Type), such as EFTPOS. It has to match all of it, ignoring capital letters A to Z."
+          />
           <Input id="rule-type" value={values.type} maxLength={40} aria-describedby="rule-type-hint" onChange={(event) => set({ type: event.target.value })} />
-          <p id="rule-type-hint" className="mt-1 text-muted-foreground">
-            The bank's own type, as the bank's export shows it (Tran Type), such as EFTPOS. It has to match all of it, ignoring capital letters A to Z.
-          </p>
         </div>
         <div>
           <label htmlFor="rule-direction" className="block font-medium">
@@ -641,9 +718,13 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
         <div>
           <div className="flex flex-wrap gap-4">
             <div className="min-w-0 grow basis-40">
-              <label htmlFor="rule-from" className="block font-medium">
-                Amount from ($)
-              </label>
+              <FieldLabel
+                htmlFor="rule-from"
+                label="Amount from ($)"
+                about="Amount from and up to"
+                hintId="rule-amount-hint"
+                hint="Both ends count. The amount is its size, whichever way the money went, so $50 covers $50 in and $50 out. Use Money in or out above to keep just one."
+              />
               <Input
                 id="rule-from"
                 inputMode="decimal"
@@ -655,9 +736,7 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
               {error('from') && <p id="rule-from-error" role="alert" className="mt-1 font-medium text-destructive">{error('from')}</p>}
             </div>
             <div className="min-w-0 grow basis-40">
-              <label htmlFor="rule-to" className="block font-medium">
-                Amount up to ($)
-              </label>
+              <FieldLabel htmlFor="rule-to" label="Amount up to ($)" />
               <Input
                 id="rule-to"
                 inputMode="decimal"
@@ -669,9 +748,6 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
               {error('to') && <p id="rule-to-error" role="alert" className="mt-1 font-medium text-destructive">{error('to')}</p>}
             </div>
           </div>
-          <p id="rule-amount-hint" className="mt-1 text-muted-foreground">
-            Both ends count. The amount is its size, whichever way the money went, so $50 covers $50 in and $50 out. Use Money in or out above to keep just one.
-          </p>
         </div>
         <div>
           <label htmlFor="rule-target" className="block font-medium">
