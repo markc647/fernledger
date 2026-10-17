@@ -5,6 +5,7 @@ import { findTransactions, transactionId } from './report-helpers'
 import { addRule, categoryId, pageOrder, removeRule, ruleActions, ruleIds, runningJob, usageFigures, usageOn, withRules } from './rule-helpers'
 import { arrowTo, chooseAction, menuAction, noAxeViolationsFromTop, openActions, ruleActionButtons } from './row-actions-helpers'
 import { mainNav, navGroup, navigateTo } from './shell-helpers'
+import { expectTableLook } from './table-look-helpers'
 
 // The light and dark projects share one local database, so each test uses text and an Account of its own, no earlier run used
 // and no other spec uses: the Summary spec has 86 and 87, Categories 88 and 89, the Change Log 90 and 91, Cutover 92 and 93
@@ -201,6 +202,7 @@ test('the first Rule cannot move up and the last cannot move down, and each of t
     await page.goto('/rules')
     const buttons = ruleActionButtons(page)
     await expect(buttons.nth(1)).toBeVisible() // at least these two
+    await expectTableLook(page.getByRole('table', { name: 'Rules, in the order they are checked' }))
     await openActions(buttons.first())
     await expect(menuAction(page, 'Move up')).toHaveAttribute('aria-disabled', 'true')
     await expect(menuAction(page, 'Move down')).not.toHaveAttribute('aria-disabled', 'true')

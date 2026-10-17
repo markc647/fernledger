@@ -5,7 +5,7 @@ import { dateField, pickDate, thisMonth } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { helpButton, helpSheet } from './help-helpers'
 import { ensureCategory, forgetKeptReportsAfterEach, importRows, restoreAppTitleAfterEach, signInToOpen, transactionId, type SeedRow } from './report-helpers'
-import { arrowTo, menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
+import { arrowTo, chooseAction, menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
 import { categoryId, ruleActions, runningJob, usageFigures, usageOn, withRules } from './rule-helpers'
 import { navGroup, openHeaderControls, openNavGroup, siteHeader } from './shell-helpers'
 
@@ -213,7 +213,7 @@ const PAGES: {
       await scan()
       await scanNote()
       if (role === 'member') return
-      await rows.filter({ hasText: 'TO SAVINGS' }).getByRole('button', { name: /^Edit Category and Note/ }).click()
+      await chooseAction(rows.filter({ hasText: 'TO SAVINGS' }).getByRole('button', { name: /^Actions for/ }), 'Edit Category and Note')
       await expect(page.getByText('If the pairing is wrong, use Not a Transfer instead.')).toBeVisible()
       await scan('with the edit panel open')
       await page.getByRole('button', { name: 'Not a Transfer', exact: true }).click()

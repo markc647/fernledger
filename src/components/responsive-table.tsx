@@ -1,4 +1,4 @@
-import { useId, useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
+import { useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
 import { Select } from '@/components/ui/select'
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
@@ -116,6 +116,53 @@ function SortMenu<Row>({ columns }: { columns: Column<Row>[] }) {
 /** The heading and cells of a handle column: narrow, with its padding to the start. */
 const HANDLE_CELL = 'w-12 py-2 ps-2 pe-0'
 
+// The table's look on screen is one set of classes, here, for every table. On paper (`print:`) it is the paper layout a Report is printed in: no box (the frame's border, corners and clipping, and
+// its scrolling), no shading, a 2px rule under the headings (and none under the printed heading above them) and a divider under every row, the last too, with the text at the top of its cell.
+// A column's own `className` is last. Its `print:py-2` (`PAPER`, src/lib/utils.ts, a Report's tighter padding on paper) replaces the `print:py-3` the cells have here, because `cn` keeps the later of two classes
+// of a kind and variant; its `print:px-2` is not a replacement of `px-3` but beats it, because the stylesheet puts a `print:` class after the same class without one. `!` is for the rules that ui/table.tsx
+// writes with a selector of its own (`[&_tr]`).
+
+/**
+ * The box round the table: rounded and clipped to its corners, and the one thing that scrolls sideways when the table is wider than the room (the table's own container, which ui/table.tsx makes the scroller,
+ * is left to overflow into it: the frame is what is named and can be focused, `TableFrame`). On paper it is none of that.
+ */
+const FRAME = 'overflow-x-auto overflow-y-hidden rounded-lg print:overflow-visible print:rounded-none [&_[data-slot=table-container]]:overflow-visible'
+/** The heading rows: shaded on screen, with a divider under each; on paper unshaded, with the rule under the headings only. */
+const HEADER = 'bg-muted print:bg-transparent print:[&_tr]:border-b-0! print:[&_tr:last-child]:border-b-2!'
+/** The rows: the last has no divider on screen, where the box closes it; on paper it has. */
+const BODY = 'print:[&_tr:last-child]:border-b!'
+
+/**
+ * The frame of a table, and what a table that is too wide for it needs: a box that scrolls sideways is a region with a name that the keyboard can reach and scroll (WCAG 2.1.1, and axe's
+ * `scrollable-region-focusable`). It is that only while it scrolls, so a table that fits is not another landmark on the page; the table's own name is the box's.
+ */
+function TableFrame({ label, className, children }: { label: string; className: string; children: ReactNode }) {
+  const frame = useRef<HTMLDivElement>(null)
+  const [scrolls, setScrolls] = useState(false)
+  useLayoutEffect(() => {
+    const element = frame.current
+    if (!element) return
+    const measure = () => setScrolls(element.scrollWidth > element.clientWidth)
+    measure()
+    // The box changes size with the window, and the table with its rows and the text size.
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    const table = element.querySelector('table')
+    if (table) observer.observe(table)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <div
+      ref={frame}
+      data-slot="table-frame"
+      className={cn(className, scrolls && 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring')}
+      {...(scrolls ? { role: 'region', 'aria-label': label, tabIndex: 0 } : {})}
+    >
+      {children}
+    </div>
+  )
+}
+
 /** A card, when the page has not given its rows an element of their own. */
 const CardItem = ({ className, children }: RowProps) => <li className={className}>{children}</li>
 /** A row of the shadcn table, likewise. */
@@ -136,7 +183,7 @@ export function ResponsiveTable<Row>({
   emptyMessage = 'Nothing to show yet.',
   className,
   printHeading,
-  look = 'plain',
+  look = 'shadcn',
   RowElement,
 }: {
   caption: string
@@ -152,13 +199,14 @@ export function ResponsiveTable<Row>({
    */
   printHeading?: ReactNode
   /**
-   * `shadcn` draws the table with shadcn/ui's Table: a muted heading row, borders between rows, a row that lights as it is pointed at, all in a rounded box. Only the table: cards are the same in
-   * both. It is for a page whose rows have actions (Rules, Categories), and a page that does not ask for it has the table it always had. `printHeading` is for the plain look.
+   * Every table on screen has one look, shadcn/ui's Table: a muted heading row, a divider between rows and a row that lights as it is pointed at, in a rounded box. The cards a phone gets are the
+   * same whatever the look. `shadcn`, the default, draws the box with its border. `in-card` is for a table that sits in a card (the Summary's and the Dashboard's), which is the box already: the same
+   * heading and rows without a second border. On paper neither is drawn: a table is the paper layout (no box, no shading, a rule under its headings, a divider under every row), whatever its look.
    */
-  look?: 'plain' | 'shadcn'
+  look?: 'shadcn' | 'in-card'
   /**
    * The element of a row, for a page that makes its rows more than a row (draggable: src/components/sortable-rows.tsx). A stable component, not one made in the page's render, which would
-   * start every row again each time. It draws a `tr` (`TableRow`) or an `li` according to `layout`, and is used for the shadcn look and for cards, not for the plain table.
+   * start every row again each time. It draws a `tr` (`TableRow`) or an `li` according to `layout`.
    */
   RowElement?: ComponentType<RowProps>
 }) {
@@ -185,7 +233,7 @@ export function ResponsiveTable<Row>({
               key={getRowKey(row)}
               rowKey={getRowKey(row)}
               layout="cards"
-              className={cn('rounded-xl border bg-card p-4 text-card-foreground', handle && 'flex items-start gap-1')}
+              className={cn('rounded-lg border bg-card p-4 text-card-foreground', handle && 'flex items-start gap-1')}
             >
               {/* The grip, if the page has one, at the card's start: the card's lines (a label with its value) are beside it. */}
               {handle && <div className="-my-1 -ms-3 shrink-0">{handle.cell(row)}</div>}
@@ -208,77 +256,45 @@ export function ResponsiveTable<Row>({
       </>
     )
   }
-  if (look === 'shadcn') {
-    const Item = RowElement ?? TableItem
-    return (
-      // The box is the shadcn data table's: rounded, with a border the rows and the heading sit inside.
-      <div className="overflow-hidden rounded-lg border">
-        <Table className={cn('text-base', className)}>
-          <TableCaption className="sr-only">{caption}</TableCaption>
-          <TableHeader className="bg-muted">
-            <TableRow className="hover:bg-transparent">
-              {columns.map((column) => (
-                <TableHead
-                  key={column.key}
-                  scope="col"
-                  aria-sort={column.sort ? (column.sort.direction ?? 'none') : undefined}
-                  className={cn(column.handle ? HANDLE_CELL : column.sort ? 'px-1 py-1' : 'px-3 py-2', 'font-semibold', align(column), column.className)}
-                >
-                  {column.handle ? <span className="sr-only">{column.header}</span> : column.sort ? <SortHeading column={{ ...column, sort: column.sort }} /> : column.header}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <Item key={getRowKey(row)} rowKey={getRowKey(row)} layout="table">
-                {columns.map((column) => (
-                  <TableCell key={column.key} className={cn(column.handle ? HANDLE_CELL : 'px-3 py-2', 'whitespace-normal', align(column), column.className)}>
-                    {column.cell(row)}
-                  </TableCell>
-                ))}
-              </Item>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    )
-  }
+  const Item = RowElement ?? TableItem
   return (
-    <table className={cn('w-full border-collapse text-base', className)}>
-      <caption className="sr-only">{caption}</caption>
-      <thead>
-        {printHeading && (
-          <tr className="hidden print:table-row">
-            <td colSpan={columns.length} className="pb-3 text-start">
-              {printHeading}
-            </td>
-          </tr>
-        )}
-        <tr className="border-b-2">
-          {columns.map((column) => (
-            <th
-              key={column.key}
-              scope="col"
-              aria-sort={column.sort ? (column.sort.direction ?? 'none') : undefined}
-              className={cn(column.sort ? 'px-1 py-0' : 'px-3 py-2', 'font-semibold', align(column), column.className)}
-            >
-              {column.sort ? <SortHeading column={{ ...column, sort: column.sort }} /> : column.header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={getRowKey(row)} className="border-b">
-            {columns.map((column) => (
-              <td key={column.key} className={cn('px-3 py-3 align-top', align(column), column.className)}>
-                {column.cell(row)}
+    // The box is the shadcn data table's: rounded, with a border the heading and rows sit inside, or, in a card, without one.
+    <TableFrame label={caption} className={cn(FRAME, look === 'shadcn' && 'border print:border-0')}>
+      <Table className={cn('text-base', className)}>
+        <TableCaption className="sr-only">{caption}</TableCaption>
+        <TableHeader className={HEADER}>
+          {printHeading && (
+            <tr className="hidden print:table-row">
+              <td colSpan={columns.length} className="pb-3 text-start">
+                {printHeading}
               </td>
+            </tr>
+          )}
+          <TableRow className="hover:bg-transparent">
+            {columns.map((column) => (
+              <TableHead
+                key={column.key}
+                scope="col"
+                aria-sort={column.sort ? (column.sort.direction ?? 'none') : undefined}
+                className={cn(column.handle ? HANDLE_CELL : column.sort ? 'px-1 py-1' : 'px-3 py-2', 'font-semibold whitespace-normal print:h-auto', align(column), column.className)}
+              >
+                {column.handle ? <span className="sr-only">{column.header}</span> : column.sort ? <SortHeading column={{ ...column, sort: column.sort }} /> : column.header}
+              </TableHead>
             ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+          </TableRow>
+        </TableHeader>
+        <TableBody className={BODY}>
+          {rows.map((row) => (
+            <Item key={getRowKey(row)} rowKey={getRowKey(row)} layout="table">
+              {columns.map((column) => (
+                <TableCell key={column.key} className={cn(column.handle ? HANDLE_CELL : 'px-3 py-2', 'whitespace-normal print:py-3 print:align-top', align(column), column.className)}>
+                  {column.cell(row)}
+                </TableCell>
+              ))}
+            </Item>
+          ))}
+        </TableBody>
+      </Table>
+    </TableFrame>
   )
 }

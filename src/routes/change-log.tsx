@@ -123,6 +123,7 @@ function ChangeLog() {
                         columns={columnsFor(fields)}
                         rows={fields.rows}
                         getRowKey={(row) => row.key}
+                        look="in-card"
                       />
                     </div>
                   )}

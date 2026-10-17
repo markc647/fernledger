@@ -3,7 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
-import { RowAction, RowActions } from '@/components/row-actions'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
 import { Button } from '@/components/ui/button'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -56,17 +56,11 @@ function Categories() {
   const { data: budgets } = useQuery({ ...budgetsQuery, enabled: isAdmin })
   const budgetChanges = (id: number) => budgets?.budgets.find((b) => b.categoryId === id)?.changes.length ?? 0
 
-  // Back to the button that opened the form (or, if its row is gone, the message), so keyboard focus is never lost.
+  // Back to the button that opened the form (or, if its row is gone, the message).
   const status = useRef<HTMLParagraphElement>(null)
-  const focusAfter = useRef<{ id?: string } | null>(null)
-  useEffect(() => {
-    if (editing !== null || focusAfter.current === null) return
-    const id = focusAfter.current.id
-    focusAfter.current = null
-    ;((id ? document.getElementById(id) : null) ?? status.current)?.focus()
-  }, [editing])
+  const focusBack = useFocusBack(editing, status)
   const done = (message: string, focusId?: string) => {
-    focusAfter.current = { id: focusId }
+    focusBack(focusId)
     setNotice(message)
     setEditing(null)
   }
@@ -129,7 +123,7 @@ function Categories() {
         ) : !categories ? (
           <p role="status">Loading…</p>
         ) : (
-          <ResponsiveTable caption="Categories" columns={columns} rows={sortCategories(categories, sort)} getRowKey={(c) => c.id} emptyMessage="There are no Categories. Add one above." look="shadcn" />
+          <ResponsiveTable caption="Categories" columns={columns} rows={sortCategories(categories, sort)} getRowKey={(c) => c.id} emptyMessage="There are no Categories. Add one above." />
         )}
       </div>
     </>

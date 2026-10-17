@@ -1,7 +1,9 @@
 import type { Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { actionsButton, rowAction } from './row-actions-helpers'
 import { mainNav, navigateTo } from './shell-helpers'
+import { expectTableLook } from './table-look-helpers'
 
 const fixture = (name: string) => readFileSync(new URL(`../test/fixtures/asb/${name}`, import.meta.url), 'utf8')
 
@@ -50,6 +52,7 @@ test('the Admin previews an ASB file, then imports it and sees the summary and t
   await expect(page.getByText('New Account')).toBeVisible()
   await expect(page.getByText('8 transactions to import')).toBeVisible()
   await expect(page.getByText('Wed 2 Oct 2019 to Fri 2 Oct 2026')).toBeVisible()
+  await expectTableLook(page.getByRole('table', { name: /^First \d+ rows in the file$/ }))
   await page.getByLabel('Account name').fill(name)
   await noAxeViolations(page)
 
@@ -158,12 +161,13 @@ test('the Admin renames an Account and the new name shows on its Transactions', 
   await page.goto('/accounts')
   await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toBeVisible()
 
-  await page.getByRole('button', { name: `Rename ${before}` }).click()
+  await rowAction(page, before, 'Rename')
   await page.getByLabel('Account name').fill(after)
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save name' }).click()
 
-  await expect(page.getByRole('cell', { name: after })).toBeVisible()
+  await expect(page.getByRole('cell', { name: after, exact: true })).toBeVisible()
+  await expect(actionsButton(page, after)).toBeFocused() // the row's Actions button, which opened the form
   await navigateTo(page, 'All Transactions', 'Transactions')
   await expect(page.getByRole('row', { name: new RegExp(`${after} ASB BANK - INTEREST`) })).toBeVisible()
 })
@@ -183,7 +187,7 @@ test('a Member sees Transactions and Accounts but no Import and no rename', asyn
   await navigateTo(page, 'Accounts', 'Reports')
   await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toBeVisible()
   await expect(page.getByRole('cell', { name: numberWith(suffixes(testInfo).small) })).toBeVisible()
-  await expect(page.getByRole('button', { name: /^Rename/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^Actions for/ })).toHaveCount(0)
   await noAxeViolations(page)
 
   await page.goto('/import')

@@ -1,6 +1,7 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expectTableLook } from './table-look-helpers'
 import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
@@ -443,6 +444,7 @@ test.describe('on screen', () => {
     const summary = sectionOf(page, 'All loans')
     const table = summary.getByRole('table', { name: 'What each loan owes' })
     await expect(table.getByRole('columnheader')).toHaveText(['Loan', `Owed on ${dateText(`${d.year}-12-31`)}`])
+    await expectTableLook(table)
     const lines = await rowsOf(table)
     // This spec's loans are among the ones in the Report, a line each, and in the order of the sections below.
     expect(lines).toContainEqual([d.aliceLoan, `${d.alice} owes $300.00 to the Accounts`])

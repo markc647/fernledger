@@ -2,7 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import { expect, noAxeViolations } from './fixtures'
 import { contrastOf, rgbOf, type Rgb } from './shell-helpers'
 
-// The "⋯" menu on a row of the Rules and Categories tables (src/components/row-actions.tsx), and the cards on a phone: the same button and menu at every width. A spec says which
+// The "⋯" menu on a row of the Rules, Categories, Accounts, Budgets, Transactions and kept Reports tables (src/components/row-actions.tsx), and the cards on a phone: the same button and menu at every width. A spec says which
 // row's actions it means and which it chooses, and not where the control is today.
 
 /** The "⋯" button of a row. `row` is what it names: "Rule 3" for a Rule, the Category's name for a Category. */
@@ -46,6 +46,9 @@ export async function chooseAction(button: Locator, action: string) {
   await openActions(button)
   await menuAction(button.page(), action).click()
 }
+
+/** Opens the "⋯" menu of the row `row` names ("Rule 3", an Account's name, a Transaction's "description, date") and chooses an item: what a spec does where the page once had a button on the row. */
+export const rowAction = (page: Page, row: string, action: string) => chooseAction(actionsButton(page, row), action)
 
 /**
  * The contrast of an element's text against what it is drawn on, as the browser paints it (WCAG 1.4.3): the fills of the element and of each element it is in, the first of them over

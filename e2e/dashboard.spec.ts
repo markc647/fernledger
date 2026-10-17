@@ -4,6 +4,7 @@ import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import { chooseTextSize, mainNav, navGroup, navLink, openNavGroup } from './shell-helpers'
+import { expectTableLook } from './table-look-helpers'
 
 // The Dashboard (where the Admin lands) and the Summary (where a Member does), which are the same column of cards, and the Net worth page, which has net worth over time, against the
 // real Worker. (The spending chart is on the Spending by Category Report: e2e/report-spending.spec.ts.) The light and dark projects share one local
@@ -469,6 +470,7 @@ test('net worth\'s figures open from the keyboard, and the control is a touch ta
   await summary.focus()
   await page.keyboard.press('Enter')
   await expect(netWorth(page).getByRole('table')).toBeVisible()
+  await expectTableLook(netWorth(page).getByRole('table'), { inCard: true })
   await page.keyboard.press('Enter')
   await expect(netWorth(page).getByRole('table')).toBeHidden()
 })

@@ -154,7 +154,7 @@ const card = (page: Page, name: string): Locator => page.getByRole('region', { n
 
 const PAGES: Case[] = [
   { path: '/transactions', heading: 'Transactions', says: ['Search and filter every Transaction'], adminSays: ['To print Transactions as a Report'], roles: BOTH, ready: (page) => expect(page.getByRole('button', { name: 'Search', exact: true })).toBeVisible() },
-  { path: '/uncategorised', heading: 'Uncategorised', says: ['Transactions with no Category'] },
+  { path: '/uncategorised', heading: 'Uncategorised', says: ['Transactions with no Category'], adminSays: ["Choose Edit Category and Note in a Transaction's Actions menu"] },
   { path: '/import', heading: 'Import', says: ['Choose a bank export'], ready: (page) => expect(page.getByLabel('Bank export file')).toBeVisible() },
   { path: '/categories', heading: 'Categories', says: ['A Category groups Transactions by purpose'], adminSays: ["Add, rename or remove them to suit you"], memberSays: ['Only the Admin can change them.'], roles: BOTH },
   {
@@ -163,7 +163,7 @@ const PAGES: Case[] = [
     says: ['Rules are checked from the top of the list', 'The Transactions you already have change only when you choose', 'Fernledger goes through every Transaction you have', 'Change the Rules first, then apply them once.'],
     ready: (page) => expect(card(page, 'Apply the Rules to all Transactions')).toBeVisible(),
   },
-  { path: '/budgets', heading: 'Budgets', says: ['A Budget is the amount you plan to spend'], adminSays: ['Choose Edit on a Category'], memberSays: ['Only the Admin can change them.'], roles: BOTH },
+  { path: '/budgets', heading: 'Budgets', says: ['A Budget is the amount you plan to spend'], adminSays: ["Choose Edit Budget in a Category's Actions menu"], memberSays: ['Only the Admin can change them.'], roles: BOTH },
   { path: '/settings', heading: 'Settings', says: ["The Admin is set when Fernledger is deployed", 'A Cutover Date is the day an Account stops taking Transactions'], ready: (page) => expect(page.getByLabel('App title')).toBeVisible() },
   { path: '/change-log', heading: 'Change Log', says: ['Everything the Admin has changed'], roles: BOTH },
   {

@@ -17,6 +17,7 @@
     "reports.spec.ts": [60, 61, 62, 63],
     "rules.spec.ts": [84, 85],
     "summary.spec.ts": [86, 87],
+    "table-look.spec.ts": [36, 37],
     "transactions.spec.ts": [70, 71, 72, 73],
     "transfers.spec.ts": [40, 41, 42, 43, 44, 45, 46, 47]
   },
