@@ -3,6 +3,7 @@ import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
 import { actionsButton, chooseAction, menuAction, noAxeViolationsFromTop, openActions } from './row-actions-helpers'
 import { atEveryTextSize, mainNav, navigateTo } from './shell-helpers'
+import { expectTableLook } from './table-look-helpers'
 
 /** The light and dark projects share one local database, so each test imports a Transaction of its own, dated to sort first. */
 async function seedTransaction(context: BrowserContext, baseURL: string, projectName: string) {
@@ -34,7 +35,8 @@ test('the Admin sets an Override and a Note, the Transaction leaves the Uncatego
   await expect(page.getByRole('heading', { level: 1, name: 'Uncategorised' })).toBeVisible()
   await expect(rowFor(page, description)).toContainText('Uncategorised')
 
-  await page.getByRole('button', { name: new RegExp(`^Edit Category and Note for ${description}`) }).click()
+  await expectTableLook(page.getByRole('table', { name: 'Transactions' }))
+  await chooseAction(page.getByRole('button', { name: new RegExp(`^Actions for ${description}`) }), 'Edit Category and Note')
   await expect(page.getByLabel('Category', { exact: true })).toBeFocused()
   await page.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
   await page.getByLabel('Note', { exact: true }).fill(note)
@@ -217,7 +219,7 @@ test('the Admin sets the kind of a Category, Members see it, and only a Spending
   await expect(actions).toBeFocused()
   await expect(page.getByRole('row', { name })).toContainText('Spending')
   await page.goto('/budgets')
-  await expect(page.getByRole('button', { name: `Edit Budget for ${name}` })).toBeVisible()
+  await expect(actionsButton(page, name)).toBeVisible() // the Budgets page lists it, with the same Actions button as the Categories page has
 
   // Making it Income takes it away again. With no Budgets there is nothing to say about them; with some, they are kept but not used.
   await page.goto('/categories')
