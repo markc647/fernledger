@@ -1,6 +1,7 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expectTableLook } from './table-look-helpers'
 import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
@@ -293,6 +294,7 @@ test.describe('on screen', () => {
     await expect(section.locator('dl dt').first()).toHaveCSS('font-weight', '600')
     const table = section.getByRole('table', { name: new RegExp(`^Budget and spending in the months that have ended from ${monthText(`${year}-01`)} to ${monthText(`${year}-06`)}`) })
     await expect(table.getByRole('columnheader')).toHaveText(['Category', 'Budget', 'Spent', 'Months over Budget'])
+    await expectTableLook(table)
     await expect(table.locator('tbody tr')).toHaveCount(5)
     await expect(table.locator('tbody tr').nth(0)).toContainText(`${names.cafe}${money(45_000)}${money(19_100)}1 of 3 months`) // January to March, over in March only
     await expect(table.locator('tbody tr').nth(1)).toContainText(`${names.fuel}${money(110_000)}${money(39_000)}1 of 5 months`) // February to April at $200.00, May and June at $250.00

@@ -2,6 +2,7 @@ import type { BrowserContext, Page } from '@playwright/test'
 import { spendingChart, spendingDrawn, spyApi } from './chart-helpers'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expectTableLook } from './table-look-helpers'
 import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import { chooseTextSize } from './shell-helpers'
@@ -263,6 +264,7 @@ test.describe('on screen', () => {
     await expect(section.locator('dl')).toContainText(spent(total(ALL)))
     const table = tableOf(page)
     await expect(table.getByRole('columnheader')).toHaveText(['Category', 'Spent'])
+    await expectTableLook(table)
     // The most spent first, as the Dashboard has them. Uncategorised is a row of its own, where its amount puts it, named as the Summary names it, and what
     // came back is below the rest.
     expect(await rowsOf(page)).toEqual({

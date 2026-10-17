@@ -6,7 +6,7 @@ import { D1UsageBar } from '@/components/d1-usage-bar'
 import { FieldLabel } from '@/components/field-label'
 import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
-import { RowAction, RowActions } from '@/components/row-actions'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
 import { DragHandle, SortableFrame, SortableRow } from '@/components/sortable-rows'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
@@ -110,15 +110,9 @@ function AdminRules() {
 
   // After a form or a confirmation closes, focus goes back to the button that opened it (or, if that is gone, to the message).
   const status = useRef<HTMLParagraphElement>(null)
-  const focusAfter = useRef<{ id?: string } | null>(null)
-  useEffect(() => {
-    if (editing !== null || removing !== null || focusAfter.current === null) return
-    const id = focusAfter.current.id
-    focusAfter.current = null
-    ;((id ? document.getElementById(id) : null) ?? status.current)?.focus()
-  }, [editing, removing])
+  const focusBack = useFocusBack(editing ?? removing, status)
   const closed = (message: string, focusId?: string) => {
-    focusAfter.current = { id: focusId }
+    focusBack(focusId)
     setNotice(message)
     setEditing(null)
     setRemoving(null)
@@ -248,7 +242,6 @@ function AdminRules() {
                 rows={items}
                 getRowKey={(item) => item.rule.id}
                 emptyMessage="There are no Rules yet. Add one above."
-                look="shadcn"
                 RowElement={SortableRow}
               />
             </SortableFrame>

@@ -1,6 +1,9 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { dateText } from './report-helpers'
+import { actionsButton, rowAction } from './row-actions-helpers'
+import { expectTableLook } from './table-look-helpers'
 
 // The light and dark projects share one local database, so each project has Accounts of its own, and each test finds its
 // own Transactions by a stamp in their descriptions. Dated in 2012, older than any other spec's, so they never push those off the first page of the list.
@@ -54,8 +57,7 @@ const dataRows = (page: Page) => page.getByRole('row').filter({ has: page.getByR
 /**
  * Waits until a Transaction's details have replaced the list, and returns the part of the page that is the details.
  * A heading name matches as a substring, so "Transaction" alone is also found in the list's "Transactions" heading, and a
- * test that clicks straight away then races the navigation (slower on CI). Every row of the list has an "Edit Category and
- * Note for …" button too, so the buttons are looked for inside the details only.
+ * test that clicks straight away then races the navigation (slower on CI). Every row of the list has an "Actions for …" button too, so the buttons are looked for inside the details only.
  */
 const detailsOpened = async (page: Page) => {
   await expect(page).toHaveURL(/\/transactions\/\d+/)
@@ -78,6 +80,8 @@ test('a Member finds Transactions by text, Account, Category and dates, and the 
   await expect(dataRows(page)).toHaveCount(4)
   await expect(page).toHaveURL(new RegExp(`q=${stamp}`, 'i'))
   await expect(page.getByRole('status').filter({ hasText: 'of 4 matching' })).toBeVisible()
+  await expectTableLook(page.getByRole('table', { name: 'Transactions matching the search' }))
+  await expect(page.getByRole('button', { name: /^Actions for/ })).toHaveCount(0) // a Member has nothing to change
   await noAxeViolations(page)
 
   // Account.
@@ -443,6 +447,21 @@ test.describe('a Transaction that does not exist', () => {
     await expect(page.getByRole('alert')).toContainText('There is no Transaction with that number')
     await noAxeViolations(page)
   })
+})
+
+test("a row's Actions menu opens the Edit panel, and closing the panel puts focus back on the row's button", async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, names } = await seedFour(context, baseURL!, testInfo.project.name)
+  await page.goto(`/transactions?q=${stamp}`)
+  const row = `${names.hardware}, ${dateText('2012-10-01')}`
+  await expect(page.getByRole('link', { name: names.hardware })).toBeVisible()
+
+  await rowAction(page, row, 'Edit Category and Note')
+  const panel = page.getByRole('region', { name: 'Edit Category and Note' })
+  await expect(page.locator('#edit-category')).toBeFocused() // the menu has closed and the panel it opened has focus
+  await noAxeViolations(page)
+  await panel.getByRole('button', { name: 'Cancel' }).click()
+  await expect(panel).toHaveCount(0)
+  await expect(actionsButton(page, row)).toBeFocused()
 })
 
 test('the Admin edits a Transaction from its details and sees the change there', async ({ page, context, baseURL }, testInfo) => {

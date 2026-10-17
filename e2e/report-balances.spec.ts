@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expectTableLook } from './table-look-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
   blackOnWhite,
@@ -229,6 +230,7 @@ test.describe('on screen', () => {
 
     const table = account.getByRole('table', { name: `Balances in ${savings.name}` })
     await expect(table.getByRole('columnheader')).toHaveText(['Date', 'Balance', 'Change', 'Source'])
+    await expectTableLook(table)
     await expect(table.locator('tbody tr')).toHaveCount(MONTHS_HELD)
     // The line that says what a page is belongs to paper: it is in the table's heading, and not on screen.
     await expect(table.locator('thead tr')).toHaveCount(2)

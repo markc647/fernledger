@@ -2,6 +2,7 @@ import type { BrowserContext, Page } from '@playwright/test'
 import { calendarOf, clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { navigateTo } from './shell-helpers'
+import { expectTableLook } from './table-look-helpers'
 
 // The light and dark projects share one local database, so each makes entries of its own, with values no earlier run used.
 const nzToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(new Date())
@@ -51,6 +52,7 @@ for (const role of ['admin', 'member'] as const) {
     await expect(imported.locator('time')).toHaveText(WHEN)
     await expect(imported.getByRole('columnheader', { name: 'Before' })).toHaveCount(0) // an Import has no "before"
     await expect(imported.getByRole('row', { name: /^Added 1$/ })).toBeVisible()
+    await expectTableLook(imported.getByRole('table'), { inCard: true }) // the entry is the box
     await expect(imported.getByRole('row', { name: /^From Sun 1 Jan 2017$/ })).toBeVisible()
 
     // A Settings change shows the field with its old and new value.

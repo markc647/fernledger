@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
+import { ResponsiveTable, type Column } from '@/components/responsive-table'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { HttpError, meQuery } from '@/lib/me'
@@ -12,10 +14,41 @@ export const Route = createFileRoute('/accounts')({
   staticData: { nav: { label: 'Accounts', group: 'setup', order: 30, member: { group: 'reports', order: 60 } } },
 })
 
+type Account = { id: number; name: string; accountNumber: string }
+
+/** The id of an Account's "⋯" button, which focus goes back to when its rename form is closed. */
+const actionsId = (id: number) => `account-${id}-actions`
+
 function Accounts() {
   const { data: me } = useQuery(meQuery)
   const { data: accounts, error } = useQuery(accountsQuery)
   const [renaming, setRenaming] = useState<number | null>(null)
+
+  // Back to the row's Actions button when the form is closed, saved or not.
+  const focusBack = useFocusBack(renaming)
+  const closeForm = (id: number) => {
+    focusBack(actionsId(id))
+    setRenaming(null)
+  }
+
+  const columns: Column<Account>[] = [
+    { key: 'name', header: 'Name', cell: (account) => account.name },
+    { key: 'number', header: 'Account number', cell: (account) => <span className="tabular-nums">{account.accountNumber}</span> },
+  ]
+  if (me?.role === 'admin')
+    columns.push({
+      key: 'actions',
+      header: 'Actions',
+      align: 'end',
+      cell: (account) =>
+        renaming === account.id ? (
+          <RenameForm id={account.id} name={account.name} onDone={() => closeForm(account.id)} />
+        ) : (
+          <RowActions row={account.name} id={actionsId(account.id)}>
+            <RowAction run={() => setRenaming(account.id)}>Rename</RowAction>
+          </RowActions>
+        ),
+    })
 
   return (
     <>
@@ -27,40 +60,8 @@ function Accounts() {
       ) : accounts.length === 0 ? (
         <p className="mt-2">There are no Accounts yet. An Account is added the first time you import a file for it.</p>
       ) : (
-        <div className="mt-4 overflow-x-auto" role="region" aria-label="Accounts table" tabIndex={0}>
-          <table className="w-full text-left">
-            <caption className="sr-only">Accounts</caption>
-            <thead>
-              <tr className="border-b">
-                <th scope="col" className="py-2 pe-4 font-medium">Name</th>
-                <th scope="col" className="py-2 pe-4 font-medium">Account number</th>
-                {me?.role === 'admin' && (
-                  <th scope="col" className="py-2 font-medium">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((account) => (
-                <tr key={account.id} className="border-b">
-                  <td className="py-2 pe-4">{account.name}</td>
-                  <td className="py-2 pe-4 tabular-nums">{account.accountNumber}</td>
-                  {me?.role === 'admin' && (
-                    <td className="py-2">
-                      {renaming === account.id ? (
-                        <RenameForm id={account.id} name={account.name} onDone={() => setRenaming(null)} />
-                      ) : (
-                        <Button size="touch" variant="outline" aria-label={`Rename ${account.name}`} onClick={() => setRenaming(account.id)}>
-                          Rename
-                        </Button>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mt-4">
+          <ResponsiveTable caption="Accounts" columns={columns} rows={accounts} getRowKey={(account) => account.id} />
         </div>
       )}
     </>
@@ -86,7 +87,7 @@ function RenameForm({ id, name, onDone }: { id: number; name: string; onDone: ()
 
   return (
     <form
-      className="flex flex-wrap items-end gap-2"
+      className="flex flex-wrap items-end justify-end gap-2 text-start"
       onSubmit={(event) => {
         event.preventDefault()
         rename.mutate()

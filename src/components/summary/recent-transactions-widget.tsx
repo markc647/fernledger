@@ -28,6 +28,7 @@ export function RecentTransactionsWidget() {
               { key: 'description', header: 'Description', cell: (row) => row.description },
               { key: 'amount', header: 'Amount', align: 'end', cell: (row) => <Amount cents={row.amountCents} showLabel /> },
             ]}
+            look="in-card"
           />
           {data.transactions.length > 0 && (
             <p className="mt-3">

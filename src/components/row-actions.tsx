@@ -1,5 +1,5 @@
 import { MoreHorizontal } from 'lucide-react'
-import { createContext, useContext, useRef, type ComponentProps, type ReactNode, type RefObject } from 'react'
+import { createContext, useContext, useEffect, useRef, type ComponentProps, type ReactNode, type RefObject } from 'react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
@@ -52,4 +52,22 @@ export function RowAction({ run, ...props }: Omit<ComponentProps<typeof Dropdown
       }}
     />
   )
+}
+
+/**
+ * Where focus goes when a form or a question that a row's menu opened is closed (cancelled, or saved with its row still there): back to the row's Actions button, by its `id`, or, if the row is gone
+ * (removed, or no longer in the list), to `fallback`, the page's status line, so keyboard focus is never lost. `open` is what the page has open (null when nothing is: the effect waits for it to
+ * close) and `refresh` is anything else the button waits for (a list that is read again after a save). The page calls the function this returns as it closes what is open, and says which button.
+ */
+export function useFocusBack(open: unknown, fallback: RefObject<HTMLElement | null> | null = null, refresh?: unknown) {
+  const back = useRef<{ id?: string } | null>(null)
+  useEffect(() => {
+    if (open !== null || back.current === null) return
+    const { id } = back.current
+    back.current = null
+    ;((id ? document.getElementById(id) : null) ?? fallback?.current)?.focus()
+  }, [open, fallback, refresh])
+  return (id?: string) => {
+    back.current = { id }
+  }
 }

@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import { BALANCES, CHECKS, difference, FEATURES, latestCheck, stubBalances } from './balances-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { chooseTextSize, navLink, openNavGroup } from './shell-helpers'
+import { expectTableLook } from './table-look-helpers'
 
 // The Summary is where every Member lands. These tests give an Account a Balance Check mismatch (one file imported by
 // the API, a second through the Import screen) and then read the Summary as a Member. The light and dark projects share
@@ -75,6 +76,7 @@ test("a Member lands on a Summary with balances, the Balance Check warning in th
   await expect(checked).toHaveText('Check: balance differs from the bank by $5.00')
   await expect(checked.locator('svg[aria-hidden="true"]')).toHaveCount(1)
   await expect(balances.getByRole('columnheader')).toHaveText(['Account', 'Balance', 'As of', 'Checked'])
+  await expectTableLook(balances.getByRole('table'), { inCard: true, single: true })
   await expect(page.getByRole('region', { name: 'Balance checks' })).toHaveCount(0)
 
   const recent = page.getByRole('region', { name: 'Recent transactions' })

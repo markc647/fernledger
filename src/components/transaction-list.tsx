@@ -16,6 +16,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { Amount } from '@/components/amount'
 import { EditPanel } from '@/components/edit-panel'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -100,10 +101,13 @@ function NoteCell({ row }: { row: Row }) {
 }
 
 /**
- * The Note column asks for the least room it can have, so a table gives it what its heading and the button need and no more. The plain table's heading wraps anywhere (`overflow-wrap` in
+ * The Note column asks for the least room it can have, so a table gives it what its heading and the button need and no more. A table's heading wraps anywhere (`overflow-wrap` in
  * src/index.css), so `whitespace-nowrap` is what keeps "Note" whole when no row on the page has a button to hold the column open.
  */
 const NOTE_COLUMN = 'w-px whitespace-nowrap'
+
+/** The id of a row's "⋯" button, which focus goes back to when the Edit panel it opened is closed. */
+const actionsId = (id: number) => `transaction-${id}-actions`
 
 const hasFilter = (search: TransactionSearch) => search.account !== undefined || search.category !== undefined || search.transfers !== undefined || !!search.from || !!search.to || !!search.q
 
@@ -111,7 +115,7 @@ const hasFilter = (search: TransactionSearch) => search.account !== undefined ||
  * Transactions, a page at a time, with their Category and Note. `search` is what is asked for (filters, sort, page) and
  * `onSearch` changes it; the page keeps it in its address. The server does the searching, sorting and paging, and the table
  * (TanStack Table in manual mode) holds the sort and page. How many match is asked once per search, not per page (it reads
- * every Transaction the filters keep: ADR 0004). The Admin gets an Edit button on each row to set an Override and a Note; a
+ * every Transaction the filters keep: ADR 0004). The Admin gets an Actions menu on each row, to open the panel where an Override and a Note are set; a
  * Member sees the same list read-only. With `showFilters` there is a search form above the list. A Transaction's details
  * come back to this list, or to the Uncategorised page when `origin` says that is where the reader started.
  */
@@ -145,15 +149,9 @@ export function TransactionList({
   const { sort, dir } = sortOf(search)
   const page = search.page ?? 1
 
-  // After a save or cancel, focus goes back to the row's Edit button; if the row has left this list (it was categorised), to the status line.
+  // After a save or cancel, focus goes back to the row's Actions button; if the row has left this list (it was categorised), to the status line.
   const status = useRef<HTMLParagraphElement>(null)
-  const returnTo = useRef<number | null>(null)
-  useEffect(() => {
-    if (editing !== null || returnTo.current === null) return
-    const button = document.getElementById(`edit-${returnTo.current}`)
-    returnTo.current = null
-    ;(button ?? status.current)?.focus()
-  }, [editing, data])
+  const focusBack = useFocusBack(editing, status, data)
 
   // After Previous or Next, the list starts again at its top. If the press left that button disabled (the first or last page)
   // focus would be lost, so it moves to the "Showing …" line, which also announces the new page.
@@ -207,18 +205,16 @@ export function TransactionList({
               header: 'Actions',
               enableSorting: false,
               cell: (info) => (
-                <Button
-                  id={`edit-${info.row.original.id}`}
-                  size="touch"
-                  variant="outline"
-                  aria-label={`Edit Category and Note for ${info.row.original.description}, ${formatDate(info.row.original.date)}`}
-                  onClick={() => {
-                    setSaved('')
-                    setEditing(info.row.original)
-                  }}
-                >
-                  Edit
-                </Button>
+                <RowActions row={`${info.row.original.description}, ${formatDate(info.row.original.date)}`} id={actionsId(info.row.original.id)}>
+                  <RowAction
+                    run={() => {
+                      setSaved('')
+                      setEditing(info.row.original)
+                    }}
+                  >
+                    Edit Category and Note
+                  </RowAction>
+                </RowActions>
               ),
             }),
           ]
@@ -253,7 +249,7 @@ export function TransactionList({
     return {
       key: column.id,
       header: String(column.columnDef.header),
-      align: column.id === 'amount' ? 'end' : 'start',
+      align: column.id === 'amount' || column.id === 'actions' ? 'end' : 'start',
       className: column.id === 'note' ? NOTE_COLUMN : undefined,
       hideOnCard: column.id === 'note' ? (row) => !row.original.note : undefined,
       cell: (row) => <FlexRender cell={row.getAllCellsByColumnId()[column.id]!} />,
@@ -270,7 +266,7 @@ export function TransactionList({
   })
 
   const finish = (row: Row, message: string) => {
-    returnTo.current = row.id
+    focusBack(actionsId(row.id))
     setSaved(message)
     setEditing(null)
   }

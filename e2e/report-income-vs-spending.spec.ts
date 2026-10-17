@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expectTableLook } from './table-look-helpers'
 import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
@@ -325,6 +326,7 @@ test.describe('on screen', () => {
     expect(parseFloat(line.row)).toBeGreaterThan(0)
     expect(line.cells).toEqual(['0px', '0px'])
     await expect(tableOf(page).getByRole('columnheader')).toHaveText(['Month', 'Income', 'Spending', DIFFERENCE])
+    await expectTableLook(tableOf(page))
     // A row for every month in the dates, oldest first, quiet ones too: a month with only a Transfer and a loan is a row of zeros, not a gap.
     const rows = await rowsOf(page)
     expect(rows).toEqual(ALL.map((figures, i) => cells(d.year, i, figures)))

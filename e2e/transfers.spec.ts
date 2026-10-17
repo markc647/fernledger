@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { findTransactions, forgetKeptReportsAfterEach } from './report-helpers'
+import { chooseAction } from './row-actions-helpers'
 
 forgetKeptReportsAfterEach() // a Report shown as the Admin is kept on a list every spec shares, so each test leaves it empty
 
@@ -130,7 +131,7 @@ test('the Admin can take one half of a Transfer out of the Transfers by choosing
   const outRow = dataRows(page).filter({ hasText: out })
   await expect(outRow).toContainText(`Transfer to ${savings.name}`)
 
-  await outRow.getByRole('button', { name: /^Edit Category and Note/ }).click()
+  await chooseAction(outRow.getByRole('button', { name: /^Actions for/ }), 'Edit Category and Note')
   await expect(page.getByText("This Transaction is a Transfer. Choosing a Category takes it out of the Transfers: it then counts under that Category's kind, which is Spending, Income or Loans.")).toBeVisible()
   await noAxeViolations(page)
   await page.locator('#edit-category').selectOption({ label: 'Gifts and donations' })
@@ -228,7 +229,7 @@ test('the Admin can say Not a Transfer from the edit panel, and is told what an 
   await signInAs(context, 'admin')
   await page.goto(`/transactions?q=${stamp}`)
   const outRow = dataRows(page).filter({ hasText: out })
-  await outRow.getByRole('button', { name: /^Edit Category and Note/ }).click()
+  await chooseAction(outRow.getByRole('button', { name: /^Actions for/ }), 'Edit Category and Note')
 
   // The panel points to Not a Transfer rather than a Category on each half.
   await expect(page.getByText('If the pairing is wrong, use Not a Transfer instead.')).toBeVisible()
@@ -246,7 +247,7 @@ test('the Admin can say Not a Transfer from the edit panel, and is told what an 
   await expect(outRow).not.toContainText('Typed but not saved')
 
   // The list knows it is marked, so the panel offers the undo.
-  await outRow.getByRole('button', { name: /^Edit Category and Note/ }).click()
+  await chooseAction(outRow.getByRole('button', { name: /^Actions for/ }), 'Edit Category and Note')
   await expect(page.getByText('The Admin marked this Not a Transfer, so it is not paired with another Transaction.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Not a Transfer', exact: true })).toHaveCount(0)
   await expect(page.getByText("Changes in this panel that you haven't saved will be lost.")).toHaveCount(0)
@@ -388,7 +389,7 @@ test('lending to a tracked Account: a Loans Category on a half counts as a loan,
 
   for (const description of [out, into]) {
     const row = dataRows(page).filter({ hasText: description })
-    await row.getByRole('button', { name: /^Edit Category and Note/ }).click()
+    await chooseAction(row.getByRole('button', { name: /^Actions for/ }), 'Edit Category and Note')
     await page.locator('#edit-category').selectOption({ label: 'Loans' })
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(row).toContainText('Loans')

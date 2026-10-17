@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expectTableLook } from './table-look-helpers'
 import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
@@ -147,6 +148,7 @@ test.describe('opening a Report', () => {
     await pickDate(form, 'To', `${year}-12-31`)
     await form.getByRole('button', { name: 'Show Report' }).click()
     await expect(article(page).getByRole('table', { name: `Transactions in ${savings.name}` })).toBeVisible()
+    await expectTableLook(article(page).getByRole('table', { name: `Transactions in ${savings.name}` }))
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0) // the page moved to the Report, which is under the form
     await expect(article(page)).not.toContainText(cheque.name) // the one Account chosen
     expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ account: String(savingsId), from: `${year}-01-01`, to: `${year}-12-31` })
