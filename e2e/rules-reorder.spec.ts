@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
-import { expect, noAxeViolations, test } from './fixtures'
+import { expect, noAxeViolations, settle, test } from './fixtures'
 import { pageOrder, ruleActions, ruleGrip, ruleIds, runningJob, withRules } from './rule-helpers'
 import { menuAction, noAxeViolationsFromTop, OPEN_MENU, openActions } from './row-actions-helpers'
 
@@ -112,16 +112,17 @@ test('the Admin moves a Rule with the keyboard, hears where it is, and can chang
     expect(await pageOrder(page, a, b, c)).toEqual([a, c, b])
     expect(puts).toHaveLength(1)
 
-    // Escape puts it down where it was picked up, and saves nothing.
+    // Escape puts it down where it was picked up, and saves nothing. The drop has settled first: its order is saved and read again (the message above is said after that) and the rows have stopped
+    // moving into their places, so what the keyboard is about to measure is where they are.
+    await settle(page)
+    await expect.poll(() => page.locator('tbody tr').evaluateAll((rows) => rows.every((row) => !(row as HTMLElement).style.transform))).toBe(true)
     const now = number(c) // it is where the third was
     await page.keyboard.press('Space')
     await expect(status(page, /Picked up/)).toHaveText(`Picked up Rule ${now} of ${total}.`)
-    // An arrow key pressed in the first moments after a Rule is picked up can move nothing (dnd-kit is still measuring the rows; a page that has to scroll to the handle first measures them again, which
-    // hides it). A press that moved nothing is pressed again; one that moved the Rule is not, as the words would then say another position.
-    await expect(async () => {
-      await page.keyboard.press('ArrowUp')
-      await expect(status(page, /is over position/)).toHaveText(`Rule ${now} is over position ${now - 1} of ${total}.`, { timeout: 1000 })
-    }).toPass()
+    // dnd-kit has measured the rows once the held row has a transform of its own (a sorting strategy needs their rects): an arrow key pressed before then moves nothing.
+    await expect.poll(() => page.locator('tr[data-dragging="true"]').evaluate((row) => (row as HTMLElement).style.transform)).not.toBe('')
+    await page.keyboard.press('ArrowUp')
+    await expect(status(page, /is over position/)).toHaveText(`Rule ${now} is over position ${now - 1} of ${total}.`)
     await page.keyboard.press('Escape')
     await expect(status(page, /was cancelled/)).toHaveText(`Moving Rule ${now} was cancelled. It is still in position ${now} of ${total}.`)
     await expect(handle).toBeFocused()
