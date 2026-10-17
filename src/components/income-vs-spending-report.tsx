@@ -1,6 +1,6 @@
 import type { IncomeVsSpending, MonthFigures } from '@/generated/api/report-income-vs-spending'
 import { Amount } from '@/components/amount'
-import { useReportIdentity } from '@/components/report-frame'
+import { useReportIdentity, type ReportNotes } from '@/components/report-frame'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Spent } from '@/components/spent'
 import { NOT_COUNTED_AS_SPENDING_OR_INCOME } from '@/lib/budgets'
@@ -53,21 +53,19 @@ const columns = (from: string, to: string): Column<MonthFigures>[] => [
   { key: 'difference', header: DIFFERENCE, align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.differenceCents} /> },
 ]
 
-/** What a reader needs before the figures: what Income and Spending are, how the dates are counted, and what is not counted. */
-function AboutIncomeVsSpending() {
-  return (
-    <section aria-labelledby="about-income-vs-spending" className="mt-6 print:mt-4">
-      <h2 id="about-income-vs-spending" className="text-lg font-semibold print:text-[13pt]">
-        About these figures
-      </h2>
-      <p className="mt-1">Income is what the Income Categories brought in each month, less what went out of them. A negative amount means more went out than came in.</p>
-      <p className="mt-1">Spending is what the Spending Categories took out, less money back, such as a refund. A “back” amount is taken off the total.</p>
-      <p className="mt-1">Uncategorised counts as spending, so money in that has no Category yet comes off Spending and is not counted as income.</p>
-      <p className="mt-1">The difference is income less spending, so it is below zero when more was spent than came in.</p>
-      <p className="mt-1">Your dates are counted exactly. A month they begin or end part way through counts only those dates, and its row says which.</p>
-      <p className="mt-1">{NOT_COUNTED_AS_SPENDING_OR_INCOME}</p>
-    </section>
-  )
+/** What a reader needs before the figures: what Income and Spending are, how the dates are counted, and what is not counted. The "?" beside the Report's title has it on screen, and a printout has it before the figures (`ReportFrame`). */
+export const INCOME_VS_SPENDING_NOTES: ReportNotes = {
+  title: 'About these figures',
+  body: (
+    <>
+      <p>Income is what the Income Categories brought in each month, less what went out of them. A negative amount means more went out than came in.</p>
+      <p>Spending is what the Spending Categories took out, less money back, such as a refund. A “back” amount is taken off the total.</p>
+      <p>Uncategorised counts as spending, so money in that has no Category yet comes off Spending and is not counted as income.</p>
+      <p>The difference is income less spending, so it is below zero when more was spent than came in.</p>
+      <p>Your dates are counted exactly. A month they begin or end part way through counts only those dates, and its row says which.</p>
+      <p>{NOT_COUNTED_AS_SPENDING_OR_INCOME}</p>
+    </>
+  ),
 }
 
 /**
@@ -88,7 +86,6 @@ export function IncomeVsSpendingReport({ report, accounts }: { report: IncomeVsS
   const nothing = totals.counted === 0
   return (
     <>
-      <AboutIncomeVsSpending />
       <section aria-labelledby="income-vs-spending-heading" className="mt-8 print:mt-6">
         <h2 id="income-vs-spending-heading" className="text-xl font-semibold print:text-[15pt]">
           Income and spending by month

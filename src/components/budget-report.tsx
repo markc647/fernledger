@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { budgetColumns } from '@/components/budget-columns'
-import { useReportIdentity } from '@/components/report-frame'
+import { useReportIdentity, type ReportNotes } from '@/components/report-frame'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Spent } from '@/components/spent'
 import { Status } from '@/components/status'
@@ -77,28 +77,26 @@ export function WholeMonthsNotice({ report }: { report: BudgetReport }) {
   return words === null ? null : <p className="mt-6 border-2 border-foreground p-3 font-semibold break-inside-avoid">{words}</p>
 }
 
-/** What a reader needs before the figures: which Budget a month has, what counts as spending and what does not, and how Categories are taken. */
-function AboutFigures() {
-  return (
-    <section aria-labelledby="about-figures" className="mt-6 print:mt-4">
-      <h2 id="about-figures" className="text-lg font-semibold print:text-[13pt]">
-        About these figures
-      </h2>
-      <p className="mt-1">
+/** What a reader needs before the figures: which Budget a month has, what counts as spending and what does not, and how Categories are taken. The "?" beside the Report's title has it on screen, and a printout has it before the figures (`ReportFrame`). */
+export const BUDGET_VS_ACTUAL_NOTES: ReportNotes = {
+  title: 'About these figures',
+  body: (
+    <>
+      <p>
         Each month is compared with the Budget in effect for it. A Budget applies from the month it begins until it is changed or ended, so changing a Budget never alters an earlier month, and
         nothing a Category doesn't spend is carried over to the next month. Where a Category's Budget changes, its row says so.
       </p>
-      <p className="mt-1">
+      <p>
         Spent is money out less money back. A refund comes off what a Category spent, so what's left can be more than the Budget, and a Category that took in more than it paid out reads “back”.
         Uncategorised counts as spending, so money in that has no Category yet comes off it. Total spending is everything spent in the month, including Categories with no Budget: a Category's
         spending in a month it has no Budget is in Spending outside Budgets.
       </p>
-      <p className="mt-1">{NOT_COUNTED}</p>
-      <p className="mt-1">
+      <p>{NOT_COUNTED}</p>
+      <p>
         Categories are taken as they are now. A Category that has since been made Income or Loans, or removed, is out of every month shown, past ones too, and a Budget kept for it is not used.
       </p>
-    </section>
-  )
+    </>
+  ),
 }
 
 /**
@@ -187,7 +185,6 @@ export function BudgetVsActual({ report, accounts }: { report: BudgetReport; acc
   const noBudgets = hasNoBudgets(report)
   return (
     <>
-      <AboutFigures />
       {noBudgets && <p className="mt-4 font-semibold">No Category has a Budget in these months, so all of the spending is outside Budgets.</p>}
       {report.months.length > 1 && <AllMonths report={report} accounts={accounts} />}
       {report.months.map((month) => (

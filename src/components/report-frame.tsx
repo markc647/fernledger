@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
+import { HelpSheet } from '@/components/help-sheet'
 import { LiveStatus } from '@/components/live-status'
 import { PrintReportButton, useReportPrint, useReportScroll, useShownReport } from '@/components/report-gate'
 import { api } from '@/lib/api'
@@ -12,6 +13,14 @@ import { settingsQuery } from '@/lib/settings'
 /** What a Report says about itself, for the parts of it that repeat the title block on every printed page (see `useReportIdentity`). */
 type ReportIdentity = { appTitle: string; name: string; range: string; generated: string }
 const Identity = createContext<ReportIdentity | null>(null)
+
+/**
+ * What a Report says about its figures that a reader reads once: what is counted, how a figure is worked out, what is left out. `title` is "About these figures" ("About these
+ * balances" for Balances) and `body` is its paragraphs (plain `<p>`s). It is written once and shown twice (`ReportFrame`'s `notes`): on screen in a sheet behind the "?" beside the
+ * Report's title, so the figures are not pushed down the page by it, and on paper as a section before the figures, because a printout has no "?". The Report's route makes it,
+ * because the route has the figures, so notes can say something that depends on them.
+ */
+export type ReportNotes = { title: string; body: ReactNode }
 
 /**
  * The heading to give each printed table (`ResponsiveTable`'s `printHeading`), for the Account it lists: two lines, "<app> –
@@ -29,6 +38,19 @@ export function useReportIdentity() {
         {also && <span className="block">{also}</span>}
       </>
     )
+}
+
+/** The Report's notes on paper: a section before the figures, so a printed page can be read on its own. It is not on the screen (`hidden`), where the "?" beside the title has them. */
+function PrintedNotes({ notes }: { notes: ReportNotes }) {
+  const id = useId()
+  return (
+    <section aria-labelledby={id} className="mt-6 hidden print:mt-4 print:block">
+      <h2 id={id} className="text-lg font-semibold print:text-[13pt]">
+        {notes.title}
+      </h2>
+      <div className="[&_p]:mt-1">{notes.body}</div>
+    </section>
+  )
 }
 
 /**
@@ -55,6 +77,7 @@ export function ReportFrame({
   subject,
   generatedAt,
   notice,
+  notes,
   children,
 }: {
   /** The Report's name, such as "Transaction listing". */
@@ -75,6 +98,8 @@ export function ReportFrame({
   generatedAt: number
   /** Something the reader must know before the figures, such as "this Report stops at 10,000 Transactions". Printed under the title block. */
   notice?: ReactNode
+  /** What a reader reads once about the figures. On screen it is behind a "?" beside the Report's title; on paper it is a section after the `notice` and before the figures. */
+  notes?: ReportNotes
   children: ReactNode
 }) {
   const settings = useQuery(settingsQuery)
@@ -175,10 +200,14 @@ export function ReportFrame({
       <article aria-label={name} className="report-frame">
         <header>
           <p className="text-lg font-semibold print:text-[14pt]">{appTitle}</p>
-          {/* The page's own heading, above the form, is the h1 on screen, so here the name is text (the article's label says it). On paper that heading is not there, and the name is the Report's h1. */}
-          <p aria-hidden="true" className="mt-1 text-2xl font-semibold print:hidden">
-            {name}
-          </p>
+          {/* The page's own heading, above the form, is the h1 on screen, so here the name is text (the article's label says it). On paper that heading is not there, and the name is the Report's h1.
+              The "?" beside it is the Report's own, for its notes, and is not the page's ("About this page", beside the h1). A printout has the notes as a section instead (below). */}
+          <div className="mt-1 flex min-h-11 items-center gap-3 print:hidden">
+            <p aria-hidden="true" className="min-w-0 text-2xl font-semibold">
+              {name}
+            </p>
+            {notes && <HelpSheet label={notes.title}>{notes.body}</HelpSheet>}
+          </div>
           <h1 className="mt-1 hidden text-2xl font-semibold print:block print:text-[20pt]">
             {name}
           </h1>
@@ -199,6 +228,7 @@ export function ReportFrame({
           <p className="mt-1">{generated}</p>
         </header>
         {notice}
+        {notes && <PrintedNotes notes={notes} />}
         {children}
       </article>
     </Identity.Provider>

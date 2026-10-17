@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { IncomeVsSpendingReport } from '@/components/income-vs-spending-report'
+import { INCOME_VS_SPENDING_NOTES, IncomeVsSpendingReport } from '@/components/income-vs-spending-report'
 import { IncomeVsSpendingForm } from '@/components/report-form'
 import { ReportFrame } from '@/components/report-frame'
 import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
@@ -47,7 +47,7 @@ function IncomeVsSpending({ scope, account }: { scope: ReportScope; account: num
   // The title block lists the Accounts; the table's heading, which is repeated on every printed page, says "All Accounts" rather than list them each time.
   const accountsInHeading = account === undefined ? 'All Accounts' : scope.accountsText
   return (
-    <ReportFrame name={REPORT.name} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={report.dataUpdatedAt}>
+    <ReportFrame name={REPORT.name} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={report.dataUpdatedAt} notes={INCOME_VS_SPENDING_NOTES}>
       <IncomeVsSpendingReport report={report.data!} accounts={accountsInHeading} />
       <BackToReports />
     </ReportFrame>

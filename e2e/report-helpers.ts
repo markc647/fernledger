@@ -247,6 +247,32 @@ export async function expectOwnPage(page: Page) {
   await expectPaperTable(page) // and its tables are the paper layout, not the box and shading they have on screen
 }
 
+// A Report's notes (`ReportNotes`, src/components/report-frame.tsx): what a reader reads once about its figures. On screen they are in a sheet behind the "?" beside the Report's own
+// title, which is named for them and not as the page's "?" is ("About this page", e2e/help-helpers.ts); on paper they are a section before the figures. The Transaction listing has none.
+
+/** What a Report's "?" is called and its sheet titled: "About these figures", or for Balances "About these balances". */
+export const NOTES_TITLE = 'About these figures'
+export const BALANCES_NOTES_TITLE = 'About these balances'
+
+/** The "?" beside the Report's own title, which is in the Report (`report` is its article). */
+export const notesButton = (report: Locator, title = NOTES_TITLE) => report.getByRole('button', { name: title, exact: true })
+
+/** The sheet it opens, once it is open. */
+export const notesSheet = (page: Page, title = NOTES_TITLE) => page.getByRole('dialog', { name: title, exact: true })
+
+/** Opens the Report's notes and returns the sheet, to read them. Close it (`closeNotes`) before looking at the rest of the page again: behind the sheet the page is hidden from a screen reader. */
+export async function openNotes(page: Page, report: Locator, title = NOTES_TITLE) {
+  await notesButton(report, title).click()
+  await expect(notesSheet(page, title)).toBeVisible()
+  return notesSheet(page, title)
+}
+
+/** Closes the notes with Esc, and waits until they are gone. */
+export async function closeNotes(page: Page, title = NOTES_TITLE) {
+  await page.keyboard.press('Escape')
+  await expect(notesSheet(page, title)).toHaveCount(0)
+}
+
 /** The Report writes its own title block: the app title as typed (`TITLE`), its name, the Account(s), the dates, and when it was generated (not by whom). */
 export async function expectTitleBlock(article: Locator, { name, account, dates }: { name: string; account: string; dates: string }) {
   const header = article.locator('header')

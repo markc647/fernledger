@@ -5,6 +5,7 @@ import { expectTableLook } from './table-look-helpers'
 import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
+  closeNotes,
   dateText,
   ensureCategory,
   expectBareMargins,
@@ -22,6 +23,7 @@ import {
   money,
   NOT_COUNTED,
   NOW,
+  openNotes,
   overrideCategories,
   restoreAppTitleAfterEach,
   setTitle,
@@ -263,7 +265,7 @@ test.describe('on screen', () => {
     await expect(header).toContainText(GENERATED)
     await expect(report.getByText('You chose')).toHaveCount(0) // whole months: nothing to say about the dates
 
-    const about = report.getByRole('region', { name: 'About these figures' })
+    const about = await openNotes(page, report) // the notes, behind the Report's "?"
     await expect(about).toContainText('Each month is compared with the Budget in effect for it.')
     await expect(about).toContainText('A Budget applies from the month it begins until it is changed or ended, so changing a Budget never alters an earlier month')
     await expect(about).toContainText('Where a Category\'s Budget changes, its row says so.')
@@ -271,8 +273,9 @@ test.describe('on screen', () => {
     await expect(about).toContainText('a Category\'s spending in a month it has no Budget is in Spending outside Budgets')
     await expect(about).toContainText(NOT_COUNTED)
     await expect(about).toContainText('Categories are taken as they are now. A Category that has since been made Income or Loans, or removed, is out of every month shown, past ones too')
+    await closeNotes(page)
 
-    await expect(report.getByRole('heading', { level: 2 })).toHaveText(['About these figures', 'All months together', ...MONTHS.map((m) => monthText(`${year}-${m}`))])
+    await expect(report.getByRole('heading', { level: 2 })).toHaveText(['All months together', ...MONTHS.map((m) => monthText(`${year}-${m}`))]) // the notes are not on the screen
   })
 
   test('adds the months that have ended together: each Category’s Budgets and spending while it had a Budget, the months it was over, and what is outside Budgets', async ({ page, context, baseURL }, testInfo) => {
@@ -410,7 +413,7 @@ test.describe('on screen', () => {
     await signInAs(context, 'admin')
     await page.goto(address(`${year}-03-01`, `${year}-03-31`))
 
-    await expect(article(page).getByRole('heading', { level: 2 })).toHaveText(['About these figures', monthText(`${year}-03`)])
+    await expect(article(page).getByRole('heading', { level: 2 })).toHaveText([monthText(`${year}-03`)])
     await expect(together(page)).toHaveCount(0)
   })
 
@@ -425,7 +428,7 @@ test.describe('on screen', () => {
     await expect(report).toContainText(
       `You chose ${dateText(`${year}-01-15`)} to ${dateText(`${year}-03-10`)}. A Budget is for a whole month, so this Report shows every month those dates touch, in full: ${dateText(`${year}-01-01`)} to ${dateText(`${year}-03-31`)}.`,
     )
-    await expect(report.getByRole('heading', { level: 2 })).toHaveText(['About these figures', 'All months together', monthText(`${year}-01`), monthText(`${year}-02`), monthText(`${year}-03`)])
+    await expect(report.getByRole('heading', { level: 2 })).toHaveText(['All months together', monthText(`${year}-01`), monthText(`${year}-02`), monthText(`${year}-03`)])
     await expect(page).toHaveTitle(`Fernledger – Budget vs actual – All Accounts – ${dateText(`${year}-01-01`)} to ${dateText(`${year}-03-31`)}`)
     // The whole of March is in, not only the first ten days: its $950.00 of Supermarket was spent on the 4th, and Petrol's $210.00 on the 9th.
     await expect(month(page, monthText(`${year}-03`)).locator('dl')).toContainText(`Total spending${money(129_100)}`)
