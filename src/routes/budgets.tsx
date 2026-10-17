@@ -3,7 +3,8 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useId, useRef, useState } from 'react'
 import { PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
-import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
+import { RowButton, useFocusBack } from '@/components/row-actions'
+import { RowPanel } from '@/components/row-panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -49,8 +50,8 @@ const whyNot = (error: unknown) =>
         : 'Fernledger keeps a limited number of Budget changes, and they cannot be removed, so there is no room to add another. Choose a month that already has a change, and replace it.'
       : 'That did not work. Try again.'
 
-/** The id of a Category's "⋯" button, which focus goes back to when the panel it opened is closed. */
-const actionsId = (categoryId: number) => `budget-${categoryId}-actions`
+/** The id of a Category's Edit button, which focus goes back to when the panel it opened is closed. */
+const editId = (categoryId: number) => `budget-${categoryId}-edit`
 
 function Budgets() {
   const { data: me } = useQuery(meQuery)
@@ -109,19 +110,20 @@ function Budgets() {
   if (isAdmin)
     columns.push({
       key: 'actions',
-      header: 'Actions',
+      header: 'Action',
       align: 'end',
+      // One action, so a button named for it and not a menu; the panel it opens is under the row.
       cell: (row) => (
-        <RowActions row={row.categoryName} id={actionsId(row.categoryId)}>
-          <RowAction
-            run={() => {
-              setNotice('')
-              setEditing(row.categoryId)
-            }}
-          >
-            Edit Budget
-          </RowAction>
-        </RowActions>
+        <RowButton
+          id={editId(row.categoryId)}
+          label="Edit"
+          name={`Edit Budget for ${row.categoryName}`}
+          open={editing === row.categoryId}
+          onPress={() => {
+            setNotice('')
+            setEditing(row.categoryId)
+          }}
+        />
       ),
     })
 
@@ -132,7 +134,7 @@ function Budgets() {
           <p>
             A Budget is the amount you plan to spend on a Category each month. A new Budget applies from the month you choose, and earlier months keep the Budget they had.
             Each month stands alone: what you don't spend isn't carried over. Only Spending Categories have a Budget. Transfers between your own Accounts, Pending Transactions and Loans aren't counted as spending, and money back, such as a refund, comes off what you spent.{' '}
-            {isAdmin ? "Choose Edit Budget in a Category's Actions menu to set or end its Budget." : 'Only the Admin can change them.'}
+            {isAdmin ? "Choose Edit on a Category's row to set or end its Budget." : 'Only the Admin can change them.'}
           </p>
         }
       >
@@ -144,29 +146,42 @@ function Budgets() {
         {notice}
       </p>
       {nearLimit && <p className="mt-2 font-medium">{nearLimit}</p>}
-      {isAdmin && editingRow && thisMonth && (
-        <BudgetPanel
-          key={editingRow.categoryId}
-          row={editingRow}
-          thisMonth={thisMonth}
-          onDone={(message) => done(message, actionsId(editingRow.categoryId))}
-          onCancel={() => done('', actionsId(editingRow.categoryId))}
-        />
-      )}
       <div className="mt-6">
         {error ? (
           <p role="alert">Fernledger couldn't load the Budgets. Reload the page to try again.</p>
         ) : !data ? (
           <p role="status">Loading…</p>
         ) : (
-          <ResponsiveTable caption="Budgets" columns={columns} rows={data.budgets} getRowKey={(row) => row.categoryId} emptyMessage="There are no Categories. Add one on the Categories page." />
+          <ResponsiveTable
+            caption="Budgets"
+            columns={columns}
+            rows={data.budgets}
+            getRowKey={(row) => row.categoryId}
+            emptyMessage="There are no Categories. Add one on the Categories page."
+            expanded={
+              isAdmin && editingRow && thisMonth
+                ? {
+                    after: editingRow.categoryId,
+                    content: (
+                      <BudgetPanel
+                        key={editingRow.categoryId}
+                        row={editingRow}
+                        thisMonth={thisMonth}
+                        onDone={(message) => done(message, editId(editingRow.categoryId))}
+                        onCancel={() => done('', editId(editingRow.categoryId))}
+                      />
+                    ),
+                  }
+                : undefined
+            }
+          />
         )}
       </div>
     </>
   )
 }
 
-/** Sets or ends one Category's Budget from a month. A panel of its own above the list, not a form inside a row, so it has the whole width on a phone. */
+/** Sets or ends one Category's Budget from a month. A panel under the Category's row, not a form inside it, so it has the whole width of the table, and of a phone's screen. */
 function BudgetPanel({
   row,
   thisMonth,
@@ -200,12 +215,9 @@ function BudgetPanel({
   const later = laterChanges(row.changes, from)
 
   return (
-    <section aria-labelledby={`${id}-heading`} className="mt-4 max-w-xl rounded-xl border-2 p-4">
-      <h2 id={`${id}-heading`} className="text-lg font-semibold break-words">
-        Budget for {row.categoryName}
-      </h2>
+    <RowPanel title={`Budget for ${row.categoryName}`}>
       <form
-        className="mt-3 space-y-4"
+        className="space-y-4"
         onSubmit={(event) => {
           event.preventDefault()
           const typed = readDollars(amount)
@@ -287,6 +299,6 @@ function BudgetPanel({
           </p>
         )}
       </form>
-    </section>
+    </RowPanel>
   )
 }
