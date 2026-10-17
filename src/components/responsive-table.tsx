@@ -247,7 +247,7 @@ export function ResponsiveTable<Row>({
         <SortMenu columns={columns} />
         {/* One column that may shrink to the window: without it a card is as wide as its longest unbroken word (a long web address in a Note). */}
         <ul aria-label={caption} className="grid grid-cols-1 gap-3 text-base">
-          {expanded?.after === null && <li>{expanded.content}</li>}
+          {expanded?.after === null && <li className="print:hidden">{expanded.content}</li>}
           {rows.map((row) => (
             <Fragment key={getRowKey(row)}>
               <Item
@@ -271,7 +271,7 @@ export function ResponsiveTable<Row>({
                     ))}
                 </dl>
               </Item>
-              {expanded?.after === getRowKey(row) && <li>{expanded.content}</li>}
+              {expanded?.after === getRowKey(row) && <li className="print:hidden">{expanded.content}</li>}
             </Fragment>
           ))}
         </ul>
