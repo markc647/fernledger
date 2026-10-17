@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useId, useRef, useState } from 'react'
 import { PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
+import { RowAction, RowActions } from '@/components/row-actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -47,6 +48,9 @@ const whyNot = (error: unknown) =>
         ? 'This Budget was changed just now. Try again.'
         : 'Fernledger keeps a limited number of Budget changes, and they cannot be removed, so there is no room to add another. Choose a month that already has a change, and replace it.'
       : 'That did not work. Try again.'
+
+/** The id of a Category's "⋯" button, which focus goes back to when the panel it opened is closed. */
+const actionsId = (categoryId: number) => `budget-${categoryId}-actions`
 
 function Budgets() {
   const { data: me } = useQuery(meQuery)
@@ -112,20 +116,18 @@ function Budgets() {
     columns.push({
       key: 'actions',
       header: 'Actions',
+      align: 'end',
       cell: (row) => (
-        <Button
-          id={`budget-${row.categoryId}-button`}
-          size="touch"
-          variant="outline"
-          aria-label={`Edit Budget for ${row.categoryName}`}
-          aria-expanded={editing === row.categoryId}
-          onClick={() => {
-            setNotice('')
-            setEditing(row.categoryId)
-          }}
-        >
-          Edit
-        </Button>
+        <RowActions row={row.categoryName} id={actionsId(row.categoryId)}>
+          <RowAction
+            run={() => {
+              setNotice('')
+              setEditing(row.categoryId)
+            }}
+          >
+            Edit Budget
+          </RowAction>
+        </RowActions>
       ),
     })
 
@@ -136,7 +138,7 @@ function Budgets() {
           <p>
             A Budget is the amount you plan to spend on a Category each month. A new Budget applies from the month you choose, and earlier months keep the Budget they had.
             Each month stands alone: what you don't spend isn't carried over. Only Spending Categories have a Budget. Transfers between your own Accounts, Pending Transactions and Loans aren't counted as spending, and money back, such as a refund, comes off what you spent.{' '}
-            {isAdmin ? 'Choose Edit on a Category to set or end its Budget.' : 'Only the Admin can change them.'}
+            {isAdmin ? "Choose Edit Budget in a Category's Actions menu to set or end its Budget." : 'Only the Admin can change them.'}
           </p>
         }
       >
@@ -153,8 +155,8 @@ function Budgets() {
           key={editingRow.categoryId}
           row={editingRow}
           thisMonth={thisMonth}
-          onDone={(message) => done(message, `budget-${editingRow.categoryId}-button`)}
-          onCancel={() => done('', `budget-${editingRow.categoryId}-button`)}
+          onDone={(message) => done(message, actionsId(editingRow.categoryId))}
+          onCancel={() => done('', actionsId(editingRow.categoryId))}
         />
       )}
       <div className="mt-6">
