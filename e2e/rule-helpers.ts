@@ -86,3 +86,32 @@ export const runningJob = (over: Record<string, unknown> = {}) => ({
   paused: false,
   ...over,
 })
+
+/** The button beside "Add a Rule" that opens the question before the Rules are applied to every Transaction. */
+export const applyButton = (page: Page) => page.getByRole('button', { name: 'Apply the Rules to all Transactions' })
+
+/** The question that button opens (an alert dialog), once it is open. */
+export const applyDialog = (page: Page) => page.getByRole('alertdialog', { name: 'Apply the Rules to all Transactions' })
+
+/** Its answer that starts the run. (`exact`: the page's button has "Apply the Rules" in its name too.) */
+export const applyAnswer = (page: Page) => applyDialog(page).getByRole('button', { name: 'Apply the Rules', exact: true })
+
+/** Opens the question, and returns it. */
+export async function openApplyDialog(page: Page) {
+  await applyButton(page).click()
+  await expect(applyDialog(page)).toBeVisible()
+  return applyDialog(page)
+}
+
+/** Opens the question and answers Apply the Rules: the run starts and the question closes. */
+export async function applyTheRules(page: Page) {
+  await openApplyDialog(page)
+  await applyAnswer(page).click()
+  await expect(applyDialog(page)).toHaveCount(0)
+}
+
+/** The progress of a run, in the frame under the buttons (shown while a run is going, paused, or has just ended in this visit). */
+export const progressFrame = (page: Page) => page.locator('[data-slot="empty"]')
+
+/** The spinner in that frame: there while the Rules are being applied, and not when the run is paused or has ended. */
+export const spinner = (page: Page) => page.getByRole('status', { name: 'Loading' })

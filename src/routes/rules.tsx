@@ -1,17 +1,19 @@
-import { queryOptions, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Amount } from '@/components/amount'
 import { D1UsageBar } from '@/components/d1-usage-bar'
 import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { RowAction, RowActions } from '@/components/row-actions'
 import { DragHandle, SortableFrame, SortableRow } from '@/components/sortable-rows'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
+import { Spinner } from '@/components/ui/spinner'
 import { api } from '@/lib/api'
-import { d1UsageQuery } from '@/lib/d1-usage-query'
 import { formatCount, formatDate } from '@/lib/format'
 import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
@@ -47,12 +49,9 @@ const rerunQuery = queryOptions({
   refetchOnWindowFocus: false,
 })
 
-/** Read the D1 usage bar's figures again (a query that is not on, because the feature is not set up, is left alone). */
-const refreshUsage = (queryClient: QueryClient) => queryClient.invalidateQueries({ queryKey: d1UsageQuery.queryKey })
-
 const INTRO = 'A Rule is used for new Transactions as they are imported. The Transactions you already have change only when you choose Apply the Rules to all Transactions.'
 
-/** The page's help sheet: what a Rule is and when it is used, and, under its own heading, what the Apply box does. */
+/** The page's help sheet: what a Rule is and when it is used, and, under its own heading, what applying the Rules does. */
 function RulesHelp() {
   return (
     <>
@@ -217,11 +216,15 @@ function AdminRules() {
         {notice}
       </p>
       {problem && <p role="alert" className="mt-2 font-medium text-destructive">{problem}</p>}
-      {editing === null ? (
-        <Button id="add-rule-button" className="mt-4" size="touch" onClick={() => { setNotice(''); setProblem(''); setRemoving(null); setEditing({ kind: 'add' }) }}>
-          Add a Rule
-        </Button>
-      ) : (
+      {/* While a Rule is being changed (the form open, a removal being confirmed or a move going through) the run waits: what it did would be done again. */}
+      <ApplyToHistory holding={editing !== null || removing !== null || move.isPending}>
+        {editing === null && (
+          <Button id="add-rule-button" size="touch" onClick={() => { setNotice(''); setProblem(''); setRemoving(null); setEditing({ kind: 'add' }) }}>
+            Add a Rule
+          </Button>
+        )}
+      </ApplyToHistory>
+      {editing !== null && (
         <RuleForm
           key={editing.kind === 'edit' ? editing.rule.id : 'add'}
           rule={editing.kind === 'edit' ? editing.rule : undefined}
@@ -230,8 +233,6 @@ function AdminRules() {
           onCancel={() => closed('', editing.kind === 'edit' ? `rule-${editing.rule.id}-actions` : 'add-rule-button')}
         />
       )}
-      {/* While a Rule is being changed (the form open, a removal being confirmed or a move going through) the run waits: what it did would be done again. */}
-      <ApplyToHistory holding={editing !== null || removing !== null || move.isPending} />
       <div className="mt-6">
         {error ? (
           <p role="alert">Fernledger couldn't load the Rules. Reload the page to try again.</p>
@@ -265,10 +266,12 @@ function AdminRules() {
  * `holding` is true while the Admin is changing a Rule: the run waits, since a change sends it back to the start.
  * A run pauses itself when it has used its share of the free plan's day (the Worker says so in the job, `paused`), and the plan can
  * refuse a step outright (429) when the day's allowance is gone; either way the page asks again when the day changes, at 00:00 UTC.
- * The panel also shows how much of that day the Cloudflare account has used (D1UsageBar, if the Deployer turned it on). It is read when the
- * panel shows and again when a run ends, pauses or is stopped, or the plan refuses a step: not at each step, and not on a timer.
+ * The button that starts a run is on the row of the Rules page's buttons, after `children` (Add a Rule); it asks first, and the question shows how much of that day the Cloudflare
+ * account has used (D1UsageBar, if the Deployer turned it on). That is read each time the question opens (a query with nobody watching it is read again when someone does), so it is
+ * the figures after a run that has ended, paused or been stopped, or been refused by the plan, and not figures from before it: nothing reads it at each step, or on a timer.
+ * Under the row, a run that is going, paused, or has ended since this page was opened is shown in a frame (Empty): a spinner while it works, what it says, and its Stop button.
  */
-function ApplyToHistory({ holding }: { holding: boolean }) {
+function ApplyToHistory({ holding, children }: { holding: boolean; children?: ReactNode }) {
   const queryClient = useQueryClient()
   const { data: job, error } = useQuery(rerunQuery)
   // 'limit' is the free plan's allowance for the day being used up; the run keeps its place either way.
@@ -279,6 +282,9 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
   const status = useRef<HTMLParagraphElement>(null)
   // How many times the page has asked whether the day has changed and been told to wait, since the run was last moving.
   const asked = useRef(0)
+  // Where the question opens with focus: the answer that carries on, so that Enter is the answer.
+  const apply = useRef<HTMLButtonElement>(null)
+  const title = useId()
 
   const start = useMutation({
     mutationFn: async () => {
@@ -294,7 +300,7 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
         await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
         queryClient.setQueryData(rerunQuery.queryKey, started)
       } else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
-      // The button is off while it runs, so keyboard focus moves to the progress rather than being lost.
+      // The question has closed and the button is off while it runs, so keyboard focus moves to the progress rather than being lost.
       status.current?.focus()
     },
   })
@@ -312,7 +318,6 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
         queryClient.setQueryData(rerunQuery.queryKey, stopped)
       } else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
       status.current?.focus()
-      void refreshUsage(queryClient)
     },
   })
 
@@ -333,11 +338,7 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
       while (!stopped) {
         const res = await api.rules.rerun.step.$post({ json: {} })
         if (stopped) return
-        if (!res.ok) {
-          // The plan refusing a step is the day's allowance gone: the usage bar is worth reading again.
-          if (res.status === 429) void refreshUsage(queryClient)
-          return setProblem(res.status === 429 ? 'limit' : 'failed')
-        }
+        if (!res.ok) return setProblem(res.status === 429 ? 'limit' : 'failed')
         const { job: next } = await res.json()
         if (stopped) return
         // A reading of the job asked for before this step (the one asked for when the day changes, say) is dropped: landing after this
@@ -347,8 +348,7 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
         queryClient.setQueryData(rerunQuery.queryKey, next)
         if (!next?.paused) asked.current = 0
         if (next?.status !== 'running' || next.paused) {
-          // Every Category shown in a list may have changed, and the run has used some of the day's allowance.
-          void refreshUsage(queryClient)
+          // Every Category shown in a list may have changed.
           await queryClient.invalidateQueries({ queryKey: ['transactions'] })
           return
         }
@@ -377,56 +377,92 @@ function ApplyToHistory({ holding }: { holding: boolean }) {
 
   const note = job ? restartNote(job) : null
   const estimate = job && !problem ? estimateSentence(job) : null
+  // The frame is for a run that is going and one that has ended since this page was opened. A run that ended before it was opened is not news, and the Rules page has no history of runs (the Change Log does).
+  const shown = job ? watching || running : false
+  // It works only while it is asking for steps: not when it waits for the day, or for a Rule to be changed, or has gone wrong.
+  const spinning = running && !waitingForTheDay && !holding && problem !== 'failed'
   return (
-    <section aria-labelledby="rerun-heading" className="mt-6 max-w-xl rounded-xl border-2 p-4">
-      <h2 id="rerun-heading" className="text-lg font-semibold">
-        Apply the Rules to all Transactions
-      </h2>
-      <D1UsageBar />
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button id="rerun-button" className="max-w-full py-2 whitespace-normal" size="touch" disabled={running || start.isPending || job === undefined} onClick={() => start.mutate()}>
-          Apply the Rules to all Transactions
-        </Button>
-        {running && (
-          <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" disabled={stop.isPending} onClick={() => stop.mutate()}>
-            Stop applying the Rules
-          </Button>
-        )}
+    <>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {children}
+        {/* Asks first: the Admin reads how much of the free plan's day is left before sending the run off. Enter, with focus on Apply the Rules, is the answer. */}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button id="rerun-button" className="max-w-full py-2 whitespace-normal" size="touch" disabled={running || start.isPending || job === undefined}>
+              Apply the Rules to all Transactions
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent
+            aria-describedby={undefined} // what it holds is the allowance, in its own region
+            onOpenAutoFocus={(event) => {
+              event.preventDefault()
+              apply.current?.focus()
+            }}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>Apply the Rules to all Transactions</AlertDialogTitle>
+            </AlertDialogHeader>
+            <D1UsageBar />
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction ref={apply} onClick={() => start.mutate()}>
+                Apply the Rules
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
       {/* Always in the page, so a screen reader announces the words when they change. They change a few times in a run, not at every step. */}
-      <p role="status" ref={status} tabIndex={-1} className="mt-3 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+      <p role="status" ref={status} tabIndex={-1} className={`font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${shown ? 'mt-4' : ''}`}>
         {job && (watching || running) ? announcement(job) : ''}
       </p>
-      {job && (
-        <div className="mt-2">
-          {running && <progress aria-labelledby="rerun-heading" className="block h-4 w-full accent-primary" value={job.percent} max={100} />}
-          <p className="mt-1">{progressSentence(job)}</p>
-          <p className="mt-1 text-muted-foreground">{updatedSentence(job)}</p>
-          {note && <p className="mt-1">{note}</p>}
-          {running && holding && <p className="mt-1">Waiting while you change a Rule.</p>}
-          {estimate && !holding && <p className="mt-1">{estimate}</p>}
-          {running && job.paused && <p className="mt-1">Paused: it has used the share of today's free database allowance that it keeps for itself. {pausedSentence()}</p>}
-        </div>
-      )}
-      {problem === 'limit' && (
-        <p role="alert" className="mt-2 font-medium text-destructive">
-          Fernledger has used up the database allowance the free plan gives for today. It has kept its place. {pausedSentence()}
-        </p>
-      )}
-      {problem === 'failed' && (
-        <div role="alert" className="mt-2 space-y-2 font-medium text-destructive">
-          <p>That did not work. Fernledger has kept its place, so you can try again.</p>
-          <Button size="touch" variant="outline" onClick={() => { setProblem(''); setAttempt(attempt + 1) }}>
-            Try again
-          </Button>
-        </div>
+      {shown && job && (
+        <Empty className="mt-2 w-full max-w-xl border">
+          <EmptyHeader>
+            {spinning && (
+              <EmptyMedia variant="icon">
+                <Spinner />
+              </EmptyMedia>
+            )}
+            <EmptyTitle id={title}>Applying the Rules to all Transactions</EmptyTitle>
+            <EmptyDescription className="text-foreground">
+              {running && <progress aria-labelledby={title} className="block h-4 w-full accent-primary" value={job.percent} max={100} />}
+              <p className="mt-1">{progressSentence(job)}</p>
+              <p className="mt-1 text-muted-foreground">{updatedSentence(job)}</p>
+              {note && <p className="mt-1">{note}</p>}
+              {running && holding && <p className="mt-1">Waiting while you change a Rule.</p>}
+              {estimate && !holding && <p className="mt-1">{estimate}</p>}
+              {running && job.paused && <p className="mt-1">Paused: it has used the share of today's free database allowance that it keeps for itself. {pausedSentence()}</p>}
+            </EmptyDescription>
+          </EmptyHeader>
+          {running && (
+            <EmptyContent>
+              {problem === 'limit' && (
+                <p role="alert" className="font-medium text-destructive">
+                  Fernledger has used up the database allowance the free plan gives for today. It has kept its place. {pausedSentence()}
+                </p>
+              )}
+              {problem === 'failed' && (
+                <div role="alert" className="space-y-2 font-medium text-destructive">
+                  <p>That did not work. Fernledger has kept its place, so you can try again.</p>
+                  <Button size="touch" variant="outline" onClick={() => { setProblem(''); setAttempt(attempt + 1) }}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+              <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" disabled={stop.isPending} onClick={() => stop.mutate()}>
+                Stop applying the Rules
+              </Button>
+            </EmptyContent>
+          )}
+        </Empty>
       )}
       {(error || start.isError || stop.isError) && (
         <p role="alert" className="mt-2 font-medium text-destructive">
           {error ? "Fernledger couldn't find out whether the Rules are being applied. Reload the page to try again." : stop.isError ? 'The run could not be stopped. Try again.' : 'The Rules could not be applied. Try again.'}
         </p>
       )}
-    </section>
+    </>
   )
 }
 

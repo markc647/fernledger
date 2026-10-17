@@ -2,7 +2,7 @@ import type { BrowserContext, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
 import { findTransactions, transactionId } from './report-helpers'
-import { addRule, categoryId, pageOrder, removeRule, ruleActions, ruleIds, runningJob, usageFigures, usageOn, withRules } from './rule-helpers'
+import { addRule, applyAnswer, applyButton, applyDialog, applyTheRules, categoryId, openApplyDialog, pageOrder, progressFrame, removeRule, ruleActions, ruleIds, runningJob, spinner, usageFigures, usageOn, withRules } from './rule-helpers'
 import { arrowTo, chooseAction, menuAction, noAxeViolationsFromTop, openActions, ruleActionButtons } from './row-actions-helpers'
 import { mainNav, navGroup, navigateTo } from './shell-helpers'
 
@@ -369,7 +369,72 @@ test('the Admin is told what is wrong with a box, and taken to it', async ({ pag
   await noAxeViolationsFromTop(page)
 })
 
-const rerunButton = (page: Page) => page.getByRole('button', { name: 'Apply the Rules to all Transactions' })
+test.describe('Apply the Rules to all Transactions, beside Add a Rule', () => {
+  test('is on the row of Add a Rule, to its right, and the row wraps on a phone', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.goto('/rules')
+    const add = page.getByRole('button', { name: 'Add a Rule' })
+    await expect(add).toBeVisible()
+    await expect(applyButton(page)).toBeEnabled()
+    const [addBox, applyBox] = [(await add.boundingBox())!, (await applyButton(page).boundingBox())!]
+    expect(applyBox.x, 'to the right of Add a Rule').toBeGreaterThanOrEqual(addBox.x + addBox.width)
+    expect(Math.abs(applyBox.y + applyBox.height / 2 - (addBox.y + addBox.height / 2)), 'on the same row').toBeLessThan(4)
+    expect(applyBox.height, 'a touch target').toBeGreaterThanOrEqual(44)
+
+    await page.setViewportSize({ width: 360, height: 800 })
+    await expect.poll(async () => (await applyButton(page).boundingBox())!.y - (await add.boundingBox())!.y).toBeGreaterThanOrEqual(44) // wrapped under it
+    const box = (await applyButton(page).boundingBox())!
+    expect(box.x + box.width, 'and inside the screen').toBeLessThanOrEqual(360)
+  })
+
+  test('asks first: Apply the Rules has focus and Enter starts the run; Cancel and Esc close it and give focus back; a press outside does not close it', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.emulateMedia({ reducedMotion: 'reduce' }) // the fades take no time, so a dialog that closes is gone at once
+    let started = 0
+    await page.route('**/api/rules/rerun/step', () => new Promise(() => {})) // never answered: the run stays as it started
+    await page.route('**/api/rules/rerun', (route) => {
+      if (route.request().method() === 'GET') return route.fulfill({ json: { job: null } })
+      started++
+      return route.fulfill({ json: { job: runningJob({ doneRows: 0, percent: 0 }) } })
+    })
+    await page.goto('/rules')
+    await expect(applyButton(page)).toBeEnabled()
+    await expect(page.getByRole('region', { name: 'Free database allowance' })).toHaveCount(0) // not on the page: it is in the question
+
+    const dialog = await openApplyDialog(page)
+    // The Free database allowance (here, its setup words) is what the Admin reads before answering.
+    await expect(dialog.getByRole('region', { name: 'Free database allowance' })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible()
+    await expect(applyAnswer(page)).toBeFocused() // so Enter is the answer to the question
+    await noAxeViolationsFromTop(page)
+
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(applyDialog(page)).toHaveCount(0)
+    await expect(applyButton(page)).toBeFocused()
+
+    await openApplyDialog(page)
+    await page.keyboard.press('Escape')
+    await expect(applyDialog(page)).toHaveCount(0)
+    await expect(applyButton(page)).toBeFocused()
+
+    await openApplyDialog(page)
+    await page.mouse.click(5, 5) // on the page behind it: an alert dialog is answered, not dismissed
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))) // (a dialog that was dismissed would be gone by now: its fade lasts no time)
+    await expect(applyDialog(page)).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(applyDialog(page)).toHaveCount(0)
+    await expect(applyButton(page)).toBeFocused()
+    expect(started).toBe(0) // nothing above started the run
+
+    await openApplyDialog(page)
+    await expect(applyAnswer(page)).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(applyDialog(page)).toHaveCount(0)
+    await expect.poll(() => started).toBe(1)
+    await expect(spinner(page)).toBeVisible() // ...and the progress is under the buttons
+    await expect(page.getByRole('status').filter({ hasText: 'Started. Going through up to 20,000 Transactions.' })).toBeFocused()
+  })
+})
 
 test('the Admin applies a Rule to the Transactions already on file, and one set by hand is left alone', async ({ page, context, baseURL }, testInfo) => {
   await signInAs(context, 'admin')
@@ -385,18 +450,18 @@ test('the Admin applies a Rule to the Transactions already on file, and one set 
 
   try {
     await page.goto('/rules')
-    await expect(page.getByRole('heading', { level: 2, name: 'Apply the Rules to all Transactions' })).toBeVisible()
-    await expect(rerunButton(page)).toBeEnabled()
+    await expect(page.getByRole('heading', { level: 2, name: 'Apply the Rules to all Transactions' })).toHaveCount(0) // (the box with a heading of its own is gone: the button asks first)
+    await expect(applyButton(page)).toBeEnabled()
     await noAxeViolationsFromTop(page)
     // Nothing has changed yet: a Rule is for new Transactions until it is applied.
     expect((await found()).map((t) => t.categoryName).sort()).toEqual(['Travel', null])
 
     // (The light and dark runs share a database, so the page may already show the other's finished run; the Transactions are what tell.)
-    await rerunButton(page).click()
+    await applyTheRules(page)
     await expect.poll(async () => (await found()).find((t) => t.description.endsWith('PLAIN'))?.categoryName).toBe('Groceries')
     await expect(page.getByRole('status').filter({ hasText: /Finished\. Looked at/ })).toContainText('and updated')
     await expect(page.getByText(/^Finished (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d/)).toBeVisible()
-    await expect(rerunButton(page)).toBeEnabled()
+    await expect(applyButton(page)).toBeEnabled()
     await expect(page.getByRole('progressbar')).toHaveCount(0)
     await noAxeViolationsFromTop(page)
 
@@ -414,7 +479,7 @@ test('the Admin applies a Rule to the Transactions already on file, and one set 
 
   // With the Rule gone, applying the Rules again takes the Category it gave away. The Override stays.
   await page.goto('/rules')
-  await rerunButton(page).click()
+  await applyTheRules(page)
   await expect.poll(async () => (await found()).find((t) => t.description.endsWith('PLAIN'))?.categoryName).toBeNull()
   await expect(page.getByRole('status').filter({ hasText: /Finished\. Looked at/ })).toBeVisible()
   const cleared = await found()
@@ -461,13 +526,17 @@ test.describe('while the Rules are being applied', () => {
     await page.goto('/rules')
     // A run that was going when the page was opened is carried on, and shown.
     await expect(page.getByText('Looked at 4,000 of up to 20,000 Transactions (20%).')).toBeVisible()
-    const bar = page.getByRole('progressbar', { name: 'Apply the Rules to all Transactions' })
+    const bar = page.getByRole('progressbar', { name: 'Applying the Rules to all Transactions' })
     await expect(bar).toHaveAttribute('value', '20')
     await expect(page.getByRole('status').filter({ hasText: 'Started. Going through up to 20,000 Transactions.' })).toBeVisible()
     await expect(page.getByText('Last updated Sun 11 Oct 2026, 3:00 pm.')).toBeVisible()
     await expect(page.getByText('About 16 more steps if you keep this page open, or about 3 days if you close it. Keep this page open to finish sooner.')).toBeVisible()
-    await expect(rerunButton(page)).toBeDisabled()
-    await expect(page.getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
+    await expect(applyButton(page)).toBeDisabled()
+    // A run that is going is a spinner, what it says and its Stop button, in a frame of their own under the buttons.
+    const frame = progressFrame(page)
+    await expect(frame.getByText('Applying the Rules to all Transactions', { exact: true })).toBeVisible()
+    await expect(frame.getByRole('status', { name: 'Loading' })).toBeVisible()
+    await expect(frame.getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
     await noAxeViolationsFromTop(page)
 
     gates[0]!.open()
@@ -480,6 +549,9 @@ test.describe('while the Rules are being applied', () => {
     await expect(alert).toContainText('It carries on by itself after the daily allowance resets, around midday NZ time. Open this page then to finish sooner.')
     await expect(alert.getByRole('button')).toHaveCount(0) // trying again now would only be refused again
     await expect(page.getByText('Looked at 10,000 of up to 20,000 Transactions (50%).')).toBeVisible() // where it got to is still shown
+    await expect(frame.getByRole('alert')).toBeVisible() // in the same frame, which is not spinning while it waits for the day
+    await expect(spinner(page)).toHaveCount(0)
+    await expect(frame.getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
     await noAxeViolationsFromTop(page)
 
     // The day changes: the page asks again, with nobody pressing anything. It reads the job as well as asking for a step, and the two
@@ -496,7 +568,9 @@ test.describe('while the Rules are being applied', () => {
     await expect(page.getByText('Finished Mon 12 Oct 2026, 1:05 pm.')).toBeVisible()
     await expect(alert).toHaveCount(0)
     await expect(bar).toHaveCount(0)
-    await expect(rerunButton(page)).toBeEnabled()
+    await expect(spinner(page)).toHaveCount(0)
+    await expect(frame.getByRole('button', { name: 'Stop applying the Rules' })).toHaveCount(0)
+    await expect(applyButton(page)).toBeEnabled()
     await noAxeViolationsFromTop(page)
     expect(steps).toBe(3) // the late reading did not set the run going again
   })
@@ -513,7 +587,11 @@ test.describe('while the Rules are being applied', () => {
 
     await expect(page.getByText(/^Paused: it has used the share of today's free database allowance that it keeps for itself\./)).toContainText('Open this page then to finish sooner.')
     await expect(page.getByRole('status').filter({ hasText: 'Paused until the daily allowance resets, around midday NZ time.' })).toBeVisible()
-    await expect(rerunButton(page)).toBeDisabled()
+    await expect(applyButton(page)).toBeDisabled()
+    // Waiting for the day is not working: no spinner, the message in the frame, and Stop is still there.
+    await expect(progressFrame(page).getByText(/^Paused: it has used the share/)).toBeVisible()
+    await expect(spinner(page)).toHaveCount(0)
+    await expect(progressFrame(page).getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
     await noAxeViolationsFromTop(page)
     expect(steps).toBe(0)
   })
@@ -568,15 +646,31 @@ test.describe('while the Rules are being applied', () => {
     await expect(page.getByRole('status').filter({ hasText: 'The Rules changed again, so it started again (2 times). Going through up to 3,000 Transactions.' })).toBeVisible()
   })
 
-  test('does not announce a run that finished before the page was opened', async ({ page, context }) => {
+  test('the spinner turns, and does not turn when the device asks for less motion', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.route('**/api/rules/rerun/step', () => new Promise(() => {}))
+    await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await page.goto('/rules')
+    const animation = () => spinner(page).evaluate((element) => getComputedStyle(element).animationName)
+    await expect(spinner(page)).toBeVisible()
+    expect(await animation()).toBe('spin')
+
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await expect.poll(animation).toBe('none')
+  })
+
+  test('does not show or announce a run that finished before the page was opened', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.route('**/api/rules/rerun', (route) =>
       route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob({ status: 'done', doneRows: 20_000, percent: 100, finishedAt: '2026-10-11T02:05:00.000Z' }) } }) : route.fallback(),
     )
     await page.goto('/rules')
 
-    await expect(page.getByText('Finished. Looked at all 20,000 Transactions and updated 12 of them.')).toBeVisible() // shown...
-    await expect(page.getByRole('status').filter({ hasText: 'Finished.' })).toHaveCount(0) // ...but not said again to a screen reader
+    await expect(applyButton(page)).toBeEnabled()
+    await expect(page.getByText('Looked at all 20,000 Transactions')).toHaveCount(0) // the frame is for a run going or one that has just ended in this visit
+    await expect(progressFrame(page)).toHaveCount(0)
+    await expect(page.getByRole('status').filter({ hasText: 'Finished.' })).toHaveCount(0) // and nothing is said to a screen reader
   })
 
   test('the Admin stops a run, and is told what that leaves', async ({ page, context }) => {
@@ -593,7 +687,9 @@ test.describe('while the Rules are being applied', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Stopped. Looked at 7,000 Transactions and updated 300 of them. Those keep the result they were given and the rest are as they were.' })).toBeFocused()
     await expect(page.getByText('Stopped Sun 11 Oct 2026, 3:07 pm.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Stop applying the Rules' })).toHaveCount(0)
-    await expect(rerunButton(page)).toBeEnabled()
+    await expect(spinner(page)).toHaveCount(0) // stopped, and still said in the frame
+    await expect(progressFrame(page)).toContainText('Stopped. Looked at 7,000 Transactions')
+    await expect(applyButton(page)).toBeEnabled()
     await noAxeViolationsFromTop(page)
   })
 
@@ -675,6 +771,7 @@ test.describe('the D1 usage bar', () => {
     const asked: string[] = []
     page.on('request', (request) => request.url().includes('/api/d1-usage') && asked.push(request.url()))
     await page.goto('/rules')
+    await openApplyDialog(page) // the bar is in the question before the Rules are applied, and not on the page
 
     const panel = usagePanel(page)
     await expect(panel).toContainText('Optional: you only need this to use the D1 usage bar.')
@@ -708,6 +805,7 @@ test.describe('the D1 usage bar', () => {
       await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
       await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures(figures) }))
       await page.goto('/rules')
+      await openApplyDialog(page)
 
       const colours = await tokenColours(page, ['success', 'warning', 'danger', 'muted'])
       for (const [label, meter] of [
@@ -732,88 +830,37 @@ test.describe('the D1 usage bar', () => {
     })
   }
 
-  test.describe('read again when a run ends, and not otherwise', () => {
+  test('is read when the question opens, each time it does, and not for the steps of a run or while the question is shut', async ({ page, context }) => {
+    await signInAs(context, 'admin')
     // Each answer is a little further on, as the account's day is while a run uses it.
-    const answers = [usageFigures(), usageFigures({ rowsRead: 2_750_000 }), usageFigures({ rowsRead: 4_200_000 }), usageFigures({ rowsRead: 4_500_000 })]
-    const stubUsage = async (page: Page, asked: { count: number }) => {
-      await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
-      await page.route('**/api/d1-usage', (route) => route.fulfill({ json: answers[Math.min(asked.count++, answers.length - 1)] }))
-    }
-    const readsText = (page: Page, text: string) => usagePanel(page).getByText(text)
+    const answers = [usageFigures(), usageFigures({ rowsRead: 2_750_000 }), usageFigures({ rowsRead: 4_200_000 })]
+    let asked = 0
+    await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+    await page.route('**/api/d1-usage', (route) => route.fulfill({ json: answers[Math.min(asked++, answers.length - 1)] }))
+    // The run: the first step is a step like any other, the next ends it.
+    let job: ReturnType<typeof runningJob> | null = null
+    let steps = 0
+    await page.route('**/api/rules/rerun/step', (route) => route.fulfill({ json: { job: (job = steps++ === 0 ? runningJob({ doneRows: 8_000, percent: 40 }) : runningJob({ status: 'done', doneRows: 20_000, percent: 100, finishedAt: '2026-10-11T02:09:00.000Z' })) } }))
+    await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job } }) : route.fulfill({ json: { job: (job = runningJob()) } })))
+    await page.goto('/rules')
+    await expect(applyButton(page)).toBeEnabled()
+    expect(asked).toBe(0) // the page does not ask while the question is shut
 
-    test('when a run pauses, and when a run finishes, and not at each step before', async ({ page, context }) => {
-      await signInAs(context, 'admin')
-      const asked = { count: 0 }
-      await stubUsage(page, asked)
-      for (const { job, before, after } of [
-        { job: runningJob({ paused: true, doneRows: 10_000, percent: 50 }), before: '1,234,567 of 5,000,000 rows read · 24%', after: '2,750,000 of 5,000,000 rows read · 55%' },
-        { job: runningJob({ status: 'done', doneRows: 20_000, percent: 100, finishedAt: '2026-10-11T02:09:00.000Z' }), before: '4,200,000 of 5,000,000 rows read · 84%', after: '4,500,000 of 5,000,000 rows read · 90%' },
-      ]) {
-        const first = asked.count
-        // The first step is a step like any other (the run is going and not done); the next waits to be let go, and ends the run as the job says.
-        let open = () => {}
-        const opened = new Promise<void>((resolve) => (open = resolve))
-        let steps = 0
-        await page.route('**/api/rules/rerun/step', async (route) => {
-          if (steps++ === 0) return route.fulfill({ json: { job: runningJob({ doneRows: 8_000, percent: 40 }) } })
-          await opened
-          return route.fulfill({ json: { job } })
-        })
-        await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
-        await page.goto('/rules')
+    const dialog = await openApplyDialog(page)
+    await expect(dialog.getByText('1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await openApplyDialog(page)
+    await expect(dialog.getByText('2,750,000 of 5,000,000 rows read · 55%')).toBeVisible()
+    expect(asked).toBe(2)
 
-        await expect(readsText(page, before)).toBeVisible()
-        await expect(page.getByText('Looked at 8,000 of up to 20,000 Transactions (40%).')).toBeVisible()
-        await expect.poll(() => steps).toBe(2) // the run is going: the first step was answered, the second is waiting
-        expect(asked.count).toBe(first + 1) // ...and the usage was read when the panel showed, not for the step
+    await applyAnswer(page).click()
+    await expect(progressFrame(page)).toContainText('Finished. Looked at all 20,000 Transactions')
+    expect(steps).toBe(2)
+    expect(asked).toBe(2) // two steps and an end, and the bar was shut: nothing was asked
 
-        open()
-        await expect(readsText(page, after)).toBeVisible()
-        expect(asked.count).toBe(first + 2)
-        await page.unroute('**/api/rules/rerun/step')
-        await page.unroute('**/api/rules/rerun')
-      }
-    })
-
-    test('when the Admin stops a run', async ({ page, context }) => {
-      await signInAs(context, 'admin')
-      const asked = { count: 0 }
-      await stubUsage(page, asked)
-      await page.route('**/api/rules/rerun/step', () => new Promise(() => {}))
-      await page.route('**/api/rules/rerun/stop', (route) => route.fulfill({ json: { job: runningJob({ status: 'stopped', doneRows: 7_000, percent: 35, finishedAt: '2026-10-11T02:07:00.000Z' }) } }))
-      await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
-      await page.goto('/rules')
-      await expect(readsText(page, '1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
-
-      await page.getByRole('button', { name: 'Stop applying the Rules' }).click()
-      await expect(readsText(page, '2,750,000 of 5,000,000 rows read · 55%')).toBeVisible()
-      expect(asked.count).toBe(2)
-    })
-
-    test.describe('and the free plan refuses a step', () => {
-      test.use({ expectedStatuses: [429] })
-
-      test('when the free plan refuses a step because the day is used up', async ({ page, context }) => {
-        await signInAs(context, 'admin')
-        const asked = { count: 0 }
-        await stubUsage(page, asked)
-        // The step is refused once the figures from before it are on the page (it would otherwise be refused before the page knew the feature is on).
-        let open = () => {}
-        const opened = new Promise<void>((resolve) => (open = resolve))
-        await page.route('**/api/rules/rerun/step', async (route) => {
-          await opened
-          await route.fulfill({ status: 429, json: { error: 'Daily limit reached' } })
-        })
-        await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
-        await page.goto('/rules')
-        await expect(readsText(page, '1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
-
-        open()
-        await expect(page.getByRole('alert').filter({ hasText: 'used up the database allowance' })).toBeVisible()
-        await expect(readsText(page, '2,750,000 of 5,000,000 rows read · 55%')).toBeVisible()
-        expect(asked.count).toBe(2)
-      })
-    })
+    await openApplyDialog(page)
+    await expect(dialog.getByText('4,200,000 of 5,000,000 rows read · 84%')).toBeVisible() // the figures after the run, not the ones from before it
+    expect(asked).toBe(3)
   })
 
   test.describe('when Cloudflare cannot give the figures', () => {
@@ -827,6 +874,7 @@ test.describe('the D1 usage bar', () => {
         asked++ === 0 ? route.fulfill({ status: 502, json: { error: 'Usage unavailable', reason: 'no-account' } }) : route.fulfill({ json: usageFigures() }),
       )
       await page.goto('/rules')
+      await openApplyDialog(page)
 
       const panel = usagePanel(page)
       const note = panel.getByRole('status').filter({ hasText: 'Usage unavailable.' })
@@ -834,7 +882,7 @@ test.describe('the D1 usage bar', () => {
       await expect(note).toContainText('CF_ACCOUNT_ID must be the account the token belongs to, and the token needs Account Analytics: Read.')
       await expect(note).toContainText('The steps are in docs/setup.md, under "D1 usage bar (optional)".')
       await expect(panel.getByRole('progressbar')).toHaveCount(0)
-      await expect(rerunButton(page)).toBeEnabled()
+      await expect(applyAnswer(page)).toBeEnabled() // the Rules can still be applied
       await noAxeViolationsFromTop(page)
 
       await panel.getByRole('button', { name: 'Check again' }).click()
@@ -844,7 +892,7 @@ test.describe('the D1 usage bar', () => {
       await noAxeViolationsFromTop(page)
     })
 
-    test('after figures, a refresh that fails takes them down rather than leaving them as today, and asking again brings them back', async ({ page, context }) => {
+    test('after figures, a reading that fails takes them down rather than leaving them as today, and asking again brings them back', async ({ page, context }) => {
       await signInAs(context, 'admin')
       await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
       let asked = 0
@@ -852,15 +900,15 @@ test.describe('the D1 usage bar', () => {
         const n = asked++
         return n === 1 ? route.fulfill({ status: 502, json: { error: 'Usage unavailable', reason: 'unreachable' } }) : route.fulfill({ json: usageFigures(n === 0 ? {} : { rowsRead: 3_000_000 }) })
       })
-      await page.route('**/api/rules/rerun/step', () => new Promise(() => {}))
-      await page.route('**/api/rules/rerun/stop', (route) => route.fulfill({ json: { job: runningJob({ status: 'stopped', doneRows: 7_000, percent: 35, finishedAt: '2026-10-11T02:07:00.000Z' }) } }))
-      await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
       await page.goto('/rules')
+      await openApplyDialog(page)
       const panel = usagePanel(page)
       await expect(panel.getByText('1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
 
-      // The run ends, the page reads the figures again, and Cloudflare cannot give them.
-      await page.getByRole('button', { name: 'Stop applying the Rules' }).click()
+      // The question is opened again, the figures are read again, and Cloudflare cannot give them.
+      await page.keyboard.press('Escape')
+      await expect(applyDialog(page)).toHaveCount(0)
+      await openApplyDialog(page)
       await expect(panel.getByRole('status').filter({ hasText: 'Usage unavailable.' })).toContainText('Cloudflare could not be reached just now')
       await expect(panel.getByRole('progressbar')).toHaveCount(0)
       await expect(panel.getByText('1,234,567 of 5,000,000 rows read')).toHaveCount(0)

@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import { netWorth as netWorthRegion, NET_WORTH_PATH, pressShowNetWorth, SPENDING_REPORT_PATH, spendingDrawn, stubSpendingReport } from './chart-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
+import { openApplyDialog } from './rule-helpers'
 import { actionsButton, chooseAction, openActions } from './row-actions-helpers'
 import {
   chooseTextSize,
@@ -586,8 +587,8 @@ test.describe('zoom', () => {
     }
   }
 
-  // The Rules page with the D1 usage bar on and the day used up: the longest figures and badge it shows (the figures are stubbed, so this needs
-  // no token). With it off, the page's own test above covers the longer Setup needed words.
+  // The Rules page with the question before the Rules are applied open and the D1 usage bar on in it, the day used up: the longest figures and badge it shows (the figures are stubbed,
+  // so this needs no token). With it off, the page's own test above covers the longer Setup needed words. The question must stay inside the screen, which scrolls it if the words are longer.
   for (const { name, width, height } of zoomLevels) {
     for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/rules with the D1 usage bar showing the day used up at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
@@ -599,6 +600,7 @@ test.describe('zoom', () => {
         await page.setViewportSize({ width, height })
         await page.goto('/rules')
         await chooseTextSize(page, size)
+        await openApplyDialog(page) // the bar is in the question before the Rules are applied
         await expect(page.getByText('5,100,000 of 5,000,000 rows read · 102%')).toBeVisible()
         await expect(page.getByText('The allowance starts again on Thu 15 Oct 2026, 1:00 pm, New Zealand time.')).toBeVisible()
         await expectTextSize(page, size)
@@ -1547,6 +1549,7 @@ test.describe('forced colours (Windows high contrast)', { tag: '@theme' }, () =>
       route.fulfill({ json: { rowsRead: 2_750_000, rowsWritten: 4_321, readLimit: 5_000_000, writeLimit: 100_000, resetsAt: '2026-10-15T00:00:00.000Z' } }),
     )
     await page.goto('/rules')
+    await openApplyDialog(page)
 
     const bar = page.getByRole('progressbar', { name: 'Database rows read today' })
     await expect(bar).toBeVisible()
