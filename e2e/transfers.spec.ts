@@ -31,6 +31,8 @@ async function seed(context: BrowserContext, baseURL: string, batches: Seed[]) {
 }
 
 const dataRows = (page: Page) => page.getByRole('row').filter({ has: page.getByRole('cell') })
+/** The Admin's row of a Transaction, found by its Edit button: the panel that its button opens and the line that says it was saved are rows of the table too, and name it. */
+const listRow = (page: Page, text: string) => dataRows(page).filter({ hasText: text }).filter({ has: page.getByRole('button', { name: /^Edit / }) })
 
 test('a Transfer between two Accounts is named as one, in the list and in its details, and a payment to someone else is not', async ({ page, context, baseURL }, testInfo) => {
   const { everyday, savings } = accountsFor(testInfo.project.name)
@@ -128,7 +130,7 @@ test('the Admin can take one half of a Transfer out of the Transfers by choosing
   ])
   await signInAs(context, 'admin')
   await page.goto(`/transactions?q=${stamp}`)
-  const outRow = dataRows(page).filter({ hasText: out })
+  const outRow = listRow(page, out)
   await expect(outRow).toContainText(`Transfer to ${savings.name}`)
 
   await outRow.getByRole('button', { name: /^Edit / }).click()
@@ -228,7 +230,7 @@ test('the Admin can say Not a Transfer from the edit panel, and is told what an 
   ])
   await signInAs(context, 'admin')
   await page.goto(`/transactions?q=${stamp}`)
-  const outRow = dataRows(page).filter({ hasText: out })
+  const outRow = listRow(page, out)
   await outRow.getByRole('button', { name: /^Edit / }).click()
 
   // The panel points to Not a Transfer rather than a Category on each half.
@@ -388,7 +390,7 @@ test('lending to a tracked Account: a Loans Category on a half counts as a loan,
   await page.goto(`/transactions?q=${stamp}`)
 
   for (const description of [out, into]) {
-    const row = dataRows(page).filter({ hasText: description })
+    const row = listRow(page, description)
     await row.getByRole('button', { name: /^Edit / }).click()
     await page.locator('#edit-category').selectOption({ label: 'Loans' })
     await page.getByRole('button', { name: 'Save', exact: true }).click()
@@ -397,7 +399,7 @@ test('lending to a tracked Account: a Loans Category on a half counts as a loan,
 
   // Neither half is a Transfer or spending now. The list marks both as a loan, in words.
   for (const description of [out, into]) {
-    const row = dataRows(page).filter({ hasText: description })
+    const row = listRow(page, description)
     await expect(row).not.toContainText('Transfer')
     await expect(row).toContainText('Loan, not spending')
   }

@@ -1,4 +1,4 @@
-import type { BrowserContext, Locator } from '@playwright/test'
+import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
 import { importRows } from './report-helpers'
 import { actionsButton, menuAction, openActions, rowButton } from './row-actions-helpers'
@@ -75,13 +75,66 @@ test('a panel that opens under a row is a full-width row of the table, in its lo
   const panel = page.getByRole('region', { name: `Rename ${name}` })
   await expect(panel).toBeVisible()
   await expect(panel.locator('xpath=ancestor::td[1]')).toHaveAttribute('colspan', String(columns)) // across every column
+  await expect(rowButton(page, 'Rename', name)).toHaveAttribute('aria-controls', (await panel.getAttribute('id'))!)
   await expectTableLook(table) // the open panel is a row of the table: the same box, text size and dividers
+  await page.getByLabel('Account name').fill(`${name} typed`)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByRole('table')).toHaveCount(0)
   await expect(panel).toBeVisible()
   await expect(panel.locator('xpath=ancestor::li[1]/preceding-sibling::li[1]').getByRole('button', { name: `Rename ${name}`, exact: true })).toBeVisible()
+  await expect(page.getByLabel('Account name')).toHaveValue(`${name} typed`) // the cards start the form again, with what was typed in it
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expect(page.getByLabel('Account name')).toHaveValue(`${name} typed`)
+  await panel.getByRole('button', { name: 'Cancel' }).click()
+  await rowButton(page, 'Rename', name).click()
+  await expect(page.getByLabel('Account name')).toHaveValue(name) // Cancel throws it away
 })
+
+// A panel that opens from a row of the Accounts or the Budgets (stubbed, with enough rows for the page to scroll) leaves the page where it was, and puts focus in its first field.
+for (const { path, table, button, field, stub } of [
+  {
+    path: '/accounts',
+    table: 'Accounts',
+    button: (page: Page, n: number) => rowButton(page, 'Rename', `Stub account ${n}`),
+    field: 'Account name',
+    stub: (page: Page) =>
+      page.route('**/api/accounts', (route) => route.fulfill({ json: Array.from({ length: 16 }, (_, i) => ({ id: i + 1, name: `Stub account ${i + 1}`, accountNumber: '99-9999-9999999-97', cutoverDate: null })) })),
+  },
+  {
+    path: '/budgets',
+    table: 'Budgets',
+    button: (page: Page, n: number) => rowButton(page, 'Edit Budget for', `Stub category ${n}`),
+    field: 'Monthly Budget in dollars',
+    stub: (page: Page) =>
+      page.route(/\/api\/budgets(\?.*)?$/, (route) =>
+        route.fulfill({
+          json: {
+            month: '2026-10',
+            changeCount: 1,
+            changeLimit: 600,
+            budgets: Array.from({ length: 16 }, (_, i) => ({ categoryId: i + 1, categoryName: `Stub category ${i + 1}`, amountCents: null, effectiveFrom: null, changes: [] })),
+          },
+        }),
+      ),
+  },
+]) {
+  test(`${path}: a row's panel opens without moving the page`, async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await stub(page)
+    await page.setViewportSize({ width: 1100, height: 800 })
+    await page.goto(path)
+    await expect(page.getByRole('table', { name: table })).toBeVisible()
+    await button(page, 6).evaluate((element) => window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - 130)) // the sixth row is some way down the page
+    const scrolled = await page.evaluate(() => window.scrollY)
+    expect(scrolled).toBeGreaterThan(100)
+
+    await button(page, 6).click()
+    await expect(page.getByLabel(field)).toBeFocused()
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrolled)
+    await expect(page.getByRole('region').filter({ has: page.getByLabel(field) })).toBeInViewport()
+  })
+}
 
 test('a row\'s Actions menu opens from the keyboard, and focus goes back to its button when a question is closed or the menu is', async ({ page, context }) => {
   await signInAs(context, 'admin')

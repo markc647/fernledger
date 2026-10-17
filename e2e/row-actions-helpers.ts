@@ -52,9 +52,6 @@ export async function chooseAction(button: Locator, action: string) {
   await menuAction(button.page(), action).click()
 }
 
-/** Opens the "⋯" menu of the row `row` names ("Rule 3", a Category's name) and chooses an item: what a spec does where the page once had a button on the row. */
-export const rowAction = (page: Page, row: string, action: string) => chooseAction(actionsButton(page, row), action)
-
 /**
  * The contrast of an element's text against what it is drawn on, as the browser paints it (WCAG 1.4.3): the fills of the element and of each element it is in, the first of them over
  * the page, laid one over the next (a translucent fill, such as a tint, shows what is under it).

@@ -41,7 +41,8 @@ async function seed(context: BrowserContext, baseURL: string, projectName: strin
   return { name }
 }
 
-const rowFor = (page: Page, text: string) => page.getByRole('row').filter({ hasText: text })
+/** A Category's row of the table: not the panel under it or the line that says what saving did, which are rows of one cell and name the Category too. */
+const rowFor = (page: Page, text: string) => page.getByRole('row').filter({ hasText: text }).filter({ has: page.locator('td:nth-child(2)') })
 /** A Category's one action: its Edit button, named for it. */
 const editBudget = (page: Page, category: string) => rowButton(page, 'Edit Budget for', category)
 const widgetRow = (page: Page, name: string) => page.getByRole('region', { name: 'Budget vs actual' }).getByRole('row').filter({ hasText: name })
@@ -75,6 +76,12 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await page.getByRole('button', { name: 'Save Budget' }).click()
   await expect(page.getByRole('alert')).toContainText('more than $0')
   await page.getByLabel('Monthly Budget in dollars').fill('$100')
+  // The table becoming cards starts the panel again, and what was typed in it stays.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole('table')).toHaveCount(0)
+  await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('$100')
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('$100')
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save Budget' }).click()
 
@@ -82,6 +89,12 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   const message = page.getByRole('status').filter({ hasText: 'now has a Budget' })
   await expect(message).toHaveText(`${name} now has a Budget of $100.00 a month from ${monthWords}.`)
   await expect(editBudget(page, name)).toBeFocused()
+  // It is written under the Category's row too, where the Admin is looking, and the line at the top, which a screen reader announces, is not drawn: it is said once and seen once.
+  const under = page.getByRole('table').getByText(`${name} now has a Budget of $100.00 a month from ${monthWords}.`)
+  await expect(under).toBeVisible()
+  await expect(under.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[1]').getByRole('button', { name: `Edit Budget for ${name}`, exact: true })).toBeVisible()
+  await expect(under).not.toBeFocused()
+  expect((await message.boundingBox())!.width).toBeLessThanOrEqual(1)
   await expect(rowFor(page, name)).toContainText('$100.00 a month')
   await expect(rowFor(page, name)).toContainText(`From ${monthWords}: $100.00 a month`)
   await noAxeViolations(page)
@@ -170,7 +183,7 @@ test.describe('a refused Budget', () => {
     await page.getByRole('button', { name: 'Save Budget' }).click()
     await expect(page.getByRole('alert')).toContainText('there is no room to add another')
     await noAxeViolations(page)
-    await expect(rowFor(page, name).first()).toContainText('No Budget') // the panel is a row too, under it
+    await expect(rowFor(page, name)).toContainText('No Budget')
   })
 })
 
