@@ -3,11 +3,13 @@ import { createRootRouteWithContext, Outlet, useRouter, useRouterState } from '@
 import { useCallback, useEffect, useState } from 'react'
 import { AppSidebar } from '@/components/app-sidebar'
 import { DevIdentitySwitcher } from '@/components/dev-identity-switcher'
+import { SessionProblemPage } from '@/components/session-problem'
 import { SiteHeader } from '@/components/site-header'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { deviceStorage } from '@/lib/device-storage'
-import { isNotSignedIn, meQuery } from '@/lib/me'
+import { meQuery } from '@/lib/me'
 import { navSections, trailFor } from '@/lib/nav'
+import { useSessionProblem } from '@/lib/session'
 import { FALLBACK_APP_TITLE, settingsQuery } from '@/lib/settings'
 import { loadSidebarChoice, saveSidebarChoice, sidebarIsOpen, SIDEBAR_WIDE_QUERY } from '@/lib/sidebar-state'
 import { useMediaQuery } from '@/lib/use-media-query'
@@ -22,6 +24,7 @@ const focusStyle = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus
 
 function Layout() {
   const { data: me, error: meError } = useQuery(meQuery)
+  const sessionProblem = useSessionProblem()
   // Until the title arrives the sidebar's title is blank rather than flashing "Fernledger" over the Admin's own title.
   // The Settings screen writes its saved Settings into this same query, so the sidebar changes without a reload.
   const { data: settings, isPending: titlePending } = useQuery(settingsQuery)
@@ -76,18 +79,14 @@ function Layout() {
             {/* Local development only: inside the panel, because the sidebar is fixed to the left edge. */}
             {import.meta.env.DEV && <DevIdentitySwitcher />}
             <main id="main" tabIndex={-1} className="mx-auto w-full max-w-6xl p-4 md:p-6">
-              {meError ? (
-                isNotSignedIn(meError) ? (
-                  <>
-                    <h1 className="text-2xl font-semibold">Not signed in</h1>
-                    <p className="mt-2">Sign in through your usual Fernledger link to see this page.</p>
-                  </>
-                ) : (
-                  <>
-                    <h1 className="text-2xl font-semibold">Something went wrong</h1>
-                    <p className="mt-2">Fernledger couldn't load your details. Reload the page to try again.</p>
-                  </>
-                )
+              {/* A sign-in problem found by any API call, not only the one for who is signed in: a session that runs out while a page is open shows it too (src/lib/session.ts). */}
+              {sessionProblem ? (
+                <SessionProblemPage problem={sessionProblem} />
+              ) : meError ? (
+                <>
+                  <h1 className="text-2xl font-semibold">Something went wrong</h1>
+                  <p className="mt-2">Fernledger couldn't load your details. Reload the page to try again.</p>
+                </>
               ) : (
                 <Outlet />
               )}

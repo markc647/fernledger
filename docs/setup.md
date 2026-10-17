@@ -186,7 +186,7 @@ If your Cloudflare account already has an account-wide Access rule (**Protect al
 2. **Zero Trust → Access → Applications → Add an application → Workers.** (Cloudflare's own pages call the Access menu "Access controls".) Deploy the Worker first so it can be chosen.
    - **Worker:** `fernledger`, the `name` in `wrangler.jsonc`.
    - **Traffic:** **All traffic**. **Previews only** would leave the live app open.
-   - **Session duration:** 24 hours.
+   - **Session duration:** 24 hours. This is the length of a sign-in, and the only place it is set: Fernledger has no session of its own. When it runs out a Member sees **Your sign-in has expired** and presses **Sign in again** (README [What it does](../README.md#what-it-does)).
    - **Login methods:** One-time PIN only.
 
    Cloudflare also describes a quicker route (Workers & Pages → your Worker → **Access**). Its policy options are **Cloudflare account** and **Email domain**, and neither is a list of people, so use the Zero Trust route above.
@@ -206,6 +206,8 @@ If your Cloudflare account already has an account-wide Access rule (**Protect al
    Your team name is under **Zero Trust → Settings**. It is also the start of the address of Cloudflare's sign-in page (`<your-team>.cloudflareaccess.com`), which you reach by opening the app's address in a private window. Until all three secrets are set, every API request returns 401. The app fails closed.
 6. **Check it.** Open `https://fernledger.<your-subdomain>.workers.dev` in a private window. A Member's email should be sent a code and then reach the app. Then try an email that isn't on the list: it should get no code.
 7. **Check Sign out.** Press **Sign out** in the header once (the README's [What it does](../README.md#what-it-does) says what it does). The next visit should ask for a code. [Local development](#local-development) can't try it.
+
+**If a Member sees "Not signed in"** (and not "Your sign-in has expired", which signing in again mends): Cloudflare let them through and the Worker refused the API, which is a 401. The Worker log has one line for the kind of refusal, with no token and no email: `auth.refused.no-token` (no Access token reached the Worker, so Access is not in front of the address that was used), `auth.refused.bad-token` (a token that did not verify: `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` is not this application's, the token is out of date, or it has no email) or `auth.refused.not-configured` (one of the three secrets in step 5 is missing). An email that is not in the policy never gets this far: Cloudflare gives it no code.
 
 **Adding or removing a Member:** edit the "Fernledger Members" policy. The app needs no changes. Give a new Member the app's address. Its **How to sign in** page prints as a one-page guide for anyone who finds the email code hard, and **About your data** shows what you write in Settings under "About your data", so fill those in too. As the Admin, print **How to sign in** and give it to each Member before their first sign-in: the page says so to you alone, and the printout has a line to write your name and phone on, as well as the contact you set in Settings.
 
