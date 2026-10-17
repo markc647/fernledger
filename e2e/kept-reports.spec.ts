@@ -211,7 +211,7 @@ test.describe('the Reports page', () => {
     await keep(context, baseURL, { report: 'income-vs-spending', from: `${year}-01-01`, to: `${year}-12-31` })
     await page.reload()
     const table = page.getByRole('table', { name: 'Kept Reports' })
-    await expect(table.getByRole('columnheader')).toHaveText(['Report', 'Dates', 'Account', 'Last made', 'Made by', 'Actions'])
+    await expect(table.getByRole('columnheader')).toHaveText(['Report', 'Dates', 'Account', 'Last made', 'Made by', 'Action'])
     await expect(rows(page)).toHaveCount(2)
     await expectTableLook(table)
     await expect(rows(page).first()).toContainText('Income vs spending by month')

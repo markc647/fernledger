@@ -3,7 +3,7 @@ import { thisMonth } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
 import { transactionId } from './report-helpers'
-import { actionsButton, rowAction } from './row-actions-helpers'
+import { rowButton } from './row-actions-helpers'
 import { navigateTo } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
@@ -42,6 +42,8 @@ async function seed(context: BrowserContext, baseURL: string, projectName: strin
 }
 
 const rowFor = (page: Page, text: string) => page.getByRole('row').filter({ hasText: text })
+/** A Category's one action: its Edit button, named for it. */
+const editBudget = (page: Page, category: string) => rowButton(page, 'Edit Budget for', category)
 const widgetRow = (page: Page, name: string) => page.getByRole('region', { name: 'Budget vs actual' }).getByRole('row').filter({ hasText: name })
 
 test.describe.configure({ mode: 'serial' })
@@ -58,10 +60,14 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await expect(rowFor(page, name)).toContainText('No Budget')
 
   await expectTableLook(page.getByRole('table', { name: 'Budgets' }))
+  await expect(page.getByRole('columnheader', { name: 'Action', exact: true })).toBeVisible() // one action: a button named for it, under a singular heading
+  await expect(page.getByRole('button', { name: /^Actions for/ })).toHaveCount(0)
 
   // An amount that is not a Budget is explained, not sent.
-  await rowAction(page, name, 'Edit Budget')
+  await editBudget(page, name).click()
   await expect(page.getByRole('heading', { level: 2, name: `Budget for ${name}` })).toBeVisible()
+  // The panel is a row of the table under the Category's own, and the Edit button says it is open.
+  await expect(page.getByRole('region', { name: `Budget for ${name}` }).locator('xpath=ancestor::tr[1]/preceding-sibling::tr[1]').getByRole('button', { name: `Edit Budget for ${name}`, exact: true })).toHaveAttribute('aria-expanded', 'true')
   await expect(page.getByLabel('Monthly Budget in dollars')).toBeFocused()
   await expect(page.getByLabel('Applies from')).toHaveValue(thisMonth)
   await expect(page.getByRole('button', { name: 'End Budget' })).toHaveCount(0) // there is no Budget to end yet
@@ -72,10 +78,10 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save Budget' }).click()
 
-  // Focus returns to the row's Actions button, which opened the form, and the message says what happened.
+  // Focus returns to the row's Edit button, which opened the form, and the message says what happened.
   const message = page.getByRole('status').filter({ hasText: 'now has a Budget' })
   await expect(message).toHaveText(`${name} now has a Budget of $100.00 a month from ${monthWords}.`)
-  await expect(actionsButton(page, name)).toBeFocused()
+  await expect(editBudget(page, name)).toBeFocused()
   await expect(rowFor(page, name)).toContainText('$100.00 a month')
   await expect(rowFor(page, name)).toContainText(`From ${monthWords}: $100.00 a month`)
   await noAxeViolations(page)
@@ -95,7 +101,7 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
 
   // A lower Budget from this month puts the Category over it.
   await page.getByRole('link', { name: 'Set or change Budgets' }).click()
-  await rowAction(page, name, 'Edit Budget')
+  await editBudget(page, name).click()
   await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('100.00')
   await page.getByLabel('Monthly Budget in dollars').fill('40.50')
   await page.getByRole('button', { name: 'Save Budget' }).click()
@@ -106,27 +112,27 @@ test('the Admin sets, changes and ends a Budget, the Summary compares it with sp
 
   // Setting what the month already has changes nothing, and says so.
   await page.goto('/budgets')
-  await rowAction(page, name, 'Edit Budget')
+  await editBudget(page, name).click()
   await page.getByLabel('Monthly Budget in dollars').fill('40.50')
   await page.getByRole('button', { name: 'Save Budget' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'so nothing changed' })).toHaveText(`${name} already has a Budget of $40.50 a month in ${monthWords}, so nothing changed.`)
 
   // A later change stays when a Budget is set from an earlier month, and the panel says so.
-  await rowAction(page, name, 'Edit Budget')
+  await editBudget(page, name).click()
   await page.getByLabel('Monthly Budget in dollars').fill('30')
   await page.getByLabel('Applies from').selectOption(nextMonth)
   await page.getByRole('button', { name: 'Save Budget' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'now has a Budget' })).toHaveText(`${name} now has a Budget of $30.00 a month from ${words(nextMonth)}.`)
-  await rowAction(page, name, 'Edit Budget')
+  await editBudget(page, name).click()
   const panel = page.getByRole('region', { name: `Budget for ${name}` })
   await expect(panel.getByText('This Category already has later changes')).toBeVisible()
   await expect(panel.getByText(`From ${words(nextMonth)}: $30.00 a month`)).toBeVisible()
   await expect(panel.getByText('To have no Budget, use End Budget.')).toBeVisible()
   await panel.getByRole('button', { name: 'Cancel' }).click()
-  await expect(actionsButton(page, name)).toBeFocused()
+  await expect(editBudget(page, name)).toBeFocused()
 
   // Ending it leaves this month with no Budget until its next change; the Summary stops listing the Category.
-  await rowAction(page, name, 'Edit Budget')
+  await editBudget(page, name).click()
   await page.getByRole('button', { name: 'End Budget' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Ended the Budget' })).toHaveText(`Ended the Budget for ${name} from ${monthWords}.`)
   await expect(rowFor(page, name)).toContainText('No Budget')
@@ -155,7 +161,7 @@ test.describe('a refused Budget', () => {
     await page.route(/\/api\/budgets\/\d+$/, (route) => (route.request().method() === 'PUT' ? route.fulfill({ status: 409, json: refusal }) : route.fallback()))
     await page.goto('/budgets')
 
-    await rowAction(page, name, 'Edit Budget')
+    await editBudget(page, name).click()
     await page.getByLabel('Monthly Budget in dollars').fill('$100')
     await page.getByRole('button', { name: 'Save Budget' }).click()
     await expect(page.getByRole('alert')).toHaveText('This Budget was changed just now. Try again.')
@@ -164,7 +170,7 @@ test.describe('a refused Budget', () => {
     await page.getByRole('button', { name: 'Save Budget' }).click()
     await expect(page.getByRole('alert')).toContainText('there is no room to add another')
     await noAxeViolations(page)
-    await expect(rowFor(page, name)).toContainText('No Budget')
+    await expect(rowFor(page, name).first()).toContainText('No Budget') // the panel is a row too, under it
   })
 })
 
@@ -188,8 +194,8 @@ test('a Member sees the Budgets and how spending compares, and cannot change the
   await expect(await openHelp(page)).toContainText('Only the Admin can change them.') // in the page's help sheet
   await page.keyboard.press('Escape')
   await expect(rowFor(page, name)).toContainText('$50.00 a month')
-  await expect(page.getByRole('button', { name: /^Actions for/ })).toHaveCount(0)
-  await expect(page.getByRole('columnheader', { name: 'Actions' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^Edit / })).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: /^Action/ })).toHaveCount(0)
   await noAxeViolations(page)
 
   // The API says no too, whatever the page shows.

@@ -159,6 +159,7 @@ test("a Rule's Actions menu opens its form and its question where the old button
     const actions = ruleActions(page, id)
     const number = (await ruleIds(context)).indexOf(id) + 1
     await expect(actions).toHaveAccessibleName(`Actions for Rule ${number}`)
+    await expect(page.getByRole('columnheader', { name: 'Action', exact: true })).toBeVisible() // one heading for the row's menu, in the singular like every table's
 
     // The menu is named for the button that opened it (which Radix does not do when the button has an id of its own).
     await openActions(actions)

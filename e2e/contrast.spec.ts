@@ -5,7 +5,7 @@ import { dateField, pickDate, thisMonth } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { helpButton, helpSheet } from './help-helpers'
 import { ensureCategory, forgetKeptReportsAfterEach, importRows, restoreAppTitleAfterEach, signInToOpen, transactionId, type SeedRow } from './report-helpers'
-import { arrowTo, chooseAction, menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
+import { arrowTo, menuAction, OPEN_MENU, openActions, rowButton } from './row-actions-helpers'
 import { categoryId, openApplyDialog, ruleActions, runningJob, spinner, usageFigures, usageOn, withRules } from './rule-helpers'
 import { navGroup, openHeaderControls, openNavGroup, siteHeader } from './shell-helpers'
 
@@ -213,7 +213,7 @@ const PAGES: {
       await scan()
       await scanNote()
       if (role === 'member') return
-      await chooseAction(rows.filter({ hasText: 'TO SAVINGS' }).getByRole('button', { name: /^Actions for/ }), 'Edit Category and Note')
+      await rows.filter({ hasText: 'TO SAVINGS' }).getByRole('button', { name: /^Edit / }).click()
       await expect(page.getByText('If the pairing is wrong, use Not a Transfer instead.')).toBeVisible()
       await scan('with the edit panel open')
       await page.getByRole('button', { name: 'Not a Transfer', exact: true }).click()
@@ -269,12 +269,17 @@ const PAGES: {
     },
   },
   {
+    // The Admin's Rename panel is looked at open, under its row, which is lit (text on a tint) while it is open.
     path: '/accounts',
-    visit: async ({ page, data, scan }) => {
+    visit: async ({ page, role, data, scan }) => {
       await page.goto('/accounts')
       await heading(page, 'Accounts')
       await expect(page.getByText(data.everyday.name).first()).toBeVisible()
       await scan()
+      if (role === 'member') return
+      await rowButton(page, 'Rename', data.everyday.name).click()
+      await expect(page.getByRole('region', { name: `Rename ${data.everyday.name}` })).toBeVisible()
+      await scan('with the rename panel open')
     },
   },
   {
@@ -438,12 +443,16 @@ const PAGES: {
   },
   {
     path: '/budgets',
-    visit: async ({ page, data, scan }) => {
+    visit: async ({ page, role, data, scan }) => {
       await page.goto('/budgets')
       await heading(page, 'Budgets')
       await expect(page.getByRole('row').filter({ hasText: data.food })).toContainText('$100.00 a month')
       await expect(page.getByRole('row').filter({ hasText: data.petrol })).toContainText('$200.00 a month')
       await scan()
+      if (role === 'member') return
+      await rowButton(page, 'Edit Budget for', data.food).click()
+      await expect(page.getByRole('region', { name: `Budget for ${data.food}` })).toBeVisible()
+      await scan('with the Budget panel open')
     },
   },
   {

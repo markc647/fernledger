@@ -1,12 +1,12 @@
 import type { BrowserContext, Locator } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
 import { importRows } from './report-helpers'
-import { actionsButton, menuAction, openActions } from './row-actions-helpers'
+import { actionsButton, menuAction, openActions, rowButton } from './row-actions-helpers'
 import { expectTableLook } from './table-look-helpers'
 
 // The one look every table has (ResponsiveTable, src/components/responsive-table.tsx): tested once here, on the Transactions table (in its own box) and the Recent transactions table of the Dashboard (in a card, which is the
 // box), and on the cards a phone gets in place of the first. Each page's own spec then checks that its table has the look (`expectTableLook`), and the Report specs that its printout does not (`expectPaperTable`).
-// The row's "⋯" menu is tested here for the keyboard and for where focus goes, on the Accounts table; what each page's actions do is in that page's spec.
+// The row's "⋯" menu is tested here for the keyboard and for where focus goes, on the Categories table, and a panel that opens under a row (an expanded row) on the Accounts table; what each page's actions do is in that page's spec.
 
 // The light and dark projects share one local database, so each has an Account of its own.
 const accountFor = (project: string) => ({ number: project === 'dark' ? '99-9999-9999999-37' : '99-9999-9999999-36', name: `Table look ${project}` })
@@ -60,22 +60,42 @@ test('on a phone the rows are cards with the border, corners and text size the t
   await expect(page.getByRole('table')).toHaveCount(0)
   expect(parseFloat(box.border)).toBeGreaterThan(0)
   expect(await boxOf(card, 'dd')).toEqual(box)
-  await expect(actionsButton(page, name)).toBeVisible() // the same "⋯" button, on the card
+  await expect(rowButton(page, 'Rename', name)).toBeVisible() // the same button, on the card
 })
 
-test('a row\'s Actions menu opens from the keyboard, and focus goes back to its button when a question is closed or the menu is', async ({ page, context, baseURL }, testInfo) => {
+test('a panel that opens under a row is a full-width row of the table, in its look, and on a phone a card after the row\'s card', async ({ page, context, baseURL }, testInfo) => {
   const { name } = await seed(context, baseURL!, testInfo.project.name)
+  await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/accounts')
-  const button = actionsButton(page, name)
+  const table = page.getByRole('table', { name: 'Accounts' })
+  await expect(table.getByRole('cell', { name, exact: true })).toBeVisible()
+  const columns = await table.getByRole('columnheader').count()
+
+  await rowButton(page, 'Rename', name).click()
+  const panel = page.getByRole('region', { name: `Rename ${name}` })
+  await expect(panel).toBeVisible()
+  await expect(panel.locator('xpath=ancestor::td[1]')).toHaveAttribute('colspan', String(columns)) // across every column
+  await expectTableLook(table) // the open panel is a row of the table: the same box, text size and dividers
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole('table')).toHaveCount(0)
+  await expect(panel).toBeVisible()
+  await expect(panel.locator('xpath=ancestor::li[1]/preceding-sibling::li[1]').getByRole('button', { name: `Rename ${name}`, exact: true })).toBeVisible()
+})
+
+test('a row\'s Actions menu opens from the keyboard, and focus goes back to its button when a question is closed or the menu is', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  await page.goto('/categories')
+  const button = actionsButton(page, 'Groceries')
   await expect(button).toBeVisible()
 
   await button.focus()
   await page.keyboard.press('Enter')
   await expect(menuAction(page, 'Rename')).toBeFocused() // opened with the keyboard, the first item has focus
   await page.keyboard.press('Enter')
-  await expect(page.getByLabel('Account name')).toBeFocused() // the form the item opens takes focus once the menu has closed
+  await expect(page.getByLabel('Category name')).toBeFocused() // the form the item opens takes focus once the menu has closed
   await page.getByRole('button', { name: 'Cancel' }).click()
-  await expect(page.getByLabel('Account name')).toHaveCount(0)
+  await expect(page.getByLabel('Category name')).toHaveCount(0)
   await expect(button).toBeFocused() // and gives it back to the row's button
 
   await openActions(button)

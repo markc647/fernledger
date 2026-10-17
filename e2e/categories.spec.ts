@@ -1,7 +1,7 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
-import { actionsButton, chooseAction, menuAction, noAxeViolationsFromTop, openActions } from './row-actions-helpers'
+import { actionsButton, chooseAction, menuAction, noAxeViolationsFromTop, openActions, rowButton } from './row-actions-helpers'
 import { atEveryTextSize, mainNav, navigateTo } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
@@ -36,15 +36,16 @@ test('the Admin sets an Override and a Note, the Transaction leaves the Uncatego
   await expect(rowFor(page, description)).toContainText('Uncategorised')
 
   await expectTableLook(page.getByRole('table', { name: 'Transactions' }), { single: true })
-  await chooseAction(page.getByRole('button', { name: new RegExp(`^Actions for ${description}`) }), 'Edit Category and Note')
+  await rowButton(page, 'Edit', `${description}, ${dateText('2026-10-09')}`).click()
   await expect(page.getByLabel('Category', { exact: true })).toBeFocused()
   await page.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
   await page.getByLabel('Note', { exact: true }).fill(note)
   await noAxeViolationsFromTop(page)
   await page.getByRole('button', { name: 'Save', exact: true }).click()
 
-  await expect(page.getByRole('status').filter({ hasText: `Saved ${description}.` })).toBeVisible()
-  await expect(rowFor(page, description)).toHaveCount(0)
+  // The row has left the list, and focus is on the message that took its place, not on the next Transaction.
+  await expect(page.getByRole('status').filter({ hasText: `Saved ${description}.` })).toBeFocused()
+  await expect(page.getByRole('link', { name: description })).toHaveCount(0)
 
   await navigateTo(page, 'All Transactions', 'Transactions')
   const row = rowFor(page, description)
@@ -81,7 +82,7 @@ test('a Member sees Categories and Notes but cannot change them', async ({ page,
   await expect(page.getByRole('heading', { level: 1, name: 'Categories' })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'Groceries', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: /^(Rename|Select kind|Remove|Actions for)/ })).toHaveCount(0)
-  await expect(page.getByRole('columnheader', { name: 'Actions' })).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: /^Action/ })).toHaveCount(0)
   await expect(page.getByRole('row', { name: /Wages and salary/ })).toContainText('Income')
   await expect(page.getByRole('row', { name: /^Loans/ })).toContainText('Loans')
   await expect(page.getByRole('row', { name: /^Groceries/ })).toContainText('Spending')
@@ -220,7 +221,7 @@ test('the Admin sets the kind of a Category, Members see it, and only a Spending
   await expect(actions).toBeFocused()
   await expect(page.getByRole('row', { name })).toContainText('Spending')
   await page.goto('/budgets')
-  await expect(actionsButton(page, name)).toBeVisible() // the Budgets page lists it, with the same Actions button as the Categories page has
+  await expect(rowButton(page, 'Edit Budget for', name)).toBeVisible() // the Budgets page lists it, with its Edit button
 
   // Making it Income takes it away again. With no Budgets there is nothing to say about them; with some, they are kept but not used.
   await page.goto('/categories')
@@ -259,6 +260,7 @@ test("a Category's Actions menu opens its form and its question where the old bu
   const actions = actionsButton(page, 'Groceries')
   await expect(actions).toBeVisible()
   await expect(actions).toHaveAttribute('id', /^category-\d+-actions$/)
+  await expect(page.getByRole('columnheader', { name: 'Action', exact: true })).toBeVisible() // one heading for the row's menu, in the singular like every table's
 
   // The menu is named for its button, has the three actions with Remove set apart, and Escape closes it and puts focus back on the button.
   await openActions(actions)
@@ -357,7 +359,7 @@ test('the Categories sort by Category and by Kind, in plain words, and the first
   await page.goto('/categories')
   await byKind.getByRole('button').click()
   await expect.poll(() => inTable(page)).toEqual(['Interest', 'Wages', 'Loan – Alice', 'Care Fees', 'Groceries'])
-  await expect(page.getByRole('columnheader', { name: 'Actions' })).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: /^Action/ })).toHaveCount(0)
 })
 
 test.describe('on a phone', () => {

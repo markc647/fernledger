@@ -3,7 +3,7 @@ import { netWorth as netWorthRegion, NET_WORTH_PATH, pressShowNetWorth, SPENDING
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
 import { applyAnswer, applyDialog, openApplyDialog, progressFrame, runningJob, usageFigures, usageOn } from './rule-helpers'
-import { actionsButton, chooseAction, openActions, rowAction } from './row-actions-helpers'
+import { actionsButton, chooseAction, openActions, rowButton } from './row-actions-helpers'
 import {
   chooseTextSize,
   closeHeaderControls,
@@ -774,7 +774,7 @@ test.describe('zoom', () => {
         await page.setViewportSize({ width, height })
         await page.goto('/budgets')
         await chooseTextSize(page, size)
-        await rowAction(page, longBudgetName, 'Edit Budget')
+        await rowButton(page, 'Edit Budget for', longBudgetName).click()
         await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('1234567.89')
         await expect(page.getByRole('button', { name: 'End Budget' })).toBeVisible()
         const panel = page.getByRole('region', { name: `Budget for ${longBudgetName}` })
