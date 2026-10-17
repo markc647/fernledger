@@ -681,7 +681,7 @@ test.describe('printed', () => {
     expectPageNumbers(pages)
     expectBareMargins(pages)
     expectNoTypeUnder12pt(pages, 50)
-    // The table's heading, with what the Report is, who generated it, what the Difference is, what is not counted and what has no Category, is on every page that has the table.
+    // The table's heading, with what the Report is, when it was generated, what the Difference is, what is not counted and what has no Category, is on every page that has the table.
     const withTable = expectIdentityOnEveryPage(pages, 'The Difference is income less spending.', `${TITLE} – ${NAME} – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`, 1)
     for (const p of withTable) {
       expect(squash(textOf(p))).toContain(squash('The Difference is income less spending.'))

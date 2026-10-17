@@ -84,7 +84,7 @@ function keepRequests(page: Page) {
 // Making a Report keeps it
 
 test.describe('showing a Report as the Admin', () => {
-  test('keeps its choices on the Reports page: the Report, its dates, its Account, when it was made and by whom', async ({ page, context, baseURL }, testInfo) => {
+  test('keeps its choices on the Reports page: the Report, its dates, its Account and when it was made', async ({ page, context, baseURL }, testInfo) => {
     const { year, account } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'admin')

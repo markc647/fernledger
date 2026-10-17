@@ -229,6 +229,7 @@ export const keptReports = new Hono<AppEnv>()
             }),
           ]
     // The INSERT is the last statement, which `onlyIfChanged` looks at: it changes a row only when no Report with these choices was kept.
+    // `made_by` is written only because the column is NOT NULL (migration 9701, and migrations are add-only, ADR 0009). It is never read or sent: a Report does not say who made it.
     const [updated, ...rest] = await recordChange(
       db,
       [

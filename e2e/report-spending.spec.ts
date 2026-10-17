@@ -674,7 +674,7 @@ test.describe('printed', () => {
     expect(text).toContain(`Total spending ${spent(total(EVERYDAY))}`)
     expect(text).toContain('Page 1 of 1')
     expectNoTypeUnder12pt(pages, 25)
-    // The table's heading, with what the Report is, who generated it and what is not counted, is on the page that has the table.
+    // The table's heading, with what the Report is, when it was generated and what is not counted, is on the page that has the table.
     expectIdentityOnEveryPage(pages, 'Total spending', `${TITLE} – Spending by Category – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`, 1)
     expect(squash(text)).toContain(squash(NOT_COUNTED))
   })
