@@ -2,7 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import { expect, noAxeViolations } from './fixtures'
 import { contrastOf, rgbOf, type Rgb } from './shell-helpers'
 
-// The "⋯" menu on a row of the Rules and Categories tables (src/components/row-actions.tsx), and the cards on a phone: the same button and menu at every width. A spec says which
+// The "⋯" menu on a row of the Rules, Categories, Accounts, Budgets, Transactions and kept Reports tables (src/components/row-actions.tsx), and the cards on a phone: the same button and menu at every width. A spec says which
 // row's actions it means and which it chooses, and not where the control is today.
 
 /** The "⋯" button of a row. `row` is what it names: "Rule 3" for a Rule, the Category's name for a Category. */

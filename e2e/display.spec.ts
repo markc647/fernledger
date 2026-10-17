@@ -2,7 +2,6 @@ import type { Locator, Page } from '@playwright/test'
 import { netWorth as netWorthRegion, NET_WORTH_PATH, pressShowNetWorth, SPENDING_REPORT_PATH, spendingDrawn, stubSpendingReport } from './chart-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
-import { importRows } from './report-helpers'
 import { actionsButton, chooseAction, openActions, rowAction } from './row-actions-helpers'
 import {
   chooseTextSize,
@@ -687,41 +686,43 @@ test.describe('zoom', () => {
 
   // The Budgets page with its longest content: a long Category name, big amounts, a long list of changes, and the Admin's form open
   // with every button it can have. The Budgets are stubbed, so this needs nothing in the database.
+  const longBudgetName = 'Health and medical costs for the household and the long-term care fees'
+  const stubLongBudgets = (page: Page) =>
+    page.route(/\/api\/budgets(\?.*)?$/, (route) =>
+      route.fulfill({
+        json: {
+          month: '2026-10',
+          changeCount: 595,
+          changeLimit: 600,
+          budgets: [
+            {
+              categoryId: 1,
+              categoryName: longBudgetName,
+              amountCents: 123456789,
+              effectiveFrom: '2026-08',
+              changes: [
+                { effectiveFrom: '2026-08', amountCents: 123456789 },
+                { effectiveFrom: '2026-12', amountCents: null },
+                { effectiveFrom: '2027-03', amountCents: 100000000000 },
+              ],
+            },
+            { categoryId: 2, categoryName: 'Groceries', amountCents: null, effectiveFrom: '2026-06', changes: [{ effectiveFrom: '2026-06', amountCents: null }] },
+          ],
+        },
+      }),
+    )
   for (const { name, width, height } of zoomLevels) {
     for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/budgets with long content and the form open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
-        const longName = 'Health and medical costs for the household and the long-term care fees'
-        await page.route(/\/api\/budgets(\?.*)?$/, (route) =>
-          route.fulfill({
-            json: {
-              month: '2026-10',
-              changeCount: 595,
-              changeLimit: 600,
-              budgets: [
-                {
-                  categoryId: 1,
-                  categoryName: longName,
-                  amountCents: 123456789,
-                  effectiveFrom: '2026-08',
-                  changes: [
-                    { effectiveFrom: '2026-08', amountCents: 123456789 },
-                    { effectiveFrom: '2026-12', amountCents: null },
-                    { effectiveFrom: '2027-03', amountCents: 100000000000 },
-                  ],
-                },
-                { categoryId: 2, categoryName: 'Groceries', amountCents: null, effectiveFrom: '2026-06', changes: [{ effectiveFrom: '2026-06', amountCents: null }] },
-              ],
-            },
-          }),
-        )
+        await stubLongBudgets(page)
         await page.setViewportSize({ width, height })
         await page.goto('/budgets')
         await chooseTextSize(page, size)
-        await rowAction(page, longName, 'Edit Budget')
+        await rowAction(page, longBudgetName, 'Edit Budget')
         await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('1234567.89')
         await expect(page.getByRole('button', { name: 'End Budget' })).toBeVisible()
-        const panel = page.getByRole('region', { name: `Budget for ${longName}` })
+        const panel = page.getByRole('region', { name: `Budget for ${longBudgetName}` })
         await expect(panel.getByText('This Category already has later changes')).toBeVisible()
         await expect(panel.getByText('From March 2027: $1,000,000,000.00 a month')).toBeVisible()
         await expect(page.getByText('595 are used')).toBeVisible()
@@ -846,41 +847,93 @@ test.describe('zoom', () => {
 
   // The tables of the Rules, the Categories, the Transactions, the Accounts and the Budgets just above a phone's width, where the zoom widths above do not look: a table starts at 768px (a media query's `48rem` is the browser's 16px,
   // not the page's text size), so at 768px it is there at every size, with its columns (the Rules' handle, order, When, Then and Actions, the Transactions' seven) at their narrowest and the text at its largest at Xtra Large.
-  // Nothing may scroll sideways, in the table's own box or in the page. The Transactions, Accounts and Budgets are the real ones, after an Account with a long description is imported. The Transactions' seven columns cannot
-  // fit 768px at Xtra Large (their words are at their shortest already, and a date and an amount keep theirs whole): there the table scrolls in its box, as the page scrolled before every table had one, so it is tried at Medium.
+  // Nothing may scroll sideways, in the table's own box (its frame) or in the page. The Rules and Categories are stubbed as above, and so are the Transactions, Accounts and Budgets, each with a long name and no more than one or
+  // two rows, so that they add nothing to the shared database.
+  const stubLongTransactions = (page: Page) =>
+    page.route(/\/api\/transactions\?/, (route) =>
+      route.fulfill({
+        json: new URL(route.request().url()).searchParams.get('count') === 'only'
+          ? { total: 1 }
+          : {
+              transactions: [
+                {
+                  id: 1,
+                  accountId: 1,
+                  accountName: 'Example account with a long name',
+                  date: '2026-10-08',
+                  description: `EXAMPLE SHOP ${'long'.repeat(10)} with a long enough name to wrap on a narrow screen`,
+                  bankType: 'EFTPOS',
+                  amountCents: -1234,
+                  categoryId: 3,
+                  categoryName: 'Eating out',
+                  categorySource: 'override',
+                  categoryKind: 'loans', // the longest kind note
+                  note: 'A Note, so the row has its button',
+                  transfer: null,
+                  transferAccountName: null,
+                  canMarkNotTransfer: false,
+                  notTransfer: false,
+                },
+              ],
+            },
+      }),
+    )
+  const stubLongAccounts = (page: Page) =>
+    page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
   const TABLE_AT_768 = {
-    '/rules': 'Rules, in the order they are checked',
-    '/categories': 'Categories',
-    '/transactions': 'Transactions',
-    '/accounts': 'Accounts',
-    '/budgets': 'Budgets',
+    '/rules': { table: 'Rules, in the order they are checked', stub: stubRulesAndCategories },
+    '/categories': { table: 'Categories', stub: stubRulesAndCategories },
+    '/transactions': { table: 'Transactions', stub: stubLongTransactions },
+    '/accounts': { table: 'Accounts', stub: stubLongAccounts },
+    '/budgets': { table: 'Budgets', stub: stubLongBudgets },
   } as const
+  const frame = (page: Page) => page.locator('[data-slot="table-frame"]')
   for (const size of ['Medium', 'Xtra Large'] as const) {
     for (const path of Object.keys(TABLE_AT_768) as (keyof typeof TABLE_AT_768)[]) {
+      // The Transactions' seven columns cannot fit 768px at Xtra Large: its own test, below, is of the box that scrolls instead.
       if (path === '/transactions' && size === 'Xtra Large') continue
-      test(`${path} as a table at 768px wide and text size ${size} fits`, async ({ page, context, baseURL }) => {
+      test(`${path} as a table at 768px wide and text size ${size} fits`, async ({ page, context }) => {
         await signInAs(context, 'admin')
-        if (path === '/rules' || path === '/categories') await stubRulesAndCategories(page)
-        else
-          await importRows(context, baseURL!, {
-            account: { number: '99-9999-9999999-28', name: 'Display wide table account with a long name' },
-            year: 2026,
-            rows: [{ date: '2026-10-08', payee: `EXAMPLE DISPLAY ${'long'.repeat(10)} shop with a long enough name to wrap`, amountCents: -123456789, uniqueId: 'DISPLAY768' }],
-          })
+        await TABLE_AT_768[path].stub(page)
         await page.setViewportSize({ width: 768, height: 1024 })
         await page.goto(path)
         await chooseTextSize(page, size)
         await expectTextSize(page, size)
-        const box = page.locator('[data-slot="table-container"]')
-        await expect(box).toHaveCount(1)
-        await expect(page.getByRole('table', { name: TABLE_AT_768[path] })).toBeVisible()
+        await expect(frame(page)).toHaveCount(1)
+        await expect(page.getByRole('table', { name: TABLE_AT_768[path].table })).toBeVisible()
         await settle(page)
-        expect(await box.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true) // the box has not had to scroll its table
+        expect(await frame(page).evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true) // the box has not had to scroll its table
+        await expect(page.getByRole('region', { name: TABLE_AT_768[path].table, exact: true })).toHaveCount(0) // so it is not a region of its own
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
         expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
       })
     }
   }
+
+  // The one that does not fit: a table wider than its box scrolls in the box and not the page, and the box is a region with the table's name that the keyboard can reach and scroll (WCAG 2.1.1), as a box that
+  // fits is not.
+  test('/transactions as a table at 768px wide and text size Xtra Large scrolls in a box that the keyboard can reach', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await stubLongTransactions(page)
+    await page.setViewportSize({ width: 768, height: 1024 })
+    await page.goto('/transactions')
+    await chooseTextSize(page, 'Xtra Large')
+    await expectTextSize(page, 'Xtra Large')
+    await expect(page.getByRole('table', { name: 'Transactions' })).toBeVisible()
+    await settle(page)
+    const box = page.getByRole('region', { name: 'Transactions', exact: true })
+    await expect(box).toHaveAttribute('tabindex', '0')
+    expect(await box.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+    const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth) // the page itself does not scroll sideways
+    await noAxeViolations(page) // including `scrollable-region-focusable`
+
+    await box.focus()
+    await expect(box).toBeFocused()
+    expect((await box.evaluate((element) => getComputedStyle(element).outlineStyle))).toBe('solid') // focus is drawn, inside the box's edge
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => box.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+  })
 
   // The Summary's Budget vs actual with its longest content: a long Category name, big amounts, and each Status. The data is stubbed.
   for (const { name, width, height } of zoomLevels) {
@@ -1156,7 +1209,7 @@ test.describe('zoom', () => {
     await expect(page.getByRole('article', { name: 'Transaction listing' })).toContainText('−$1,234,567.89')
     await expectTextSize(page, 'Medium')
     await settle(page)
-    const box = page.locator('[data-slot="table-container"]')
+    const box = page.locator('[data-slot="table-frame"]')
     await expect(box).toHaveCount(1)
     expect(await box.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
     const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))

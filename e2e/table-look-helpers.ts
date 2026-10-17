@@ -17,9 +17,9 @@ const resolvedBackground = (page: Page, value: string) =>
 
 /**
  * The table has the shared look on screen: in a rounded box (with a border, or without one `inCard`, where the card is the box), a heading row in the muted fill, a divider under every
- * row but the last, and every word in the size of the page's text.
+ * row but the last, and every word in the size of the page's text. The table has two rows or more, so there is a divider to look at, unless the data is only ever one (`single`).
  */
-export async function expectTableLook(table: Locator, { inCard = false }: { inCard?: boolean } = {}) {
+export async function expectTableLook(table: Locator, { inCard = false, single = false }: { inCard?: boolean; single?: boolean } = {}) {
   await expect(table).toBeVisible()
   const muted = await resolvedBackground(table.page(), 'var(--muted)')
   const look = await table.evaluate((element) => {
@@ -41,6 +41,7 @@ export async function expectTableLook(table: Locator, { inCard = false }: { inCa
   expect(look!.radius).toBeGreaterThan(0)
   expect(look!.border > 0, inCard ? 'a table in a card has no border of its own' : 'the table has a border').toBe(!inCard)
   expect(look!.heading).toBe(muted)
+  if (!single) expect(look!.dividers.length, 'a table with a divider to look at has two rows or more').toBeGreaterThan(0)
   expect(look!.dividers.every((width) => width > 0)).toBe(true)
   expect(look!.sizes).toEqual([look!.pageSize])
 }
@@ -54,7 +55,6 @@ export async function expectPaperTable(page: Page) {
     const headings = table.querySelectorAll('thead tr')
     return {
       box: [box.borderTopWidth, box.borderTopLeftRadius, box.overflowX],
-      scrolls: getComputedStyle(table.parentElement!).overflowX,
       shaded: style('thead').backgroundColor,
       // The rule is under the column headings and not under the identity line a printed table has above them.
       rules: Array.from(headings).map((row) => getComputedStyle(row).borderBottomWidth),
@@ -63,7 +63,6 @@ export async function expectPaperTable(page: Page) {
     }
   })
   expect(paper.box).toEqual(['0px', '0px', 'visible'])
-  expect(paper.scrolls).toBe('visible')
   expect(paper.shaded).toBe('rgba(0, 0, 0, 0)')
   expect(paper.rules.at(-1)).toBe('2px')
   expect(paper.rules.slice(0, -1).every((width) => width === '0px')).toBe(true)

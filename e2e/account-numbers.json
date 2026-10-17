@@ -6,7 +6,6 @@
     "contrast.spec.ts": [20, 21, 22, 23],
     "cutover.spec.ts": [92, 93],
     "dashboard.spec.ts": [64, 65, 66, 67],
-    "display.spec.ts": [28],
     "export.spec.ts": [24, 25],
     "import.spec.ts": [94, 95, 96, 97, 99],
     "kept-reports.spec.ts": [30, 31],
