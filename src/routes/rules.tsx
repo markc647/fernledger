@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Amount } from '@/components/amount'
 import { D1UsageBar } from '@/components/d1-usage-bar'
+import { FieldLabel } from '@/components/field-label'
 import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { RowAction, RowActions } from '@/components/row-actions'
@@ -637,10 +638,14 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
           onSave()
         }}
       >
+        {/* A hint is behind the "?" beside its label, and is also the box's accessible description (FieldLabel). */}
         <div>
-          <label htmlFor="rule-text" className="block font-medium">
-            Text contains
-          </label>
+          <FieldLabel
+            htmlFor="rule-text"
+            label="Text contains"
+            hintId="rule-text-hint"
+            hint="Looked for in the description and the bank's memo, ignoring capital letters A to Z. A letter with an accent or macron, such as Ā, has to match as typed. For example, Woolworths."
+          />
           <Input
             id="rule-text"
             autoFocus
@@ -650,19 +655,16 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
             aria-describedby={error('criteria') ? 'rule-text-hint rule-criteria-error' : 'rule-text-hint'}
             onChange={(event) => set({ text: event.target.value })}
           />
-          <p id="rule-text-hint" className="mt-1 text-muted-foreground">
-            Looked for in the description and the bank's memo, ignoring capital letters A to Z. A letter with an accent or macron, such as Ā, has to match as typed. For example, Woolworths.
-          </p>
           {error('criteria') && <p id="rule-criteria-error" role="alert" className="mt-1 font-medium text-destructive">{error('criteria')}</p>}
         </div>
         <div>
-          <label htmlFor="rule-type" className="block font-medium">
-            Transaction type
-          </label>
+          <FieldLabel
+            htmlFor="rule-type"
+            label="Transaction type"
+            hintId="rule-type-hint"
+            hint="The bank's own type, as the bank's export shows it (Tran Type), such as EFTPOS. It has to match all of it, ignoring capital letters A to Z."
+          />
           <Input id="rule-type" value={values.type} maxLength={40} aria-describedby="rule-type-hint" onChange={(event) => set({ type: event.target.value })} />
-          <p id="rule-type-hint" className="mt-1 text-muted-foreground">
-            The bank's own type, as the bank's export shows it (Tran Type), such as EFTPOS. It has to match all of it, ignoring capital letters A to Z.
-          </p>
         </div>
         <div>
           <label htmlFor="rule-direction" className="block font-medium">
@@ -677,9 +679,13 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
         <div>
           <div className="flex flex-wrap gap-4">
             <div className="min-w-0 grow basis-40">
-              <label htmlFor="rule-from" className="block font-medium">
-                Amount from ($)
-              </label>
+              <FieldLabel
+                htmlFor="rule-from"
+                label="Amount from ($)"
+                about="Amount from and up to"
+                hintId="rule-amount-hint"
+                hint="Both ends count. The amount is its size, whichever way the money went, so $50 covers $50 in and $50 out. Use Money in or out above to keep just one."
+              />
               <Input
                 id="rule-from"
                 inputMode="decimal"
@@ -691,9 +697,7 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
               {error('from') && <p id="rule-from-error" role="alert" className="mt-1 font-medium text-destructive">{error('from')}</p>}
             </div>
             <div className="min-w-0 grow basis-40">
-              <label htmlFor="rule-to" className="block font-medium">
-                Amount up to ($)
-              </label>
+              <FieldLabel htmlFor="rule-to" label="Amount up to ($)" />
               <Input
                 id="rule-to"
                 inputMode="decimal"
@@ -705,9 +709,6 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
               {error('to') && <p id="rule-to-error" role="alert" className="mt-1 font-medium text-destructive">{error('to')}</p>}
             </div>
           </div>
-          <p id="rule-amount-hint" className="mt-1 text-muted-foreground">
-            Both ends count. The amount is its size, whichever way the money went, so $50 covers $50 in and $50 out. Use Money in or out above to keep just one.
-          </p>
         </div>
         <div>
           <label htmlFor="rule-target" className="block font-medium">

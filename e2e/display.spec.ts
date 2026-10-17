@@ -571,10 +571,13 @@ test.describe('zoom', () => {
         await page.goto('/rules')
         await chooseTextSize(page, size)
         await page.getByRole('button', { name: 'Add a Rule' }).click()
-        await page.getByLabel('Text contains').fill('example')
+        await page.getByLabel('Text contains', { exact: true }).fill('example')
         await page.getByRole('button', { name: 'Check how many match' }).click()
         await expect(page.getByText('1,234 Transactions you already have match.')).toBeVisible()
         await expect(page.getByText(/Category: Health and medical \(removed/)).toBeVisible()
+        // The longest hint, open (a popover is drawn outside the form, and must stay on the screen).
+        await page.getByRole('button', { name: 'About Text contains' }).click()
+        await expect(page.getByRole('dialog', { name: 'About Text contains' })).toContainText('A letter with an accent or macron')
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
         await settle(page)

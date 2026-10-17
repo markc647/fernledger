@@ -40,10 +40,10 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
   await expect(await openHelp(page)).toContainText('The Transactions you already have change only when you choose Apply the Rules to all Transactions.')
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Add a Rule' }).click()
-  await expect(page.getByLabel('Text contains')).toBeFocused()
+  await expect(page.getByLabel('Text contains', { exact: true })).toBeFocused()
 
   // The Rule can't be saved before the Admin has seen what it matches.
-  await page.getByLabel('Text contains').fill(shop.toLowerCase())
+  await page.getByLabel('Text contains', { exact: true }).fill(shop.toLowerCase())
   await expect(page.getByRole('button', { name: 'Save Rule' })).toBeDisabled()
   await page.getByRole('button', { name: 'Check how many match' }).click()
   const result = page.getByRole('status').filter({ hasText: 'you already have' })
@@ -53,10 +53,10 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
   await expect(result).toContainText('type EFTPOS') // the bank's type, which a Rule can match on and the Transactions list does not show
 
   // Changing what it looks for takes the result away, and the Rule has to be checked again.
-  await page.getByLabel('Text contains').fill(`${shop} OLD`)
+  await page.getByLabel('Text contains', { exact: true }).fill(`${shop} OLD`)
   await expect(page.getByRole('button', { name: 'Save Rule' })).toBeDisabled()
   await expect(page.getByText('You have changed what the Rule looks for')).toBeVisible()
-  await page.getByLabel('Text contains').fill(shop.toLowerCase())
+  await page.getByLabel('Text contains', { exact: true }).fill(shop.toLowerCase())
   await page.getByRole('button', { name: 'Check how many match' }).click()
   await expect(result).toContainText('1 Transaction you already have matches.')
 
@@ -131,7 +131,7 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
 
     // Edit the second: the amount range changes, and it needs no new check while the text, type and amounts are as they were.
     await chooseAction(secondActions, 'Edit')
-    await expect(page.getByLabel('Text contains')).toHaveValue(`EXAMPLE TWO ${stamp}`)
+    await expect(page.getByLabel('Text contains', { exact: true })).toHaveValue(`EXAMPLE TWO ${stamp}`)
     await expect(page.getByLabel('Amount from ($)')).toHaveValue('10.00')
     await page.getByLabel('What the Rule does').selectOption({ label: 'Mark as a Transfer' })
     await expect(page.getByText('is a Transfer even if no matching Transaction is found in another Account')).toBeVisible()
@@ -162,11 +162,11 @@ test("a Rule's Actions menu opens its form and its question where the old button
 
     // Edit: focus goes into the form, as it did from the Edit button. Cancel brings it back to this row's button.
     await menuAction(page, 'Edit').click()
-    await expect(page.getByLabel('Text contains')).toBeFocused()
-    await expect(page.getByLabel('Text contains')).toHaveValue(/^EXAMPLE MENU /)
+    await expect(page.getByLabel('Text contains', { exact: true })).toBeFocused()
+    await expect(page.getByLabel('Text contains', { exact: true })).toHaveValue(/^EXAMPLE MENU /)
     await page.getByRole('button', { name: 'Cancel' }).click()
     await expect(actions).toBeFocused()
-    await expect(page.getByLabel('Text contains')).toHaveCount(0)
+    await expect(page.getByLabel('Text contains', { exact: true })).toHaveCount(0)
 
     // Remove: the question opens on its safe answer, and Keep it brings focus back to this row's button, which was taken out of the row while the question was in it.
     await chooseAction(actions, 'Remove')
@@ -328,13 +328,13 @@ test('boxes changed while a check is out do not take its result, so Save stays o
   })
   await page.goto('/rules')
   await page.getByRole('button', { name: 'Add a Rule' }).click()
-  await page.getByLabel('Text contains').fill('first')
+  await page.getByLabel('Text contains', { exact: true }).fill('first')
   await page.getByLabel('What the Rule does').selectOption({ label: 'Mark as a Transfer' })
   const check = page.getByRole('button', { name: 'Check how many match' })
   await check.click()
   await expect(check).toBeDisabled() // the check is out
 
-  await page.getByLabel('Text contains').fill('second')
+  await page.getByLabel('Text contains', { exact: true }).fill('second')
   release()
 
   // The answer was about "first". It is not an answer about "second", so nothing is shown and Save is still off.
@@ -351,11 +351,11 @@ test('the Admin is told what is wrong with a box, and taken to it', async ({ pag
 
   await page.getByRole('button', { name: 'Check how many match' }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'Fill in at least one of the boxes above' })).toBeVisible()
-  await expect(page.getByLabel('Text contains')).toBeFocused()
-  await expect(page.getByLabel('Text contains')).toHaveAttribute('aria-invalid', 'true')
+  await expect(page.getByLabel('Text contains', { exact: true })).toBeFocused()
+  await expect(page.getByLabel('Text contains', { exact: true })).toHaveAttribute('aria-invalid', 'true')
   await noAxeViolationsFromTop(page)
 
-  await page.getByLabel('Text contains').fill('example')
+  await page.getByLabel('Text contains', { exact: true }).fill('example')
   await page.getByLabel('Amount from ($)').fill('12.345')
   await page.getByRole('button', { name: 'Check how many match' }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'Enter an amount in dollars' })).toBeVisible()
@@ -367,6 +367,58 @@ test('the Admin is told what is wrong with a box, and taken to it', async ({ pag
   await expect(page.getByRole('alert').filter({ hasText: 'must not be less than the amount it starts from' })).toBeVisible()
   await expect(page.getByLabel('Amount up to ($)')).toBeFocused()
   await noAxeViolationsFromTop(page)
+})
+
+// The hints under three of the form's boxes are behind a "?" beside the box's label, and are still what describes the box to a screen reader.
+test.describe("the form's hints", () => {
+  const HINTS = [
+    { field: ['Text contains'], about: 'About Text contains', text: "Looked for in the description and the bank's memo, ignoring capital letters A to Z." },
+    { field: ['Transaction type'], about: 'About Transaction type', text: "The bank's own type, as the bank's export shows it (Tran Type), such as EFTPOS." },
+    { field: ['Amount from ($)', 'Amount up to ($)'], about: 'About Amount from and up to', text: 'Both ends count. The amount is its size, whichever way the money went' },
+  ]
+  const start = (text: string) => new RegExp(text.slice(0, 30).replace(/[()]/g, '\\$&'))
+
+  test('a "?" beside the label opens the hint, Esc closes it and gives focus back, and the box is described by it throughout', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.goto('/rules')
+    await page.getByRole('button', { name: 'Add a Rule' }).click()
+    await expect(page.getByText('A Transaction matches when it meets every box you fill in. Leave a box blank to ignore it.')).toBeVisible() // the form's own line stays on the page
+
+    const { field, about, text } = HINTS[0]!
+    const input = page.getByLabel(field[0]!, { exact: true })
+    const help = page.getByRole('button', { name: about })
+    const hint = page.getByRole('dialog', { name: about })
+    await expect(input).toHaveAccessibleDescription(start(text)) // read with the box, though the words are not drawn on the page
+    await expect(page.locator('#rule-text-hint')).toHaveClass(/sr-only/)
+    await expect(hint).toHaveCount(0)
+    const [label, button] = [(await page.locator('label[for="rule-text"]').boundingBox())!, (await help.boundingBox())!]
+    expect(button.x, 'to the right of its label').toBeGreaterThanOrEqual(label.x + label.width)
+    expect(button.y + button.height, 'above the box').toBeLessThanOrEqual((await input.boundingBox())!.y)
+    expect(button.width, 'a touch target').toBeGreaterThanOrEqual(44)
+    expect(button.height).toBeGreaterThanOrEqual(44)
+
+    await help.click()
+    await expect(hint).toContainText(text)
+    await expect(input).toHaveAccessibleDescription(start(text)) // still, with the hint open
+    await noAxeViolationsFromTop(page)
+    await page.keyboard.press('Escape')
+    await expect(hint).toHaveCount(0)
+    await expect(help).toBeFocused()
+    await expect(page.getByRole('heading', { name: 'Add a Rule' })).toBeVisible() // Esc closed the hint and not the form
+  })
+
+  test('the other two hints open the same way, and the Amount hint describes both of its boxes', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.goto('/rules')
+    await page.getByRole('button', { name: 'Add a Rule' }).click()
+    for (const { field, about, text } of HINTS.slice(1)) {
+      await page.getByRole('button', { name: about }).click()
+      await expect(page.getByRole('dialog', { name: about })).toContainText(text)
+      for (const name of field) await expect(page.getByLabel(name, { exact: true })).toHaveAccessibleDescription(start(text))
+      await page.keyboard.press('Escape')
+      await expect(page.getByRole('dialog', { name: about })).toHaveCount(0)
+    }
+  })
 })
 
 test.describe('Apply the Rules to all Transactions, beside Add a Rule', () => {
