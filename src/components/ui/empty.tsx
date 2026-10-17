@@ -3,7 +3,8 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
 // shadcn/ui Empty, as the registry writes it: a centred frame for a state with nothing to list (or, on the Rules page, nothing but a run's progress), with an optional icon, a title,
-// a description and some actions. The frame's border is the caller's (`border`: the registry only makes it dashed). The title is a heading (h2) and not the registry's div, because
+// a description and some actions. The frame's border is the caller's: the registry's Empty is `border-dashed` and draws no border until it is given one, so `border` alone is dashed and a
+// solid frame says `border border-solid`; its padding (`p-6 md:p-12`) is the caller's to take in too. The title is a heading (h2) and not the registry's div, because
 // a heading is the one thing the app draws larger than the text size the reader chose (CODING_STANDARDS.md, UI), and it names the frame; the description is a div, so that it can hold
 // more than one paragraph.
 

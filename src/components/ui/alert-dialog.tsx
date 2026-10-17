@@ -36,14 +36,15 @@ function AlertDialogContent({ className, ...props }: React.ComponentProps<typeof
       <AlertDialogOverlay />
       <DialogPrimitive.Content
         data-slot="alert-dialog-content"
-        role="alertdialog"
-        onPointerDownOutside={(event) => event.preventDefault()}
-        onInteractOutside={(event) => event.preventDefault()}
         className={cn(
           'fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg border border-border bg-background p-4 shadow-lg outline-hidden data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in print:hidden',
           className,
         )}
         {...props}
+        // After the caller's props: what makes it an alert dialog is not the caller's to change.
+        role="alertdialog"
+        onPointerDownOutside={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
       />
     </DialogPrimitive.Portal>
   )
