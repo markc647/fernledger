@@ -2,17 +2,22 @@ import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
-import { criteriaBody, describeRule, MAX_RULES, ruleBody, ruleRecord, toCriteria, type Criteria } from './rule-criteria'
+import { criteriaBody, describeRule, fromTransactionBody, MAX_RULES, ruleBody, ruleRecord, toCriteria, type Criteria } from './rule-criteria'
+import { ruleFromTransaction } from './rule-from-transaction'
 import { previewStatements, type PreviewSample } from './rule-preview'
 import { latestRerun, restartRerun, startRerun, stepRerun, stopRerun } from './rule-rerun'
 import { CHANGED_MEANWHILE, nothing, pathId, validate } from './validate'
 
 // Rules are applied to Transactions an Import adds (rule-apply.ts); saving, changing or removing a Rule here never
-// touches a Transaction that is already stored. The Admin applies the Rules to all of those with a re-run (rule-rerun.ts),
+// touches a Transaction that is already stored, with one exception: a Rule made from a Transaction (rule-from-transaction.ts) gives its Category to the
+// Uncategorised Transactions it matches, up to a limit. The Admin applies the Rules to all of those with a re-run (rule-rerun.ts),
 // which is started and stepped from the routes at the end. A change to the Rules while a re-run is running sends it back
 // to the start, so each change here carries `restartRerun` in its batch. Every change is one Change Log entry of type `rule`.
 
 const orderBody = z.object({ ids: z.array(z.int().check(z.positive())).check(z.maxLength(MAX_RULES)) })
+
+/** What a preview answers: how many Transactions match and the newest few; with `uncategorised` asked for, how many of them have no Category and no examples. */
+type PreviewAnswer = { matches: number; samples: PreviewSample[]; uncategorised?: number }
 
 type RuleView = Criteria & { id: number; categoryId: number | null; categoryName: string | null; categoryRemoved: boolean; transfer: boolean }
 type RuleRow = Omit<RuleView, 'categoryRemoved' | 'transfer'> & { categoryRemoved: number; transfer: number }
@@ -54,10 +59,29 @@ const RULES_FULL = { error: `There are already ${MAX_RULES} Rules; remove one fi
 
 export const rules = new Hono<AppEnv>()
   .get('/', async (c) => c.json(await listRules(c.env.DB)))
-  // How many Transactions on file a set of criteria matches, and the newest few, before the Admin saves anything (rule-preview.ts).
+  // How many Transactions on file a set of criteria matches, and the newest few, before the Admin saves anything (rule-preview.ts). With `uncategorised` it counts how many of
+  // them have no Category instead of showing examples: the count Create Rule keeps up to date as the Admin types.
   .post('/preview', validate('json', criteriaBody), async (c) => {
-    const [count, samples] = await c.env.DB.batch(previewStatements(c.env.DB, toCriteria(c.req.valid('json'))))
-    return c.json({ matches: (count!.results[0] as { matches: number }).matches, samples: samples!.results as PreviewSample[] })
+    const body = c.req.valid('json')
+    const criteria = toCriteria(body)
+    if (body.uncategorised === true) {
+      const [count] = await c.env.DB.batch(previewStatements(c.env.DB, criteria, { uncategorised: true }))
+      const found = count!.results[0] as { matches: number; uncategorised: number }
+      const preview: PreviewAnswer = { matches: found.matches, samples: [], uncategorised: found.uncategorised }
+      return c.json(preview)
+    }
+    const [count, samples] = await c.env.DB.batch(previewStatements(c.env.DB, criteria))
+    const preview: PreviewAnswer = { matches: (count!.results[0] as { matches: number }).matches, samples: samples!.results as PreviewSample[] }
+    return c.json(preview)
+  })
+  // Create Rule, in the Edit panel of a Transaction (rule-from-transaction.ts): adds a Rule last, as POST / does, gives the Category to the other Uncategorised Transactions it
+  // matches (up to a limit) and to this one, in one batch.
+  .post('/from-transaction', validate('json', fromTransactionBody), async (c) => {
+    const outcome = await ruleFromTransaction(c.env.DB, c.var.member, c.req.valid('json'))
+    if (outcome.kind === 'no-transaction') return c.json({ error: 'Not found' }, 404)
+    if (outcome.kind === 'bad-category') return c.json(badCategory, 400)
+    if (outcome.kind === 'full') return c.json(RULES_FULL, 409)
+    return c.json(outcome.made, 201)
   })
   // The new Rule goes last in priority; the Admin moves it up with PUT /order.
   .post('/', validate('json', ruleBody), async (c) => {

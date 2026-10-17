@@ -104,6 +104,8 @@ const EXERCISES: Exercise[] = [
   { route: 'POST /api/rules/preview', path: () => '/api/rules/preview', opts: { method: 'POST', body: { textContains: 'EXAMPLE' } } },
   { route: 'PUT /api/rules/:id', path: () => `/api/rules/${made.ruleId}`, opts: { method: 'PUT', body: { textContains: 'EXAMPLE SHOP', transfer: true } } },
   { route: 'PUT /api/rules/order', path: () => '/api/rules/order', opts: () => ({ method: 'PUT', body: { ids: [made.ruleId] } }) },
+  // Create Rule, in a Transaction's Edit panel: a Rule made from the Transaction that chunk made, after the order above (which names exactly the Rules in use).
+  { route: 'POST /api/rules/from-transaction', path: () => '/api/rules/from-transaction', opts: () => ({ method: 'POST', body: { transactionId: made.transactionId, textContains: 'EXAMPLE', categoryId: made.categoryId } }) },
   // Applying the Rules to the Transaction on file: start the run, read it, stop it while it runs (a stop that finds none running is
   // refused), and do a step, which answers with the run it finds.
   { route: 'POST /api/rules/rerun', path: () => '/api/rules/rerun', opts: { method: 'POST', body: {} } },
