@@ -182,7 +182,7 @@ function AdminRules() {
     { key: 'then', header: 'Then', cell: (item) => ruleResult(item.rule) },
     {
       key: 'actions',
-      header: 'Actions',
+      header: 'Action',
       align: 'end',
       cell: (item) =>
         removing === item.rule.id ? (

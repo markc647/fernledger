@@ -81,7 +81,7 @@ function Categories() {
   if (isAdmin)
     columns.push({
       key: 'actions',
-      header: 'Actions',
+      header: 'Action',
       align: 'end',
       cell: (c) =>
         editing?.id === c.id && editing.action === 'rename' ? (

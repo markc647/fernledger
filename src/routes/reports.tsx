@@ -61,7 +61,7 @@ function Reports() {
     { key: 'madeBy', header: 'Made by', cell: (k) => <span className="break-all">{k.madeBy}</span> },
     {
       key: 'actions',
-      header: 'Actions',
+      header: 'Action',
       align: 'end',
       cell: (k) =>
         deleting === k.id ? (
