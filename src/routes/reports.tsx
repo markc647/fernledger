@@ -58,7 +58,6 @@ function Reports() {
     { key: 'dates', header: 'Dates', cell: (k) => keptDates(k) },
     { key: 'account', header: 'Account', cell: (k) => keptAccount(k) },
     { key: 'lastMade', header: 'Last made', cell: (k) => formatDateTime(k.lastMadeAt) },
-    { key: 'madeBy', header: 'Made by', cell: (k) => <span className="break-all">{k.madeBy}</span> },
     {
       key: 'actions',
       header: 'Actions',

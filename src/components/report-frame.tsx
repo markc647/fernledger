@@ -15,8 +15,8 @@ const Identity = createContext<ReportIdentity | null>(null)
 
 /**
  * The heading to give each printed table (`ResponsiveTable`'s `printHeading`), for the Account it lists: two lines, "<app> –
- * <Report> – <Account> – <dates>" and "Generated … by …". A browser repeats a table's heading at the top of every page the
- * table runs onto, so every printed page says what it is and who made it, in every browser, with no help from page margins.
+ * <Report> – <Account> – <dates>" and "Generated …". A browser repeats a table's heading at the top of every page the
+ * table runs onto, so every printed page says what it is and when it was made, in every browser, with no help from page margins.
  * `also` is a third line for what a reader of a loose page must know about the figures, such as what is not counted. Null outside a Report.
  */
 export function useReportIdentity() {
@@ -34,7 +34,7 @@ export function useReportIdentity() {
 /**
  * The frame every Report is printed in (README: Reports). It writes the Report's own title block, because a printout leaves
  * out the app header and the sidebar, and with them the app title: the app title from Settings, the Report's name, its Account(s) and dates, and
- * "Generated Thu 8 Oct 2026 at 3:42 pm by <the signed-in email>". A Report is shown on its own page, under the form that asked for it, and
+ * "Generated Thu 8 Oct 2026 at 3:42 pm". A Report is shown on its own page, under the form that asked for it, and
  * is all that is printed of that page; it puts what it lists in `children`, as tables (ResponsiveTable with `print:text-[12pt]` and a
  * `printHeading` from `useReportIdentity`) and headings no smaller than 12pt.
  *
@@ -44,7 +44,7 @@ export function useReportIdentity() {
  * draw; other browsers print the Report without them, and number the pages in their own header and footer if the reader turns
  * that on, which the page's help sheet says (`PRINT_HELP`, src/lib/reports.ts).
  *
- * `generatedAt` is when the data arrived. The email is the signed-in Member's own, from Access; it is printed, never logged.
+ * `generatedAt` is when the data arrived. A Report does not say who made it or who opened it.
  */
 export function ReportFrame({
   name,
@@ -80,9 +80,9 @@ export function ReportFrame({
   const settings = useQuery(settingsQuery)
   const me = useQuery(meQuery)
   const appTitle = settings.data?.app_title
-  const email = me.data?.email
   const range = describeRange(from, to)
-  const generated = email ? generatedLine(generatedAt, email) : undefined
+  // Who is signed in is waited for too: it says whether the Admin's showing is kept, and whether the live message mentions the form.
+  const generated = me.data ? generatedLine(generatedAt) : undefined
 
   // The page's title names the file "Save as PDF" suggests, and it is what a browser's own print header shows.
   const title = appTitle ? reportHeading({ appTitle, name, accounts: accountsInTitle, range }) : undefined
@@ -150,7 +150,7 @@ export function ReportFrame({
     )
   }, [onPage, shown])
 
-  // Without the app title and who is signed in the printout would not say what it is or who made it, so it waits for both.
+  // Without the app title the printout would not say what it is, so it waits for it (and for who is signed in, above).
   if (settings.error) return <p role="alert">Fernledger couldn't load the details this Report needs. Reload the page to try again.</p>
   if (identity === null) return <p role="status">Loading…</p>
 

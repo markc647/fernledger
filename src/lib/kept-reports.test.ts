@@ -13,7 +13,6 @@ const kept = (over: Partial<KeptReport> = {}): KeptReport => ({
   from: '2026-10-01',
   to: '2026-10-31',
   lastMadeAt: '2026-10-16T01:00:00.000Z',
-  madeBy: 'admin@example.com',
   ...over,
 })
 

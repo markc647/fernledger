@@ -17,10 +17,8 @@ export const ADMIN_EMAIL = 'admin@example.com'
 export const TITLE = `Mum's "family" finances \\ Report`
 /** 3:42 pm in NZ, the moment a test fixes the browser's clock at (`context.clock.setFixedTime`). */
 export const NOW = new Date('2026-10-08T02:42:00.000Z')
-/** What a Report says of who made it and when, for a Report the Admin shows. */
-export const GENERATED = `Generated Thu 8 Oct 2026 at 3:42 pm by ${ADMIN_EMAIL}`
-/** The same for a Report a Member opens. */
-export const GENERATED_FOR_MEMBER = `Generated Thu 8 Oct 2026 at 3:42 pm by ${MEMBER_EMAIL}`
+/** What a Report says of when it was made, whoever opened it. It does not say who: the email of the Admin or the Member is nowhere in a Report. */
+export const GENERATED = 'Generated Thu 8 Oct 2026 at 3:42 pm'
 
 // Dates and money, written the way the app writes them.
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -249,7 +247,7 @@ export async function expectOwnPage(page: Page) {
   await expectPaperTable(page) // and its tables are the paper layout, not the box and shading they have on screen
 }
 
-/** The Report writes its own title block: the app title as typed (`TITLE`), its name, the Account(s), the dates, and who generated it and when. */
+/** The Report writes its own title block: the app title as typed (`TITLE`), its name, the Account(s), the dates, and when it was generated (not by whom). */
 export async function expectTitleBlock(article: Locator, { name, account, dates }: { name: string; account: string; dates: string }) {
   const header = article.locator('header')
   await expect(header).toBeVisible()
@@ -266,6 +264,7 @@ export async function expectIdentityRow(page: Page, identity: string) {
   await expect(row).toBeVisible() // on screen it is not
   await expect(row).toContainText(identity)
   await expect(row).toContainText(GENERATED)
+  await expect(row).not.toContainText(ADMIN_EMAIL) // it says when, and not who
   expect(await page.locator('thead').first().evaluate((el) => [getComputedStyle(el).display, el.querySelectorAll('tr').length])).toEqual(['table-header-group', 2])
 }
 
@@ -298,7 +297,7 @@ export function expectNoTypeUnder12pt(pages: PdfPage[], atLeast: number) {
 }
 
 /**
- * The lines that say what a Report is, which Account and dates, and who generated it and when, are at the top of every page that has some of its table (the pages
+ * The lines that say what a Report is, which Account and dates, and when it was generated, are at the top of every page that has some of its table (the pages
  * with `marker` in them, at least `atLeast` of them). They are in each page's own body, not its margins, so every browser prints them.
  */
 export function expectIdentityOnEveryPage(pages: PdfPage[], marker: string | RegExp, identity: string, atLeast: number) {
@@ -308,6 +307,7 @@ export function expectIdentityOnEveryPage(pages: PdfPage[], marker: string | Reg
     const text = squash(textOf(p))
     expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(identity))
     expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(GENERATED))
+    expect(text, `page ${pages.indexOf(p) + 1}`).not.toContain(squash(ADMIN_EMAIL))
   }
   return withRows
 }

@@ -610,7 +610,7 @@ test.describe('printed', () => {
     await expectJustTheReport(page)
   })
 
-  test('writes its own title block: the app title, the Report, the Account, the dates, and who generated it and when', async ({ page }, testInfo) => {
+  test('writes its own title block: the app title, the Report, the Account, the dates, and when it was generated', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await expectTitleBlock(article(page), { name: NAME, account: `${d.everyday.name} (${d.everyday.number})`, dates: range(d.year) })
   })
@@ -749,7 +749,7 @@ test.describe('printed over several pages', () => {
     for (let i = 0; i < MONTHS; i++) expect(all.split(rowOf(i)).length - 1, rowOf(i)).toBe(1)
   })
 
-  test('says what the Report is, which Accounts and dates, who generated it and when, what the Difference is, what is not counted and what has no Category, at the top of every page the table runs onto', async ({ page }) => {
+  test('says what the Report is, which Accounts and dates, when it was generated, what the Difference is, what is not counted and what has no Category, at the top of every page the table runs onto', async ({ page }) => {
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     // The Admin's title comes through as typed, quote and backslash too; the heading says "All Accounts", not each of them on every page.
     const withRows = expectIdentityOnEveryPage(pages, 'The Difference is income less spending.', `${TITLE} – ${NAME} – All Accounts – ${dateText(`${FROM_YEAR}-01-01`)} to ${dateText(`${FROM_YEAR + YEARS - 1}-12-31`)}`, 3)

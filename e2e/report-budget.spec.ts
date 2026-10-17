@@ -588,7 +588,7 @@ test.describe('printed', () => {
     await expectJustTheReport(page)
   })
 
-  test('writes its own title block: the app title, the Report, the Accounts, the dates, and who generated it and when', async ({ page }, testInfo) => {
+  test('writes its own title block: the app title, the Report, the Accounts, the dates, and when it was generated', async ({ page }, testInfo) => {
     const { year, everyday } = dataFor(testInfo.project.name)
     await expectTitleBlock(article(page), { name: 'Budget vs actual', account: 'All Accounts: ', dates: range(year) })
     await expect(article(page).locator('header')).toContainText(`${everyday.name} (${everyday.number})`)
@@ -662,7 +662,7 @@ test.describe('printed', () => {
     expectPageNumbers(await readPdf(await page.pdf({ format: 'A4' })))
   })
 
-  test('says what the Report is, which Accounts and dates, who generated it and when, and what is not counted, at the top of every page the tables run onto', async ({ page }, testInfo) => {
+  test('says what the Report is, which Accounts and dates, when it was generated, and what is not counted, at the top of every page the tables run onto', async ({ page }, testInfo) => {
     const { year, names } = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     const withRows = expectIdentityOnEveryPage(pages, rowsMarker(names), `${TITLE} – Budget vs actual – All Accounts – ${range(year)}`, 3)

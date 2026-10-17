@@ -730,7 +730,7 @@ test.describe('printed', () => {
     await expectJustTheReport(page)
   })
 
-  test('writes its own title block: the app title, the Report, the Loans Category, the Accounts, the dates, and who generated it and when', async ({ page }, testInfo) => {
+  test('writes its own title block: the app title, the Report, the Loans Category, the Accounts, the dates, and when it was generated', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await expectTitleBlock(article(page), { name: 'Loans', account: 'All Accounts: ', dates: range(d.year) })
     await expect(article(page).locator('header')).toContainText(`Loans: ${d.aliceLoan}`)
@@ -828,7 +828,7 @@ test.describe('printed over several pages', () => {
     }
   })
 
-  test('says what the Report is, which Loans Category and dates, and who generated it and when, at the top of every page the table runs onto', async ({ page }) => {
+  test('says what the Report is, which Loans Category and dates, and when it was generated, at the top of every page the table runs onto', async ({ page }) => {
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     // The Admin's title comes through as typed, quote and backslash too.
     expectIdentityOnEveryPage(pages, 'Stub payment', `${TITLE} – Loans – Loan – Stub – ${dateText('2002-01-01')} to ${dateText('2002-12-31')}`, 2)

@@ -617,7 +617,7 @@ test.describe('printed', () => {
     await expectJustTheReport(page)
   })
 
-  test('writes its own title block: the app title, the Report, the Account, the dates, and who generated it and when', async ({ page }, testInfo) => {
+  test('writes its own title block: the app title, the Report, the Account, the dates, and when it was generated', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await expectTitleBlock(article(page), { name: 'Spending by Category', account: `${d.everyday.name} (${d.everyday.number})`, dates: range(d.year) })
   })
@@ -732,7 +732,7 @@ test.describe('printed over several pages', () => {
     expect(all.split(spent(UNCATEGORISED_CENTS)).length - 1).toBe(1)
   })
 
-  test('says what the Report is, which Accounts and dates, who generated it and when, and what is not counted, at the top of every page the table runs onto', async ({ page }, testInfo) => {
+  test('says what the Report is, which Accounts and dates, when it was generated, and what is not counted, at the top of every page the table runs onto', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     // The Admin's title comes through as typed, quote and backslash too; the heading says "All Accounts", not each of them on every page.
