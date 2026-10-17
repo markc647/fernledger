@@ -157,7 +157,7 @@ _Avoid_: Report
 ## Viewing
 
 **Summary**:
-The page every Member lands on, except the Admin, who lands on the Dashboard: a column of cards with the balance of each Account (and whether it agrees with the bank, and, once Akahu Sync is set up, whether Sync reached it), Budget vs actual for this month and the newest Transactions. The Dashboard has the same cards.
+The page every Member lands on, except the Admin, who lands on the Dashboard: a column of cards with the balance of each Account (and whether it agrees with the bank, and, once Akahu Sync is set up, whether Sync reached it), the newest Transactions and, last, Budget vs actual for this month. The Dashboard has the same cards.
 _Avoid_: Home page
 
 **Dashboard**:
