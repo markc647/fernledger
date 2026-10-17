@@ -4,7 +4,9 @@ import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { expectTableLook } from './table-look-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
+  BALANCES_NOTES_TITLE,
   blackOnWhite,
+  closeNotes,
   dateText,
   expectBareMargins,
   expectBlackOnWhite,
@@ -21,6 +23,7 @@ import {
   importRows,
   money,
   NOW,
+  openNotes,
   restoreAppTitleAfterEach,
   setTitle,
   signInToOpen,
@@ -212,11 +215,12 @@ test.describe('on screen', () => {
     await expect(header).toContainText(`Dates: ${dateText(`${start}-01-01`)} to ${dateText(`${end}-12-31`)}`)
     await expect(header).toContainText(GENERATED)
 
-    // Said before the figures: one balance a month, and that they are calculated.
-    const about = report.getByRole('region', { name: 'About these balances' })
+    // The notes, behind the Report's "?": one balance a month, and that they are calculated.
+    const about = await openNotes(page, report, BALANCES_NOTES_TITLE)
     await expect(about).toContainText('a row for every month in these dates')
     await expect(about).toContainText('calculated figures, not balances the bank gave for each month-end')
     await expect(about).toContainText('A date is held when Fernledger has a Transaction or a bank balance for the Account on it')
+    await closeNotes(page, BALANCES_NOTES_TITLE)
 
     const account = report.getByRole('region', { name: `${savings.name} (${savings.number})` })
     await expect(account).toContainText(`Worked out from the bank's balance of ${money(balanceAfter(MONTHS_HELD - 1))} on ${dateText(`${end}-12-31`)}.`)
@@ -434,7 +438,7 @@ test.describe('printed', () => {
     await expectJustTheReport(page)
   })
 
-  test('writes its own title block: the app title, the Report, the Account, the dates, and who generated it and when', async ({ page }, testInfo) => {
+  test('writes its own title block: the app title, the Report, the Account, the dates, and when it was generated', async ({ page }, testInfo) => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     await expectTitleBlock(article(page), { name: 'Balances over time', account: `${savings.name} (${savings.number})`, dates: range(start, end) })
   })
@@ -496,7 +500,7 @@ test.describe('printed', () => {
     expectPageNumbers(await readPdf(await page.pdf({ format: 'A4' })))
   })
 
-  test('says what the Report is, which Account and dates, and who generated it and when, at the top of every page the table runs onto', async ({ page }, testInfo) => {
+  test('says what the Report is, which Account and dates, and when it was generated, at the top of every page the table runs onto', async ({ page }, testInfo) => {
     const { start, end, savings } = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     // The Admin's title comes through as typed, quote and backslash too.

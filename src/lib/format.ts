@@ -108,7 +108,7 @@ export function formatDateTime(instant: string) {
   return `${formatInstantDate(moment)}, ${timeOfDay(moment)}`
 }
 
-/** A moment as a sentence's NZ day and time: "Thu 8 Oct 2026 at 3:42 pm" (for "Generated … by …" on a Report). Always Pacific/Auckland. */
+/** A moment as a sentence's NZ day and time: "Thu 8 Oct 2026 at 3:42 pm" (for "Generated …" on a Report). Always Pacific/Auckland. */
 export function formatDateAtTime(instant: Date | number) {
   const moment = new Date(instant)
   return `${formatInstantDate(moment)} at ${timeOfDay(moment)}`

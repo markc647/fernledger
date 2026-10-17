@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { BudgetVsActual, WholeMonthsNotice } from '@/components/budget-report'
+import { BUDGET_VS_ACTUAL_NOTES, BudgetVsActual, WholeMonthsNotice } from '@/components/budget-report'
 import { BudgetVsActualForm } from '@/components/report-form'
 import { ReportFrame } from '@/components/report-frame'
 import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
@@ -53,6 +53,7 @@ function Budgets({ scope }: { scope: ReportScope }) {
       to={report.covers.to}
       generatedAt={budgets.dataUpdatedAt}
       notice={<WholeMonthsNotice report={report} />}
+      notes={BUDGET_VS_ACTUAL_NOTES}
     >
       <BudgetVsActual report={report} accounts={scope.accountsInTitle} />
       <BackToReports />

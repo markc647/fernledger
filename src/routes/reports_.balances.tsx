@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { BalancesOverTime } from '@/components/balances-report'
+import { BALANCES_NOTES, BalancesOverTime } from '@/components/balances-report'
 import { BalancesForm } from '@/components/report-form'
 import { ReportFrame } from '@/components/report-frame'
 import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
@@ -38,7 +38,7 @@ function Balances({ scope }: { scope: ReportScope }) {
   if (waiting) return waiting
 
   return (
-    <ReportFrame name={REPORT.name} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={balances.dataUpdatedAt}>
+    <ReportFrame name={REPORT.name} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={balances.dataUpdatedAt} notes={BALANCES_NOTES}>
       <BalancesOverTime sections={balances.data!} />
       <BackToReports />
     </ReportFrame>

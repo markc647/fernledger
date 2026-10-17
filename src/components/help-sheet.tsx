@@ -7,7 +7,7 @@ import { Sheet, SheetClose, SheetContent, SheetFooter, SheetHeader, SheetTitle, 
 // form under the heading is not pushed down the page by it (CODING_STANDARDS.md, UI). What stays on the page is what the reader needs each time: a warning, an error, a short hint for a
 // field, the figures and the data. The speech-bubble icon is a Transaction's Note (transaction-list.tsx), so the "?" is for help and nothing else.
 
-/** What the "?" is called, and what the sheet is titled: the same on every page, so it can be found by its name. */
+/** What a page's "?" is called, and what its sheet is titled: the same on every page, so it can be found by its name. (A Report's own "?", beside its title, has a name of its own.) */
 const HELP_LABEL = 'About this page'
 
 /** A heading in the sheet's text, for a page whose help has more than one part. */
@@ -18,14 +18,15 @@ export function HelpHeading({ children }: { children: ReactNode }) {
 /**
  * The "?" button and the sheet it opens, from the right, with `children` for its text and a Close button at the foot (always in reach: the text scrolls, and Close does not). Esc, Close or
  * a tap on the page beside it closes the sheet, and focus goes back to the "?". The sheet is a dialog, so it opens with focus on itself and the text is read from the top; Tab then reaches the
- * text's links and Close. The "?" is a touch target (44px, a circle), as every button is. Use `PageHeading`, which puts the button where it belongs.
+ * text's links and Close. The "?" is a touch target (44px, a circle), as every button is. Use `PageHeading`, which puts the button where it belongs, or `ReportFrame`'s `notes`.
+ * `label` is what the "?" is called and the sheet is titled when it is not the page's own: a Report's notes ("About these figures", beside the Report's title in `ReportFrame`).
  */
-export function HelpSheet({ children }: { children: ReactNode }) {
+export function HelpSheet({ children, label = HELP_LABEL }: { children: ReactNode; label?: string }) {
   const titleId = useId()
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="outline" size="touch" className="rounded-full px-0 print:hidden" aria-label={HELP_LABEL}>
+        <Button variant="outline" size="touch" className="rounded-full px-0 print:hidden" aria-label={label}>
           <CircleQuestionMark className="size-5" aria-hidden />
         </Button>
       </SheetTrigger>
@@ -41,7 +42,7 @@ export function HelpSheet({ children }: { children: ReactNode }) {
         <SheetHeader>
           {/* The span is what the text's region is named by: Radix gives the heading itself an id of its own, which names the dialog. */}
           <SheetTitle className="text-xl">
-            <span id={titleId}>{HELP_LABEL}</span>
+            <span id={titleId}>{label}</span>
           </SheetTitle>
         </SheetHeader>
         {/* A region that can be focused, so that the keyboard can scroll it when the text is longer than the room (large text on a phone). */}

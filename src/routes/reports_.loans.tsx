@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { LoansCappedNotice, LoansReport } from '@/components/loans-report'
+import { LOANS_NOTES, LoansCappedNotice, LoansReport } from '@/components/loans-report'
 import { LoansForm } from '@/components/report-form'
 import { ReportFrame } from '@/components/report-frame'
 import { BackToReports, Needs, NeedsChange, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
@@ -61,6 +61,7 @@ function Loans({ scope, search }: { scope: ReportScope; search: LoansSearch }) {
       subject={{ label: 'Loans', text: chosen ? chosen.name : 'All Loans Categories' }}
       generatedAt={loans.dataUpdatedAt}
       notice={listing.capped ? <LoansCappedNotice alert /> : undefined}
+      notes={LOANS_NOTES}
     >
       <LoansReport loans={listing} from={search.from ?? null} to={scope.to} all={chosen === null} />
       <BackToReports />

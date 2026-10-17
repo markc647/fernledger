@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Amount } from '@/components/amount'
-import { useReportIdentity } from '@/components/report-frame'
+import { useReportIdentity, type ReportNotes } from '@/components/report-frame'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { formatBalance, formatDate } from '@/lib/format'
 import { isUnused, LOANS_ROW_CAP, loanPerson, owedSentence, owedWords, totalLoans, type LoanLine, type LoanSection, type Loans } from '@/lib/report-loans'
@@ -147,23 +147,24 @@ function LoansSummary({ sections, to }: { sections: LoanSection[]; to: string })
   )
 }
 
-/** What a reader needs before the figures: what a loan is here, which way the money owed runs, and how a Transfer counts. Said before the figures so a printed page can be read on its own. */
-function AboutLoans() {
-  return (
-    <section aria-labelledby="about-loans" className="mt-6 print:mt-4">
-      <h2 id="about-loans" className="text-lg font-semibold print:text-[13pt]">
-        About these figures
-      </h2>
-      <p className="mt-1">
+/**
+ * What a reader needs before the figures: what a loan is here, which way the money owed runs, and how a Transfer counts. The "?" beside the Report's title has it on screen, and a
+ * printout has it before the figures (`ReportFrame`), so a printed page can be read on its own.
+ */
+export const LOANS_NOTES: ReportNotes = {
+  title: 'About these figures',
+  body: (
+    <>
+      <p>
         Each loan is a Loans Category, one for each person, named like Loan – Alice. If more money went out than came in, the person owes the difference to the Accounts. If more came in than went
         out, the person is owed it. Loans aren't counted as spending or income, and have no Budget.
       </p>
-      <p className="mt-1">
+      <p>
         A Transfer between your own Accounts is lending or repayment only on the half the Admin gives the Category with an Override. Give it to the half in the lender's Account only: the other half stays a
         Transfer, and giving it to both would cancel out.
       </p>
-    </section>
-  )
+    </>
+  ),
 }
 
 /** Said at the top and again at the end, so a reader who only reads one of them still sees it. */
@@ -186,7 +187,6 @@ export function LoansReport({ loans, from, to, all }: { loans: Loans; from: stri
   const shown = all ? loans.sections.filter((section) => !isUnused(section)) : loans.sections
   return (
     <>
-      <AboutLoans />
       {shown.length >= 2 && <LoansSummary sections={shown} to={to} />}
       {shown.map((section) => (
         <LoanSectionView key={section.categoryId} section={section} from={from} to={to} />

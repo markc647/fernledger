@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
+import { HelpSheet } from '@/components/help-sheet'
 import { LiveStatus } from '@/components/live-status'
 import { PrintReportButton, useReportPrint, useReportScroll, useShownReport } from '@/components/report-gate'
 import { api } from '@/lib/api'
@@ -14,9 +15,17 @@ type ReportIdentity = { appTitle: string; name: string; range: string; generated
 const Identity = createContext<ReportIdentity | null>(null)
 
 /**
+ * What a Report says about its figures that a reader reads once: what is counted, how a figure is worked out, what is left out. `title` is "About these figures" ("About these
+ * balances" for Balances) and `body` is its paragraphs (plain `<p>`s). It is written once and shown twice (`ReportFrame`'s `notes`): on screen in a sheet behind the "?" beside the
+ * Report's title, so the figures are not pushed down the page by it, and on paper as a section before the figures, because a printout has no "?". The Report's component exports its
+ * notes (a constant) and its route passes them to the frame.
+ */
+export type ReportNotes = { title: string; body: ReactNode }
+
+/**
  * The heading to give each printed table (`ResponsiveTable`'s `printHeading`), for the Account it lists: two lines, "<app> –
- * <Report> – <Account> – <dates>" and "Generated … by …". A browser repeats a table's heading at the top of every page the
- * table runs onto, so every printed page says what it is and who made it, in every browser, with no help from page margins.
+ * <Report> – <Account> – <dates>" and "Generated …". A browser repeats a table's heading at the top of every page the
+ * table runs onto, so every printed page says what it is and when it was made, in every browser, with no help from page margins.
  * `also` is a third line for what a reader of a loose page must know about the figures, such as what is not counted. Null outside a Report.
  */
 export function useReportIdentity() {
@@ -31,10 +40,23 @@ export function useReportIdentity() {
     )
 }
 
+/** The Report's notes on paper: a section before the figures, so a printed page can be read on its own. It is not on the screen (`hidden`), where the "?" beside the title has them. */
+function PrintedNotes({ notes }: { notes: ReportNotes }) {
+  const id = useId()
+  return (
+    <section aria-labelledby={id} className="mt-6 hidden print:mt-4 print:block">
+      <h2 id={id} className="text-lg font-semibold print:text-[13pt]">
+        {notes.title}
+      </h2>
+      <div className="[&_p]:mt-1">{notes.body}</div>
+    </section>
+  )
+}
+
 /**
  * The frame every Report is printed in (README: Reports). It writes the Report's own title block, because a printout leaves
  * out the app header and the sidebar, and with them the app title: the app title from Settings, the Report's name, its Account(s) and dates, and
- * "Generated Thu 8 Oct 2026 at 3:42 pm by <the signed-in email>". A Report is shown on its own page, under the form that asked for it, and
+ * "Generated Thu 8 Oct 2026 at 3:42 pm". A Report is shown on its own page, under the form that asked for it, and
  * is all that is printed of that page; it puts what it lists in `children`, as tables (ResponsiveTable with `print:text-[12pt]` and a
  * `printHeading` from `useReportIdentity`) and headings no smaller than 12pt.
  *
@@ -44,7 +66,7 @@ export function useReportIdentity() {
  * draw; other browsers print the Report without them, and number the pages in their own header and footer if the reader turns
  * that on, which the page's help sheet says (`PRINT_HELP`, src/lib/reports.ts).
  *
- * `generatedAt` is when the data arrived. The email is the signed-in Member's own, from Access; it is printed, never logged.
+ * `generatedAt` is when the data arrived. A Report does not say who made it or who opened it.
  */
 export function ReportFrame({
   name,
@@ -55,6 +77,7 @@ export function ReportFrame({
   subject,
   generatedAt,
   notice,
+  notes,
   children,
 }: {
   /** The Report's name, such as "Transaction listing". */
@@ -75,14 +98,15 @@ export function ReportFrame({
   generatedAt: number
   /** Something the reader must know before the figures, such as "this Report stops at 10,000 Transactions". Printed under the title block. */
   notice?: ReactNode
+  /** What a reader reads once about the figures. On screen it is behind a "?" beside the Report's title; on paper it is a section after the `notice` and before the figures. */
+  notes?: ReportNotes
   children: ReactNode
 }) {
   const settings = useQuery(settingsQuery)
   const me = useQuery(meQuery)
   const appTitle = settings.data?.app_title
-  const email = me.data?.email
   const range = describeRange(from, to)
-  const generated = email ? generatedLine(generatedAt, email) : undefined
+  const generated = generatedLine(generatedAt)
 
   // The page's title names the file "Save as PDF" suggests, and it is what a browser's own print header shows.
   const title = appTitle ? reportHeading({ appTitle, name, accounts: accountsInTitle, range }) : undefined
@@ -107,7 +131,10 @@ export function ReportFrame({
     if (scroll.consume()) scroll.show()
   }, [generatedAt, scroll])
 
-  const identity = useMemo(() => (appTitle && generated ? { appTitle, name, range, generated } : null), [appTitle, name, range, generated])
+  // The Report waits for who is signed in as well as for the app title, though it no longer prints who: the Admin or a Member decides where the Print button is (in the form beside "Show
+  // Report", or above a Member's Report), what the live message says ("below the form"), and whether this showing is kept. Without it the button would start above the Report and move.
+  const known = me.data !== undefined
+  const identity = useMemo(() => (appTitle && known ? { appTitle, name, range, generated } : null), [appTitle, known, name, range, generated])
 
   // The Report is on the page once it can say what it is. Each time the Admin shows it (it arrives, or is read again) its choices are kept for the Reports page, and updated if they were
   // already (a Member's view is not a showing: the Worker would refuse it). A Report is the choices and not the figures, so this is all that is kept.
@@ -150,7 +177,7 @@ export function ReportFrame({
     )
   }, [onPage, shown])
 
-  // Without the app title and who is signed in the printout would not say what it is or who made it, so it waits for both.
+  // Without the app title the printout would not say what it is, so it waits for it (and for who is signed in, above).
   if (settings.error) return <p role="alert">Fernledger couldn't load the details this Report needs. Reload the page to try again.</p>
   if (identity === null) return <p role="status">Loading…</p>
 
@@ -175,10 +202,14 @@ export function ReportFrame({
       <article aria-label={name} className="report-frame">
         <header>
           <p className="text-lg font-semibold print:text-[14pt]">{appTitle}</p>
-          {/* The page's own heading, above the form, is the h1 on screen, so here the name is text (the article's label says it). On paper that heading is not there, and the name is the Report's h1. */}
-          <p aria-hidden="true" className="mt-1 text-2xl font-semibold print:hidden">
-            {name}
-          </p>
+          {/* The page's own heading, above the form, is the h1 on screen, so here the name is text (the article's label says it). On paper that heading is not there, and the name is the Report's h1.
+              The "?" beside it is the Report's own, for its notes, and is not the page's ("About this page", beside the h1). A printout has the notes as a section instead (below). */}
+          <div className="mt-1 flex min-h-11 items-center gap-3 print:hidden">
+            <p aria-hidden="true" className="min-w-0 text-2xl font-semibold">
+              {name}
+            </p>
+            {notes && <HelpSheet label={notes.title}>{notes.body}</HelpSheet>}
+          </div>
           <h1 className="mt-1 hidden text-2xl font-semibold print:block print:text-[20pt]">
             {name}
           </h1>
@@ -199,6 +230,7 @@ export function ReportFrame({
           <p className="mt-1">{generated}</p>
         </header>
         {notice}
+        {notes && <PrintedNotes notes={notes} />}
         {children}
       </article>
     </Identity.Provider>

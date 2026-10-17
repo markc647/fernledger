@@ -17,10 +17,8 @@ export const ADMIN_EMAIL = 'admin@example.com'
 export const TITLE = `Mum's "family" finances \\ Report`
 /** 3:42 pm in NZ, the moment a test fixes the browser's clock at (`context.clock.setFixedTime`). */
 export const NOW = new Date('2026-10-08T02:42:00.000Z')
-/** What a Report says of who made it and when, for a Report the Admin shows. */
-export const GENERATED = `Generated Thu 8 Oct 2026 at 3:42 pm by ${ADMIN_EMAIL}`
-/** The same for a Report a Member opens. */
-export const GENERATED_FOR_MEMBER = `Generated Thu 8 Oct 2026 at 3:42 pm by ${MEMBER_EMAIL}`
+/** What a Report says of when it was made, whoever opened it. It does not say who: the email of the Admin or the Member is nowhere in a Report. */
+export const GENERATED = 'Generated Thu 8 Oct 2026 at 3:42 pm'
 
 // Dates and money, written the way the app writes them.
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -249,7 +247,33 @@ export async function expectOwnPage(page: Page) {
   await expectPaperTable(page) // and its tables are the paper layout, not the box and shading they have on screen
 }
 
-/** The Report writes its own title block: the app title as typed (`TITLE`), its name, the Account(s), the dates, and who generated it and when. */
+// A Report's notes (`ReportNotes`, src/components/report-frame.tsx): what a reader reads once about its figures. On screen they are in a sheet behind the "?" beside the Report's own
+// title, which is named for them and not as the page's "?" is ("About this page", e2e/help-helpers.ts); on paper they are a section before the figures. The Transaction listing has none.
+
+/** What a Report's "?" is called and its sheet titled: "About these figures", or for Balances "About these balances". */
+export const NOTES_TITLE = 'About these figures'
+export const BALANCES_NOTES_TITLE = 'About these balances'
+
+/** The "?" beside the Report's own title, which is in the Report (`report` is its article). */
+export const notesButton = (report: Locator, title = NOTES_TITLE) => report.getByRole('button', { name: title, exact: true })
+
+/** The sheet it opens, once it is open. */
+export const notesSheet = (page: Page, title = NOTES_TITLE) => page.getByRole('dialog', { name: title, exact: true })
+
+/** Opens the Report's notes and returns the sheet, to read them. Close it (`closeNotes`) before looking at the rest of the page again: behind the sheet the page is hidden from a screen reader. */
+export async function openNotes(page: Page, report: Locator, title = NOTES_TITLE) {
+  await notesButton(report, title).click()
+  await expect(notesSheet(page, title)).toBeVisible()
+  return notesSheet(page, title)
+}
+
+/** Closes the notes with Esc, and waits until they are gone. */
+export async function closeNotes(page: Page, title = NOTES_TITLE) {
+  await page.keyboard.press('Escape')
+  await expect(notesSheet(page, title)).toHaveCount(0)
+}
+
+/** The Report writes its own title block: the app title as typed (`TITLE`), its name, the Account(s), the dates, and when it was generated (not by whom). */
 export async function expectTitleBlock(article: Locator, { name, account, dates }: { name: string; account: string; dates: string }) {
   const header = article.locator('header')
   await expect(header).toBeVisible()
@@ -266,6 +290,7 @@ export async function expectIdentityRow(page: Page, identity: string) {
   await expect(row).toBeVisible() // on screen it is not
   await expect(row).toContainText(identity)
   await expect(row).toContainText(GENERATED)
+  await expect(row).not.toContainText(ADMIN_EMAIL) // it says when, and not who
   expect(await page.locator('thead').first().evaluate((el) => [getComputedStyle(el).display, el.querySelectorAll('tr').length])).toEqual(['table-header-group', 2])
 }
 
@@ -298,7 +323,7 @@ export function expectNoTypeUnder12pt(pages: PdfPage[], atLeast: number) {
 }
 
 /**
- * The lines that say what a Report is, which Account and dates, and who generated it and when, are at the top of every page that has some of its table (the pages
+ * The lines that say what a Report is, which Account and dates, and when it was generated, are at the top of every page that has some of its table (the pages
  * with `marker` in them, at least `atLeast` of them). They are in each page's own body, not its margins, so every browser prints them.
  */
 export function expectIdentityOnEveryPage(pages: PdfPage[], marker: string | RegExp, identity: string, atLeast: number) {
@@ -308,6 +333,7 @@ export function expectIdentityOnEveryPage(pages: PdfPage[], marker: string | Reg
     const text = squash(textOf(p))
     expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(identity))
     expect(text, `page ${pages.indexOf(p) + 1}`).toContain(squash(GENERATED))
+    expect(text, `page ${pages.indexOf(p) + 1}`).not.toContain(squash(ADMIN_EMAIL))
   }
   return withRows
 }

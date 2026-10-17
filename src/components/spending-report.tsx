@@ -1,6 +1,6 @@
 import type { SpendingByCategory, SpendingCategory } from '@/generated/api/spending-by-category'
 import { LazySpendingChart } from '@/components/charts/lazy-charts'
-import { useReportIdentity } from '@/components/report-frame'
+import { useReportIdentity, type ReportNotes } from '@/components/report-frame'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Spent } from '@/components/spent'
 import { NOT_COUNTED, UNCATEGORISED_SPENDING } from '@/lib/budgets'
@@ -14,18 +14,16 @@ const columns: Column<SpendingCategory>[] = [
   { key: 'spent', header: 'Spent', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Spent cents={row.cents} /> },
 ]
 
-/** What a reader needs before the figures: what is counted as spending, and what is not. */
-function AboutSpending() {
-  return (
-    <section aria-labelledby="about-spending" className="mt-6 print:mt-4">
-      <h2 id="about-spending" className="text-lg font-semibold print:text-[13pt]">
-        About these figures
-      </h2>
-      <p className="mt-1">What the Categories spent in these dates: money out less money back, such as a refund. A “back” amount is taken off the total.</p>
-      <p className="mt-1">Uncategorised counts as spending, so money in that has no Category yet comes off it.</p>
-      <p className="mt-1">{NOT_COUNTED}</p>
-    </section>
-  )
+/** What a reader needs before the figures: what is counted as spending, and what is not. The "?" beside the Report's title has it on screen, and a printout has it before the figures (`ReportFrame`). */
+export const SPENDING_NOTES: ReportNotes = {
+  title: 'About these figures',
+  body: (
+    <>
+      <p>What the Categories spent in these dates: money out less money back, such as a refund. A “back” amount is taken off the total.</p>
+      <p>Uncategorised counts as spending, so money in that has no Category yet comes off it.</p>
+      <p>{NOT_COUNTED}</p>
+    </>
+  ),
 }
 
 /**
@@ -60,7 +58,6 @@ export function SpendingByCategoryReport({ report, accounts }: { report: Spendin
   const printHeading = useReportIdentity()(accounts, NOT_COUNTED)
   return (
     <>
-      <AboutSpending />
       <section aria-labelledby="spending-heading" className="mt-8 print:mt-6">
         <h2 id="spending-heading" className="text-xl font-semibold print:text-[15pt]">
           Spending in each Category

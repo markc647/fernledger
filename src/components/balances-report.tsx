@@ -1,5 +1,5 @@
 import { Amount } from '@/components/amount'
-import { useReportIdentity } from '@/components/report-frame'
+import { useReportIdentity, type ReportNotes } from '@/components/report-frame'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Status } from '@/components/status'
 import { formatBalance, formatDate } from '@/lib/format'
@@ -130,30 +130,27 @@ function AccountSection({ section }: { section: AccountBalances }) {
   )
 }
 
-/** What a reader needs before the figures: how often, where a balance comes from, and what "held" means. */
-function AboutBalances() {
-  return (
-    <section aria-labelledby="about-balances" className="mt-6 print:mt-4">
-      <h2 id="about-balances" className="text-lg font-semibold print:text-[13pt]">
-        About these balances
-      </h2>
-      <p className="mt-1">
+/** What a reader needs before the figures: how often, where a balance comes from, and what "held" means. The "?" beside the Report's title has it on screen, and a printout has it before the figures (`ReportFrame`). */
+export const BALANCES_NOTES: ReportNotes = {
+  title: 'About these balances',
+  body: (
+    <>
+      <p>
         Each Account has a row for every month in these dates, with its balance at the end of the month. Above the rows are its balance when the dates begin and when they end.
       </p>
-      <p className="mt-1">
+      <p>
         Fernledger works each balance out from the Transactions it holds, starting from the bank's own balance for the Account. They are calculated figures, not balances the bank gave for each
         month-end. A row says “Bank balance” where the bank did give one for that day.
       </p>
-      <p className="mt-1">A date is held when Fernledger has a Transaction or a bank balance for the Account on it. There are no balances before the first date held or after the last.</p>
-    </section>
-  )
+      <p>A date is held when Fernledger has a Transaction or a bank balance for the Account on it. There are no balances before the first date held or after the last.</p>
+    </>
+  ),
 }
 
 /** Each Account on its own: the balances Report has no total, because Accounts are held to different dates. */
 export function BalancesOverTime({ sections }: { sections: AccountBalances[] }) {
   return (
     <>
-      <AboutBalances />
       {sections.map((section) => (
         <AccountSection key={section.accountId} section={section} />
       ))}

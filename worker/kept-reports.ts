@@ -139,14 +139,13 @@ export type KeptReport = {
   to: string
   /** UTC time, ISO 8601, the Admin last showed it. */
   lastMadeAt: string
-  madeBy: string
 }
 type KeptRow = Omit<KeptReport, 'categoryRemoved' | 'from' | 'to'> & { categoryRemoved: number | null; fromDate: string | null; toDate: string }
 
 // A removed Category still names its kept Report, as it does its Rule.
 const SELECT_KEPT = `
   SELECT k.id, k.report, k.account_id AS accountId, a.name AS accountName, k.category_id AS categoryId, c.name AS categoryName, c.removed_at IS NOT NULL AS categoryRemoved,
-         k.from_date AS fromDate, k.to_date AS toDate, k.last_made_at AS lastMadeAt, k.made_by AS madeBy
+         k.from_date AS fromDate, k.to_date AS toDate, k.last_made_at AS lastMadeAt
   FROM kept_reports k LEFT JOIN accounts a ON a.id = k.account_id LEFT JOIN categories c ON c.id = k.category_id`
 
 const view = ({ fromDate, toDate, categoryRemoved, ...row }: KeptRow): KeptReport => ({ ...row, categoryRemoved: categoryRemoved === 1, from: fromDate, to: toDate })
@@ -230,6 +229,7 @@ export const keptReports = new Hono<AppEnv>()
             }),
           ]
     // The INSERT is the last statement, which `onlyIfChanged` looks at: it changes a row only when no Report with these choices was kept.
+    // `made_by` is written only because the column is NOT NULL (migration 9701, and migrations are add-only, ADR 0009). It is never read or sent: a Report does not say who made it.
     const [updated, ...rest] = await recordChange(
       db,
       [
