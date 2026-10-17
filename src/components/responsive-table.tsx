@@ -1,4 +1,4 @@
-import { useId, useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
+import { useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
 import { Select } from '@/components/ui/select'
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
@@ -117,15 +117,51 @@ function SortMenu<Row>({ columns }: { columns: Column<Row>[] }) {
 const HANDLE_CELL = 'w-12 py-2 ps-2 pe-0'
 
 // The table's look on screen is one set of classes, here, for every table. On paper (`print:`) it is the paper layout a Report is printed in: no box (the frame's border, corners and clipping, and
-// the scrolling of the table's container), no shading, a 2px rule under the headings (and none under the printed heading above them) and a divider under every row, the last too, with the text at the top of its cell.
-// A column's own `className` is last, so a Report's tighter padding on paper (`PAPER`, src/lib/utils.ts) still wins. `!` is for the rules that ui/table.tsx writes with a selector of its own (`[&_tr]`).
+// its scrolling), no shading, a 2px rule under the headings (and none under the printed heading above them) and a divider under every row, the last too, with the text at the top of its cell.
+// A column's own `className` is last. Its `print:py-2` (`PAPER`, src/lib/utils.ts, a Report's tighter padding on paper) replaces the `print:py-3` the cells have here, because `cn` keeps the later of two classes
+// of a kind and variant; its `print:px-2` is not a replacement of `px-3` but beats it, because the stylesheet puts a `print:` class after the same class without one. `!` is for the rules that ui/table.tsx
+// writes with a selector of its own (`[&_tr]`).
 
-/** The box round the table: rounded and clipped to its corners, and, on paper, neither, and the table inside it no longer scrolls. */
-const FRAME = 'overflow-hidden rounded-lg print:overflow-visible print:rounded-none [&_[data-slot=table-container]]:print:overflow-visible'
+/**
+ * The box round the table: rounded and clipped to its corners, and the one thing that scrolls sideways when the table is wider than the room (the table's own container, which ui/table.tsx makes the scroller,
+ * is left to overflow into it: the frame is what is named and can be focused, `TableFrame`). On paper it is none of that.
+ */
+const FRAME = 'overflow-x-auto overflow-y-hidden rounded-lg print:overflow-visible print:rounded-none [&_[data-slot=table-container]]:overflow-visible'
 /** The heading rows: shaded on screen, with a divider under each; on paper unshaded, with the rule under the headings only. */
 const HEADER = 'bg-muted print:bg-transparent print:[&_tr]:border-b-0! print:[&_tr:last-child]:border-b-2!'
 /** The rows: the last has no divider on screen, where the box closes it; on paper it has. */
 const BODY = 'print:[&_tr:last-child]:border-b!'
+
+/**
+ * The frame of a table, and what a table that is too wide for it needs: a box that scrolls sideways is a region with a name that the keyboard can reach and scroll (WCAG 2.1.1, and axe's
+ * `scrollable-region-focusable`). It is that only while it scrolls, so a table that fits is not another landmark on the page; the table's own name is the box's.
+ */
+function TableFrame({ label, className, children }: { label: string; className: string; children: ReactNode }) {
+  const frame = useRef<HTMLDivElement>(null)
+  const [scrolls, setScrolls] = useState(false)
+  useLayoutEffect(() => {
+    const element = frame.current
+    if (!element) return
+    const measure = () => setScrolls(element.scrollWidth > element.clientWidth)
+    measure()
+    // The box changes size with the window, and the table with its rows and the text size.
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    const table = element.querySelector('table')
+    if (table) observer.observe(table)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <div
+      ref={frame}
+      data-slot="table-frame"
+      className={cn(className, scrolls && 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring')}
+      {...(scrolls ? { role: 'region', 'aria-label': label, tabIndex: 0 } : {})}
+    >
+      {children}
+    </div>
+  )
+}
 
 /** A card, when the page has not given its rows an element of their own. */
 const CardItem = ({ className, children }: RowProps) => <li className={className}>{children}</li>
@@ -197,7 +233,7 @@ export function ResponsiveTable<Row>({
               key={getRowKey(row)}
               rowKey={getRowKey(row)}
               layout="cards"
-              className={cn('rounded-xl border bg-card p-4 text-card-foreground', handle && 'flex items-start gap-1')}
+              className={cn('rounded-lg border bg-card p-4 text-card-foreground', handle && 'flex items-start gap-1')}
             >
               {/* The grip, if the page has one, at the card's start: the card's lines (a label with its value) are beside it. */}
               {handle && <div className="-my-1 -ms-3 shrink-0">{handle.cell(row)}</div>}
@@ -223,7 +259,7 @@ export function ResponsiveTable<Row>({
   const Item = RowElement ?? TableItem
   return (
     // The box is the shadcn data table's: rounded, with a border the heading and rows sit inside, or, in a card, without one.
-    <div data-slot="table-frame" className={cn(FRAME, look === 'shadcn' && 'border print:border-0')}>
+    <TableFrame label={caption} className={cn(FRAME, look === 'shadcn' && 'border print:border-0')}>
       <Table className={cn('text-base', className)}>
         <TableCaption className="sr-only">{caption}</TableCaption>
         <TableHeader className={HEADER}>
@@ -251,7 +287,7 @@ export function ResponsiveTable<Row>({
           {rows.map((row) => (
             <Item key={getRowKey(row)} rowKey={getRowKey(row)} layout="table">
               {columns.map((column) => (
-                <TableCell key={column.key} className={cn(column.handle ? HANDLE_CELL : 'px-3 py-2', 'whitespace-normal print:align-top', align(column), column.className)}>
+                <TableCell key={column.key} className={cn(column.handle ? HANDLE_CELL : 'px-3 py-2', 'whitespace-normal print:py-3 print:align-top', align(column), column.className)}>
                   {column.cell(row)}
                 </TableCell>
               ))}
@@ -259,6 +295,6 @@ export function ResponsiveTable<Row>({
           ))}
         </TableBody>
       </Table>
-    </div>
+    </TableFrame>
   )
 }
