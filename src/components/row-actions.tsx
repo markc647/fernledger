@@ -44,11 +44,12 @@ export function RowActions({ row, id, children }: { row: string; id: string; chi
 /**
  * The one action of a row that has only one, as a button named for it ("Edit", "Rename") and not a "⋯" menu with a single item. `label` is what it says; `name` is what a screen reader calls it, which begins with the
  * label and names the row ("Edit Groceries, Mon 8 Oct 2012"); `id` is the button's own, so that a page can put focus back on it (`useFocusBack`); `open` says that the panel it opened is open under the row
- * (`aria-expanded`, which lights the row too). 44px tall, like every control that is not in the header or the sidebar.
+ * (`aria-expanded`, which lights the row in a table; Windows high contrast, which drops the fill, gives the button the palette's highlight as its edge, src/index.css), and `controls` is the panel's `id`. 44px tall,
+ * like every control that is not in the header or the sidebar.
  */
-export function RowButton({ id, label, name, open, onPress }: { id: string; label: string; name: string; open: boolean; onPress: () => void }) {
+export function RowButton({ id, label, name, open, controls, onPress }: { id: string; label: string; name: string; open: boolean; controls: string; onPress: () => void }) {
   return (
-    <Button id={id} type="button" variant="outline" size="touch" aria-label={name} aria-expanded={open} onClick={onPress}>
+    <Button id={id} type="button" variant="outline" size="touch" aria-label={name} aria-expanded={open} aria-controls={open ? controls : undefined} onClick={onPress}>
       {label}
     </Button>
   )

@@ -1,17 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NotATransfer, TreatAsTransferAgain } from '@/components/not-a-transfer'
-import { RowPanel } from '@/components/row-panel'
+import { RowPanel, type Drafts } from '@/components/row-panel'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
+import { formatDate } from '@/lib/format'
 import { HttpError } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
 import { NOT_TRANSFER_NOTE, notTransferSaved, transferEditHint, treatAsTransferAgainSaved, type TransferSource } from '@/lib/transfers'
 
-/** What the panel needs to know about a Transaction: its Override and Note now, and whether it is a Transfer. */
+/** What the panel needs to know about a Transaction: how to name it, its Override and Note now, and whether it is a Transfer. */
 export type EditableTransaction = {
   id: number
+  date: string
+  description: string
   amountCents: number
   categoryId: number | null
   /** 'override' while the Category is the Admin's own choice. */
@@ -26,22 +29,45 @@ export type EditableTransaction = {
   note: string | null
 }
 
+/** The panel's `id`, which its Transaction's Edit button `aria-controls`. */
+export const editPanelId = (id: number) => `transaction-${id}-panel`
+
+/** What has been typed into the panel and not saved: the Category chosen (null: No Override) and the Note. */
+export type EditDraft = { categoryId: number | null; note: string }
+
 const textareaStyle =
   'block min-h-20 w-full rounded-lg border border-input bg-background px-3 py-2 text-base focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring'
 
 /**
  * Sets a Transaction's Override and Note, in a panel (`RowPanel`) that sits under the Transaction's row in a list and under its Edit button on its details (`className`). Only what changed is sent, so only what changed is logged.
- * For a Transfer it also offers Not a Transfer (and its undo), which is saved at once and not with the Save button; `onSaved` is then given what to say about it.
+ * For a Transfer it also offers Not a Transfer (and its undo), which is saved at once and not with the Save button; `onSaved` is then given what to say about it. The panel starts from `draft`, what was typed in it
+ * before it was closed without being saved, and tells `onDraft` what it holds as that changes (null when it holds nothing unsaved), so that the page can keep it (`useDrafts`).
  */
-export function EditPanel({ row, className, onSaved, onCancel }: { row: EditableTransaction; className?: string; onSaved: (message?: string) => void; onCancel: () => void }) {
+export function EditPanel({
+  row,
+  className,
+  drafts,
+  onSaved,
+  onCancel,
+}: {
+  row: EditableTransaction
+  className?: string
+  drafts?: Drafts<EditDraft>
+  onSaved: (message?: string) => void
+  onCancel: () => void
+}) {
   const queryClient = useQueryClient()
   const { data: categories, isError } = useQuery(categoriesQuery)
   const startCategory = row.categorySource === 'override' ? row.categoryId : null
-  const [categoryId, setCategoryId] = useState<number | null>(startCategory)
-  const [note, setNote] = useState(row.note ?? '')
+  const [draft] = useState(() => drafts?.get(row.id))
+  const [categoryId, setCategoryId] = useState<number | null>(draft ? draft.categoryId : startCategory)
+  const [note, setNote] = useState(draft ? draft.note : (row.note ?? ''))
   const param = { id: String(row.id) }
   const transferHint = transferEditHint(row)
   const unsaved = categoryId !== startCategory || note.trim() !== (row.note ?? '')
+  useEffect(() => {
+    drafts?.set(row.id, unsaved ? { categoryId, note } : null)
+  }, [categoryId, note, unsaved, drafts, row.id])
   /** Saying Not a Transfer, or taking it off, saves at once and closes the panel, so what has been typed in it and not saved goes. */
   const unsavedWarning = unsaved ? "Changes in this panel that you haven't saved will be lost." : undefined
 
@@ -63,7 +89,7 @@ export function EditPanel({ row, className, onSaved, onCancel }: { row: Editable
   })
 
   return (
-    <RowPanel title="Edit Category and Note" className={className}>
+    <RowPanel id={editPanelId(row.id)} title={`Edit Category and Note, ${row.description}, ${formatDate(row.date)}`} className={className}>
       <form
         className="space-y-4"
         onSubmit={(event) => {
@@ -77,7 +103,6 @@ export function EditPanel({ row, className, onSaved, onCancel }: { row: Editable
           </label>
           <Select
             id="edit-category"
-            autoFocus
             value={categoryId ?? ''}
             aria-describedby="edit-category-hint"
             onChange={(event) => setCategoryId(event.target.value === '' ? null : Number(event.target.value))}

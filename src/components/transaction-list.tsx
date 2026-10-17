@@ -14,9 +14,10 @@ import type { InferResponseType } from 'hono/client'
 import { MessageSquareText } from 'lucide-react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Amount } from '@/components/amount'
-import { EditPanel } from '@/components/edit-panel'
+import { EditPanel, editPanelId, type EditDraft } from '@/components/edit-panel'
 import { ResponsiveTable, type Column, type ExpandedRow } from '@/components/responsive-table'
 import { RowButton, useFocusBack } from '@/components/row-actions'
+import { focusPanel, useDrafts } from '@/components/row-panel'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -182,14 +183,17 @@ export function TransactionList({
 
   const linkSearch = JSON.stringify(search)
   const editingId = editing?.row.id
-  /** Opens a Transaction's panel under its row, and closes any other that is open. */
+  // What was typed in a panel and not saved stays until that Transaction's panel is saved or cancelled, whichever panel is open, page of the list is shown, and layout (table or cards) the panels are in.
+  const drafts = useDrafts<EditDraft>()
+  /** Opens a Transaction's panel under its row, and closes any other that is open. Pressing the button of the one that is open puts focus in it. */
   const open = useCallback(
     (row: Row) => {
+      if (editingId === row.id) return focusPanel(editPanelId(row.id))
       const index = rows.findIndex((r) => r.id === row.id)
       setSaved(null)
       setEditing({ row, above: rows[index - 1]?.id ?? null })
     },
-    [rows],
+    [rows, editingId],
   )
   const columns = useMemo(() => {
     const here: TransactionSearch & { origin?: DetailOrigin } = { ...JSON.parse(linkSearch), origin }
@@ -229,6 +233,7 @@ export function TransactionList({
                   label="Edit"
                   name={`Edit ${info.row.original.description}, ${formatDate(info.row.original.date)}`}
                   open={editingId === info.row.original.id}
+                  controls={editPanelId(info.row.original.id)}
                   onPress={() => open(info.row.original)}
                 />
               ),
@@ -282,6 +287,7 @@ export function TransactionList({
   })
 
   const finish = ({ row, above }: Opened, message: string) => {
+    drafts.set(row.id, null)
     focusBack(editId(row.id))
     setSaved(message ? { message, rowId: row.id, above, search: linkSearch } : null)
     setEditing(null)
@@ -289,12 +295,13 @@ export function TransactionList({
 
   // The panel is under its row, so it goes with the row if the row is not on this page of the list.
   const panel = isAdmin && editing && rows.some((r) => r.id === editing.row.id) ? editing : null
-  // What saving said belongs to the search it was said for. When the Transaction is no longer in the list (it was categorised, on the Uncategorised page), the message takes its row's place, under the
-  // Transaction that was above it, and has focus there; with nothing left in the list it is the line at the top.
+  // What saving said belongs to the search it was said for, and is written under the Transaction it was said of, where the Admin is looking, as well as announced by the line at the top (which is then
+  // for a screen reader and not drawn, so that nothing is said or seen twice). When the Transaction is no longer in the list (it was categorised, on the Uncategorised page) the message takes its row's place,
+  // under the Transaction that was above it, and has focus there; with nothing left in the list it is the line at the top, and has focus.
   const said = saved !== null && saved.search === linkSearch ? saved : null
   const gone = said !== null && !rows.some((r) => r.id === said.rowId)
   const inPlace = gone && rows.length > 0
-  const messageStyle = 'font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+  const messageStyle = 'font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
   const expanded: ExpandedRow | undefined = panel
     ? {
         after: String(panel.row.id),
@@ -302,18 +309,21 @@ export function TransactionList({
           <EditPanel
             key={panel.row.id}
             row={panel.row}
+            drafts={drafts}
             onSaved={(message) => finish(panel, message ?? `Saved ${panel.row.description}.`)}
             onCancel={() => finish(panel, '')}
           />
         ),
       }
-    : inPlace
+    : said !== null && rows.length > 0
       ? {
-          after: said.above !== null && rows.some((r) => r.id === said.above) ? String(said.above) : null,
-          content: (
+          after: gone ? (said.above !== null && rows.some((r) => r.id === said.above) ? String(said.above) : null) : String(said.rowId),
+          content: gone ? (
             <p role="status" ref={status} tabIndex={-1} className={messageStyle}>
               {said.message}
             </p>
+          ) : (
+            <p className={messageStyle}>{said.message}</p>
           ),
         }
       : undefined
@@ -323,7 +333,7 @@ export function TransactionList({
   return (
     <>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
-      <p role="status" ref={inPlace ? undefined : status} tabIndex={-1} className={cn('mt-2', messageStyle)}>
+      <p role="status" ref={inPlace ? undefined : status} tabIndex={-1} className={cn('mt-2', messageStyle, said !== null && !gone && 'sr-only')}>
         {inPlace ? '' : (said?.message ?? '')}
       </p>
       {showFilters && <TransactionFilters search={search} onSearch={onSearch} />}
@@ -342,7 +352,7 @@ export function TransactionList({
         <p role="status" className="mt-4">Loading…</p>
       ) : (
         <div ref={results} aria-busy={isFetching} className="mt-4 scroll-mt-4">
-          <p ref={summary} role="status" tabIndex={-1} className="mb-4 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          <p ref={summary} role="status" tabIndex={-1} className="mb-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
             Showing {((page - 1) * PAGE_SIZE + 1).toLocaleString('en-NZ')} to{' '}
             {(total === undefined ? (page - 1) * PAGE_SIZE + data.transactions.length : Math.min(page * PAGE_SIZE, total)).toLocaleString('en-NZ')}
             {total === undefined ? '' : ` of ${total.toLocaleString('en-NZ')}`}

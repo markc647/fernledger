@@ -441,6 +441,10 @@
   [data-slot="dropdown-menu-separator"] {
     background-color: CanvasText;
   }
+  /* A button whose panel or menu is open (a row's Edit or Rename, its "⋯", a date field) says so by a fill, and the row it is on by a tint, which the reader's palette drops: its edge is the palette's highlight. */
+  [data-slot="button"][aria-expanded="true"] {
+    border-color: Highlight;
+  }
   /* A row being dragged is faded and lifted, which high contrast does not show: it is outlined as well. */
   [data-dragging="true"] {
     outline: 2px solid Highlight;
