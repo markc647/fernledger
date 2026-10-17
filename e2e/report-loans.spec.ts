@@ -5,6 +5,7 @@ import { expectTableLook } from './table-look-helpers'
 import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
+  closeNotes,
   dateText,
   ensureCategory,
   expectBareMargins,
@@ -22,6 +23,7 @@ import {
   importRows,
   money,
   NOW,
+  openNotes,
   overrideCategories,
   restoreAppTitleAfterEach,
   setTitle,
@@ -334,12 +336,13 @@ test.describe('on screen', () => {
     await expect(header).toContainText(`Dates: From the first Transaction to ${dateText(`${d.year}-12-31`)}`)
     await expect(header).toContainText(GENERATED)
 
-    const about = report.getByRole('region', { name: 'About these figures' })
+    const about = await openNotes(page, report) // the notes, behind the Report's "?"
     await expect(about).toContainText('Each loan is a Loans Category, one for each person, named like Loan – Alice.')
     await expect(about).toContainText('the person owes the difference to the Accounts')
     await expect(about).toContainText("Loans aren't counted as spending or income")
     // How a Transfer counts: on the half in the lender's Account only, because giving it to both cancels out.
     await expect(about).toContainText("Give it to the half in the lender's Account only")
+    await closeNotes(page)
 
     // Each Loans Category of this project has its section, in order of name.
     const headings = await report.getByRole('heading', { level: 2 }).allTextContents()
@@ -428,7 +431,7 @@ test.describe('on screen', () => {
     await page.goto(address(aliceId, null, `${d.year}-12-31`))
 
     await expect(article(page).locator('header')).toContainText(`Loans: ${d.aliceLoan}`)
-    await expect(article(page).getByRole('heading', { level: 2 })).toHaveText(['About these figures', d.aliceLoan]) // only that loan, and no summary of one
+    await expect(article(page).getByRole('heading', { level: 2 })).toHaveText([d.aliceLoan]) // only that loan, and no summary of one; the notes are not on the screen
     await expect(page).toHaveTitle(`Mum's finances – Loans – ${d.aliceLoan} – From the first Transaction to ${dateText(`${d.year}-12-31`)}`)
     await page.goto(address(null, null, `${d.year}-12-31`))
     await expect(article(page).locator('header')).toContainText('Loans: All Loans Categories')
@@ -730,7 +733,7 @@ test.describe('printed', () => {
     await expectJustTheReport(page)
   })
 
-  test('writes its own title block: the app title, the Report, the Loans Category, the Accounts, the dates, and who generated it and when', async ({ page }, testInfo) => {
+  test('writes its own title block: the app title, the Report, the Loans Category, the Accounts, the dates, and when it was generated', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await expectTitleBlock(article(page), { name: 'Loans', account: 'All Accounts: ', dates: range(d.year) })
     await expect(article(page).locator('header')).toContainText(`Loans: ${d.aliceLoan}`)
@@ -828,7 +831,7 @@ test.describe('printed over several pages', () => {
     }
   })
 
-  test('says what the Report is, which Loans Category and dates, and who generated it and when, at the top of every page the table runs onto', async ({ page }) => {
+  test('says what the Report is, which Loans Category and dates, and when it was generated, at the top of every page the table runs onto', async ({ page }) => {
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     // The Admin's title comes through as typed, quote and backslash too.
     expectIdentityOnEveryPage(pages, 'Stub payment', `${TITLE} – Loans – Loan – Stub – ${dateText('2002-01-01')} to ${dateText('2002-12-31')}`, 2)

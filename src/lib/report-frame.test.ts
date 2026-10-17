@@ -14,8 +14,8 @@ describe('describeRange', () => {
 })
 
 describe('generatedLine', () => {
-  it('says when and by whom, with the time in NZ whatever the device\'s zone', () => {
-    expect(generatedLine(new Date('2026-10-08T02:42:00.000Z'), 'admin@example.com')).toBe('Generated Thu 8 Oct 2026 at 3:42 pm by admin@example.com')
+  it('says when, with the time in NZ whatever the device\'s zone, and not by whom', () => {
+    expect(generatedLine(new Date('2026-10-08T02:42:00.000Z'))).toBe('Generated Thu 8 Oct 2026 at 3:42 pm')
   })
 })
 

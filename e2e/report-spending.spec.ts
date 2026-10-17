@@ -8,6 +8,7 @@ import { readPdf, textOf } from './pdf-text'
 import { chooseTextSize } from './shell-helpers'
 import {
   dateText,
+  closeNotes,
   ensureCategory,
   expectBareMargins,
   expectBlackOnWhite,
@@ -23,7 +24,9 @@ import {
   GENERATED,
   importRows,
   NOT_COUNTED,
+  notesButton,
   NOW,
+  openNotes,
   overrideCategories,
   restoreAppTitleAfterEach,
   setTitle,
@@ -253,11 +256,12 @@ test.describe('on screen', () => {
     await expect(header).toContainText(`Dates: ${dateText(`${d.year}-01-01`)} to ${dateText(`${d.year}-12-31`)}`)
     await expect(header).toContainText(GENERATED)
 
-    // Said before the figures, in the Dashboard's words: what is spending, that a "back" amount comes off, that Uncategorised counts, and what is left out.
-    const about = report.getByRole('region', { name: 'About these figures' })
+    // The notes, behind the Report's "?" (e2e/report-notes.spec.ts is about the sheet), in the Dashboard's words: what is spending, that a "back" amount comes off, that Uncategorised counts, and what is left out.
+    const about = await openNotes(page, report)
     await expect(about).toContainText('money out less money back, such as a refund. A “back” amount is taken off the total.')
     await expect(about).toContainText('Uncategorised counts as spending, so money in that has no Category yet comes off it.')
     await expect(about).toContainText(NOT_COUNTED)
+    await closeNotes(page)
 
     const section = report.getByRole('region', { name: 'Spending in each Category' })
     await expect(section.locator('dl')).toContainText('Total spending')
@@ -336,7 +340,7 @@ test.describe('on screen', () => {
     await expect(section).toContainText(`Nothing was spent in June ${d.year}.`) // a whole month by its name, as on the Dashboard
     await expect(section.getByRole('table')).toHaveCount(0)
     await expect(section.locator('dl')).toHaveCount(0)
-    await expect(article(page).getByRole('region', { name: 'About these figures' })).toBeVisible()
+    await expect(notesButton(article(page))).toBeVisible() // the notes are there to read, whatever the dates hold
   })
 
   test('says nothing was spent for an Account whose only Transaction is Income, and does not count its wages', async ({ page, context, baseURL }, testInfo) => {
@@ -617,7 +621,7 @@ test.describe('printed', () => {
     await expectJustTheReport(page)
   })
 
-  test('writes its own title block: the app title, the Report, the Account, the dates, and who generated it and when', async ({ page }, testInfo) => {
+  test('writes its own title block: the app title, the Report, the Account, the dates, and when it was generated', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await expectTitleBlock(article(page), { name: 'Spending by Category', account: `${d.everyday.name} (${d.everyday.number})`, dates: range(d.year) })
   })
@@ -670,7 +674,7 @@ test.describe('printed', () => {
     expect(text).toContain(`Total spending ${spent(total(EVERYDAY))}`)
     expect(text).toContain('Page 1 of 1')
     expectNoTypeUnder12pt(pages, 25)
-    // The table's heading, with what the Report is, who generated it and what is not counted, is on the page that has the table.
+    // The table's heading, with what the Report is, when it was generated and what is not counted, is on the page that has the table.
     expectIdentityOnEveryPage(pages, 'Total spending', `${TITLE} – Spending by Category – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`, 1)
     expect(squash(text)).toContain(squash(NOT_COUNTED))
   })
@@ -732,7 +736,7 @@ test.describe('printed over several pages', () => {
     expect(all.split(spent(UNCATEGORISED_CENTS)).length - 1).toBe(1)
   })
 
-  test('says what the Report is, which Accounts and dates, who generated it and when, and what is not counted, at the top of every page the table runs onto', async ({ page }, testInfo) => {
+  test('says what the Report is, which Accounts and dates, when it was generated, and what is not counted, at the top of every page the table runs onto', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     // The Admin's title comes through as typed, quote and backslash too; the heading says "All Accounts", not each of them on every page.

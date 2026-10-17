@@ -33,7 +33,6 @@ type Kept = {
   from: string | null
   to: string
   lastMadeAt: string
-  madeBy: string
 }
 const list = async (who: Who = 'member'): Promise<Kept[]> => {
   const res = await call('/api/kept-reports', { who })
@@ -92,9 +91,10 @@ describe('the list', () => {
     const kept = await list('member')
 
     expect(kept.map((k) => k.id)).toEqual([newest, loans, older])
+    // Exactly these: the list does not say who made a Report, though this one was made by another Admin.
     expect(kept[0]).toEqual({
       id: newest, report: 'budget-vs-actual', accountId: null, accountName: null, categoryId: null, categoryName: null, categoryRemoved: false,
-      from: '2026-10-01', to: '2026-10-31', lastMadeAt: '2026-10-16T01:00:00.000Z', madeBy: 'other.admin@example.com',
+      from: '2026-10-01', to: '2026-10-31', lastMadeAt: '2026-10-16T01:00:00.000Z',
     })
     expect(kept[1]).toMatchObject({ report: 'loans', categoryId: loanId, categoryName: 'Loan – Alice', categoryRemoved: false, from: null })
     expect(kept[2]).toMatchObject({ report: 'transactions', accountId: savings, accountName: 'Example savings' })
@@ -184,7 +184,7 @@ describe('showing a Report as the Admin', () => {
     expect(kept).toHaveLength(1)
     expect(kept[0]!.id).toBe(first.id)
     expect(kept[0]!.lastMadeAt > '2025-01-01').toBe(true)
-    expect(kept[0]!.madeBy).toBe('admin@example.com')
+    expect((await rows())[0]).toMatchObject({ made_by: 'admin@example.com' }) // still recorded, as the column is not null; the list does not send it
     expect(await changeLog()).toHaveLength(1) // only the Report being kept is a change; showing it again is not
   })
 

@@ -13,6 +13,7 @@
     "report-budget.spec.ts": [80, 81, 82, 83],
     "report-income-vs-spending.spec.ts": [39, 50, 59, 98],
     "report-loans.spec.ts": [48, 49, 68, 69],
+    "report-notes.spec.ts": [35],
     "report-spending.spec.ts": [74, 75, 76, 77, 78, 79],
     "reports.spec.ts": [60, 61, 62, 63],
     "rules.spec.ts": [84, 85],

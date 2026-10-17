@@ -26,7 +26,7 @@ import {
 } from './report-helpers'
 
 // Ticket 18: the Report frame and the Transaction listing Report (spec stories 97 to 99). A Report has a page of its own, with its form and, below it, the Report, which is laid
-// out for paper and says on its face what it is, which Account and dates it covers, and who generated it and when. The Reports page is the table of the kept Reports
+// out for paper and says on its face what it is, which Account and dates it covers, and when it was generated. The Reports page is the table of the kept Reports
 // (kept-reports.spec.ts), and reports-pages.spec.ts checks the six pages' common ground. The print layout is checked three ways: the page under print media (what the browser lays out), and the PDF
 // it makes (page count, the text on each page, the page margins and the size of the type).
 
@@ -518,7 +518,7 @@ test.describe('printed', () => {
     await expectJustTheReport(page)
   })
 
-  test('writes its own title block: the app title, the Report, the Account, the dates, and who generated it and when', async ({ page }, testInfo) => {
+  test('writes its own title block: the app title, the Report, the Account, the dates, and when it was generated', async ({ page }, testInfo) => {
     const { first, last, savings } = dataFor(testInfo.project.name)
     await expectTitleBlock(article(page), { name: 'Transaction listing', account: `${savings.name} (${savings.number})`, dates: `${first} to ${last}` })
   })
@@ -569,7 +569,7 @@ test.describe('printed', () => {
     expectPageNumbers(await readPdf(await page.pdf({ format: 'A4' })))
   })
 
-  test('says what the Report is, which Account and dates, and who generated it and when, at the top of every page the table runs onto', async ({ page }, testInfo) => {
+  test('says what the Report is, which Account and dates, and when it was generated, at the top of every page the table runs onto', async ({ page }, testInfo) => {
     const { first, last, savings } = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     // The Admin's title comes through as typed, quote and backslash too.

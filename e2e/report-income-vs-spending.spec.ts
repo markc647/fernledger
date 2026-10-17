@@ -5,6 +5,7 @@ import { expectTableLook } from './table-look-helpers'
 import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
 import {
+  closeNotes,
   dateText,
   ensureCategory,
   expectBareMargins,
@@ -21,8 +22,10 @@ import {
   GENERATED,
   importRows,
   money,
+  notesButton,
   NOT_COUNTED_AS_SPENDING_OR_INCOME,
   NOW,
+  openNotes,
   overrideCategories,
   restoreAppTitleAfterEach,
   setTitle,
@@ -303,15 +306,16 @@ test.describe('on screen', () => {
     await expect(header).toContainText(`Dates: ${dateText(from)} to ${dateText(to)}`)
     await expect(header).toContainText(GENERATED)
 
-    // Said before the figures: what Income and Spending are, that Uncategorised counts as Spending and so is not Income, what the Difference is, how the dates are
+    // The notes, behind the Report's "?": what Income and Spending are, that Uncategorised counts as Spending and so is not Income, what the Difference is, how the dates are
     // counted, and what is left out.
-    const about = report.getByRole('region', { name: 'About these figures' })
+    const about = await openNotes(page, report)
     await expect(about).toContainText('Income is what the Income Categories brought in each month, less what went out of them.')
     await expect(about).toContainText('Spending is what the Spending Categories took out, less money back, such as a refund. A “back” amount is taken off the total.')
     await expect(about).toContainText('Uncategorised counts as spending, so money in that has no Category yet comes off Spending and is not counted as income.')
     await expect(about).toContainText('The difference is income less spending, so it is below zero when more was spent than came in.')
     await expect(about).toContainText('Your dates are counted exactly. A month they begin or end part way through counts only those dates, and its row says which.')
     await expect(about).toContainText(NOT_COUNTED_AS_SPENDING_OR_INCOME)
+    await closeNotes(page)
 
     expect(await totalsOf(page)).toEqual(expectedTotals(ALL))
     expect(await totalsOf(page)).toEqual(['Total income', '$5,999.50', 'Total spending', '$119.00', DIFFERENCE, '+$5,880.50']) // the same, written out
@@ -421,7 +425,7 @@ test.describe('on screen', () => {
     await expect(section(page)).toContainText(`There was no income or spending in October ${d.year}.`)
     await expect(section(page).getByRole('table')).toHaveCount(0)
     await expect(section(page).locator('dl')).toHaveCount(0)
-    await expect(article(page).getByRole('region', { name: 'About these figures' })).toBeVisible()
+    await expect(notesButton(article(page))).toBeVisible() // the notes are there to read, whatever the dates hold
 
     await page.goto(address(null, `${d.year}-10-02`, `${d.year}-10-19`)) // every Account, several days: the Transfer is not counted, and the loan and the refunded food are later
     await expect(section(page)).toContainText(`There was no income or spending in ${dateText(`${d.year}-10-02`)} to ${dateText(`${d.year}-10-19`)}.`)
@@ -610,7 +614,7 @@ test.describe('printed', () => {
     await expectJustTheReport(page)
   })
 
-  test('writes its own title block: the app title, the Report, the Account, the dates, and who generated it and when', async ({ page }, testInfo) => {
+  test('writes its own title block: the app title, the Report, the Account, the dates, and when it was generated', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     await expectTitleBlock(article(page), { name: NAME, account: `${d.everyday.name} (${d.everyday.number})`, dates: range(d.year) })
   })
@@ -677,7 +681,7 @@ test.describe('printed', () => {
     expectPageNumbers(pages)
     expectBareMargins(pages)
     expectNoTypeUnder12pt(pages, 50)
-    // The table's heading, with what the Report is, who generated it, what the Difference is, what is not counted and what has no Category, is on every page that has the table.
+    // The table's heading, with what the Report is, when it was generated, what the Difference is, what is not counted and what has no Category, is on every page that has the table.
     const withTable = expectIdentityOnEveryPage(pages, 'The Difference is income less spending.', `${TITLE} – ${NAME} – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`, 1)
     for (const p of withTable) {
       expect(squash(textOf(p))).toContain(squash('The Difference is income less spending.'))
@@ -749,7 +753,7 @@ test.describe('printed over several pages', () => {
     for (let i = 0; i < MONTHS; i++) expect(all.split(rowOf(i)).length - 1, rowOf(i)).toBe(1)
   })
 
-  test('says what the Report is, which Accounts and dates, who generated it and when, what the Difference is, what is not counted and what has no Category, at the top of every page the table runs onto', async ({ page }) => {
+  test('says what the Report is, which Accounts and dates, when it was generated, what the Difference is, what is not counted and what has no Category, at the top of every page the table runs onto', async ({ page }) => {
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     // The Admin's title comes through as typed, quote and backslash too; the heading says "All Accounts", not each of them on every page.
     const withRows = expectIdentityOnEveryPage(pages, 'The Difference is income less spending.', `${TITLE} – ${NAME} – All Accounts – ${dateText(`${FROM_YEAR}-01-01`)} to ${dateText(`${FROM_YEAR + YEARS - 1}-12-31`)}`, 3)

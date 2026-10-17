@@ -3,7 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { SpendingForm } from '@/components/report-form'
 import { ReportFrame } from '@/components/report-frame'
 import { BackToReports, ReportGate, reportWaiting, type ReportScope } from '@/components/report-gate'
-import { SpendingByCategoryReport } from '@/components/spending-report'
+import { SPENDING_NOTES, SpendingByCategoryReport } from '@/components/spending-report'
 import { reportSpendingQuery } from '@/lib/queries'
 import { parseReportSearch } from '@/lib/report-transactions'
 import { reportNav } from '@/lib/report-nav'
@@ -40,7 +40,7 @@ function Spending({ scope, account }: { scope: ReportScope; account: number | un
   // The title block lists the Accounts; the table's heading, which is repeated on every printed page, says "All Accounts" rather than list them each time.
   const accountsInHeading = account === undefined ? 'All Accounts' : scope.accountsText
   return (
-    <ReportFrame name={REPORT.name} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={spending.dataUpdatedAt}>
+    <ReportFrame name={REPORT.name} accounts={scope.accountsText} accountsInTitle={scope.accountsInTitle} from={scope.from} to={scope.to} generatedAt={spending.dataUpdatedAt} notes={SPENDING_NOTES}>
       <SpendingByCategoryReport report={spending.data!} accounts={accountsInHeading} />
       <BackToReports />
     </ReportFrame>

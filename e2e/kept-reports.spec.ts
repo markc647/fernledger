@@ -84,7 +84,7 @@ function keepRequests(page: Page) {
 // Making a Report keeps it
 
 test.describe('showing a Report as the Admin', () => {
-  test('keeps its choices on the Reports page: the Report, its dates, its Account, when it was made and by whom', async ({ page, context, baseURL }, testInfo) => {
+  test('keeps its choices on the Reports page: the Report, its dates, its Account and when it was made', async ({ page, context, baseURL }, testInfo) => {
     const { year, account } = dataFor(testInfo.project.name)
     await seed(context, baseURL!, testInfo.project.name)
     await signInAs(context, 'admin')
@@ -102,7 +102,7 @@ test.describe('showing a Report as the Admin', () => {
 
     await page.getByRole('link', { name: 'Back to Reports' }).click()
     await expect(rows(page)).toHaveCount(1)
-    await expect(rows(page).first().getByRole('cell')).toHaveText(['Spending by Category', range(year), account.name, WHEN, ADMIN_EMAIL, ''])
+    await expect(rows(page).first().getByRole('cell')).toHaveText(['Spending by Category', range(year), account.name, WHEN, ''])
   })
 
   test('adds no second row for the same choices: showing it again says when it was last made', async ({ page, context, baseURL }, testInfo) => {
@@ -211,12 +211,12 @@ test.describe('the Reports page', () => {
     await keep(context, baseURL, { report: 'income-vs-spending', from: `${year}-01-01`, to: `${year}-12-31` })
     await page.reload()
     const table = page.getByRole('table', { name: 'Kept Reports' })
-    await expect(table.getByRole('columnheader')).toHaveText(['Report', 'Dates', 'Account', 'Last made', 'Made by', 'Actions'])
+    await expect(table.getByRole('columnheader')).toHaveText(['Report', 'Dates', 'Account', 'Last made', 'Actions'])
     await expect(rows(page)).toHaveCount(2)
     await expectTableLook(table)
     await expect(rows(page).first()).toContainText('Income vs spending by month')
     await expect(rows(page).first()).toContainText('All Accounts')
-    await expect(rows(page).first()).toContainText(ADMIN_EMAIL)
+    await expect(rows(page).first()).not.toContainText(ADMIN_EMAIL) // who made it is not said
     await expect(rows(page).first().getByRole('cell').nth(3)).toHaveText(WHEN)
     await expect(rows(page).last()).toContainText('Budget vs actual')
   })
@@ -398,14 +398,14 @@ test.describe('the Reports page', () => {
     }
   })
 
-  // At 320px wide at 400% zoom, with the largest text: a long Account name and a long email wrap in the card and do not push the page wider.
+  // At 320px wide at 400% zoom, with the largest text: a long Account name and a long Loans Category name wrap in the card and do not push the page wider.
   test('fits a narrow window with long names in it: no horizontal scrolling at 400% zoom and the largest text', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.route('**/api/kept-reports', (route) =>
       route.fulfill({
         json: [
-          { id: 1, report: 'transactions', accountId: 1, accountName: `Example account with a long name ${'y'.repeat(60)}`, categoryId: null, categoryName: null, categoryRemoved: false, from: '2026-01-01', to: '2026-10-31', lastMadeAt: '2026-10-16T01:00:00.000Z', madeBy: `${'someone.with.a.long.address'.repeat(3)}@example.com` },
-          { id: 2, report: 'loans', accountId: null, accountName: null, categoryId: 2, categoryName: `Loan – ${'Alexandra'.repeat(8)}`, categoryRemoved: false, from: null, to: '2026-10-31', lastMadeAt: '2026-10-15T01:00:00.000Z', madeBy: ADMIN_EMAIL },
+          { id: 1, report: 'transactions', accountId: 1, accountName: `Example account with a long name ${'y'.repeat(60)}`, categoryId: null, categoryName: null, categoryRemoved: false, from: '2026-01-01', to: '2026-10-31', lastMadeAt: '2026-10-16T01:00:00.000Z' },
+          { id: 2, report: 'loans', accountId: null, accountName: null, categoryId: 2, categoryName: `Loan – ${'Alexandra'.repeat(8)}`, categoryRemoved: false, from: null, to: '2026-10-31', lastMadeAt: '2026-10-15T01:00:00.000Z' },
         ],
       }),
     )
@@ -432,7 +432,7 @@ test.describe('a Member', () => {
     await signInAs(context, 'member')
     await page.goto('/reports')
     await expect(rows(page)).toHaveCount(1)
-    await expect(rows(page).first().getByRole('cell').nth(4)).toHaveText(ADMIN_EMAIL) // who made it: the Admin, not the Member reading it
+    await expect(rows(page).first()).not.toContainText(ADMIN_EMAIL) // nor who made it
     await expect(page.getByText('Choose one under Reports in the sidebar')).toHaveCount(0)
 
     const name = rowName('Budget vs actual', `${dateText(`${year}-01-01`)} to ${dateText(`${year}-03-31`)}`, 'All Accounts')
@@ -470,7 +470,8 @@ test.describe('a Member', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Spending by Category' })).toBeVisible()
     await expect(page.getByRole('form')).toHaveCount(0) // the form is the Admin's
     await expect(page.getByRole('button', { name: 'Show Report' })).toHaveCount(0)
-    await expect(page.getByRole('article')).toContainText(`by ${MEMBER_EMAIL}`)
+    await expect(page.getByRole('article')).toContainText(/Generated \w{3} \d{1,2} \w{3,4} \d{4} at \d{1,2}:\d\d [ap]m/)
+    await expect(page.getByRole('article')).not.toContainText(MEMBER_EMAIL) // a Report does not say who opened it
     await expect(breadcrumb(page).getByRole('listitem')).toHaveText(['Reports', 'Spending by Category'])
     await expect(navLink(page, 'Reports')).toHaveAttribute('data-active', 'true') // a Member's sidebar has no row for it: Reports is marked
     await frames(page, 5) // a Report that asked to be kept would have by now
