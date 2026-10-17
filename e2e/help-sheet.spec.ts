@@ -154,7 +154,7 @@ const card = (page: Page, name: string): Locator => page.getByRole('region', { n
 
 const PAGES: Case[] = [
   { path: '/transactions', heading: 'Transactions', says: ['Search and filter every Transaction'], adminSays: ['To print Transactions as a Report'], roles: BOTH, ready: (page) => expect(page.getByRole('button', { name: 'Search', exact: true })).toBeVisible() },
-  { path: '/uncategorised', heading: 'Uncategorised', says: ['Transactions with no Category'] },
+  { path: '/uncategorised', heading: 'Uncategorised', says: ['Transactions with no Category'], adminSays: ["Choose Edit Category and Note in a Transaction's Actions menu"] },
   { path: '/import', heading: 'Import', says: ['Choose a bank export'], ready: (page) => expect(page.getByLabel('Bank export file')).toBeVisible() },
   { path: '/categories', heading: 'Categories', says: ['A Category groups Transactions by purpose'], adminSays: ["Add, rename or remove them to suit you"], memberSays: ['Only the Admin can change them.'], roles: BOTH },
   {

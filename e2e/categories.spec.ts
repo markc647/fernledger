@@ -35,7 +35,7 @@ test('the Admin sets an Override and a Note, the Transaction leaves the Uncatego
   await expect(page.getByRole('heading', { level: 1, name: 'Uncategorised' })).toBeVisible()
   await expect(rowFor(page, description)).toContainText('Uncategorised')
 
-  await expectTableLook(page.getByRole('table', { name: 'Transactions' }))
+  await expectTableLook(page.getByRole('table', { name: 'Transactions' }), { single: true })
   await chooseAction(page.getByRole('button', { name: new RegExp(`^Actions for ${description}`) }), 'Edit Category and Note')
   await expect(page.getByLabel('Category', { exact: true })).toBeFocused()
   await page.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
@@ -99,6 +99,7 @@ test('the Admin adds, renames and removes a Category', async ({ page, context },
   const renamed = `${name} costs`
   await page.goto('/categories')
   await expect(page.getByRole('cell', { name: 'Groceries', exact: true })).toBeVisible()
+  await expectTableLook(page.getByRole('table', { name: 'Categories' }))
 
   await page.getByLabel('New Category').fill(name)
   await page.getByRole('button', { name: 'Add Category' }).click()

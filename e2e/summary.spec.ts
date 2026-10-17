@@ -76,7 +76,7 @@ test("a Member lands on a Summary with balances, the Balance Check warning in th
   await expect(checked).toHaveText('Check: balance differs from the bank by $5.00')
   await expect(checked.locator('svg[aria-hidden="true"]')).toHaveCount(1)
   await expect(balances.getByRole('columnheader')).toHaveText(['Account', 'Balance', 'As of', 'Checked'])
-  await expectTableLook(balances.getByRole('table'), { inCard: true })
+  await expectTableLook(balances.getByRole('table'), { inCard: true, single: true })
   await expect(page.getByRole('region', { name: 'Balance checks' })).toHaveCount(0)
 
   const recent = page.getByRole('region', { name: 'Recent transactions' })

@@ -5,6 +5,7 @@ import { openHelp } from './help-helpers'
 import { ADMIN_EMAIL, dateText, ensureCategory, forgetKeptReports, forgetKeptReportsAfterEach, importRows, MEMBER_EMAIL, type KeptChoices } from './report-helpers'
 import { actionsButton, menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
 import { breadcrumb, chooseTextSize, expectTextSize, navGroup, navLink } from './shell-helpers'
+import { expectTableLook } from './table-look-helpers'
 
 // UI ticket U7: Kept Reports. Only the Admin makes Reports. Each time the Admin shows one, its CHOICES (which Report, its dates, its Account) are kept, and the Reports page is a table of
 // them: every Member can open or print one, and only the Admin can delete one. Opening a kept Report works it out again from today's data, so nothing is stored that goes stale. The
@@ -212,6 +213,7 @@ test.describe('the Reports page', () => {
     const table = page.getByRole('table', { name: 'Kept Reports' })
     await expect(table.getByRole('columnheader')).toHaveText(['Report', 'Dates', 'Account', 'Last made', 'Made by', 'Actions'])
     await expect(rows(page)).toHaveCount(2)
+    await expectTableLook(table)
     await expect(rows(page).first()).toContainText('Income vs spending by month')
     await expect(rows(page).first()).toContainText('All Accounts')
     await expect(rows(page).first()).toContainText(ADMIN_EMAIL)
