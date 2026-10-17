@@ -261,7 +261,8 @@ test.describe('on a phone', () => {
 
       // A finger on a handle drags the card (touch events, as a phone sends them), and the page does not scroll with it.
       const cdp = await context.newCDPSession(page)
-      await ruleGrip(page, a).scrollIntoViewIfNeeded()
+      // The Rule between the two goes to the middle of the window, so that both handles are in it and the card that is held starts away from its edges.
+      await ruleGrip(page, c).evaluate((element) => element.scrollIntoView({ block: 'center' }))
       const scrolled = await page.evaluate(() => window.scrollY)
       const start = await centreOf(ruleGrip(page, a))
       const end = await centreOf(ruleGrip(page, b))
