@@ -7,6 +7,7 @@ import {
   closeHeaderControls,
   contrastOf,
   expectRailUnclipped,
+  focusIndicator,
   expectTextSize,
   mainNav,
   navGroup,
@@ -39,8 +40,14 @@ test.describe('layout', () => {
   test('is a sticky header across the whole top, the sidebar below it, and the page in a raised panel beside the sidebar', { tag: '@theme' }, async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.setViewportSize({ width: 1280, height: 480 })
-    await page.goto('/styleguide') // a page longer than the window
+    await page.goto('/styleguide')
     await expect(page.getByRole('heading', { level: 1, name: 'Styleguide' })).toBeVisible()
+    // A page longer than the window, whatever the styleguide holds today (it is as long as its samples make it, which has changed before): room to scroll a long way.
+    await page.evaluate(() => {
+      const filler = document.createElement('div')
+      filler.style.height = '1200px'
+      document.querySelector('main')!.append(filler)
+    })
     const header = siteHeader(page)
 
     const resting = (await header.boundingBox())!
@@ -706,29 +713,6 @@ const systemColour = (page: Page, name: string) =>
     probe.remove()
     return computed
   }, name)
-
-/**
- * What draws focus on a control: its outline, and the colour of what is around it (the first solid background up from its parent). `shown` is the element that draws it, when that
- * is not the control itself (a radio button is invisible, and the word beside it is drawn).
- */
-async function focusIndicator(page: Page, control: Locator, shown: Locator = control) {
-  await page.keyboard.press('Shift') // a key, so focus is drawn as it is for the keyboard
-  await control.focus()
-  await settle(page)
-  const found = await shown.evaluate((el) => {
-    const style = getComputedStyle(el)
-    let behind = el.parentElement
-    while (behind && /rgba\(\d+, \d+, \d+, 0\)|transparent/.test(getComputedStyle(behind).backgroundColor)) behind = behind.parentElement
-    return {
-      style: style.outlineStyle,
-      width: parseFloat(style.outlineWidth),
-      colour: style.outlineColor,
-      behind: behind ? getComputedStyle(behind).backgroundColor : 'rgb(255, 255, 255)',
-    }
-  })
-  const [colour, behind] = await rgbOf(page, [found.colour, found.behind])
-  return { ...found, contrast: contrastOf(colour!, behind!) }
-}
 
 test.describe('focus', () => {
   /** One of each kind of control the shell has, as the header and the sidebar show it: what takes focus, and what draws it when that is another element. */

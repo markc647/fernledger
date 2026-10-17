@@ -182,7 +182,7 @@ function AdminRules() {
     { key: 'then', header: 'Then', cell: (item) => ruleResult(item.rule) },
     {
       key: 'actions',
-      header: 'Actions',
+      header: 'Action',
       align: 'end',
       cell: (item) =>
         removing === item.rule.id ? (
@@ -207,7 +207,7 @@ function AdminRules() {
   return (
     <>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
-      <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+      <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {notice}
       </p>
       {problem && <p role="alert" className="mt-2 font-medium text-destructive">{problem}</p>}

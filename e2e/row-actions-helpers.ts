@@ -2,11 +2,16 @@ import type { Locator, Page } from '@playwright/test'
 import { expect, noAxeViolations } from './fixtures'
 import { contrastOf, rgbOf, type Rgb } from './shell-helpers'
 
-// The "⋯" menu on a row of the Rules, Categories, Accounts, Budgets, Transactions and kept Reports tables (src/components/row-actions.tsx), and the cards on a phone: the same button and menu at every width. A spec says which
-// row's actions it means and which it chooses, and not where the control is today.
+// The "⋯" menu on a row of the Rules, Categories and kept Reports tables (src/components/row-actions.tsx), and the cards on a phone: the same button and menu at every width. A spec says which
+// row's actions it means and which it chooses, and not where the control is today. A row with one action (a Transaction, an Account, a Budget) has a button named for it instead: `rowButton`.
 
 /** The "⋯" button of a row. `row` is what it names: "Rule 3" for a Rule, the Category's name for a Category. */
 export const actionsButton = (page: Page, row: string) => page.getByRole('button', { name: `Actions for ${row}`, exact: true })
+
+/**
+ * The named button of a row that has one action, with its row in its name: `rowButton(page, 'Edit', "EXAMPLE CAFE, Mon 8 Oct 2012")`, `rowButton(page, 'Rename', account.name)`, `rowButton(page, 'Edit Budget for', category.name)`.
+ */
+export const rowButton = (page: Page, action: string, row: string) => page.getByRole('button', { name: `${action} ${row}`, exact: true })
 
 /** The "⋯" button of every Rule, in the order the page shows them. */
 export const ruleActionButtons = (page: Page) => page.getByRole('button', { name: /^Actions for Rule \d+$/ })
@@ -46,9 +51,6 @@ export async function chooseAction(button: Locator, action: string) {
   await openActions(button)
   await menuAction(button.page(), action).click()
 }
-
-/** Opens the "⋯" menu of the row `row` names ("Rule 3", an Account's name, a Transaction's "description, date") and chooses an item: what a spec does where the page once had a button on the row. */
-export const rowAction = (page: Page, row: string, action: string) => chooseAction(actionsButton(page, row), action)
 
 /**
  * The contrast of an element's text against what it is drawn on, as the browser paints it (WCAG 1.4.3): the fills of the element and of each element it is in, the first of them over

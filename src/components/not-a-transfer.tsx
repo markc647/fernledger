@@ -50,7 +50,7 @@ export function NotATransfer({ id, transfer, extra, onDone }: { id: number; tran
 
   return (
     <div role="group" aria-labelledby={questionId} className="mt-2 max-w-xl rounded-xl border-2 p-4">
-      <p id={questionId} ref={question} tabIndex={-1} className="font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+      <p id={questionId} ref={question} tabIndex={-1} className="font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         Mark as Not a Transfer?
       </p>
       <p className="mt-1">

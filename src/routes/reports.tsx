@@ -60,7 +60,7 @@ function Reports() {
     { key: 'lastMade', header: 'Last made', cell: (k) => formatDateTime(k.lastMadeAt) },
     {
       key: 'actions',
-      header: 'Actions',
+      header: 'Action',
       align: 'end',
       cell: (k) =>
         deleting === k.id ? (
@@ -89,7 +89,7 @@ function Reports() {
         Reports
       </PageHeading>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
-      <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+      <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {notice}
       </p>
       <div className="mt-6">

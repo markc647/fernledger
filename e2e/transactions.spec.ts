@@ -1,8 +1,9 @@
-import type { BrowserContext, Page } from '@playwright/test'
+import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
-import { actionsButton, rowAction } from './row-actions-helpers'
+import { noAxeViolationsFromTop, rowButton } from './row-actions-helpers'
+import { focusIndicator, siteHeader } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
 // The light and dark projects share one local database, so each project has Accounts of its own, and each test finds its
@@ -57,7 +58,7 @@ const dataRows = (page: Page) => page.getByRole('row').filter({ has: page.getByR
 /**
  * Waits until a Transaction's details have replaced the list, and returns the part of the page that is the details.
  * A heading name matches as a substring, so "Transaction" alone is also found in the list's "Transactions" heading, and a
- * test that clicks straight away then races the navigation (slower on CI). Every row of the list has an "Actions for …" button too, so the buttons are looked for inside the details only.
+ * test that clicks straight away then races the navigation (slower on CI). Every row of the Admin's list has an "Edit …" button too, so the buttons are looked for inside the details only.
  */
 const detailsOpened = async (page: Page) => {
   await expect(page).toHaveURL(/\/transactions\/\d+/)
@@ -81,7 +82,8 @@ test('a Member finds Transactions by text, Account, Category and dates, and the 
   await expect(page).toHaveURL(new RegExp(`q=${stamp}`, 'i'))
   await expect(page.getByRole('status').filter({ hasText: 'of 4 matching' })).toBeVisible()
   await expectTableLook(page.getByRole('table', { name: 'Transactions matching the search' }))
-  await expect(page.getByRole('button', { name: /^Actions for/ })).toHaveCount(0) // a Member has nothing to change
+  await expect(page.getByRole('button', { name: /^Edit / })).toHaveCount(0) // a Member has nothing to change
+  await expect(page.getByRole('columnheader', { name: /^Action/ })).toHaveCount(0)
   await noAxeViolations(page)
 
   // Account.
@@ -286,7 +288,7 @@ test('a Transaction opens to show its details, and Back returns to the same sear
   await expect(summary).toContainText(names.cafeOne)
   await expect(summary).toContainText(savings.name)
   await expect(summary).toContainText('−$15.00')
-  await expect(summary).toContainText('Money out')
+  await expect(summary).not.toContainText('Money out') // the sign says it
   await expect(summary).toContainText('Uncategorised')
   await expect(summary).toContainText('No Note')
   const bank = page.getByRole('region', { name: 'From the bank' })
@@ -387,6 +389,120 @@ test('Back from a Transaction opened on the Uncategorised page returns to the Un
   await expect(page.getByRole('columnheader', { name: 'Amount' })).toHaveAttribute('aria-sort', 'ascending')
 })
 
+// The Uncategorised list is stubbed, so which Transactions are in it, and what leaves it when one is saved, is known. The Worker's own answers are held by its tests.
+test.describe('a saved Transaction that leaves the Uncategorised list', () => {
+  const stubRow = (n: number) => ({
+    id: 4240 + n,
+    accountId: 1,
+    accountName: 'Example savings',
+    date: '2026-10-08',
+    description: `EXAMPLE STUB ${n}`,
+    bankType: 'EFTPOS',
+    amountCents: -100 * n,
+    categoryId: null,
+    categoryName: null,
+    categorySource: null,
+    note: null,
+    transfer: null,
+    transferAccountName: null,
+    canMarkNotTransfer: false,
+    notTransfer: false,
+  })
+
+  /** The list is these rows until Save is pressed on `leaving`, and then it is without that one. */
+  async function stubList(page: Page, rows: ReturnType<typeof stubRow>[], leaving: number) {
+    let saved = false
+    await page.route(/\/api\/transactions\?/, (route) => {
+      const shown = saved ? rows.filter((row) => row.id !== 4240 + leaving) : rows
+      const countOnly = new URL(route.request().url()).searchParams.get('count') === 'only'
+      return route.fulfill({ json: countOnly ? { total: shown.length, transactions: [] } : { total: null, transactions: shown } })
+    })
+    await page.route(`**/api/transactions/${4240 + leaving}/override`, (route) => {
+      saved = true
+      return route.fulfill({ json: { ok: true } })
+    })
+  }
+  const stubEdit = (page: Page, n: number) => rowButton(page, 'Edit', `EXAMPLE STUB ${n}, ${dateText('2026-10-08')}`)
+
+  test('is replaced by the Saved message where its row was, which has focus that shows, so focus does not jump to the next Transaction', { tag: '@theme' }, async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await stubList(page, [1, 2, 3].map(stubRow), 2)
+    await page.goto('/uncategorised')
+    await stubEdit(page, 2).click()
+    await page.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+
+    const message = page.getByRole('status').filter({ hasText: 'Saved EXAMPLE STUB 2.' })
+    await expect(message).toBeFocused()
+    await expect(stubEdit(page, 2)).toHaveCount(0)
+    // It is between the Transactions that were either side of it.
+    await expect(message.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[1]').getByRole('button', { name: /^Edit EXAMPLE STUB 1,/ })).toBeVisible()
+    await expect(message.locator('xpath=ancestor::tr[1]/following-sibling::tr[1]').getByRole('button', { name: /^Edit EXAMPLE STUB 3,/ })).toBeVisible()
+    await noAxeViolations(page)
+
+    // Focus is drawn on it, as an outline (a mouse press set it going, so the keyboard is what makes it show): it has no `outline-none` to cancel the outline its focus style draws.
+    await message.evaluate((element) => element.blur())
+    const focus = await focusIndicator(page, message)
+    expect(focus.style).toBe('solid')
+    expect(focus.width).toBeGreaterThanOrEqual(2)
+    expect(focus.contrast).toBeGreaterThanOrEqual(3)
+    await message.evaluate((element) => element.blur())
+
+    // The message goes when the Admin starts on another Transaction.
+    await stubEdit(page, 3).click()
+    await expect(page.getByRole('region', { name: 'Edit Category and Note' })).toBeVisible()
+    await expect(message).toHaveCount(0)
+  })
+
+  test('when it was the last one, the Saved message is at the top and has focus', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await stubList(page, [stubRow(1)], 1)
+    await page.goto('/uncategorised')
+    await stubEdit(page, 1).click()
+    await page.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+
+    await expect(page.getByText('There are no Uncategorised Transactions.')).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: 'Saved EXAMPLE STUB 1.' })).toBeFocused()
+  })
+
+  test('on a phone the message is a card of its own between the cards that were either side of the Transaction', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await stubList(page, [1, 2, 3].map(stubRow), 2)
+    await page.goto('/uncategorised')
+    await stubEdit(page, 2).click()
+    await page.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+
+    const message = page.getByRole('status').filter({ hasText: 'Saved EXAMPLE STUB 2.' })
+    await expect(message).toBeFocused()
+    await expect(message.locator('xpath=ancestor::li[1]/preceding-sibling::li[1]').getByRole('button', { name: /^Edit EXAMPLE STUB 1,/ })).toBeVisible()
+    await expect(message.locator('xpath=ancestor::li[1]/following-sibling::li[1]').getByRole('button', { name: /^Edit EXAMPLE STUB 3,/ })).toBeVisible()
+  })
+
+  // Windows high contrast drops the fill that says a button's panel is open (and the tint of its row), so the button's edge is the palette's highlight.
+  test('the button of the open panel has the palette\'s highlight for its edge in Windows high contrast, and the others do not', { tag: '@theme' }, async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await stubList(page, [1, 2].map(stubRow), 2)
+    await page.goto('/uncategorised')
+    await stubEdit(page, 1).click()
+    await expect(page.getByRole('region', { name: /^Edit Category and Note/ })).toBeVisible()
+    await page.emulateMedia({ forcedColors: 'active' })
+    const highlight = await page.evaluate(() => {
+      const probe = document.createElement('div')
+      probe.style.color = 'Highlight'
+      document.body.append(probe)
+      const colour = getComputedStyle(probe).color
+      probe.remove()
+      return colour
+    })
+    const edge = (n: number) => stubEdit(page, n).evaluate((button) => ({ colour: getComputedStyle(button).borderTopColor, width: parseFloat(getComputedStyle(button).borderTopWidth) }))
+    expect(await edge(1)).toEqual({ colour: highlight, width: 1 })
+    expect((await edge(2)).colour).not.toBe(highlight)
+  })
+})
+
 test('the details show what Sync supplies, and a Bank Time only when the bank gave one', async ({ page, context }) => {
   await signInAs(context, 'member')
   const detail = {
@@ -449,19 +565,229 @@ test.describe('a Transaction that does not exist', () => {
   })
 })
 
-test("a row's Actions menu opens the Edit panel, and closing the panel puts focus back on the row's button", async ({ page, context, baseURL }, testInfo) => {
-  const { stamp, names } = await seedFour(context, baseURL!, testInfo.project.name)
-  await page.goto(`/transactions?q=${stamp}`)
-  const row = `${names.hardware}, ${dateText('2012-10-01')}`
-  await expect(page.getByRole('link', { name: names.hardware })).toBeVisible()
+// An Edit button on each row of the Admin's list, and the panel it opens under that row. Twenty Transactions, so that the page scrolls and the row is some way down it.
+const EDIT_ROWS = 20
+const editRow = (stamp: string, i: number) => ({ date: `2012-02-${String(i + 1).padStart(2, '0')}`, description: `EXAMPLE EDIT ${stamp} ${String(i).padStart(2, '0')}` })
+async function seedEditRows(context: BrowserContext, baseURL: string, project: string) {
+  const stamp = `edit${project}${Date.now()}`
+  await seed(context, baseURL, [{ account: accountsFor(project).savings, rows: Array.from({ length: EDIT_ROWS }, (_, i) => ({ ...editRow(stamp, i), amountCents: -100 - i })) }])
+  const editName = (i: number) => `${editRow(stamp, i).description}, ${dateText(editRow(stamp, i).date)}`
+  return { stamp, editName, edit: (page: Page, i: number) => rowButton(page, 'Edit', editName(i)) }
+}
+const editPanel = (page: Page) => page.getByRole('region', { name: 'Edit Category and Note' })
+/** The row the panel is under: the one before the panel's own row (a table), or the card before its card (a phone). */
+const rowAbove = (panel: Locator, element: 'tr' | 'li') => panel.locator(`xpath=ancestor::${element}[1]/preceding-sibling::${element}[1]`).getByRole('button', { name: /^Edit / })
+const scrollOffset = (page: Page) => page.evaluate(() => window.scrollY)
+const PAGE_ROWS = 60
 
-  await rowAction(page, row, 'Edit Category and Note')
-  const panel = page.getByRole('region', { name: 'Edit Category and Note' })
-  await expect(page.locator('#edit-category')).toBeFocused() // the menu has closed and the panel it opened has focus
-  await noAxeViolations(page)
-  await panel.getByRole('button', { name: 'Cancel' }).click()
-  await expect(panel).toHaveCount(0)
-  await expect(actionsButton(page, row)).toBeFocused()
+test("a row's Edit button opens the Edit panel under that row without moving the page, one panel at a time, and Cancel and Save put focus back on the button", async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, editName, edit } = await seedEditRows(context, baseURL!, testInfo.project.name)
+  await page.setViewportSize({ width: 1100, height: 900 })
+  await page.goto(`/transactions?q=${stamp}`)
+  // Newest first, so the first Transaction is the last one made: these are the fifth and the seventh rows.
+  const [first, second] = [EDIT_ROWS - 5, EDIT_ROWS - 7]
+  await expect(edit(page, first)).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: 'Action', exact: true })).toBeVisible() // one action, so the heading is singular
+  await expect(page.getByRole('columnheader', { name: 'Actions' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^Actions for/ })).toHaveCount(0) // a row with one action has a button for it, not a menu
+  await expectTableLook(page.getByRole('table', { name: 'Transactions matching the search' }))
+  await edit(page, first).evaluate((button) => window.scrollTo(0, window.scrollY + button.getBoundingClientRect().top - 130)) // the row is some way down the page
+  const scrolled = await scrollOffset(page)
+  expect(scrolled).toBeGreaterThan(300)
+
+  // It opens directly under its row, across the table, named for the Transaction, and the page stays where it was.
+  await edit(page, first).click()
+  await expect(editPanel(page)).toBeVisible()
+  await expect(editPanel(page)).toHaveAccessibleName(`Edit Category and Note, ${editName(first)}`)
+  await expect(page.getByRole('heading', { level: 2, name: `Edit Category and Note, ${editName(first)}` })).toBeVisible() // the visible title names it as well
+  await expect(page.locator('#edit-category')).toBeFocused()
+  await expect(edit(page, first)).toHaveAttribute('aria-expanded', 'true')
+  await expect(edit(page, first)).toHaveAttribute('aria-controls', (await editPanel(page).getAttribute('id'))!)
+  await expect(rowAbove(editPanel(page), 'tr')).toHaveAccessibleName(`Edit ${editName(first)}`)
+  const [table, box] = await Promise.all([page.getByRole('table').boundingBox(), editPanel(page).boundingBox()])
+  expect(box!.width).toBeGreaterThan(table!.width - 40)
+  expect(await scrollOffset(page)).toBe(scrolled)
+
+  // Pressing the button of the panel that is open puts focus in it.
+  await editPanel(page).getByLabel('Note', { exact: true }).focus()
+  await edit(page, first).click()
+  await expect(page.locator('#edit-category')).toBeFocused()
+  await expect(editPanel(page)).toHaveCount(1)
+
+  // Opening another closes the first: there is one panel, under the second row.
+  const typed = `Not saved yet ${stamp}`
+  await editPanel(page).getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
+  await editPanel(page).getByLabel('Note', { exact: true }).fill(typed)
+  await edit(page, second).click()
+  await expect(editPanel(page)).toHaveCount(1)
+  await expect(rowAbove(editPanel(page), 'tr')).toHaveAccessibleName(`Edit ${editName(second)}`)
+  await expect(edit(page, first)).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('#edit-category')).toBeFocused()
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue('') // this panel is its own, not the first one's
+  expect(await scrollOffset(page)).toBe(scrolled)
+
+  // What was typed in the first is still there when its panel is opened again, and Cancel throws it away.
+  await edit(page, first).click()
+  await expect(editPanel(page)).toHaveCount(1)
+  await expect(rowAbove(editPanel(page), 'tr')).toHaveAccessibleName(`Edit ${editName(first)}`)
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue(typed)
+  await expect(editPanel(page).getByLabel('Category', { exact: true }).locator('option:checked')).toHaveText('Groceries')
+
+  // Cancel closes it and puts focus back on that row's button, with the page where it was.
+  await editPanel(page).getByRole('button', { name: 'Cancel' }).click()
+  await expect(editPanel(page)).toHaveCount(0)
+  await expect(edit(page, first)).toBeFocused()
+  await expect(edit(page, first)).toHaveAttribute('aria-expanded', 'false')
+  expect(await scrollOffset(page)).toBe(scrolled)
+  await edit(page, first).click()
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue('')
+  await expect(editPanel(page).getByLabel('Category', { exact: true }).locator('option:checked')).toHaveText('No Override')
+
+  // Save puts focus back on the button too, says so under the row it was said of (a plain line there; the line at the top, which a screen reader announces, is not drawn), and the row shows the change.
+  await edit(page, second).click()
+  await editPanel(page).getByLabel('Category', { exact: true }).selectOption({ label: 'Home and garden' })
+  await editPanel(page).getByLabel('Note', { exact: true }).fill(`Paint for the fence ${stamp}`)
+  await editPanel(page).getByRole('button', { name: 'Save', exact: true }).click()
+  const saying = `Saved ${editRow(stamp, second).description}.`
+  const line = page.getByRole('table').getByText(saying)
+  await expect(line).toBeVisible()
+  await expect(line.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[1]').getByRole('button', { name: `Edit ${editName(second)}`, exact: true })).toBeVisible() // directly under its row
+  await expect(line).not.toBeFocused()
+  await expect(line).not.toHaveAttribute('role', 'status')
+  const announcer = page.getByRole('status').filter({ hasText: saying })
+  await expect(announcer).toHaveCount(1) // said once
+  expect((await announcer.boundingBox())!.width).toBeLessThanOrEqual(1) // and not drawn a second time
+  await expect(editPanel(page)).toHaveCount(0)
+  await expect(edit(page, second)).toBeFocused()
+  await expect(edit(page, second).locator('xpath=ancestor::tr[1]')).toContainText('Home and garden')
+  expect(await scrollOffset(page)).toBe(scrolled)
+
+  // Opening a panel clears the line; the panel is where it was.
+  await edit(page, first).click()
+  await expect(editPanel(page)).toBeVisible()
+  await expect(line).toHaveCount(0)
+  await noAxeViolationsFromTop(page)
+
+  // The table becoming cards starts the panel again, and what was typed in it stays, and focus stays in the box it was in (the Note here, not the first field).
+  await editPanel(page).getByLabel('Note', { exact: true }).fill(`Across layouts ${stamp}`)
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toBeFocused()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole('table')).toHaveCount(0)
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue(`Across layouts ${stamp}`)
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toBeFocused()
+  await expect(rowAbove(editPanel(page), 'li')).toHaveAccessibleName(`Edit ${editName(first)}`)
+  await page.setViewportSize({ width: 1100, height: 900 })
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue(`Across layouts ${stamp}`)
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toBeFocused()
+})
+
+test('a panel opened from a row near the bottom of the screen scrolls the page by no more than it must, and not to a field in the middle', async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, edit } = await seedEditRows(context, baseURL!, testInfo.project.name)
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await page.goto(`/transactions?q=${stamp}`)
+  const row = EDIT_ROWS - 8
+  await expect(edit(page, row)).toBeVisible()
+  await edit(page, row).evaluate((button) => window.scrollTo(0, window.scrollY + button.getBoundingClientRect().top - (window.innerHeight - 100))) // the button is 100px from the bottom of the window
+  const scrolled = await scrollOffset(page)
+
+  await edit(page, row).click()
+  await expect(editPanel(page)).toBeVisible()
+  await expect(page.locator('#edit-category')).toBeFocused()
+  const box = (await editPanel(page).boundingBox())!
+  const moved = (await scrollOffset(page)) - scrolled
+  const sticksOut = Math.max(0, box.y + moved + box.height - 800) // how far the panel's foot was below the window before the page moved
+  expect(box.y + box.height).toBeLessThanOrEqual(800 + 1) // all of the panel is on the screen
+  expect(moved).toBeGreaterThan(0) // it had to be
+  expect(moved).toBeLessThanOrEqual(sticksOut + 1) // and the page moved no further than that
+  await expect(edit(page, row)).toBeInViewport() // so its row is still there
+})
+
+test("on a phone a row's Edit panel opens under that Transaction's card", async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, editName, edit } = await seedEditRows(context, baseURL!, testInfo.project.name)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/transactions?q=${stamp}`)
+  const row = EDIT_ROWS - 3
+  await expect(edit(page, row)).toBeVisible()
+
+  await edit(page, row).click()
+  await expect(editPanel(page)).toBeVisible()
+  await expect(page.getByRole('list', { name: 'Transactions matching the search' }).getByRole('region', { name: 'Edit Category and Note' })).toHaveCount(1)
+  await expect(rowAbove(editPanel(page), 'li')).toHaveAccessibleName(`Edit ${editName(row)}`)
+  const [card, box] = await Promise.all([editPanel(page).locator('xpath=ancestor::li[1]/preceding-sibling::li[1]').boundingBox(), editPanel(page).boundingBox()])
+  expect(box!.width).toBeCloseTo(card!.width, 0) // as wide as the card above it
+  await noAxeViolationsFromTop(page)
+  await editPanel(page).getByRole('button', { name: 'Cancel' }).click()
+  await expect(edit(page, row)).toBeFocused()
+})
+
+test('a panel whose top would be under the sticky header is scrolled out from under it', async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, edit } = await seedEditRows(context, baseURL!, testInfo.project.name)
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await page.goto(`/transactions?q=${stamp}`)
+  const row = EDIT_ROWS - 8
+  await expect(edit(page, row)).toBeVisible()
+  await edit(page, row).evaluate((button) => window.scrollTo(0, window.scrollY + button.getBoundingClientRect().top + 40)) // the button is 40px above the top of the window, its row under the header
+  await edit(page, row).dispatchEvent('click') // nothing of it is there to press, as when the panel is drawn again by the table becoming cards
+  await expect(editPanel(page)).toBeVisible()
+  const header = (await siteHeader(page).boundingBox())!
+  const box = (await editPanel(page).boundingBox())!
+  expect(box.y).toBeGreaterThanOrEqual(header.y + header.height - 1) // the whole of the panel, its title too, is below the header
+  expect(box.y + box.height).toBeLessThanOrEqual(800 + 1)
+  expect((await edit(page, row).boundingBox())!.y).toBeGreaterThanOrEqual(header.y + header.height - 1) // and so is its row's button, which the reader pressed
+})
+
+test('a panel too tall for the window has its row at the top, under the header, and not its foot with the row hidden', async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, edit } = await seedEditRows(context, baseURL!, testInfo.project.name)
+  await page.setViewportSize({ width: 1100, height: 420 })
+  await page.goto(`/transactions?q=${stamp}`)
+  const row = EDIT_ROWS - 8
+  await expect(edit(page, row)).toBeVisible()
+  await edit(page, row).evaluate((button) => window.scrollTo(0, window.scrollY + button.getBoundingClientRect().top - (window.innerHeight - 100)))
+  await edit(page, row).click()
+  await expect(editPanel(page)).toBeVisible()
+  const header = (await siteHeader(page).boundingBox())!
+  const [button, box] = [(await edit(page, row).boundingBox())!, (await editPanel(page).boundingBox())!]
+  expect(box.height).toBeGreaterThan(420 - header.height) // it does not fit under the header
+  expect(button.y).toBeGreaterThanOrEqual(header.y + header.height - 1) // so the button the reader pressed is whole, below the header, and not scrolled off under it
+  expect(box.y).toBeGreaterThanOrEqual(button.y + button.height) // with the top of the panel under it
+  await expect(page.getByRole('heading', { level: 2, name: /^Edit Category and Note/ })).toBeInViewport()
+})
+
+// More Transactions than a page holds (50), so that one can be on the first page, with its panel open, while the reader goes to the second.
+test('what is typed in a panel is still there when the reader comes back to its page', async ({ page, context, baseURL }, testInfo) => {
+  const stamp = `paged${testInfo.project.name}${Date.now()}`
+  await seed(context, baseURL!, [
+    {
+      account: accountsFor(testInfo.project.name).savings,
+      rows: Array.from({ length: PAGE_ROWS }, (_, i) => ({ date: `2012-04-${String((i % 28) + 1).padStart(2, '0')}`, description: `EXAMPLE PAGED ${stamp} ${String(i).padStart(2, '0')}`, amountCents: -100 - i })),
+    },
+  ])
+  await page.goto(`/transactions?q=${stamp}`)
+  const summary = page.getByRole('status').filter({ hasText: 'Showing' })
+  await expect(summary).toContainText(`Showing 1 to 50 of ${PAGE_ROWS}`)
+
+  const first = page.getByRole('button', { name: /^Edit / }).first()
+  const named = (await first.getAttribute('aria-label'))!
+  await first.click()
+  await editPanel(page).getByLabel('Note', { exact: true }).fill(`Typed on page one ${stamp}`)
+  await page.getByRole('button', { name: 'Next' }).click()
+  await expect(summary).toContainText(`Showing 51 to ${PAGE_ROWS} of ${PAGE_ROWS}`)
+  await expect(editPanel(page)).toHaveCount(0) // its row is not on this page
+  await page.getByRole('button', { name: 'Previous' }).click()
+  await expect(summary).toContainText(`Showing 1 to 50 of ${PAGE_ROWS}`)
+  await expect(editPanel(page)).toHaveCount(1)
+  await expect(rowAbove(editPanel(page), 'tr')).toHaveAccessibleName(named)
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue(`Typed on page one ${stamp}`)
+
+  // Opening another row's panel and going away and back does not lose it either.
+  await page.getByRole('button', { name: /^Edit / }).nth(2).click()
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue('')
+  await page.getByRole('button', { name: 'Next' }).click()
+  await expect(summary).toContainText(`Showing 51 to ${PAGE_ROWS} of ${PAGE_ROWS}`)
+  await page.getByRole('button', { name: 'Previous' }).click()
+  await expect(summary).toContainText(`Showing 1 to 50 of ${PAGE_ROWS}`)
+  await page.getByRole('button', { name: named }).click()
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue(`Typed on page one ${stamp}`)
 })
 
 test('the Admin edits a Transaction from its details and sees the change there', async ({ page, context, baseURL }, testInfo) => {

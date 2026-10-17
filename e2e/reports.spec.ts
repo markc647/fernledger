@@ -378,7 +378,7 @@ test.describe('on screen', () => {
     await expect(firstRow).toContainText(category) // an Override is the Category shown
     await expect(firstRow).toContainText(note(0))
     await expect(firstRow).toContainText('−$10.00')
-    await expect(firstRow).toContainText('Money out')
+    await expect(firstRow).not.toContainText('Money out') // the sign says it, with no words under it
     const secondRow = table.locator('tbody tr').nth(1)
     await expect(secondRow).toContainText('Uncategorised')
     await expect(secondRow.getByText('No Note')).toBeAttached() // a missing Note is said, not left blank
@@ -537,6 +537,12 @@ test.describe('printed', () => {
     // In the dark project the page is the dark theme on screen, and must still print like this.
     await expect(page.locator('html')).toHaveClass(testInfo.project.name === 'dark' ? /dark/ : /^(?!.*dark)/)
     await expectBlackOnWhite(page, 100) // every word, including the muted ones and the money, is black
+  })
+
+  test('writes each amount with its sign and no "Money in" or "Money out" under it', async ({ page }) => {
+    const table = article(page).getByRole('table').first()
+    await expect(table.locator('tbody tr').first()).toContainText('−$10.00')
+    await expect(table).not.toContainText(/Money (in|out)/)
   })
 
   test('has no text under 12pt', async ({ page }) => {

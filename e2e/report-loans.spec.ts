@@ -389,11 +389,11 @@ test.describe('on screen', () => {
     await expect(table.getByRole('columnheader')).toHaveText(['Date', 'Description', 'Account', 'Note', 'Amount', 'Owed after'])
     const rows = await rowsOf(table)
     expect(rows.map((r) => [r[0], r[1], r[2], r[4], r[5]])).toEqual([
-      [dateText(`${d.year}-${ON.aliceLent}`), `LOANRPT ${d.project} lent`, d.parent.name, `${signed(ALICE.lent)} Money out`, `$450.00 ${d.alice} owes`],
-      [dateText(`${d.year}-${ON.repaid1}`), `LOANRPT ${d.project} repaid first`, d.parent.name, `${signed(ALICE.repaid1)} Money in`, `$350.00 ${d.alice} owes`],
-      [dateText(`${d.year}-${ON.repaid2}`), `LOANRPT ${d.project} repaid second`, d.child.name, `${signed(ALICE.repaid2)} Money in`, `$250.00 ${d.alice} owes`],
+      [dateText(`${d.year}-${ON.aliceLent}`), `LOANRPT ${d.project} lent`, d.parent.name, signed(ALICE.lent), `$450.00 ${d.alice} owes`],
+      [dateText(`${d.year}-${ON.repaid1}`), `LOANRPT ${d.project} repaid first`, d.parent.name, signed(ALICE.repaid1), `$350.00 ${d.alice} owes`],
+      [dateText(`${d.year}-${ON.repaid2}`), `LOANRPT ${d.project} repaid second`, d.child.name, signed(ALICE.repaid2), `$250.00 ${d.alice} owes`],
       // The half of a Transfer the Admin gave this Category is a loan; the other half, in the child's Account, is not.
-      [dateText(`${d.year}-${ON.transferred}`), `LOANRPT ${d.project} lent by transfer`, d.parent.name, `${signed(ALICE.transferred)} Money out`, `$300.00 ${d.alice} owes`],
+      [dateText(`${d.year}-${ON.transferred}`), `LOANRPT ${d.project} lent by transfer`, d.parent.name, signed(ALICE.transferred), `$300.00 ${d.alice} owes`],
     ])
     expect(rows[1]![3]).toBe('First repayment') // the Note, as the Transaction listing shows it
     expect(rows[0]![3]).toContain('No Note')
@@ -403,8 +403,8 @@ test.describe('on screen', () => {
     // The Accounts owe Ben: what is owed after each Transaction is the other way round, and says so.
     const benRows = await rowsOf(tableOf(page, d.benLoan))
     expect(benRows.map((r) => [r[1], r[4], r[5]])).toEqual([
-      [`LOANRPT ${d.project} lent to us`, `${signed(BEN.lends)} Money in`, `$500.00 ${d.ben} is owed`],
-      [`LOANRPT ${d.project} paid back`, `${signed(BEN.repaid)} Money out`, `$300.00 ${d.ben} is owed`],
+      [`LOANRPT ${d.project} lent to us`, signed(BEN.lends), `$500.00 ${d.ben} is owed`],
+      [`LOANRPT ${d.project} paid back`, signed(BEN.repaid), `$300.00 ${d.ben} is owed`],
     ])
   })
 

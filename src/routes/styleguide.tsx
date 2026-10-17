@@ -97,7 +97,7 @@ function Styleguide() {
         columns={[
           { key: 'date', header: 'Date', cell: (row) => formatDate(row.date), sort: sortable('date', 'descending') },
           { key: 'description', header: 'Description', cell: (row) => row.description, sort: sortable('description', 'ascending') },
-          { key: 'amount', header: 'Amount', align: 'end', cell: (row) => <Amount cents={row.cents} showLabel />, sort: sortable('amount', 'ascending') },
+          { key: 'amount', header: 'Amount', align: 'end', cell: (row) => <Amount cents={row.cents} />, sort: sortable('amount', 'ascending') },
         ]}
       />
 

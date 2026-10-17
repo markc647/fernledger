@@ -113,8 +113,3 @@ export function formatDateAtTime(instant: Date | number) {
   const moment = new Date(instant)
   return `${formatInstantDate(moment)} at ${timeOfDay(moment)}`
 }
-
-/** The plain-language direction of an amount; null for zero. Never "debit" or "credit". */
-export function moneyLabel(cents: number) {
-  return cents > 0 ? 'Money in' : cents < 0 ? 'Money out' : null
-}

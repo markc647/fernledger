@@ -41,7 +41,7 @@ const columns: Column<ReportRow>[] = [
         </>
       ),
   },
-  { key: 'amount', header: 'Amount', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.amountCents} showLabel /> },
+  { key: 'amount', header: 'Amount', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.amountCents} /> },
 ]
 
 /** What came in, what went out and the difference, in whole cents. Money out is negative, so Net is the plain sum of the two. */

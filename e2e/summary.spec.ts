@@ -83,6 +83,7 @@ test("a Member lands on a Summary with balances, the Balance Check warning in th
   const newest = recent.getByRole('row', { name: new RegExp(`${name} EXAMPLE EMPLOYER O2`) })
   await expect(newest).toContainText('Mon 6 Oct 2031')
   await expect(newest).toContainText('+$4.00')
+  await expect(newest).not.toContainText('Money in') // the sign says it
   await expect(newest).toContainText(name)
   await expect(recent.getByRole('link', { name: 'See all transactions' })).toBeVisible()
 

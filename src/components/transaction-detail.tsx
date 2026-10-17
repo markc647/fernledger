@@ -110,7 +110,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
         {formatDate(t.date)}, {t.description}, <Amount cents={t.amountCents} />
       </p>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
-      <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+      <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         {saved}
       </p>
       {isAdmin && !editing && (
@@ -130,6 +130,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
       {isAdmin && editing && (
         <EditPanel
           row={t}
+          className="mt-4 max-w-xl"
           onSaved={(message) => {
             returning.current = true
             setSaved(message ?? 'Saved.')
@@ -149,7 +150,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
         <dl className="mt-3 grid gap-3">
           <Fact label="Date">{formatDate(t.date)}</Fact>
           <Fact label="Amount">
-            <Amount cents={t.amountCents} showLabel />
+            <Amount cents={t.amountCents} />
           </Fact>
           <Fact label="Description">{t.description}</Fact>
           <Fact label="Account">{t.accountName}</Fact>

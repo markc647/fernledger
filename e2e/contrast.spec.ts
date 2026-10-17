@@ -5,7 +5,7 @@ import { dateField, pickDate, thisMonth } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { helpButton, helpSheet } from './help-helpers'
 import { ensureCategory, forgetKeptReportsAfterEach, importRows, restoreAppTitleAfterEach, signInToOpen, transactionId, type SeedRow } from './report-helpers'
-import { arrowTo, chooseAction, menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
+import { arrowTo, menuAction, OPEN_MENU, openActions, rowButton } from './row-actions-helpers'
 import { categoryId, openApplyDialog, ruleActions, runningJob, spinner, usageFigures, usageOn, withRules } from './rule-helpers'
 import { navGroup, openHeaderControls, openNavGroup, siteHeader } from './shell-helpers'
 
@@ -120,11 +120,11 @@ type Visit = {
   role: Role
   phone: boolean
   data: ReturnType<typeof dataFor>
-  scan: (state?: string, options?: { within?: string }) => Promise<void>
+  scan: (state?: string, options?: { within?: string; fromTop?: boolean }) => Promise<void>
 }
 
-/** The scan of one state of a page: with colour contrast on, once the project's theme is showing (or the scan would not be testing it). A failure says which page, who and which state, as a CI run keeps no trace to look at. */
-const scanner = (page: Page, project: string, path: string, role: Role) => async (state = 'as it opens', options: { within?: string } = {}) => {
+/** The scan of one state of a page: with colour contrast on, once the project's theme is showing (or the scan would not be testing it). A failure says which page, who and which state, as a CI run keeps no trace to look at. `fromTop` scans from the top of the page, for a state reached part-way down a long list (a row's panel), where the sticky header is over the buttons of the rows scrolled under it (e2e/fixtures.ts, `noAxeViolations`). */
+const scanner = (page: Page, project: string, path: string, role: Role) => async (state = 'as it opens', options: { within?: string; fromTop?: boolean } = {}) => {
   await expect(page.locator('html')).toHaveClass(project === 'dark' ? /dark/ : /^(?!.*dark)/)
   try {
     await noAxeViolations(page, { contrast: true, ...options })
@@ -213,9 +213,9 @@ const PAGES: {
       await scan()
       await scanNote()
       if (role === 'member') return
-      await chooseAction(rows.filter({ hasText: 'TO SAVINGS' }).getByRole('button', { name: /^Actions for/ }), 'Edit Category and Note')
+      await rows.filter({ hasText: 'TO SAVINGS' }).getByRole('button', { name: /^Edit / }).click()
       await expect(page.getByText('If the pairing is wrong, use Not a Transfer instead.')).toBeVisible()
-      await scan('with the edit panel open')
+      await scan('with the edit panel open', { fromTop: true })
       await page.getByRole('button', { name: 'Not a Transfer', exact: true }).click()
       await expect(page.getByRole('group', { name: 'Mark as Not a Transfer?' })).toBeVisible()
       await scan('with the Not a Transfer question')
@@ -269,12 +269,17 @@ const PAGES: {
     },
   },
   {
+    // The Admin's Rename panel is looked at open, under its row, which is lit (text on a tint) while it is open.
     path: '/accounts',
-    visit: async ({ page, data, scan }) => {
+    visit: async ({ page, role, data, scan }) => {
       await page.goto('/accounts')
       await heading(page, 'Accounts')
       await expect(page.getByText(data.everyday.name).first()).toBeVisible()
       await scan()
+      if (role === 'member') return
+      await rowButton(page, 'Rename', data.everyday.name).click()
+      await expect(page.getByRole('region', { name: `Rename ${data.everyday.name}` })).toBeVisible()
+      await scan('with the rename panel open', { fromTop: true })
     },
   },
   {
@@ -438,12 +443,16 @@ const PAGES: {
   },
   {
     path: '/budgets',
-    visit: async ({ page, data, scan }) => {
+    visit: async ({ page, role, data, scan }) => {
       await page.goto('/budgets')
       await heading(page, 'Budgets')
       await expect(page.getByRole('row').filter({ hasText: data.food })).toContainText('$100.00 a month')
       await expect(page.getByRole('row').filter({ hasText: data.petrol })).toContainText('$200.00 a month')
       await scan()
+      if (role === 'member') return
+      await rowButton(page, 'Edit Budget for', data.food).click()
+      await expect(page.getByRole('region', { name: `Budget for ${data.food}` })).toBeVisible()
+      await scan('with the Budget panel open', { fromTop: true })
     },
   },
   {
