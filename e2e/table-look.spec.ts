@@ -133,6 +133,17 @@ for (const { path, table, button, field, stub } of [
     await expect(page.getByLabel(field)).toBeFocused()
     expect(await page.evaluate(() => window.scrollY)).toBe(scrolled)
     await expect(page.getByRole('region').filter({ has: page.getByLabel(field) })).toBeInViewport()
+
+    // What is typed in it is still there when the reader has been to another row and comes back; Cancel throws it away.
+    await page.getByLabel(field).fill('75')
+    await button(page, 7).click()
+    await expect(page.getByRole('region')).toHaveCount(1)
+    await expect(page.getByLabel(field)).not.toHaveValue('75')
+    await button(page, 6).click()
+    await expect(page.getByLabel(field)).toHaveValue('75')
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    await button(page, 6).click()
+    await expect(page.getByLabel(field)).not.toHaveValue('75')
   })
 }
 

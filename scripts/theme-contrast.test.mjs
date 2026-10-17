@@ -58,7 +58,7 @@ const pairs = [
   // against the tint (the row in the rail's gap, and the header) and against the pill it is drawn on.
   ['sidebar-marker', 'sidebar', 3],
   ['sidebar-marker', 'sidebar-accent', 3],
-  // Money in/out and statuses are text on the page or a card (the Amount and Status components).
+  // The colour of an amount (green for what came in, red for what went out) and the statuses are text on the page or a card (the Amount and Status components).
   ...['success', 'warning', 'danger'].flatMap((fg) => [[fg, 'background', 4.5], [fg, 'card', 4.5], [fg, 'muted', 4.5]]),
   // The line and the bars of the charts (src/components/charts) are graphics that carry meaning: 3:1 against the page and a card (1.4.11).
   // They use --chart-2, which passes. Another chart token may be added here and used once it does: the stock --chart-1 is a dark blue in the dark theme, under 3:1 on its background.

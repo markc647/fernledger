@@ -3,7 +3,7 @@ import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
 import { noAxeViolationsFromTop, rowButton } from './row-actions-helpers'
-import { focusIndicator } from './shell-helpers'
+import { focusIndicator, siteHeader } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
 // The light and dark projects share one local database, so each project has Accounts of its own, and each test finds its
@@ -578,6 +578,7 @@ const editPanel = (page: Page) => page.getByRole('region', { name: 'Edit Categor
 /** The row the panel is under: the one before the panel's own row (a table), or the card before its card (a phone). */
 const rowAbove = (panel: Locator, element: 'tr' | 'li') => panel.locator(`xpath=ancestor::${element}[1]/preceding-sibling::${element}[1]`).getByRole('button', { name: /^Edit / })
 const scrollOffset = (page: Page) => page.evaluate(() => window.scrollY)
+const PAGE_ROWS = 60
 
 test("a row's Edit button opens the Edit panel under that row without moving the page, one panel at a time, and Cancel and Save put focus back on the button", async ({ page, context, baseURL }, testInfo) => {
   const { stamp, editName, edit } = await seedEditRows(context, baseURL!, testInfo.project.name)
@@ -667,14 +668,17 @@ test("a row's Edit button opens the Edit panel under that row without moving the
   await expect(line).toHaveCount(0)
   await noAxeViolationsFromTop(page)
 
-  // The table becoming cards starts the panel again, and what was typed in it stays.
+  // The table becoming cards starts the panel again, and what was typed in it stays, and focus stays in the box it was in (the Note here, not the first field).
   await editPanel(page).getByLabel('Note', { exact: true }).fill(`Across layouts ${stamp}`)
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toBeFocused()
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByRole('table')).toHaveCount(0)
   await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue(`Across layouts ${stamp}`)
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toBeFocused()
   await expect(rowAbove(editPanel(page), 'li')).toHaveAccessibleName(`Edit ${editName(first)}`)
   await page.setViewportSize({ width: 1100, height: 900 })
   await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue(`Across layouts ${stamp}`)
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toBeFocused()
 })
 
 test('a panel opened from a row near the bottom of the screen scrolls the page by no more than it must, and not to a field in the middle', async ({ page, context, baseURL }, testInfo) => {
@@ -714,6 +718,76 @@ test("on a phone a row's Edit panel opens under that Transaction's card", async 
   await noAxeViolationsFromTop(page)
   await editPanel(page).getByRole('button', { name: 'Cancel' }).click()
   await expect(edit(page, row)).toBeFocused()
+})
+
+test('a panel whose top would be under the sticky header is scrolled out from under it', async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, edit } = await seedEditRows(context, baseURL!, testInfo.project.name)
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await page.goto(`/transactions?q=${stamp}`)
+  const row = EDIT_ROWS - 8
+  await expect(edit(page, row)).toBeVisible()
+  await edit(page, row).evaluate((button) => window.scrollTo(0, window.scrollY + button.getBoundingClientRect().top + 40)) // the button is 40px above the top of the window, its row under the header
+  await edit(page, row).dispatchEvent('click') // nothing of it is there to press, as when the panel is drawn again by the table becoming cards
+  await expect(editPanel(page)).toBeVisible()
+  const header = (await siteHeader(page).boundingBox())!
+  const box = (await editPanel(page).boundingBox())!
+  expect(box.y).toBeGreaterThanOrEqual(header.y + header.height - 1) // the whole of the panel, its title too, is below the header
+  expect(box.y + box.height).toBeLessThanOrEqual(800 + 1)
+  expect((await edit(page, row).boundingBox())!.y).toBeGreaterThanOrEqual(header.y + header.height - 1) // and so is its row's button, which the reader pressed
+})
+
+test('a panel too tall for the window has its row at the top, under the header, and not its foot with the row hidden', async ({ page, context, baseURL }, testInfo) => {
+  const { stamp, edit } = await seedEditRows(context, baseURL!, testInfo.project.name)
+  await page.setViewportSize({ width: 1100, height: 420 })
+  await page.goto(`/transactions?q=${stamp}`)
+  const row = EDIT_ROWS - 8
+  await expect(edit(page, row)).toBeVisible()
+  await edit(page, row).evaluate((button) => window.scrollTo(0, window.scrollY + button.getBoundingClientRect().top - (window.innerHeight - 100)))
+  await edit(page, row).click()
+  await expect(editPanel(page)).toBeVisible()
+  const header = (await siteHeader(page).boundingBox())!
+  const [button, box] = [(await edit(page, row).boundingBox())!, (await editPanel(page).boundingBox())!]
+  expect(box.height).toBeGreaterThan(420 - header.height) // it does not fit under the header
+  expect(button.y).toBeGreaterThanOrEqual(header.y + header.height - 1) // so the button the reader pressed is whole, below the header, and not scrolled off under it
+  expect(box.y).toBeGreaterThanOrEqual(button.y + button.height) // with the top of the panel under it
+  await expect(page.getByRole('heading', { level: 2, name: /^Edit Category and Note/ })).toBeInViewport()
+})
+
+// More Transactions than a page holds (50), so that one can be on the first page, with its panel open, while the reader goes to the second.
+test('what is typed in a panel is still there when the reader comes back to its page', async ({ page, context, baseURL }, testInfo) => {
+  const stamp = `paged${testInfo.project.name}${Date.now()}`
+  await seed(context, baseURL!, [
+    {
+      account: accountsFor(testInfo.project.name).savings,
+      rows: Array.from({ length: PAGE_ROWS }, (_, i) => ({ date: `2012-04-${String((i % 28) + 1).padStart(2, '0')}`, description: `EXAMPLE PAGED ${stamp} ${String(i).padStart(2, '0')}`, amountCents: -100 - i })),
+    },
+  ])
+  await page.goto(`/transactions?q=${stamp}`)
+  const summary = page.getByRole('status').filter({ hasText: 'Showing' })
+  await expect(summary).toContainText(`Showing 1 to 50 of ${PAGE_ROWS}`)
+
+  const first = page.getByRole('button', { name: /^Edit / }).first()
+  const named = (await first.getAttribute('aria-label'))!
+  await first.click()
+  await editPanel(page).getByLabel('Note', { exact: true }).fill(`Typed on page one ${stamp}`)
+  await page.getByRole('button', { name: 'Next' }).click()
+  await expect(summary).toContainText(`Showing 51 to ${PAGE_ROWS} of ${PAGE_ROWS}`)
+  await expect(editPanel(page)).toHaveCount(0) // its row is not on this page
+  await page.getByRole('button', { name: 'Previous' }).click()
+  await expect(summary).toContainText(`Showing 1 to 50 of ${PAGE_ROWS}`)
+  await expect(editPanel(page)).toHaveCount(1)
+  await expect(rowAbove(editPanel(page), 'tr')).toHaveAccessibleName(named)
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue(`Typed on page one ${stamp}`)
+
+  // Opening another row's panel and going away and back does not lose it either.
+  await page.getByRole('button', { name: /^Edit / }).nth(2).click()
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue('')
+  await page.getByRole('button', { name: 'Next' }).click()
+  await expect(summary).toContainText(`Showing 51 to ${PAGE_ROWS} of ${PAGE_ROWS}`)
+  await page.getByRole('button', { name: 'Previous' }).click()
+  await expect(summary).toContainText(`Showing 1 to 50 of ${PAGE_ROWS}`)
+  await page.getByRole('button', { name: named }).click()
+  await expect(editPanel(page).getByLabel('Note', { exact: true })).toHaveValue(`Typed on page one ${stamp}`)
 })
 
 test('the Admin edits a Transaction from its details and sees the change there', async ({ page, context, baseURL }, testInfo) => {

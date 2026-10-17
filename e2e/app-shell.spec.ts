@@ -40,8 +40,14 @@ test.describe('layout', () => {
   test('is a sticky header across the whole top, the sidebar below it, and the page in a raised panel beside the sidebar', { tag: '@theme' }, async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.setViewportSize({ width: 1280, height: 480 })
-    await page.goto('/styleguide') // a page longer than the window
+    await page.goto('/styleguide')
     await expect(page.getByRole('heading', { level: 1, name: 'Styleguide' })).toBeVisible()
+    // A page longer than the window, whatever the styleguide holds today (it is as long as its samples make it, which has changed before): room to scroll a long way.
+    await page.evaluate(() => {
+      const filler = document.createElement('div')
+      filler.style.height = '1200px'
+      document.querySelector('main')!.append(filler)
+    })
     const header = siteHeader(page)
 
     const resting = (await header.boundingBox())!

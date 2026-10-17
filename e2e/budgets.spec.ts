@@ -187,6 +187,52 @@ test.describe('a refused Budget', () => {
   })
 })
 
+// The Budgets are stubbed, with 595 of the 600 changes used, so that the page says so; the Worker's own answers are held by its tests. The warning is said once, where the Admin is working.
+test('the warning that the Budget changes are nearly used is at the top, then in the slot of the open panel under the row, then under the row once it is saved, and at the top again', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  const names = ['Stub Budget One', 'Stub Budget Two']
+  await page.route(/\/api\/budgets(\?.*)?$/, (route) =>
+    route.fulfill({
+      json: {
+        month: thisMonth,
+        changeCount: 595,
+        changeLimit: 600,
+        budgets: names.map((categoryName, i) => ({ categoryId: i + 1, categoryName, amountCents: null, effectiveFrom: null, changes: [] })),
+      },
+    }),
+  )
+  await page.route(/\/api\/budgets\/\d+$/, (route) =>
+    route.request().method() === 'PUT' ? route.fulfill({ json: { effectiveFrom: thisMonth, amountCents: 10000, changed: true } }) : route.fallback(),
+  )
+  await page.goto('/budgets')
+  const warning = page.getByText('595 are used')
+  const table = page.getByRole('table', { name: 'Budgets' })
+  await expect(warning).toHaveCount(1)
+  await expect(table.getByText('595 are used')).toHaveCount(0) // at the top of the page to begin with
+
+  // While a panel is open the Admin is looking at it, so the warning is above it, under the row, and not at the top as well.
+  await editBudget(page, names[0]!).click()
+  await expect(warning).toHaveCount(1)
+  const slot = warning.locator('xpath=ancestor::tr[1]')
+  await expect(slot.getByRole('region', { name: `Budget for ${names[0]}` })).toBeVisible()
+  await expect(slot.locator('xpath=preceding-sibling::tr[1]').getByRole('button', { name: `Edit Budget for ${names[0]}`, exact: true })).toBeVisible()
+
+  // Once it is saved the warning stays with what was said, under the row, and the line at the top says it for a screen reader.
+  await page.getByLabel('Monthly Budget in dollars').fill('100')
+  await page.getByRole('button', { name: 'Save Budget' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'now has a Budget' })).toHaveText(`${names[0]} now has a Budget of $100.00 a month from ${monthWords}.`)
+  await expect(warning).toHaveCount(1)
+  const saved = warning.locator('xpath=ancestor::tr[1]')
+  await expect(saved.getByText('now has a Budget')).toBeVisible()
+  await expect(saved.locator('xpath=preceding-sibling::tr[1]').getByRole('button', { name: `Edit Budget for ${names[0]}`, exact: true })).toBeVisible()
+
+  // A panel cancelled says nothing, so the warning is back at the top.
+  await editBudget(page, names[1]!).click()
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await expect(warning).toHaveCount(1)
+  await expect(table.getByText('595 are used')).toHaveCount(0)
+})
+
 test('a Member sees the Budgets and how spending compares, and cannot change them', async ({ page, context, baseURL }, testInfo) => {
   const { name } = await seed(context, baseURL!, testInfo.project.name)
   const headers = { Origin: baseURL! }
