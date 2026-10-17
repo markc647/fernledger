@@ -51,7 +51,19 @@ export function estimateSentence(job: RerunJob): string | null {
   if (job.status !== 'running' || job.paused || left <= 0) return null
   const steps = Math.ceil(left / job.stepRows)
   const days = Math.ceil(left / job.cronRowsPerDay)
-  return `About ${steps} more ${steps === 1 ? 'step' : 'steps'} if you keep this page open, or ${days <= 1 ? 'less than a day' : `about ${days} days`} if you close it. Keep this page open to finish sooner.`
+  return `About ${steps} more ${steps === 1 ? 'step' : 'steps'} if you keep this page open, or ${days <= 1 ? 'less than a day' : `about ${days} days`} if you close it.`
+}
+
+/**
+ * What the frame of a run's progress is titled (the Rules page): what it is doing, or what became of it. A run that waits for the free plan's day to change (`waiting`: its own pause, or the
+ * plan refusing a step) is paused until the allowance resets, which is at 00:00 UTC and not "tomorrow"; one that went wrong (`failed`) says so and keeps its place.
+ */
+export function frameTitle(job: RerunJob, { waiting, failed }: { waiting: boolean; failed: boolean }): string {
+  if (job.status === 'done') return 'Applied the Rules to all Transactions'
+  if (job.status === 'stopped') return 'Stopped applying the Rules'
+  if (waiting) return 'Paused until the allowance resets'
+  if (failed) return 'Applying the Rules stopped with a problem'
+  return 'Applying the Rules to all Transactions'
 }
 
 /**

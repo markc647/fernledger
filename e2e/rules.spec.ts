@@ -1,10 +1,10 @@
 import type { BrowserContext, Page } from '@playwright/test'
-import { expect, signInAs, test } from './fixtures'
+import { expect, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
 import { findTransactions, transactionId } from './report-helpers'
-import { addRule, applyAnswer, applyButton, applyDialog, applyTheRules, categoryId, openApplyDialog, pageOrder, progressFrame, removeRule, ruleActions, ruleIds, runningJob, spinner, usageFigures, usageOn, withRules } from './rule-helpers'
+import { addRule, applyAnswer, applyButton, applyDialog, applyTheRules, categoryId, frameHeading, openApplyDialog, pageOrder, progressFrame, removeRule, ruleActions, ruleIds, runningJob, spinner, usageFigures, usageOn, withRules } from './rule-helpers'
 import { arrowTo, chooseAction, menuAction, noAxeViolationsFromTop, openActions, ruleActionButtons } from './row-actions-helpers'
-import { mainNav, navGroup, navigateTo } from './shell-helpers'
+import { chooseTextSize, mainNav, navGroup, navigateTo } from './shell-helpers'
 
 // The light and dark projects share one local database, so each test uses text and an Account of its own, no earlier run used
 // and no other spec uses: the Summary spec has 86 and 87, Categories 88 and 89, the Change Log 90 and 91, Cutover 92 and 93
@@ -407,6 +407,29 @@ test.describe("the form's hints", () => {
     await expect(page.getByRole('heading', { name: 'Add a Rule' })).toBeVisible() // Esc closed the hint and not the form
   })
 
+  test('on a phone the "?" stays beside its label at every text size, and the two Amount boxes are level when they are side by side', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/rules')
+    await page.getByRole('button', { name: 'Add a Rule' }).click()
+    for (const size of ['Small', 'Medium', 'Xtra Large'] as const) {
+      await chooseTextSize(page, size)
+      await settle(page) // the buttons grow and shrink with the text size, over a transition
+      const from = page.getByLabel('Amount from ($)', { exact: true })
+      const to = page.getByLabel('Amount up to ($)', { exact: true })
+      const [fromBox, toBox] = [(await from.boundingBox())!, (await to.boundingBox())!]
+      if (size === 'Small') expect(Math.abs(fromBox.y - toBox.y), 'side by side at the smallest text, and level').toBeLessThan(1)
+      else expect(toBox.y, 'one under the other at larger text').toBeGreaterThanOrEqual(fromBox.y + fromBox.height)
+      for (const [name, id] of [['About Text contains', 'rule-text'], ['About Transaction type', 'rule-type'], ['About Amount from and up to', 'rule-from']] as const) {
+        const [button, label] = [(await page.getByRole('button', { name }).boundingBox())!, (await page.locator(`label[for="${id}"]`).boundingBox())!]
+        expect(button.x, `${name} is to the right of its label`).toBeGreaterThanOrEqual(label.x + label.width - 1)
+        expect(button.y, `and on its row (${size})`).toBeLessThan(label.y + label.height)
+        expect(button.x + button.width, 'and on the screen').toBeLessThanOrEqual(390)
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+    }
+  })
+
   test('the other two hints open the same way, and the Amount hint describes both of its boxes', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/rules')
@@ -433,6 +456,14 @@ test.describe('Apply the Rules to all Transactions, beside Add a Rule', () => {
     expect(Math.abs(applyBox.y + applyBox.height / 2 - (addBox.y + addBox.height / 2)), 'on the same row').toBeLessThan(4)
     expect(applyBox.height, 'a touch target').toBeGreaterThanOrEqual(44)
 
+    // With the form open Add a Rule is off and not gone, so Apply the Rules to all Transactions stays under the pointer.
+    await add.click()
+    await expect(add).toBeDisabled()
+    expect(await applyButton(page).boundingBox()).toEqual(applyBox)
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    await expect(add).toBeFocused()
+    await expect(add).toBeEnabled()
+
     await page.setViewportSize({ width: 360, height: 800 })
     await expect.poll(async () => (await applyButton(page).boundingBox())!.y - (await add.boundingBox())!.y).toBeGreaterThanOrEqual(44) // wrapped under it
     const box = (await applyButton(page).boundingBox())!
@@ -451,10 +482,10 @@ test.describe('Apply the Rules to all Transactions, beside Add a Rule', () => {
     })
     await page.goto('/rules')
     await expect(applyButton(page)).toBeEnabled()
-    await expect(page.getByRole('region', { name: 'Free database allowance' })).toHaveCount(0) // not on the page: it is in the question
 
     const dialog = await openApplyDialog(page)
-    // The Free database allowance (here, its setup words) is what the Admin reads before answering.
+    // What applying does, and the Free database allowance (here, its setup words) that the Admin reads before answering.
+    await expect(dialog).toHaveAccessibleDescription('Goes through every Transaction, a few at a time. A Category you set by hand is never changed.')
     await expect(dialog.getByRole('region', { name: 'Free database allowance' })).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible()
     await expect(applyAnswer(page)).toBeFocused() // so Enter is the answer to the question
@@ -463,6 +494,8 @@ test.describe('Apply the Rules to all Transactions, beside Add a Rule', () => {
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(applyDialog(page)).toHaveCount(0)
     await expect(applyButton(page)).toBeFocused()
+    // The page now knows whether the bar is set up (reading it was what showed the bar in the question), so a bar on the page would be drawn: it is only in the question.
+    await expect(page.getByRole('region', { name: 'Free database allowance' })).toHaveCount(0)
 
     await openApplyDialog(page)
     await page.keyboard.press('Escape')
@@ -484,7 +517,23 @@ test.describe('Apply the Rules to all Transactions, beside Add a Rule', () => {
     await expect(applyDialog(page)).toHaveCount(0)
     await expect.poll(() => started).toBe(1)
     await expect(spinner(page)).toBeVisible() // ...and the progress is under the buttons
-    await expect(page.getByRole('status').filter({ hasText: 'Started. Going through up to 20,000 Transactions.' })).toBeFocused()
+    await expect(frameHeading(page)).toHaveText('Applying the Rules to all Transactions')
+    await expect(frameHeading(page)).toBeFocused() // the question is gone and the button is off: focus is on what the Admin caused
+    await expect(page.getByRole('status').filter({ hasText: 'Started. Going through up to 20,000 Transactions.' })).toHaveCount(1) // (said to a screen reader, not drawn)
+  })
+
+  test.describe('when the run cannot be started', () => {
+    test.use({ expectedStatuses: [500] })
+
+    test('says so, and focus is on Apply the Rules to all Transactions again', async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: null } }) : route.fulfill({ status: 500, json: { error: 'Nope' } })))
+      await page.goto('/rules')
+      await applyTheRules(page)
+      await expect(page.getByRole('alert').filter({ hasText: 'The Rules could not be applied. Try again.' })).toBeVisible()
+      await expect(progressFrame(page)).toHaveCount(0)
+      await expect(applyButton(page)).toBeFocused() // Radix gave it back to a button that was off, which cannot take it
+    })
   })
 })
 
@@ -513,6 +562,7 @@ test('the Admin applies a Rule to the Transactions already on file, and one set 
     await expect.poll(async () => (await found()).find((t) => t.description.endsWith('PLAIN'))?.categoryName).toBe('Groceries')
     await expect(page.getByRole('status').filter({ hasText: /Finished\. Looked at/ })).toContainText('and updated')
     await expect(page.getByText(/^Finished (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d/)).toBeVisible()
+    await expect(frameHeading(page)).toHaveText('Applied the Rules to all Transactions')
     await expect(applyButton(page)).toBeEnabled()
     await expect(page.getByRole('progressbar')).toHaveCount(0)
     await noAxeViolationsFromTop(page)
@@ -545,6 +595,8 @@ test.describe('while the Rules are being applied', () => {
 
   test('the page shows how far it has got, announces a few times, says a used-up day ends at midday NZ time, carries on by itself then, and keeps a finished run finished when a late reading arrives', async ({ page, context }) => {
     await signInAs(context, 'admin')
+    await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+    await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures() }))
     // The page asks again when the day changes (00:00 UTC), so the clock is the test's to move.
     await page.clock.install({ time: new Date('2026-10-11T02:00:00Z') })
     let current = runningJob()
@@ -582,11 +634,11 @@ test.describe('while the Rules are being applied', () => {
     await expect(bar).toHaveAttribute('value', '20')
     await expect(page.getByRole('status').filter({ hasText: 'Started. Going through up to 20,000 Transactions.' })).toBeVisible()
     await expect(page.getByText('Last updated Sun 11 Oct 2026, 3:00 pm.')).toBeVisible()
-    await expect(page.getByText('About 16 more steps if you keep this page open, or about 3 days if you close it. Keep this page open to finish sooner.')).toBeVisible()
+    await expect(page.getByText('About 16 more steps if you keep this page open, or about 3 days if you close it.')).toBeVisible()
     await expect(applyButton(page)).toBeDisabled()
     // A run that is going is a spinner, what it says and its Stop button, in a frame of their own under the buttons.
     const frame = progressFrame(page)
-    await expect(frame.getByText('Applying the Rules to all Transactions', { exact: true })).toBeVisible()
+    await expect(frameHeading(page)).toHaveText('Applying the Rules to all Transactions')
     await expect(frame.getByRole('status', { name: 'Loading' })).toBeVisible()
     await expect(frame.getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
     await noAxeViolationsFromTop(page)
@@ -603,6 +655,9 @@ test.describe('while the Rules are being applied', () => {
     await expect(page.getByText('Looked at 10,000 of up to 20,000 Transactions (50%).')).toBeVisible() // where it got to is still shown
     await expect(frame.getByRole('alert')).toBeVisible() // in the same frame, which is not spinning while it waits for the day
     await expect(spinner(page)).toHaveCount(0)
+    await expect(frameHeading(page)).toHaveText('Paused until the allowance resets') // and is titled for it, with just its message and not when it was last updated
+    await expect(page.getByText(/^Last updated/)).toHaveCount(0)
+    await expect(frame.getByRole('region', { name: 'Free database allowance' })).toContainText('1,234,567 of 5,000,000 rows read · 24%') // the allowance, which the Apply button cannot show while a run is going
     await expect(frame.getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
     await noAxeViolationsFromTop(page)
 
@@ -620,6 +675,8 @@ test.describe('while the Rules are being applied', () => {
     await expect(page.getByText('Finished Mon 12 Oct 2026, 1:05 pm.')).toBeVisible()
     await expect(alert).toHaveCount(0)
     await expect(bar).toHaveCount(0)
+    await expect(frameHeading(page)).toHaveText('Applied the Rules to all Transactions')
+    await expect(frame.getByRole('region', { name: 'Free database allowance' })).toHaveCount(0) // a run that is not waiting for the day has no need of it
     await expect(spinner(page)).toHaveCount(0)
     await expect(frame.getByRole('button', { name: 'Stop applying the Rules' })).toHaveCount(0)
     await expect(applyButton(page)).toBeEnabled()
@@ -629,6 +686,8 @@ test.describe('while the Rules are being applied', () => {
 
   test('a run that has used its share of the day is shown as paused, and the page does not ask for steps', async ({ page, context }) => {
     await signInAs(context, 'admin')
+    await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+    await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures({ rowsRead: 4_900_000 }) }))
     let steps = 0
     await page.route('**/api/rules/rerun/step', (route) => {
       steps++
@@ -640,10 +699,17 @@ test.describe('while the Rules are being applied', () => {
     await expect(page.getByText(/^Paused: it has used the share of today's free database allowance that it keeps for itself\./)).toContainText('Open this page then to finish sooner.')
     await expect(page.getByRole('status').filter({ hasText: 'Paused until the daily allowance resets, around midday NZ time.' })).toBeVisible()
     await expect(applyButton(page)).toBeDisabled()
+    // The frame has a solid border (Empty's own is dashed), and the padding of a card and not of a page.
+    expect(await progressFrame(page).evaluate((frame) => getComputedStyle(frame).borderTopStyle)).toBe('solid')
+    expect(await progressFrame(page).evaluate((frame) => parseFloat(getComputedStyle(frame).paddingTop))).toBeLessThanOrEqual(24)
     // Waiting for the day is not working: no spinner, the message in the frame, and Stop is still there.
     await expect(progressFrame(page).getByText(/^Paused: it has used the share/)).toBeVisible()
+    await expect(frameHeading(page)).toHaveText('Paused until the allowance resets')
+    await expect(progressFrame(page).getByText(/^Last updated/)).toHaveCount(0) // just the message
     await expect(spinner(page)).toHaveCount(0)
     await expect(progressFrame(page).getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
+    // The button that opens the allowance is off while the run is going, so the allowance is in the frame, as it is now (read as the frame showed it).
+    await expect(progressFrame(page).getByRole('region', { name: 'Free database allowance' })).toContainText('4,900,000 of 5,000,000 rows read · 98%')
     await noAxeViolationsFromTop(page)
     expect(steps).toBe(0)
   })
@@ -704,12 +770,12 @@ test.describe('while the Rules are being applied', () => {
     await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob() } }) : route.fallback()))
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await page.goto('/rules')
-    const animation = () => spinner(page).evaluate((element) => getComputedStyle(element).animationName)
+    const turning = () => spinner(page).evaluate((element) => element.getAnimations().length) // the animations that are running or about to
     await expect(spinner(page)).toBeVisible()
-    expect(await animation()).toBe('spin')
+    await expect.poll(turning).toBeGreaterThan(0)
 
-    await page.emulateMedia({ reducedMotion: 'reduce' })
-    await expect.poll(animation).toBe('none')
+    await page.emulateMedia({ reducedMotion: 'reduce' }) // src/index.css gives an animation no time and one turn: it is over as it begins
+    await expect.poll(turning).toBe(0)
   })
 
   test('does not show or announce a run that finished before the page was opened', async ({ page, context }) => {
@@ -736,7 +802,9 @@ test.describe('while the Rules are being applied', () => {
 
     await page.getByRole('button', { name: 'Stop applying the Rules' }).click()
 
-    await expect(page.getByRole('status').filter({ hasText: 'Stopped. Looked at 7,000 Transactions and updated 300 of them. Those keep the result they were given and the rest are as they were.' })).toBeFocused()
+    await expect(frameHeading(page)).toHaveText('Stopped applying the Rules')
+    await expect(frameHeading(page)).toBeFocused() // the Stop button has gone, and focus is on what it did
+    await expect(page.getByRole('status').filter({ hasText: 'Stopped. Looked at 7,000 Transactions and updated 300 of them. Those keep the result they were given and the rest are as they were.' })).toHaveCount(1)
     await expect(page.getByText('Stopped Sun 11 Oct 2026, 3:07 pm.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Stop applying the Rules' })).toHaveCount(0)
     await expect(spinner(page)).toHaveCount(0) // stopped, and still said in the frame
@@ -896,10 +964,10 @@ test.describe('the D1 usage bar', () => {
     await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job } }) : route.fulfill({ json: { job: (job = runningJob()) } })))
     await page.goto('/rules')
     await expect(applyButton(page)).toBeEnabled()
-    expect(asked).toBe(0) // the page does not ask while the question is shut
 
     const dialog = await openApplyDialog(page)
     await expect(dialog.getByText('1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
+    expect(asked).toBe(1) // (a bar on the page would have asked as the page loaded, and the second opening below would then ask for nothing)
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     await openApplyDialog(page)
     await expect(dialog.getByText('2,750,000 of 5,000,000 rows read · 55%')).toBeVisible()

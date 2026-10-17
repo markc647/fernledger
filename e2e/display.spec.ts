@@ -2,7 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import { netWorth as netWorthRegion, NET_WORTH_PATH, pressShowNetWorth, SPENDING_REPORT_PATH, spendingDrawn, stubSpendingReport } from './chart-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
-import { openApplyDialog } from './rule-helpers'
+import { applyAnswer, applyDialog, openApplyDialog, progressFrame, runningJob, usageFigures, usageOn } from './rule-helpers'
 import { actionsButton, chooseAction, openActions } from './row-actions-helpers'
 import {
   chooseTextSize,
@@ -22,6 +22,15 @@ import {
   textSizeLabel,
   themeToggle,
 } from './shell-helpers'
+
+/** A box (null if the thing is not there) is wholly inside a window of this size: something fixed to the window, or drawn outside the page (a dialog, a popover), is not in the page's scrollWidth. */
+function expectInside(box: { x: number; y: number; width: number; height: number } | null, viewport: { width: number; height: number }) {
+  expect(box, 'it is drawn').not.toBeNull()
+  expect(box!.x, 'its left edge').toBeGreaterThanOrEqual(0)
+  expect(box!.y, 'its top').toBeGreaterThanOrEqual(0)
+  expect(box!.x + box!.width, 'its right edge').toBeLessThanOrEqual(viewport.width)
+  expect(box!.y + box!.height, 'its bottom').toBeLessThanOrEqual(viewport.height)
+}
 
 const fontSize = (page: Page, selector: string) =>
   page.locator(selector).first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
@@ -575,9 +584,11 @@ test.describe('zoom', () => {
         await page.getByRole('button', { name: 'Check how many match' }).click()
         await expect(page.getByText('1,234 Transactions you already have match.')).toBeVisible()
         await expect(page.getByText(/Category: Health and medical \(removed/)).toBeVisible()
-        // The longest hint, open (a popover is drawn outside the form, and must stay on the screen).
+        // The longest hint, open. A popover is drawn outside the form and the page's width does not count it, so its own box is looked at: it is on the screen, on all four sides.
         await page.getByRole('button', { name: 'About Text contains' }).click()
-        await expect(page.getByRole('dialog', { name: 'About Text contains' })).toContainText('A letter with an accent or macron')
+        const hint = page.getByRole('dialog', { name: 'About Text contains' })
+        await expect(hint).toContainText('A letter with an accent or macron')
+        expectInside(await hint.boundingBox(), { width, height })
         // Measure only once the size is applied and the buttons have finished their width transition.
         await expectTextSize(page, size)
         await settle(page)
@@ -613,6 +624,44 @@ test.describe('zoom', () => {
           clientWidth: document.documentElement.clientWidth,
         }))
         expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        // The question is fixed to the window, which the page's width does not count: its own box is on the screen on all four sides (it scrolls inside itself when the words are longer
+        // than the room), and the answer that carries on can be scrolled to and is wholly in the window.
+        expectInside(await applyDialog(page).boundingBox(), { width, height })
+        await applyAnswer(page).scrollIntoViewIfNeeded()
+        await expect(applyAnswer(page)).toBeInViewport({ ratio: 1 })
+      })
+    }
+  }
+
+  // The Rules page with a run paused for the allowance: the frame of its progress with the longest words it has (the pause, the allowance used up in the frame, the Stop button).
+  for (const { name, width, height } of zoomLevels) {
+    for (const size of ['Medium', 'Xtra Large'] as const) {
+      test(`/rules with a run paused for the allowance at ${name} and text size ${size} fits, with Stop in reach`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+        await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures({ rowsRead: 5_100_000, rowsWritten: 100_000 }) }))
+        await page.route('**/api/rules/rerun/step', (route) => route.fulfill({ json: { job: runningJob({ paused: true }) } }))
+        await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: runningJob({ paused: true }) } }) : route.fallback()))
+        await page.setViewportSize({ width, height })
+        await page.goto('/rules')
+        await chooseTextSize(page, size)
+        await expect(page.getByText(/^Paused: it has used the share/)).toBeVisible()
+        await expect(progressFrame(page).getByText('5,100,000 of 5,000,000 rows read · 102%')).toBeVisible()
+        await expectTextSize(page, size)
+        await settle(page)
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+        // The frame and its Stop button are inside the window's width (the frame has no scroll of its own), and Stop can be scrolled to.
+        const stop = progressFrame(page).getByRole('button', { name: 'Stop applying the Rules' })
+        for (const box of [await progressFrame(page).boundingBox(), await stop.boundingBox()]) {
+          expect(box!.x).toBeGreaterThanOrEqual(0)
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width)
+        }
+        await stop.scrollIntoViewIfNeeded()
+        await expect(stop).toBeInViewport({ ratio: 1 })
       })
     }
   }

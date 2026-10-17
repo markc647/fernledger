@@ -8,7 +8,7 @@ import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { RowAction, RowActions } from '@/components/row-actions'
 import { DragHandle, SortableFrame, SortableRow } from '@/components/sortable-rows'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -18,7 +18,7 @@ import { api } from '@/lib/api'
 import { formatCount, formatDate } from '@/lib/format'
 import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
-import { announcement, estimateSentence, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
+import { announcement, estimateSentence, frameTitle, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
 import { dollarsForInput, DRAG_INSTRUCTIONS, DRAG_ROLE, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, type RuleView } from '@/lib/rules'
 
 export const Route = createFileRoute('/rules')({
@@ -219,11 +219,10 @@ function AdminRules() {
       {problem && <p role="alert" className="mt-2 font-medium text-destructive">{problem}</p>}
       {/* While a Rule is being changed (the form open, a removal being confirmed or a move going through) the run waits: what it did would be done again. */}
       <ApplyToHistory holding={editing !== null || removing !== null || move.isPending}>
-        {editing === null && (
-          <Button id="add-rule-button" size="touch" onClick={() => { setNotice(''); setProblem(''); setRemoving(null); setEditing({ kind: 'add' }) }}>
-            Add a Rule
-          </Button>
-        )}
+        {/* Off, not gone, while a form is open (it is the form's own): the button beside it stays where it is under the pointer. */}
+        <Button id="add-rule-button" size="touch" disabled={editing !== null} onClick={() => { setNotice(''); setProblem(''); setRemoving(null); setEditing({ kind: 'add' }) }}>
+          Add a Rule
+        </Button>
       </ApplyToHistory>
       {editing !== null && (
         <RuleForm
@@ -268,9 +267,11 @@ function AdminRules() {
  * A run pauses itself when it has used its share of the free plan's day (the Worker says so in the job, `paused`), and the plan can
  * refuse a step outright (429) when the day's allowance is gone; either way the page asks again when the day changes, at 00:00 UTC.
  * The button that starts a run is on the row of the Rules page's buttons, after `children` (Add a Rule); it asks first, and the question shows how much of that day the Cloudflare
- * account has used (D1UsageBar, if the Deployer turned it on). That is read each time the question opens (a query with nobody watching it is read again when someone does), so it is
- * the figures after a run that has ended, paused or been stopped, or been refused by the plan, and not figures from before it: nothing reads it at each step, or on a timer.
- * Under the row, a run that is going, paused, or has ended since this page was opened is shown in a frame (Empty): a spinner while it works, what it says, and its Stop button.
+ * account has used (D1UsageBar, if the Deployer turned it on). A run that is going turns the button off, so the figures are also in the frame of a run that is paused for the allowance
+ * (its own pause, or the plan refusing a step), which is when they matter. Each is read when it shows (the query is dropped as it goes: gcTime 0), so they are never the figures from before:
+ * the question opening, the run pausing, and Check again; nothing reads them at each step, or on a timer.
+ * Under the row, a run that is going, paused, or has ended since this page was opened is shown in a frame (Empty): a spinner while it works, what it says, and its Stop button. The frame is
+ * titled for its state (frameTitle), and takes focus when the Admin starts or stops a run, so the words they caused are what a screen reader reads and keyboard focus is not lost.
  */
 function ApplyToHistory({ holding, children }: { holding: boolean; children?: ReactNode }) {
   const queryClient = useQueryClient()
@@ -280,12 +281,22 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
   const [attempt, setAttempt] = useState(0)
   // Words are announced for a run the Admin is watching, not for the last finished run found when the page opens.
   const [watching, setWatching] = useState(false)
-  const status = useRef<HTMLParagraphElement>(null)
   // How many times the page has asked whether the day has changed and been told to wait, since the run was last moving.
   const asked = useRef(0)
   // Where the question opens with focus: the answer that carries on, so that Enter is the answer.
   const apply = useRef<HTMLButtonElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const frame = useRef<HTMLHeadingElement>(null)
   const title = useId()
+  // Where focus goes once the page has drawn what the Admin has just done: the question has closed (or a Stop was pressed) and the button that was pressed is off, so keyboard focus
+  // goes to the frame's title rather than being lost; if Apply could not start a run, it goes back to the button, which Radix cannot do while it is off.
+  const focusNext = useRef<'frame' | 'trigger' | null>(null)
+  useEffect(() => {
+    const target = focusNext.current === 'frame' ? frame.current : focusNext.current === 'trigger' && !trigger.current?.disabled ? trigger.current : null
+    if (!target) return
+    focusNext.current = null
+    target.focus()
+  })
 
   const start = useMutation({
     mutationFn: async () => {
@@ -297,12 +308,14 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
     onSuccess: async (started) => {
       setProblem('')
       setWatching(true)
+      focusNext.current = 'frame'
       if (started) {
         await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
         queryClient.setQueryData(rerunQuery.queryKey, started)
       } else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
-      // The question has closed and the button is off while it runs, so keyboard focus moves to the progress rather than being lost.
-      status.current?.focus()
+    },
+    onError: () => {
+      focusNext.current = 'trigger'
     },
   })
 
@@ -314,11 +327,11 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
       return (await res.json()).job
     },
     onSuccess: async (stopped) => {
+      focusNext.current = 'frame'
       if (stopped) {
         await queryClient.cancelQueries({ queryKey: rerunQuery.queryKey })
         queryClient.setQueryData(rerunQuery.queryKey, stopped)
       } else await queryClient.invalidateQueries({ queryKey: rerunQuery.queryKey })
-      status.current?.focus()
     },
   })
 
@@ -389,12 +402,11 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
         {/* Asks first: the Admin reads how much of the free plan's day is left before sending the run off. Enter, with focus on Apply the Rules, is the answer. */}
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button id="rerun-button" className="max-w-full py-2 whitespace-normal" size="touch" disabled={running || start.isPending || job === undefined}>
+            <Button ref={trigger} className="max-w-full py-2 whitespace-normal" size="touch" disabled={running || start.isPending || job === undefined}>
               Apply the Rules to all Transactions
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent
-            aria-describedby={undefined} // what it holds is the allowance, in its own region
             onOpenAutoFocus={(event) => {
               event.preventDefault()
               apply.current?.focus()
@@ -402,6 +414,7 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
           >
             <AlertDialogHeader>
               <AlertDialogTitle>Apply the Rules to all Transactions</AlertDialogTitle>
+              <AlertDialogDescription>Goes through every Transaction, a few at a time. A Category you set by hand is never changed.</AlertDialogDescription>
             </AlertDialogHeader>
             <D1UsageBar />
             <AlertDialogFooter>
@@ -413,23 +426,25 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
           </AlertDialogContent>
         </AlertDialog>
       </div>
-      {/* Always in the page, so a screen reader announces the words when they change. They change a few times in a run, not at every step. */}
-      <p role="status" ref={status} tabIndex={-1} className={`font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${shown ? 'mt-4' : ''}`}>
+      {/* Always in the page, so a screen reader announces the words when they change; it is not drawn, because the frame says them. They change a few times in a run, not at every step. */}
+      <p role="status" className="sr-only">
         {job && (watching || running) ? announcement(job) : ''}
       </p>
       {shown && job && (
-        <Empty className="mt-2 w-full max-w-xl border">
+        <Empty className="mt-4 w-full max-w-xl border border-solid p-4 md:p-6">
           <EmptyHeader>
             {spinning && (
               <EmptyMedia variant="icon">
                 <Spinner />
               </EmptyMedia>
             )}
-            <EmptyTitle id={title}>Applying the Rules to all Transactions</EmptyTitle>
+            <EmptyTitle ref={frame} id={title} tabIndex={-1} className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+              {frameTitle(job, { waiting: waitingForTheDay, failed: problem === 'failed' })}
+            </EmptyTitle>
             <EmptyDescription className="text-foreground">
               {running && <progress aria-labelledby={title} className="block h-4 w-full accent-primary" value={job.percent} max={100} />}
               <p className="mt-1">{progressSentence(job)}</p>
-              <p className="mt-1 text-muted-foreground">{updatedSentence(job)}</p>
+              {!waitingForTheDay && <p className="mt-1 text-muted-foreground">{updatedSentence(job)}</p>}
               {note && <p className="mt-1">{note}</p>}
               {running && holding && <p className="mt-1">Waiting while you change a Rule.</p>}
               {estimate && !holding && <p className="mt-1">{estimate}</p>}
@@ -449,6 +464,12 @@ function ApplyToHistory({ holding, children }: { holding: boolean; children?: Re
                   <Button size="touch" variant="outline" onClick={() => { setProblem(''); setAttempt(attempt + 1) }}>
                     Try again
                   </Button>
+                </div>
+              )}
+              {/* The button that starts a run is off while this one is going, so the allowance (if the Deployer turned it on) is here when the run waits for it. */}
+              {waitingForTheDay && (
+                <div className="w-full text-start">
+                  <D1UsageBar />
                 </div>
               )}
               <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" disabled={stop.isPending} onClick={() => stop.mutate()}>

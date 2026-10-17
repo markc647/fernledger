@@ -113,5 +113,8 @@ export async function applyTheRules(page: Page) {
 /** The progress of a run, in the frame under the buttons (shown while a run is going, paused, or has just ended in this visit). */
 export const progressFrame = (page: Page) => page.locator('[data-slot="empty"]')
 
+/** The frame's title: a heading that says what the run is doing, or what became of it, and takes focus when the Admin starts or stops a run. */
+export const frameHeading = (page: Page) => progressFrame(page).locator('[data-slot="empty-title"]')
+
 /** The spinner in that frame: there while the Rules are being applied, and not when the run is paused or has ended. */
 export const spinner = (page: Page) => page.getByRole('status', { name: 'Loading' })
