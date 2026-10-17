@@ -129,7 +129,7 @@ function Categories() {
         ) : !categories ? (
           <p role="status">Loading…</p>
         ) : (
-          <ResponsiveTable caption="Categories" columns={columns} rows={sortCategories(categories, sort)} getRowKey={(c) => c.id} emptyMessage="There are no Categories. Add one above." look="shadcn" />
+          <ResponsiveTable caption="Categories" columns={columns} rows={sortCategories(categories, sort)} getRowKey={(c) => c.id} emptyMessage="There are no Categories. Add one above." />
         )}
       </div>
     </>

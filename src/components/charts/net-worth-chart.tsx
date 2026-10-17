@@ -130,6 +130,7 @@ export function NetWorthChart() {
                 { key: 'date', header: 'Date', cell: (row) => formatDate(row.date) },
                 { key: 'netWorth', header: 'Net worth', align: 'end', cell: (row) => <Amount cents={row.cents} balance /> },
               ]}
+              look="in-card"
             />
           </details>
           {early.length > 0 && (

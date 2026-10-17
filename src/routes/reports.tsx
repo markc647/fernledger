@@ -111,7 +111,6 @@ function Reports() {
             rows={kept}
             getRowKey={(k) => k.id}
             emptyMessage={isAdmin ? 'No Reports have been made yet. Choose one under Reports in the sidebar to make the first.' : 'No Reports have been made yet. The Admin makes them.'}
-            look="shadcn"
           />
         )}
       </div>

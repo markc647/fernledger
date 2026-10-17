@@ -41,6 +41,7 @@ export function BudgetVsActualWidget() {
             getRowKey={(row) => row.key}
             emptyMessage={`No Category has a Budget in ${formatMonth(data.month)}.${me?.role === 'admin' ? ' Set one on the Budgets page.' : ''}`}
             columns={columns}
+            look="in-card"
           />
           <p className="mt-3">
             <Link to="/budgets" className="inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">

@@ -97,6 +97,7 @@ export function BalancesWidget() {
             getRowKey={(row) => row.accountId}
             emptyMessage="There are no Accounts yet."
             columns={columns}
+            look="in-card"
           />
         </>
       )}
