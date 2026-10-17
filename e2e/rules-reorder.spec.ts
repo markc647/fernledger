@@ -116,8 +116,12 @@ test('the Admin moves a Rule with the keyboard, hears where it is, and can chang
     const now = number(c) // it is where the third was
     await page.keyboard.press('Space')
     await expect(status(page, /Picked up/)).toHaveText(`Picked up Rule ${now} of ${total}.`)
-    await page.keyboard.press('ArrowUp')
-    await expect(status(page, /is over position/)).toHaveText(`Rule ${now} is over position ${now - 1} of ${total}.`)
+    // An arrow key pressed in the first moments after a Rule is picked up can move nothing (dnd-kit is still measuring the rows; a page that has to scroll to the handle first measures them again, which
+    // hides it). A press that moved nothing is pressed again; one that moved the Rule is not, as the words would then say another position.
+    await expect(async () => {
+      await page.keyboard.press('ArrowUp')
+      await expect(status(page, /is over position/)).toHaveText(`Rule ${now} is over position ${now - 1} of ${total}.`, { timeout: 1000 })
+    }).toPass()
     await page.keyboard.press('Escape')
     await expect(status(page, /was cancelled/)).toHaveText(`Moving Rule ${now} was cancelled. It is still in position ${now} of ${total}.`)
     await expect(handle).toBeFocused()
