@@ -1,20 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Amount } from '@/components/amount'
 import { NotATransfer, TreatAsTransferAgain } from '@/components/not-a-transfer'
+import { RowPanel } from '@/components/row-panel'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
-import { formatDate } from '@/lib/format'
 import { HttpError } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
 import { NOT_TRANSFER_NOTE, notTransferSaved, transferEditHint, treatAsTransferAgainSaved, type TransferSource } from '@/lib/transfers'
 
-/** What the panel needs to know about a Transaction: how to name it, and its Override and Note now. */
+/** What the panel needs to know about a Transaction: its Override and Note now, and whether it is a Transfer. */
 export type EditableTransaction = {
   id: number
-  date: string
-  description: string
   amountCents: number
   categoryId: number | null
   /** 'override' while the Category is the Admin's own choice. */
@@ -33,10 +30,10 @@ const textareaStyle =
   'block min-h-20 w-full rounded-lg border border-input bg-background px-3 py-2 text-base focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring'
 
 /**
- * Sets a Transaction's Override and Note. Only what changed is sent, so only what changed is logged. For a Transfer it also offers Not a Transfer
- * (and its undo), which is saved at once and not with the Save button; `onSaved` is then given what to say about it.
+ * Sets a Transaction's Override and Note, in a panel (`RowPanel`) that sits under the Transaction's row in a list and under its Edit button on its details (`className`). Only what changed is sent, so only what changed is logged.
+ * For a Transfer it also offers Not a Transfer (and its undo), which is saved at once and not with the Save button; `onSaved` is then given what to say about it.
  */
-export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction; onSaved: (message?: string) => void; onCancel: () => void }) {
+export function EditPanel({ row, className, onSaved, onCancel }: { row: EditableTransaction; className?: string; onSaved: (message?: string) => void; onCancel: () => void }) {
   const queryClient = useQueryClient()
   const { data: categories, isError } = useQuery(categoriesQuery)
   const startCategory = row.categorySource === 'override' ? row.categoryId : null
@@ -66,15 +63,9 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
   })
 
   return (
-    <section aria-labelledby="edit-heading" className="mt-4 max-w-xl rounded-xl border-2 p-4">
-      <h2 id="edit-heading" className="text-lg font-semibold">
-        Edit Category and Note
-      </h2>
-      <p className="mt-1">
-        {formatDate(row.date)}, {row.description}, <Amount cents={row.amountCents} />
-      </p>
+    <RowPanel title="Edit Category and Note" className={className}>
       <form
-        className="mt-3 space-y-4"
+        className="space-y-4"
         onSubmit={(event) => {
           event.preventDefault()
           save.mutate()
@@ -143,6 +134,6 @@ export function EditPanel({ row, onSaved, onCancel }: { row: EditableTransaction
           )}
         </div>
       )}
-    </section>
+    </RowPanel>
   )
 }

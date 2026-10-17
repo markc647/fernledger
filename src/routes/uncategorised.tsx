@@ -35,7 +35,7 @@ function Uncategorised() {
         help={
           admin && (
             <p>
-              Transactions with no Category. Choose Edit Category and Note in a Transaction's Actions menu to set an Override; it leaves this list once it has a Category. Transfers between your own Accounts are left out, as they are not spending. Until a
+              Transactions with no Category. Choose Edit on a Transaction's row to set an Override; it leaves this list once it has a Category. Transfers between your own Accounts are left out, as they are not spending. Until a
               Transaction has a Category it counts as Spending, so money in left here, such as a wage, reduces Spending.
             </p>
           )

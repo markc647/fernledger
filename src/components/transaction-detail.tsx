@@ -130,6 +130,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
       {isAdmin && editing && (
         <EditPanel
           row={t}
+          className="mt-4 max-w-xl"
           onSaved={(message) => {
             returning.current = true
             setSaved(message ?? 'Saved.')

@@ -12,11 +12,11 @@ import {
 } from '@tanstack/react-table'
 import type { InferResponseType } from 'hono/client'
 import { MessageSquareText } from 'lucide-react'
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Amount } from '@/components/amount'
 import { EditPanel } from '@/components/edit-panel'
-import { ResponsiveTable, type Column } from '@/components/responsive-table'
-import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
+import { ResponsiveTable, type Column, type ExpandedRow } from '@/components/responsive-table'
+import { RowButton, useFocusBack } from '@/components/row-actions'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -27,6 +27,7 @@ import { meQuery } from '@/lib/me'
 import { accountsQuery, categoriesQuery, PAGE_SIZE, transactionCountQuery, transactionsQuery } from '@/lib/queries'
 import { searchProblem, SORT_KEYS, sortOf, tidy, type DetailOrigin, type SortKey, type TransactionSearch } from '@/lib/transaction-search'
 import { transferLabel } from '@/lib/transfers'
+import { cn } from '@/lib/utils'
 
 type Row = InferResponseType<typeof api.transactions.$get, 200>['transactions'][number]
 
@@ -106,8 +107,13 @@ function NoteCell({ row }: { row: Row }) {
  */
 const NOTE_COLUMN = 'w-px whitespace-nowrap'
 
-/** The id of a row's "⋯" button, which focus goes back to when the Edit panel it opened is closed. */
-const actionsId = (id: number) => `transaction-${id}-actions`
+/** The id of a row's Edit button, which focus goes back to when the Edit panel it opened is closed. */
+const editId = (id: number) => `transaction-${id}-edit`
+
+/** The Transaction whose Edit panel is open, and the id of the one above it in the list when it was opened (null: it was the first), which is where its place is if saving takes it out of the list. */
+type Opened = { row: Row; above: number | null }
+/** What saving said, for the search it was said in: where the Transaction was (`above`), in case it left the list and the message takes its place. */
+type Saved = { message: string; rowId: number; above: number | null; search: string }
 
 const hasFilter = (search: TransactionSearch) => search.account !== undefined || search.category !== undefined || search.transfers !== undefined || !!search.from || !!search.to || !!search.q
 
@@ -115,7 +121,7 @@ const hasFilter = (search: TransactionSearch) => search.account !== undefined ||
  * Transactions, a page at a time, with their Category and Note. `search` is what is asked for (filters, sort, page) and
  * `onSearch` changes it; the page keeps it in its address. The server does the searching, sorting and paging, and the table
  * (TanStack Table in manual mode) holds the sort and page. How many match is asked once per search, not per page (it reads
- * every Transaction the filters keep: ADR 0004). The Admin gets an Actions menu on each row, to open the panel where an Override and a Note are set; a
+ * every Transaction the filters keep: ADR 0004). The Admin gets an Edit button on each row, which opens the panel where an Override and a Note are set directly under that row, one panel at a time; a
  * Member sees the same list read-only. With `showFilters` there is a search form above the list. A Transaction's details
  * come back to this list, or to the Uncategorised page when `origin` says that is where the reader started.
  */
@@ -132,8 +138,8 @@ export function TransactionList({
   origin?: DetailOrigin
   emptyMessage: ReactNode
 }) {
-  const [editing, setEditing] = useState<Row | null>(null)
-  const [saved, setSaved] = useState('')
+  const [editing, setEditing] = useState<Opened | null>(null)
+  const [saved, setSaved] = useState<Saved | null>(null)
   // A range that runs backwards, or an Account or Category the address names that doesn't exist, can't match anything: the form explains the range when it is typed, and the page explains
   // what a hand-edited address names (searchProblem), rather than showing an error or an empty list.
   const accounts = useQuery({ ...accountsQuery, enabled: search.account !== undefined })
@@ -149,7 +155,9 @@ export function TransactionList({
   const { sort, dir } = sortOf(search)
   const page = search.page ?? 1
 
-  // After a save or cancel, focus goes back to the row's Actions button; if the row has left this list (it was categorised), to the status line.
+  const rows = data?.transactions ?? NO_ROWS
+  // After a save or cancel, focus goes back to the row's Edit button. If the row has left this list (it was categorised), it goes to the status line that says it was saved, which is where the row was
+  // (and not to the next Transaction, which the reader has not chosen) unless the list is now empty, when it is the status line at the top.
   const status = useRef<HTMLParagraphElement>(null)
   const focusBack = useFocusBack(editing, status, data)
 
@@ -173,6 +181,16 @@ export function TransactionList({
   }, [lastPageNumber, isFetching, page, search, onSearch])
 
   const linkSearch = JSON.stringify(search)
+  const editingId = editing?.row.id
+  /** Opens a Transaction's panel under its row, and closes any other that is open. */
+  const open = useCallback(
+    (row: Row) => {
+      const index = rows.findIndex((r) => r.id === row.id)
+      setSaved(null)
+      setEditing({ row, above: rows[index - 1]?.id ?? null })
+    },
+    [rows],
+  )
   const columns = useMemo(() => {
     const here: TransactionSearch & { origin?: DetailOrigin } = { ...JSON.parse(linkSearch), origin }
     return helper.columns([
@@ -200,32 +218,30 @@ export function TransactionList({
       helper.accessor('amountCents', { id: 'amount', header: 'Amount', cell: (info) => <Amount cents={info.getValue()} /> }),
       ...(isAdmin
         ? [
+            // One action, so a button named for it and not a menu: the panel it opens is under its row.
             helper.display({
               id: 'actions',
-              header: 'Actions',
+              header: 'Action',
               enableSorting: false,
               cell: (info) => (
-                <RowActions row={`${info.row.original.description}, ${formatDate(info.row.original.date)}`} id={actionsId(info.row.original.id)}>
-                  <RowAction
-                    run={() => {
-                      setSaved('')
-                      setEditing(info.row.original)
-                    }}
-                  >
-                    Edit Category and Note
-                  </RowAction>
-                </RowActions>
+                <RowButton
+                  id={editId(info.row.original.id)}
+                  label="Edit"
+                  name={`Edit ${info.row.original.description}, ${formatDate(info.row.original.date)}`}
+                  open={editingId === info.row.original.id}
+                  onPress={() => open(info.row.original)}
+                />
               ),
             }),
           ]
         : []),
     ])
-  }, [isAdmin, linkSearch, origin])
+  }, [isAdmin, linkSearch, origin, editingId, open])
 
   const table = useTable({
     features,
     columns,
-    data: data?.transactions ?? NO_ROWS,
+    data: rows,
     rowCount: total,
     manualSorting: true,
     manualPagination: true,
@@ -265,21 +281,51 @@ export function TransactionList({
     }
   })
 
-  const finish = (row: Row, message: string) => {
-    focusBack(actionsId(row.id))
-    setSaved(message)
+  const finish = ({ row, above }: Opened, message: string) => {
+    focusBack(editId(row.id))
+    setSaved(message ? { message, rowId: row.id, above, search: linkSearch } : null)
     setEditing(null)
   }
+
+  // The panel is under its row, so it goes with the row if the row is not on this page of the list.
+  const panel = isAdmin && editing && rows.some((r) => r.id === editing.row.id) ? editing : null
+  // What saving said belongs to the search it was said for. When the Transaction is no longer in the list (it was categorised, on the Uncategorised page), the message takes its row's place, under the
+  // Transaction that was above it, and has focus there; with nothing left in the list it is the line at the top.
+  const said = saved !== null && saved.search === linkSearch ? saved : null
+  const gone = said !== null && !rows.some((r) => r.id === said.rowId)
+  const inPlace = gone && rows.length > 0
+  const messageStyle = 'font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+  const expanded: ExpandedRow | undefined = panel
+    ? {
+        after: String(panel.row.id),
+        content: (
+          <EditPanel
+            key={panel.row.id}
+            row={panel.row}
+            onSaved={(message) => finish(panel, message ?? `Saved ${panel.row.description}.`)}
+            onCancel={() => finish(panel, '')}
+          />
+        ),
+      }
+    : inPlace
+      ? {
+          after: said.above !== null && rows.some((r) => r.id === said.above) ? String(said.above) : null,
+          content: (
+            <p role="status" ref={status} tabIndex={-1} className={messageStyle}>
+              {said.message}
+            </p>
+          ),
+        }
+      : undefined
 
   const filtered = showFilters && hasFilter(search)
 
   return (
     <>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
-      <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-        {saved}
+      <p role="status" ref={inPlace ? undefined : status} tabIndex={-1} className={cn('mt-2', messageStyle)}>
+        {inPlace ? '' : (said?.message ?? '')}
       </p>
-      {isAdmin && editing && <EditPanel key={editing.id} row={editing} onSaved={(message) => finish(editing, message ?? `Saved ${editing.description}.`)} onCancel={() => finish(editing, '')} />}
       {showFilters && <TransactionFilters search={search} onSearch={onSearch} />}
       {problem ? (
         <p role="alert" className="mt-4 font-medium">
@@ -302,7 +348,7 @@ export function TransactionList({
             {total === undefined ? '' : ` of ${total.toLocaleString('en-NZ')}`}
             {filtered ? ' matching' : ''}, sorted by {String(table.getColumn(sort)?.columnDef.header)}, {SORT_WORDS[sort][dir === 'asc' ? 'ascending' : 'descending']}.
           </p>
-          <ResponsiveTable caption={filtered ? 'Transactions matching the search' : 'Transactions'} columns={tableColumns} rows={table.getRowModel().rows} getRowKey={(row) => row.id} />
+          <ResponsiveTable caption={filtered ? 'Transactions matching the search' : 'Transactions'} columns={tableColumns} rows={table.getRowModel().rows} getRowKey={(row) => row.id} expanded={expanded} />
           <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center gap-2">
             <Button size="touch" variant="outline" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()}>
               Previous
