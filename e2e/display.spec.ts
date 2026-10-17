@@ -2,7 +2,8 @@ import type { Locator, Page } from '@playwright/test'
 import { netWorth as netWorthRegion, NET_WORTH_PATH, pressShowNetWorth, SPENDING_REPORT_PATH, spendingDrawn, stubSpendingReport } from './chart-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
-import { actionsButton, chooseAction, openActions } from './row-actions-helpers'
+import { importRows } from './report-helpers'
+import { actionsButton, chooseAction, openActions, rowAction } from './row-actions-helpers'
 import {
   chooseTextSize,
   closeHeaderControls,
@@ -420,7 +421,7 @@ test.describe('zoom', () => {
     // exactly on Windows. A viewport 4px narrower fails on any machine when something can't shrink to fit.
     { name: '400% zoom with 4px to spare (316px wide)', width: 316, height: 256 },
   ]
-  const pages = ['/', '/settings', '/styleguide', '/transactions', '/change-log', '/import', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/net-worth', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/income-vs-spending', '/reports/loans']
+  const pages = ['/', '/settings', '/styleguide', '/transactions', '/change-log', '/import', '/accounts', '/categories', '/uncategorised', '/about-your-data', '/how-to-sign-in', '/rules', '/budgets', '/reports', '/reports/net-worth', '/reports/transactions', '/reports/balances', '/reports/spending', '/reports/budget-vs-actual', '/reports/income-vs-spending', '/reports/loans']
 
   for (const { name, width, height } of zoomLevels) {
     for (const path of pages) {
@@ -717,7 +718,7 @@ test.describe('zoom', () => {
         await page.setViewportSize({ width, height })
         await page.goto('/budgets')
         await chooseTextSize(page, size)
-        await page.getByRole('button', { name: `Edit Budget for ${longName}` }).click()
+        await rowAction(page, longName, 'Edit Budget')
         await expect(page.getByLabel('Monthly Budget in dollars')).toHaveValue('1234567.89')
         await expect(page.getByRole('button', { name: 'End Budget' })).toBeVisible()
         const panel = page.getByRole('region', { name: `Budget for ${longName}` })
@@ -843,21 +844,36 @@ test.describe('zoom', () => {
     }
   }
 
-  // The table of the Rules and of the Categories just above a phone's width, where the zoom widths above do not look: a table starts at 768px (a media query's `48rem` is the browser's 16px,
-  // not the page's text size), so at 768px it is there at every size, with its columns (a handle, the order, When, Then, Actions) at their narrowest and the text at its largest at Xtra Large.
-  // Nothing may scroll sideways, in the table's own box or in the page.
+  // The tables of the Rules, the Categories, the Transactions, the Accounts and the Budgets just above a phone's width, where the zoom widths above do not look: a table starts at 768px (a media query's `48rem` is the browser's 16px,
+  // not the page's text size), so at 768px it is there at every size, with its columns (the Rules' handle, order, When, Then and Actions, the Transactions' seven) at their narrowest and the text at its largest at Xtra Large.
+  // Nothing may scroll sideways, in the table's own box or in the page. The Transactions, Accounts and Budgets are the real ones, after an Account with a long description is imported. The Transactions' seven columns cannot
+  // fit 768px at Xtra Large (their words are at their shortest already, and a date and an amount keep theirs whole): there the table scrolls in its box, as the page scrolled before every table had one, so it is tried at Medium.
+  const TABLE_AT_768 = {
+    '/rules': 'Rules, in the order they are checked',
+    '/categories': 'Categories',
+    '/transactions': 'Transactions',
+    '/accounts': 'Accounts',
+    '/budgets': 'Budgets',
+  } as const
   for (const size of ['Medium', 'Xtra Large'] as const) {
-    for (const path of ['/rules', '/categories'] as const) {
-      test(`${path} as a table at 768px wide and text size ${size} fits`, async ({ page, context }) => {
+    for (const path of Object.keys(TABLE_AT_768) as (keyof typeof TABLE_AT_768)[]) {
+      if (path === '/transactions' && size === 'Xtra Large') continue
+      test(`${path} as a table at 768px wide and text size ${size} fits`, async ({ page, context, baseURL }) => {
         await signInAs(context, 'admin')
-        await stubRulesAndCategories(page)
+        if (path === '/rules' || path === '/categories') await stubRulesAndCategories(page)
+        else
+          await importRows(context, baseURL!, {
+            account: { number: '99-9999-9999999-28', name: 'Display wide table account with a long name' },
+            year: 2026,
+            rows: [{ date: '2026-10-08', payee: `EXAMPLE DISPLAY ${'long'.repeat(10)} shop with a long enough name to wrap`, amountCents: -123456789, uniqueId: 'DISPLAY768' }],
+          })
         await page.setViewportSize({ width: 768, height: 1024 })
         await page.goto(path)
         await chooseTextSize(page, size)
         await expectTextSize(page, size)
         const box = page.locator('[data-slot="table-container"]')
         await expect(box).toHaveCount(1)
-        await expect(page.getByRole('table', { name: path === '/rules' ? 'Rules, in the order they are checked' : 'Categories' })).toBeVisible()
+        await expect(page.getByRole('table', { name: TABLE_AT_768[path] })).toBeVisible()
         await settle(page)
         expect(await box.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true) // the box has not had to scroll its table
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
@@ -1096,21 +1112,24 @@ test.describe('zoom', () => {
 
   // The Transaction listing Report with its longest content: a long app title and Account name, a long description and Note,
   // a huge amount and totals, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
+  const stubLongListing = async (page: Page) => {
+    const long = 'EXAMPLE'.padEnd(80, 'x')
+    await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
+    await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
+    await page.route('**/api/reports/transactions?**', (route) =>
+      route.fulfill({
+        json: {
+          transactions: [{ id: 1, date: '2026-10-08', description: `${long} shop with a long enough name to wrap on a narrow screen`, amountCents: -123456789, categoryName: 'Category with a long name'.padEnd(40, 'z'), note: `${long} note that goes on and on`, source: 'sync', bankReference: long, bankCounterpartyAccount: '99-9999-9999999-97', bankCardSuffix: '1234', bankParticulars: long, bankPaymentCode: long }],
+          next: null,
+        },
+      }),
+    )
+  }
   for (const { name, width, height } of zoomLevels) {
     for (const size of ['Medium', 'Xtra Large'] as const) {
       test(`/reports/transactions with long content at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'member')
-        const long = 'EXAMPLE'.padEnd(80, 'x')
-        await page.route('**/api/settings', (route) => route.fulfill({ json: { app_title: 'The'.padEnd(60, 'x'), about_contact: '', about_retention: '' } }))
-        await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
-        await page.route('**/api/reports/transactions?**', (route) =>
-          route.fulfill({
-            json: {
-              transactions: [{ id: 1, date: '2026-10-08', description: `${long} shop with a long enough name to wrap on a narrow screen`, amountCents: -123456789, categoryName: 'Category with a long name'.padEnd(40, 'z'), note: `${long} note that goes on and on`, source: 'sync', bankReference: long, bankCounterpartyAccount: '99-9999-9999999-97', bankCardSuffix: '1234', bankParticulars: long, bankPaymentCode: long }],
-              next: null,
-            },
-          }),
-        )
+        await stubLongListing(page)
         await page.setViewportSize({ width, height })
         await page.goto('/reports/transactions?account=1&from=2026-10-01&to=2026-10-31')
         await chooseTextSize(page, size)
@@ -1126,6 +1145,23 @@ test.describe('zoom', () => {
       })
     }
   }
+
+  // The same Report as a table, at 768px, where a table starts and a Report's columns are at their narrowest: its box has not had to scroll the table (at Medium, as for the Transactions list above).
+  test('/reports/transactions with long content as a table at 768px wide and text size Medium fits', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await stubLongListing(page)
+    await page.setViewportSize({ width: 768, height: 1024 })
+    await page.goto('/reports/transactions?account=1&from=2026-10-01&to=2026-10-31')
+    await chooseTextSize(page, 'Medium')
+    await expect(page.getByRole('article', { name: 'Transaction listing' })).toContainText('−$1,234,567.89')
+    await expectTextSize(page, 'Medium')
+    await settle(page)
+    const box = page.locator('[data-slot="table-container"]')
+    await expect(box).toHaveCount(1)
+    expect(await box.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+  })
 
   // The balances-over-time Report with its longest content: a long app title and Account name, the largest balances and a Balance Check
   // difference, on screen (cards on a narrow window). The data is stubbed, so the test needs nothing in the database.
