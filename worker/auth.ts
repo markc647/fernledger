@@ -36,6 +36,15 @@ export async function authenticate(request: Request, config: AuthConfig): Promis
   }
 }
 
+/**
+ * Why a request was refused, as a log event name (`logEvent`): a Worker secret is missing, there is no Access token, or the token did not verify (another key, issuer or app, out of
+ * date, no email). The page sees only a 401 for all three. Not why a token failed: what jose says can echo the token.
+ */
+export function refusalEvent(request: Request, config: AuthConfig | null): string {
+  if (!config) return 'auth.refused.not-configured'
+  return request.headers.get('Cf-Access-Jwt-Assertion') ? 'auth.refused.bad-token' : 'auth.refused.no-token'
+}
+
 const jwksCache = new Map<string, JWTVerifyGetKey>()
 
 /** Builds config from Worker secrets; null if any are missing, so the app fails closed. */

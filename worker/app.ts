@@ -4,7 +4,7 @@ import { validator } from 'hono/validator'
 import * as z from 'zod/mini'
 import { accounts } from './accounts'
 import type { AppEnv } from './app-env'
-import { authConfigFromEnv, authenticate, devMember } from './auth'
+import { authConfigFromEnv, authenticate, devMember, refusalEvent } from './auth'
 import { balanceChecks, balances } from './balances'
 import { budgets } from './budgets'
 import { categories } from './categories'
@@ -35,7 +35,10 @@ export const app = new Hono<AppEnv>()
   .use('/api/*', async (c, next) => {
     const config = authConfigFromEnv(c.env)
     const member = devMember(c.req.raw, c.env) ?? (config && (await authenticate(c.req.raw, config)))
-    if (!member) return c.json({ error: 'Unauthorised' }, 401)
+    if (!member) {
+      logEvent(refusalEvent(c.req.raw, config))
+      return c.json({ error: 'Unauthorised' }, 401)
+    }
     c.set('member', member)
     await next()
   })
