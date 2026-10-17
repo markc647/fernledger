@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useRef, type ComponentProps, type
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
-// The actions on one row of a table, in a "⋯" menu, as shadcn's table with actions has them.
+// The actions on one row of a table: two or more in a "⋯" menu, as shadcn's table with actions has them (`RowActions`), and a row with only one has a button named for it (`RowButton`, below).
 //
 // An action does not run when its item is chosen but once the menu has closed and put focus back on the button. A menu that is open traps focus, so a form that an action opens, which takes
 // focus as it appears, would be refused it and left with the button; run after, the form takes focus from the button as it would from any other. The same goes for an action that moves a Rule: focus
@@ -41,6 +41,19 @@ export function RowActions({ row, id, children }: { row: string; id: string; chi
   )
 }
 
+/**
+ * The one action of a row that has only one, as a button named for it ("Edit", "Rename") and not a "⋯" menu with a single item. `label` is what it says; `name` is what a screen reader calls it, which begins with the
+ * label and names the row ("Edit Groceries, Mon 8 Oct 2012"); `id` is the button's own, so that a page can put focus back on it (`useFocusBack`); `open` says that the panel it opened is open under the row
+ * (`aria-expanded`, which lights the row too). 44px tall, like every control that is not in the header or the sidebar.
+ */
+export function RowButton({ id, label, name, open, onPress }: { id: string; label: string; name: string; open: boolean; onPress: () => void }) {
+  return (
+    <Button id={id} type="button" variant="outline" size="touch" aria-label={name} aria-expanded={open} onClick={onPress}>
+      {label}
+    </Button>
+  )
+}
+
 /** An item of `RowActions`: `run` is what it does, and it runs once the menu has closed (it is not Radix's `onSelect`, which runs while the menu is still open). */
 export function RowAction({ run, ...props }: Omit<ComponentProps<typeof DropdownMenuItem>, 'onSelect'> & { run: () => void }) {
   const chosen = useContext(Queue)
@@ -55,8 +68,8 @@ export function RowAction({ run, ...props }: Omit<ComponentProps<typeof Dropdown
 }
 
 /**
- * Where focus goes when a form or a question that a row's menu opened is closed (cancelled, or saved with its row still there): back to the row's Actions button, by its `id`, or, if the row is gone
- * (removed, or no longer in the list), to `fallback`, the page's status line, so keyboard focus is never lost. `open` is what the page has open (null when nothing is: the effect waits for it to
+ * Where focus goes when a form or a question that a row's menu or button opened is closed (cancelled, or saved with its row still there): back to the row's Actions button or `RowButton`, by its `id`, or, if the row is gone
+ * (removed, or no longer in the list), to `fallback`, the page's status line (or the one that took the row's place), so keyboard focus is never lost. `open` is what the page has open (null when nothing is: the effect waits for it to
  * close) and `refresh` is anything else the button waits for (a list that is read again after a save). The page calls the function this returns as it closes what is open, and says which button.
  */
 export function useFocusBack(open: unknown, fallback: RefObject<HTMLElement | null> | null = null, refresh?: unknown) {

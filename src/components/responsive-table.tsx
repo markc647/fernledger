@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
+import { Fragment, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
 import { Select } from '@/components/ui/select'
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
@@ -163,6 +163,22 @@ function TableFrame({ label, className, children }: { label: string; className: 
   )
 }
 
+/**
+ * A row of its own among the rows, across the whole table: a panel that a row's button opens under that row, or the line that says what became of a row that has left the list. On a wide screen it is a row of the table
+ * with one cell that spans every column; on cards it is a card's place in the list, after the row's card. `after` is the key of the row it follows, or `null` to come before the first; a key that no row has draws nothing, so a panel
+ * goes with its row. The content is the caller's (a shadcn Card, for a panel); the row is not printed.
+ */
+export type ExpandedRow = { after: string | number | null; content: ReactNode }
+
+/** An expanded row of the table: one cell across every column, in the table's text and dividers, not lit as the pointer passes over it and not printed. */
+const ExpandedTableRow = ({ columns, children }: { columns: number; children: ReactNode }) => (
+  <TableRow className="hover:bg-transparent print:hidden">
+    <TableCell colSpan={columns} className="px-3 py-3 text-start whitespace-normal">
+      {children}
+    </TableCell>
+  </TableRow>
+)
+
 /** A card, when the page has not given its rows an element of their own. */
 const CardItem = ({ className, children }: RowProps) => <li className={className}>{children}</li>
 /** A row of the shadcn table, likewise. */
@@ -185,6 +201,7 @@ export function ResponsiveTable<Row>({
   printHeading,
   look = 'shadcn',
   RowElement,
+  expanded,
 }: {
   caption: string
   columns: Column<Row>[]
@@ -209,6 +226,8 @@ export function ResponsiveTable<Row>({
    * start every row again each time. It draws a `tr` (`TableRow`) or an `li` according to `layout`.
    */
   RowElement?: ComponentType<RowProps>
+  /** One row of its own, across the table, after a row (see `ExpandedRow`). At most one at a time. */
+  expanded?: ExpandedRow
 }) {
   const wide = useIsWide()
   // The caption stays on the empty state: a screen reader still hears what the missing data was.
@@ -228,29 +247,32 @@ export function ResponsiveTable<Row>({
         <SortMenu columns={columns} />
         {/* One column that may shrink to the window: without it a card is as wide as its longest unbroken word (a long web address in a Note). */}
         <ul aria-label={caption} className="grid grid-cols-1 gap-3 text-base">
+          {expanded?.after === null && <li>{expanded.content}</li>}
           {rows.map((row) => (
-            <Item
-              key={getRowKey(row)}
-              rowKey={getRowKey(row)}
-              layout="cards"
-              className={cn('rounded-lg border bg-card p-4 text-card-foreground', handle && 'flex items-start gap-1')}
-            >
-              {/* The grip, if the page has one, at the card's start: the card's lines (a label with its value) are beside it. */}
-              {handle && <div className="-my-1 -ms-3 shrink-0">{handle.cell(row)}</div>}
-              <dl className={cn('grid grid-cols-1 gap-2', handle && 'min-w-0 grow')}>
-                {/* A label and a value sit side by side, the value taking the rest of the line, unless the value's narrowest form (a large amount that keeps its digits together, or a long
-                    word) will not fit beside the label: then, at any text size, it goes under the label, and a label wider than the card wraps, rather than push the page wider.
-                    Ordinary content at the usual text size is where it always was; a row changes only when its value could not fit. */}
-                {columns
-                  .filter((column) => !column.handle && !column.hideOnCard?.(row))
-                  .map((column) => (
-                    <div key={column.key} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
-                      <dt className="text-muted-foreground">{column.header}</dt>
-                      <dd className="min-w-0 grow basis-[min-content] text-end break-words">{column.cell(row)}</dd>
-                    </div>
-                  ))}
-              </dl>
-            </Item>
+            <Fragment key={getRowKey(row)}>
+              <Item
+                rowKey={getRowKey(row)}
+                layout="cards"
+                className={cn('rounded-lg border bg-card p-4 text-card-foreground', handle && 'flex items-start gap-1')}
+              >
+                {/* The grip, if the page has one, at the card's start: the card's lines (a label with its value) are beside it. */}
+                {handle && <div className="-my-1 -ms-3 shrink-0">{handle.cell(row)}</div>}
+                <dl className={cn('grid grid-cols-1 gap-2', handle && 'min-w-0 grow')}>
+                  {/* A label and a value sit side by side, the value taking the rest of the line, unless the value's narrowest form (a large amount that keeps its digits together, or a long
+                      word) will not fit beside the label: then, at any text size, it goes under the label, and a label wider than the card wraps, rather than push the page wider.
+                      Ordinary content at the usual text size is where it always was; a row changes only when its value could not fit. */}
+                  {columns
+                    .filter((column) => !column.handle && !column.hideOnCard?.(row))
+                    .map((column) => (
+                      <div key={column.key} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                        <dt className="text-muted-foreground">{column.header}</dt>
+                        <dd className="min-w-0 grow basis-[min-content] text-end break-words">{column.cell(row)}</dd>
+                      </div>
+                    ))}
+                </dl>
+              </Item>
+              {expanded?.after === getRowKey(row) && <li>{expanded.content}</li>}
+            </Fragment>
           ))}
         </ul>
       </>
@@ -284,14 +306,18 @@ export function ResponsiveTable<Row>({
           </TableRow>
         </TableHeader>
         <TableBody className={BODY}>
+          {expanded?.after === null && <ExpandedTableRow columns={columns.length}>{expanded.content}</ExpandedTableRow>}
           {rows.map((row) => (
-            <Item key={getRowKey(row)} rowKey={getRowKey(row)} layout="table">
-              {columns.map((column) => (
-                <TableCell key={column.key} className={cn(column.handle ? HANDLE_CELL : 'px-3 py-2', 'whitespace-normal print:py-3 print:align-top', align(column), column.className)}>
-                  {column.cell(row)}
-                </TableCell>
-              ))}
-            </Item>
+            <Fragment key={getRowKey(row)}>
+              <Item rowKey={getRowKey(row)} layout="table">
+                {columns.map((column) => (
+                  <TableCell key={column.key} className={cn(column.handle ? HANDLE_CELL : 'px-3 py-2', 'whitespace-normal print:py-3 print:align-top', align(column), column.className)}>
+                    {column.cell(row)}
+                  </TableCell>
+                ))}
+              </Item>
+              {expanded?.after === getRowKey(row) && <ExpandedTableRow columns={columns.length}>{expanded.content}</ExpandedTableRow>}
+            </Fragment>
           ))}
         </TableBody>
       </Table>
