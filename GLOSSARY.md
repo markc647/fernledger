@@ -179,7 +179,7 @@ A value the Admin chooses in the app, such as the app title or the About your da
 _Avoid_: Preference, option, config
 
 **D1 usage bar**:
-What the Rules page shows the Admin, in the question it asks before "Apply the Rules to all Transactions", when the Deployer has added the two Cloudflare secrets for it: the Cloudflare account's rows read and rows written today, against D1 Free's 5,000,000 and 100,000 a day, as bars with a Low, Medium or High badge and the figures in words. It counts the whole account, runs a few minutes behind, and is optional, so its Setup needed can be ignored (ADR 0010).
+What the Rules page shows the Admin, in the question it asks before "Apply the Rules to all Transactions" and in the progress of a run that is paused for the allowance, when the Deployer has added the two Cloudflare secrets for it: the Cloudflare account's rows read and rows written today, against D1 Free's 5,000,000 and 100,000 a day, as bars with a Low, Medium or High badge and the figures in words. It counts the whole account, runs a few minutes behind, and is optional, so its Setup needed can be ignored (ADR 0010).
 _Avoid_: Quota meter, analytics
 
 **Setup needed**:
