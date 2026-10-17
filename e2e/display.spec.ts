@@ -1600,15 +1600,14 @@ test.describe('responsive table', () => {
     }
   })
 
-  test('shows signed NZD amounts and NZ dates, with the direction in words', async ({ page }) => {
+  test('shows signed NZD amounts and NZ dates, the sign carrying the direction and no words under it', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 })
     await page.goto('/styleguide')
     const table = page.getByRole('table', { name: 'Sample transactions' })
     await expect(table.getByRole('row').nth(1)).toContainText('Thu 8 Oct 2026')
     await expect(table.getByText('−$1,111.11')).toBeVisible()
     await expect(table.getByText('+$1,234.56')).toBeVisible()
-    await expect(table.getByText('Money out').first()).toBeVisible()
-    await expect(table.getByText('Money in').first()).toBeVisible()
+    await expect(table.getByText(/Money (in|out)/)).toHaveCount(0) // the sign is what says it, with the colour
     expect(await table.innerText()).not.toMatch(/\d-\$|-\$/) // a real minus sign, never a hyphen
   })
 

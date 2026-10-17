@@ -149,7 +149,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
         <dl className="mt-3 grid gap-3">
           <Fact label="Date">{formatDate(t.date)}</Fact>
           <Fact label="Amount">
-            <Amount cents={t.amountCents} showLabel />
+            <Amount cents={t.amountCents} />
           </Fact>
           <Fact label="Description">{t.description}</Fact>
           <Fact label="Account">{t.accountName}</Fact>

@@ -41,7 +41,7 @@ function columnsFor(person: string | null): Column<LoanLine>[] {
           </>
         ),
     },
-    { key: 'amount', header: 'Amount', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.amountCents} showLabel /> },
+    { key: 'amount', header: 'Amount', align: 'end', className: `${PAPER} [overflow-wrap:normal]`, cell: (row) => <Amount cents={row.amountCents} /> },
     { key: 'owed', header: 'Owed after', align: 'end', className: PAPER, cell: (row) => <Owed cents={row.owedAfterCents} person={person} /> },
   ]
 }

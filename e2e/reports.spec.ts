@@ -378,7 +378,7 @@ test.describe('on screen', () => {
     await expect(firstRow).toContainText(category) // an Override is the Category shown
     await expect(firstRow).toContainText(note(0))
     await expect(firstRow).toContainText('−$10.00')
-    await expect(firstRow).toContainText('Money out')
+    await expect(firstRow).not.toContainText('Money out') // on paper too, the sign says it
     const secondRow = table.locator('tbody tr').nth(1)
     await expect(secondRow).toContainText('Uncategorised')
     await expect(secondRow.getByText('No Note')).toBeAttached() // a missing Note is said, not left blank

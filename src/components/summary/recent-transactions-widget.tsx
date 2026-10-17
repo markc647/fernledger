@@ -26,7 +26,7 @@ export function RecentTransactionsWidget() {
               { key: 'date', header: 'Date', cell: (row) => formatDate(row.date) },
               { key: 'account', header: 'Account', cell: (row) => row.accountName },
               { key: 'description', header: 'Description', cell: (row) => row.description },
-              { key: 'amount', header: 'Amount', align: 'end', cell: (row) => <Amount cents={row.amountCents} showLabel /> },
+              { key: 'amount', header: 'Amount', align: 'end', cell: (row) => <Amount cents={row.amountCents} /> },
             ]}
             look="in-card"
           />

@@ -197,7 +197,7 @@ export function TransactionList({
         enableSorting: false,
         cell: (info) => <NoteCell row={info.row.original} />,
       }),
-      helper.accessor('amountCents', { id: 'amount', header: 'Amount', cell: (info) => <Amount cents={info.getValue()} showLabel /> }),
+      helper.accessor('amountCents', { id: 'amount', header: 'Amount', cell: (info) => <Amount cents={info.getValue()} /> }),
       ...(isAdmin
         ? [
             helper.display({

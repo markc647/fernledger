@@ -286,7 +286,7 @@ test('a Transaction opens to show its details, and Back returns to the same sear
   await expect(summary).toContainText(names.cafeOne)
   await expect(summary).toContainText(savings.name)
   await expect(summary).toContainText('−$15.00')
-  await expect(summary).toContainText('Money out')
+  await expect(summary).not.toContainText('Money out') // the sign says it
   await expect(summary).toContainText('Uncategorised')
   await expect(summary).toContainText('No Note')
   const bank = page.getByRole('region', { name: 'From the bank' })

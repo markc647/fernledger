@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAmount, formatAxisDollars, formatBalance, formatCount, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, formatMonthShort, moneyLabel, nzDate } from './format'
+import { formatAmount, formatAxisDollars, formatBalance, formatCount, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, formatMonthShort, nzDate } from './format'
 
 describe('formatCount (a number of things that is not money)', () => {
   it.each([
@@ -87,16 +87,6 @@ describe('formatBalance (an Account balance: signed only when negative)', () => 
   })
   it('shows zero without a sign', () => {
     expect(formatBalance(0)).toBe('$0.00')
-  })
-})
-
-describe('moneyLabel', () => {
-  it('says Money in or Money out in plain words', () => {
-    expect(moneyLabel(1)).toBe('Money in')
-    expect(moneyLabel(-1)).toBe('Money out')
-  })
-  it('has no label for a zero amount', () => {
-    expect(moneyLabel(0)).toBeNull()
   })
 })
 
