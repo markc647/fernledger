@@ -1,6 +1,7 @@
 import type { APIRequestContext, BrowserContext, Locator, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
 import { textOf, type PdfPage } from './pdf-text'
+import { expectPaperTable } from './table-look-helpers'
 
 // What every Report's browser tests share (reports.spec.ts, report-balances.spec.ts, report-spending.spec.ts): the title block and print layout of ticket 18's Report
 // frame, which a Report must keep (README: Reports). A spec checks what is its own (the figures, its Accounts, its dates) and calls these for the rest, so a change to
@@ -245,6 +246,7 @@ export async function expectOwnPage(page: Page) {
     return { page: style('.report-frame').page, thead: style('thead').display, row: style('tbody tr').breakInside, main: style('main').paddingLeft }
   })
   expect(styles).toEqual({ page: 'report', thead: 'table-header-group', row: 'avoid', main: '0px' })
+  await expectPaperTable(page) // and its tables are the paper layout, not the box and shading they have on screen
 }
 
 /** The Report writes its own title block: the app title as typed (`TITLE`), its name, the Account(s), the dates, and who generated it and when. */
