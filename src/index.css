@@ -270,6 +270,14 @@
   }
 }
 
+/* A menu, a sheet or a question locks the page's scroll while it is open (Radix, with react-remove-scroll). That hides the page's scrollbar, and to make up for the room it took the
+   library adds the scrollbar's width to the body's right margin (`body[data-scroll-locked]`, with `!important`). The page keeps that room itself (`scrollbar-gutter: stable`, above), so the
+   margin made up for room that was still there, and the header, the page and the header's buttons all moved sideways when anything opened (e2e/scroll-lock.spec.ts). Nothing here is
+   in a layer and `html body` is more specific than the library's own selector, so this wins over its `!important` and holds for every overlay that locks the scroll, now and later. */
+html body[data-scroll-locked] {
+  margin-right: 0 !important;
+}
+
 /* Reduced motion: no animation or smooth scrolling for anyone who asks the device for less. */
 @media (prefers-reduced-motion: reduce) {
   *,
