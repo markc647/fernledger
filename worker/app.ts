@@ -4,7 +4,7 @@ import { validator } from 'hono/validator'
 import * as z from 'zod/mini'
 import { accounts } from './accounts'
 import type { AppEnv } from './app-env'
-import { authConfigFromEnv, authenticate, devMember, refusalEvent } from './auth'
+import { authConfigFromEnv, authenticate, devMember } from './auth'
 import { balanceChecks, balances } from './balances'
 import { budgets } from './budgets'
 import { categories } from './categories'
@@ -34,11 +34,13 @@ export const app = new Hono<AppEnv>()
   // Every /api request is authenticated before routing, so unknown routes reveal nothing. Fail closed.
   .use('/api/*', async (c, next) => {
     const config = authConfigFromEnv(c.env)
-    const member = devMember(c.req.raw, c.env) ?? (config && (await authenticate(c.req.raw, config)))
-    if (!member) {
-      logEvent(refusalEvent(c.req.raw, config))
+    const dev = devMember(c.req.raw, c.env)
+    const verified = dev ? { member: dev } : config ? await authenticate(c.req.raw, config) : { refused: { event: 'auth.refused.not-configured' } }
+    if ('refused' in verified) {
+      logEvent(verified.refused.event, verified.refused)
       return c.json({ error: 'Unauthorised' }, 401)
     }
+    const { member } = verified
     c.set('member', member)
     await next()
   })

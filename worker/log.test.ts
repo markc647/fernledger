@@ -29,6 +29,15 @@ describe('logEvent', () => {
     expect(lines.map((l) => JSON.parse(l))).toEqual([{ event: 'sync.failed', errorClass: 'UnknownError' }])
   })
 
+  it('logs a code that is a fixed ERR_ constant, and drops anything else that could carry a value', () => {
+    const lines = capture()
+    logEvent('auth.refused.bad-token', { code: 'ERR_JWT_EXPIRED' })
+    logEvent('auth.refused.bad-token', { code: 'token for mum@leak.test' })
+    logEvent('auth.refused.bad-token', { code: 'err_jwt_expired' })
+    expect(lines.map((l) => JSON.parse(l))).toEqual([{ event: 'auth.refused.bad-token', code: 'ERR_JWT_EXPIRED' }, { event: 'auth.refused.bad-token' }, { event: 'auth.refused.bad-token' }])
+    expect(lines.join()).not.toContain('leak')
+  })
+
   it('drops an ID or count that is not a whole number', () => {
     const lines = capture()
     // The types stop this, but a runtime guard still stops a string (an email, a token) sneaking in.
