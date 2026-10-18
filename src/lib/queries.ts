@@ -8,15 +8,16 @@ import { HttpError } from './me'
 import { loadBalances } from './report-balances'
 import { loadLoans } from './report-loans'
 import { loadListing } from './report-transactions'
+import { sessionProblem } from './session'
 import { apiQuery, filterQuery, filtersOf, type TransactionSearch } from './transaction-search'
 
 export const PAGE_SIZE = 50
 
 /**
  * A Report's reads are asked for again when they fail, as any read is, except when the Worker refuses them (403): a Member who asks for a Report the Admin has not made is told so
- * at once, and asking again would only be refused again.
+ * at once, and asking again would only be refused again. Nor once the sign-in is known to be gone (src/lib/session.ts), which asking again would only meet again.
  */
-const retryUnlessRefused = (count: number, error: unknown) => !(error instanceof HttpError && error.status === 403) && count < 3
+const retryUnlessRefused = (count: number, error: unknown) => !(error instanceof HttpError && error.status === 403) && count < 3 && sessionProblem() === null
 
 export const accountsQuery = queryOptions({
   queryKey: ['accounts'],

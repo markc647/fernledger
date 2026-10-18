@@ -10,6 +10,8 @@
 //   An alias (`const f = fetch`), a computed name, a dynamic `import()` of a URL, or a URL set on an element from code
 //   is not caught. The CSP and worker/outbound.test.ts cover some of these.
 // - A line that starts with `//`, `*` or `/*` is skipped whole, even if code follows on it.
+// - src/lib/session.ts passes the browser's `fetch` by name to the API client (`inner = fetch`), so that a redirect is not followed: an alias, which is not caught (above), and so
+//   the one use of it that is known and let be (it names no address; ADR 0010, Consequences). A second would not be found either.
 // - Only index.html is checked for external `src` and `href` (public/ files and CSS are not).
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'

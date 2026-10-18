@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAllowanceOn } from '@/components/allowance-bar'
 import { AppSidebar } from '@/components/app-sidebar'
 import { DevIdentitySwitcher } from '@/components/dev-identity-switcher'
-import { SessionProblemPage } from '@/components/session-problem'
+import { SessionBanner, SessionProblemPage } from '@/components/session-problem'
 import { SiteHeader } from '@/components/site-header'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { deviceStorage } from '@/lib/device-storage'
@@ -81,16 +81,20 @@ function Layout() {
             {/* Local development only: inside the panel, because the sidebar is fixed to the left edge. */}
             {import.meta.env.DEV && <DevIdentitySwitcher />}
             <main id="main" tabIndex={-1} className="mx-auto w-full max-w-6xl p-4 md:p-6">
-              {/* A sign-in problem found by any API call, not only the one for who is signed in: a session that runs out while a page is open shows it too (src/lib/session.ts). */}
-              {sessionProblem ? (
+              {/* A sign-in problem found by any API call, not only the one for who is signed in (src/lib/session.ts). With nothing loaded yet it is the page; once who is signed in has loaded it is a
+                  banner over the page, which stays as it was, and a read in the background cannot replace it. */}
+              {sessionProblem && me === undefined ? (
                 <SessionProblemPage problem={sessionProblem} />
-              ) : meError ? (
+              ) : meError && me === undefined ? (
                 <>
                   <h1 className="text-2xl font-semibold">Something went wrong</h1>
                   <p className="mt-2">Fernledger couldn't load your details. Reload the page to try again.</p>
                 </>
               ) : (
-                <Outlet />
+                <>
+                  {sessionProblem && <SessionBanner problem={sessionProblem} />}
+                  <Outlet />
+                </>
               )}
             </main>
           </SidebarInset>

@@ -186,7 +186,7 @@ If your Cloudflare account already has an account-wide Access rule (**Protect al
 2. **Zero Trust → Access → Applications → Add an application → Workers.** (Cloudflare's own pages call the Access menu "Access controls".) Deploy the Worker first so it can be chosen.
    - **Worker:** `fernledger`, the `name` in `wrangler.jsonc`.
    - **Traffic:** **All traffic**. **Previews only** would leave the live app open.
-   - **Session duration:** 24 hours. This is the length of a sign-in, and the only place it is set: Fernledger has no session of its own. When it runs out a Member sees **Your sign-in has expired** and presses **Sign in again** (README [What it does](../README.md#what-it-does)).
+   - **Session duration:** 24 hours. This is the length of a sign-in, and the only place it is set: Fernledger has no session of its own. When it runs out anyone sees **Your sign-in has expired** and presses **Sign in again** (README [What it does](../README.md#what-it-does)).
    - **Login methods:** One-time PIN only.
 
    Cloudflare also describes a quicker route (Workers & Pages → your Worker → **Access**). Its policy options are **Cloudflare account** and **Email domain**, and neither is a list of people, so use the Zero Trust route above.

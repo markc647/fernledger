@@ -1,8 +1,28 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import type { MouseEvent } from 'react'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { api } from '@/lib/api'
 import { accountsQuery, categoriesQuery, transactionCountQuery } from '@/lib/queries'
+import { sessionProblem } from '@/lib/session'
 import { EXPORT_MAX_ROWS, exportPath, searchProblem, type TransactionSearch } from '@/lib/transaction-search'
+
+/**
+ * Saves the file the link is for, once the sign-in is known to be good. A link is followed by the browser itself and not through the API client, so when Access's session has run out
+ * it would save Access's sign-in page as the CSV file. So the sign-in is checked through the client first (src/lib/session.ts), which puts the banner up if it has expired, and
+ * nothing is saved then. A click with a modifier (a new tab, Save link as) is the browser's own.
+ */
+async function saveIfSignedIn(event: MouseEvent<HTMLAnchorElement>) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  const href = event.currentTarget.href
+  await api.me.$get().catch(() => undefined)
+  if (sessionProblem() !== null) return
+  const link = document.createElement('a')
+  link.href = href
+  link.download = ''
+  link.click()
+}
 
 /**
  * The Export page's content: what Download CSV saves and what a saved file leaves unprotected, the Transactions' filters, and Download CSV for the Transactions that match what
@@ -48,7 +68,7 @@ export function TransactionExport({ search, onSearch }: { search: TransactionSea
         actions={({ unapplied }) => (
           <>
             {!unapplied && searchable ? (
-              <a href={exportPath(search)} download className={buttonVariants({ variant: 'outline', size: 'touch' })} aria-describedby={describedBy}>
+              <a href={exportPath(search)} download onClick={(event) => void saveIfSignedIn(event)} className={buttonVariants({ variant: 'outline', size: 'touch' })} aria-describedby={describedBy}>
                 Download CSV
               </a>
             ) : (
