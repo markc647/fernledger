@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test'
 import { expect, noAxeViolations, settle, test } from './fixtures'
 import { pageOrder, ruleActions, ruleGrip, ruleIds, runningJob, withRules } from './rule-helpers'
-import { menuAction, noAxeViolationsFromTop, OPEN_MENU, openActions } from './row-actions-helpers'
+import { menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
 
 // Putting the Rules in order by dragging (src/components/sortable-rows.tsx): with a mouse, with a finger, and with the keyboard, and what the page does when the Worker does not take the order.
 // The Rules page's other specs, and the Move up and Move down items of the Actions menu (the way to do it without dragging), are in rules.spec.ts. A spec works only with the Rules it makes,
@@ -173,7 +173,7 @@ test.describe('an order the Worker does not take', () => {
         await expect.poll(async () => pageOrder(page, a, b, c)).toEqual([b, a, c]) // and taken back
         expect(await ruleIds(context)).toEqual(before) // nothing was saved
         await expect(page.getByRole('status').filter({ hasText: /^Moved/ })).toHaveCount(0) // and what was said of the move before is not said of this one
-        await noAxeViolationsFromTop(page)
+        await noAxeViolations(page)
 
         // It can be tried again, and this time the Worker takes it.
         await page.unroute(/\/api\/rules\/order$/)
@@ -248,7 +248,7 @@ test.describe('on a phone', () => {
       }
       await expect(ruleGrip(page, a)).toHaveAccessibleName(/^Drag to reorder Rule \d+$/)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
-      await noAxeViolationsFromTop(page)
+      await noAxeViolations(page)
 
       // The menu moves a card.
       await ruleActions(page, b).scrollIntoViewIfNeeded()

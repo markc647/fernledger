@@ -1,7 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { findTransactions, forgetKeptReportsAfterEach } from './report-helpers'
-import { noAxeViolationsFromTop } from './row-actions-helpers'
 
 forgetKeptReportsAfterEach() // a Report shown as the Admin is kept on a list every spec shares, so each test leaves it empty
 
@@ -135,7 +134,7 @@ test('the Admin can take one half of a Transfer out of the Transfers by choosing
 
   await outRow.getByRole('button', { name: /^Edit / }).click()
   await expect(page.getByText("This Transaction is a Transfer. Choosing a Category takes it out of the Transfers: it then counts under that Category's kind, which is Spending, Income or Loans.")).toBeVisible()
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
   await page.locator('#edit-category').selectOption({ label: 'Gifts and donations' })
   await page.getByRole('button', { name: 'Save', exact: true }).click()
 
@@ -238,7 +237,7 @@ test('the Admin can say Not a Transfer from the edit panel, and is told what an 
   await page.locator('#edit-note').fill('Typed but not saved')
   await page.getByRole('button', { name: 'Not a Transfer', exact: true }).click()
   await expect(page.getByRole('group', { name: 'Mark as Not a Transfer?' })).toContainText("Changes in this panel that you haven't saved will be lost.")
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
   await page.getByRole('button', { name: 'Yes, mark Not a Transfer' }).click()
 
   // The panel closes, the page says so, and neither half is a Transfer. The unsaved Note was not saved.
@@ -256,7 +255,7 @@ test('the Admin can say Not a Transfer from the edit panel, and is told what an 
   // Undo closes the panel too, so it says what an unsaved change costs, as the question for Not a Transfer does.
   await page.locator('#edit-note').fill('Typed but not saved either')
   await expect(page.getByRole('button', { name: 'Undo: treat as a Transfer again' })).toHaveAccessibleDescription("Changes in this panel that you haven't saved will be lost.")
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
   await page.getByRole('button', { name: 'Undo: treat as a Transfer again' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Treated as a Transfer again. It is paired with its matching Transaction.' })).toBeVisible()
   await expect(outRow).toContainText(`Transfer to ${savings.name}`)

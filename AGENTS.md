@@ -9,6 +9,7 @@ Self-hosted NZ bank-account tracker on Cloudflare Workers (free plan) + D1 + R2,
 - `migrations/`: add-only SQL, `<ticket number × 100 + n>_<name>.sql`; each ticket owns its range. See CODING_STANDARDS.md#migrations.
 - `docs/releasing.md`: how a release is made; `test/sample-dbs/` holds the databases every release must upgrade from.
 - `docs/bank-formats/`: bank CSV layouts, with made-up examples. Real exports never enter this repo.
+- `docs/agents/parallel-work.md`: read it first when you are in a worktree, a subagent, or testing beside other agents.
 
 ## Before reporting work done
 - Run `npm run check` (lint, typecheck, tests, script tests, migration check, secret scan and its self-test). It's green when it exits 0. The first scan downloads a pinned, checksum-verified gitleaks into your user cache.

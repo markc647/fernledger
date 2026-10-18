@@ -19,6 +19,7 @@ describe('recordChange', () => {
       actor: admin,
       type: 'settings',
       summary: 'Changed the app title',
+      onlyIfChanged: false,
       before: { app_title: 'Starting title' },
       after: { app_title: "Mum's finances" },
     })
@@ -42,6 +43,7 @@ describe('recordChange', () => {
       actor: admin,
       type: 'settings',
       summary: 'Filled in About your data',
+      onlyIfChanged: false,
     })
 
     expect(await getSetting(env.DB, 'about_contact')).toBe('Sam')
@@ -74,8 +76,8 @@ describe('recordChange', () => {
       expect(await changeLog()).toEqual([])
     })
 
-    it('is not the default: a change without it always has its entry', async () => {
-      await recordChange(env.DB, rename('Some other title', 'Changed'), { actor: admin, type: 'settings', summary: 'Tried to change the app title' })
+    it('writes the entry whatever changed when it is false', async () => {
+      await recordChange(env.DB, rename('Some other title', 'Changed'), { actor: admin, type: 'settings', summary: 'Tried to change the app title', onlyIfChanged: false })
 
       expect(await changeLog()).toMatchObject([{ summary: 'Tried to change the app title' }])
     })
@@ -102,7 +104,7 @@ describe('recordChange', () => {
       const words = `Added a Rule: text contains "${CHANGES}"`
 
       await recordChange(env.DB, touch(2), { actor: admin, type: 'category', summary: words, onlyIfChanged: true })
-      await recordChange(env.DB, touch(2), { actor: admin, type: 'category', summary: words })
+      await recordChange(env.DB, touch(2), { actor: admin, type: 'category', summary: words, onlyIfChanged: false })
 
       expect(await changeLog()).toMatchObject([{ summary: words }, { summary: words }])
     })
@@ -121,7 +123,7 @@ describe('recordChange', () => {
   it('leaves no entry, and no partial change, when a mutation fails', async () => {
     const failing = [putSetting(env.DB, 'app_title', 'Should not stick'), env.DB.prepare('INSERT INTO no_such_table (x) VALUES (1)')]
 
-    await expect(recordChange(env.DB, failing, { actor: admin, type: 'settings', summary: 'Will fail' })).rejects.toThrow()
+    await expect(recordChange(env.DB, failing, { actor: admin, type: 'settings', summary: 'Will fail', onlyIfChanged: false })).rejects.toThrow()
 
     expect(await changeLog()).toEqual([])
     expect(await getSetting(env.DB, 'app_title')).toBe('Starting title')
@@ -129,7 +131,7 @@ describe('recordChange', () => {
 
   it('leaves no change behind when the entry cannot be written', async () => {
     // The entry's actor is NOT NULL, so the entry is refused after the mutation ran inside the same batch.
-    const noActor = { actor: { email: null } as unknown as Member, type: 'settings' as const, summary: 'Will fail' }
+    const noActor = { actor: { email: null } as unknown as Member, type: 'settings' as const, summary: 'Will fail', onlyIfChanged: false }
 
     await expect(recordChange(env.DB, putSetting(env.DB, 'app_title', 'Should not stick'), noActor)).rejects.toThrow()
 

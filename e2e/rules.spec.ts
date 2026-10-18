@@ -1,9 +1,9 @@
 import type { BrowserContext, Page } from '@playwright/test'
-import { expect, settle, signInAs, test } from './fixtures'
+import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
 import { findTransactions, transactionId } from './report-helpers'
 import { addRule, applyAnswer, applyButton, applyDialog, applyTheRules, categoryId, frameHeading, openApplyDialog, pageOrder, progressFrame, removeRule, ruleActions, ruleIds, runningJob, spinner, stubUsageReadings, usageFigures, usageOn, withRules } from './rule-helpers'
-import { arrowTo, chooseAction, menuAction, noAxeViolationsFromTop, openActions, ruleActionButtons } from './row-actions-helpers'
+import { arrowTo, chooseAction, menuAction, openActions, ruleActionButtons } from './row-actions-helpers'
 import { chooseTextSize, mainNav, navGroup, navigateTo } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
@@ -65,7 +65,7 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
   await expect(result).toContainText('1 Transaction you already have matches.')
 
   await page.getByLabel('What the Rule does').selectOption({ label: 'Put in the Category Groceries' })
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save Rule' }).click()
 
   const saved = page.getByRole('status').filter({ hasText: 'Added the Rule.' })
@@ -75,7 +75,7 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
   const row = rowFor(page, shop.toLowerCase())
   await expect(row).toContainText(`Text contains “${shop.toLowerCase()}”`)
   await expect(row).toContainText('Category: Groceries')
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 
   // A Transaction imported now is put in Groceries by the Rule; the one on file from before is not.
   await importTransaction(context, baseURL!, testInfo.project.name, `${shop} NEW`, `RB${stamp}`)
@@ -141,12 +141,12 @@ test('the Admin changes a Rule and moves it in the order with the keyboard', asy
     await expect(page.getByText('is a Transfer even if no matching Transaction is found in another Account')).toBeVisible()
     await expect(page.getByText("An Override outranks this Rule too: a Transaction with an Override counts under the Override's Category and is not a Transfer.")).toBeVisible() // as Not a Transfer does
     await expect(page.getByRole('button', { name: 'Save Rule' })).toBeEnabled()
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
     await page.getByRole('button', { name: 'Save Rule' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Saved the changes to the Rule.' })).toBeVisible()
     await expect(secondActions).toBeFocused()
     await expect(rowFor(page, `EXAMPLE TWO ${stamp}`)).toContainText('Mark as a Transfer')
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
   } finally {
     await removeRule(context, baseURL!, first)
     await removeRule(context, baseURL!, second)
@@ -198,7 +198,7 @@ test('with one Rule there is nothing to put in order: no handle, no Reorder head
   await expect(page.locator('[id$="-grip"]')).toHaveCount(0)
   await expect(page.getByRole('columnheader', { name: 'Reorder' })).toHaveCount(0)
   await expect(page.getByText(/To change the order/)).toHaveCount(0)
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 })
 
 test('the first Rule cannot move up and the last cannot move down, and each of the others can do both', async ({ page, context, baseURL }, testInfo) => {
@@ -247,7 +247,7 @@ test('the Admin moves a Rule up and down from its Actions menu with the mouse, a
     await expect(ruleActions(page, a)).toBeFocused()
     expect(mine(await ruleIds(context))).toEqual([c, a, b])
     expect(await pageOrder(page, a, b, c)).toEqual([c, a, b])
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
 
     // The Change Log has the new order.
     await page.goto('/change-log')
@@ -276,7 +276,7 @@ test.describe('a refused Rule', () => {
       refusal = { error: 'There are already 100 Rules; remove one first' }
       await page.getByRole('button', { name: 'Save Rule' }).click()
       await expect(page.getByRole('alert').filter({ hasText: 'already 100 Rules' })).toHaveText('There are already 100 Rules. Remove one before adding another.')
-      await noAxeViolationsFromTop(page)
+      await noAxeViolations(page)
     } finally {
       await removeRule(context, baseURL!, id)
     }
@@ -320,7 +320,7 @@ test.describe('a Rule removed meanwhile', () => {
 
     await expect(page.getByRole('status').filter({ hasText: 'That Rule had already been removed' })).toHaveText('That Rule had already been removed, so nothing was changed. The list is up to date now.')
     await expect(rowFor(page, `EXAMPLE SIX ${stamp}`)).toHaveCount(0)
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
   })
 })
 
@@ -359,7 +359,7 @@ test('the Admin is told what is wrong with a box, and taken to it', async ({ pag
   await expect(page.getByRole('alert').filter({ hasText: 'Fill in at least one of the boxes above' })).toBeVisible()
   await expect(page.getByLabel('Text contains', { exact: true })).toBeFocused()
   await expect(page.getByLabel('Text contains', { exact: true })).toHaveAttribute('aria-invalid', 'true')
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 
   await page.getByLabel('Text contains', { exact: true }).fill('example')
   await page.getByLabel('Amount from ($)').fill('12.345')
@@ -372,7 +372,7 @@ test('the Admin is told what is wrong with a box, and taken to it', async ({ pag
   await page.getByRole('button', { name: 'Check how many match' }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'must not be less than the amount it starts from' })).toBeVisible()
   await expect(page.getByLabel('Amount up to ($)')).toBeFocused()
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 })
 
 // The hints under three of the form's boxes are behind a "?" beside the box's label, and are still what describes the box to a screen reader.
@@ -406,7 +406,7 @@ test.describe("the form's hints", () => {
     await help.click()
     await expect(hint).toContainText(text)
     await expect(input).toHaveAccessibleDescription(start(text)) // still, with the hint open
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
     await page.keyboard.press('Escape')
     await expect(hint).toHaveCount(0)
     await expect(help).toBeFocused()
@@ -495,7 +495,7 @@ test.describe('Apply the Rules to all Transactions, beside Add a Rule', () => {
     await expect(dialog.getByRole('region', { name: 'Free database allowance' })).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible()
     await expect(applyAnswer(page)).toBeFocused() // so Enter is the answer to the question
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
 
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(applyDialog(page)).toHaveCount(0)
@@ -560,7 +560,7 @@ test('the Admin applies a Rule to the Transactions already on file, and one set 
     await page.goto('/rules')
     await expect(page.getByRole('heading', { level: 2, name: 'Apply the Rules to all Transactions' })).toHaveCount(0) // (the box with a heading of its own is gone: the button asks first)
     await expect(applyButton(page)).toBeEnabled()
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
     // Nothing has changed yet: a Rule is for new Transactions until it is applied.
     expect((await found()).map((t) => t.categoryName).sort()).toEqual(['Travel', null])
 
@@ -572,7 +572,7 @@ test('the Admin applies a Rule to the Transactions already on file, and one set 
     await expect(frameHeading(page)).toHaveText('Applied the Rules to all Transactions')
     await expect(applyButton(page)).toBeEnabled()
     await expect(page.getByRole('progressbar')).toHaveCount(0)
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
 
     // The Transaction on file from before has the Rule's Category now. The one the Admin set by hand has the Category it was given.
     const applied = await found()
@@ -648,7 +648,7 @@ test.describe('while the Rules are being applied', () => {
     await expect(frameHeading(page)).toHaveText('Applying the Rules to all Transactions')
     await expect(frame.getByRole('status', { name: 'Loading' })).toBeVisible()
     await expect(frame.getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
 
     gates[0]!.open()
     await expect(page.getByText('Looked at 10,000 of up to 20,000 Transactions (50%).')).toBeVisible()
@@ -666,7 +666,7 @@ test.describe('while the Rules are being applied', () => {
     await expect(page.getByText(/^Last updated/)).toHaveCount(0)
     await expect(frame.getByRole('region', { name: 'Free database allowance' })).toContainText('1,234,567 of 5,000,000 rows read · 24%') // the allowance, which the Apply button cannot show while a run is going
     await expect(frame.getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
 
     // The day changes: the page asks again, with nobody pressing anything. It reads the job as well as asking for a step, and the two
     // answers can come back in either order. Here the reading comes back last, saying where the run was before the step finished it:
@@ -687,7 +687,7 @@ test.describe('while the Rules are being applied', () => {
     await expect(spinner(page)).toHaveCount(0)
     await expect(frame.getByRole('button', { name: 'Stop applying the Rules' })).toHaveCount(0)
     await expect(applyButton(page)).toBeEnabled()
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
     expect(steps).toBe(3) // the late reading did not set the run going again
   })
 
@@ -717,7 +717,7 @@ test.describe('while the Rules are being applied', () => {
     await expect(progressFrame(page).getByRole('button', { name: 'Stop applying the Rules' })).toBeEnabled()
     // The button that opens the allowance is off while the run is going, so the allowance is in the frame, as it is now (read as the frame showed it).
     await expect(progressFrame(page).getByRole('region', { name: 'Free database allowance' })).toContainText('4,900,000 of 5,000,000 rows read · 98%')
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
     expect(steps).toBe(0)
   })
 
@@ -844,7 +844,7 @@ test.describe('while the Rules are being applied', () => {
     await expect(spinner(page)).toHaveCount(0) // stopped, and still said in the frame
     await expect(progressFrame(page)).toContainText('Stopped. Looked at 7,000 Transactions')
     await expect(applyButton(page)).toBeEnabled()
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
   })
 
   test('while a Rule is being changed the run waits, and the form, the Save message and the removal say that saving starts it again', async ({ page, context, baseURL }, testInfo) => {
@@ -867,8 +867,9 @@ test.describe('while the Rules are being applied', () => {
       // Nothing is being done, and the frame says so: no spinner, and a title of its own.
       await expect(frameHeading(page)).toHaveText('Applying the Rules waits while you change a Rule')
       await expect(spinner(page)).toHaveCount(0)
-      await noAxeViolationsFromTop(page)
+      await noAxeViolations(page)
       const whenOpened = steps
+      // oxlint-disable-next-line no-restricted-properties -- nothing to await: this checks that no step is asked for while the form is open
       await page.waitForTimeout(600)
       expect(steps - whenOpened).toBeLessThanOrEqual(1) // ...until the form is open: at most the one already out
       await page.getByRole('button', { name: 'Cancel' }).click()
@@ -893,7 +894,7 @@ test('a Member does not see the Rules page, and the API refuses their changes', 
   await expect(navGroup(page, 'Transactions')).toBeVisible()
   await expect(navGroup(page, 'Set up')).toHaveCount(0) // a Member's sidebar has no Set up group, so no Rules link in it
   await expect(mainNav(page).getByRole('link', { name: 'Rules' })).toHaveCount(0)
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 
   // The D1 usage figures are the Admin's alone, whether or not they are set up (here they are not). (Asked before the refused write below:
   // that one is sent without a body, and Vite's local server then drops the next request on its connection, as settings.spec.ts says.)
@@ -940,7 +941,7 @@ test.describe('the D1 usage bar', () => {
     await expect(panel.getByRole('progressbar')).toHaveCount(0)
     await expect(panel.getByRole('alert')).toHaveCount(0)
     await expect(panel.getByRole('button')).toHaveCount(0)
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
     expect(asked).toEqual([])
   })
 
@@ -992,7 +993,7 @@ test.describe('the D1 usage bar', () => {
       // Said once, for both bars.
       await expect(usagePanel(page).getByText('The allowance starts again on Thu 15 Oct 2026, 1:00 pm, New Zealand time.')).toBeVisible()
       await expect(usagePanel(page).getByText('These figures are for the whole Cloudflare account, not only Fernledger, and run a few minutes behind.')).toBeVisible()
-      await noAxeViolationsFromTop(page)
+      await noAxeViolations(page)
     })
   }
 
@@ -1049,13 +1050,13 @@ test.describe('the D1 usage bar', () => {
       await expect(note).toContainText('The steps are in docs/setup.md, under "D1 usage bar (optional)".')
       await expect(panel.getByRole('progressbar')).toHaveCount(0)
       await expect(applyAnswer(page)).toBeEnabled() // the Rules can still be applied
-      await noAxeViolationsFromTop(page)
+      await noAxeViolations(page)
 
       await panel.getByRole('button', { name: 'Check again' }).click()
       await expect(panel.getByText('1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
       await expect(panel.getByText('Usage unavailable.')).toHaveCount(0)
       expect(usage.readings()).toBe(2)
-      await noAxeViolationsFromTop(page)
+      await noAxeViolations(page)
     })
 
     test('after figures, a reading that fails takes them down rather than leaving them as today, and asking again brings them back', async ({ page, context }) => {

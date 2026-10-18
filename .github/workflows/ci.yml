@@ -5,7 +5,20 @@ on:
   push:
     branches: [main, 'ui/**', 'fix/**', 'chore/**', 'ticket/**', 'update/**']
   pull_request:
-  workflow_dispatch: # runs it by hand from the Actions tab, once this file is on main
+  # Runs it by hand, once this file is on main. A test that fails only on CI can be run there many times:
+  # `gh workflow run ci.yml --ref <branch> -f spec=rules-reorder -f grep="keyboard" -f repeat=20`.
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: Only the spec files whose path matches this (e.g. rules-reorder)
+        required: false
+      grep:
+        description: Only the tests whose title matches this
+        required: false
+      repeat:
+        description: Run each test this many times
+        required: false
+        default: '1'
 
 # One run for a branch: a push to a branch that has a pull request starts both a push run and a pull request run, and the newer replaces the older.
 concurrency:
@@ -37,7 +50,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      # The inputs reach the shell as variables, never pasted into the script.
+      - run: npm run test:e2e -- $SPEC ${GREP:+--grep "$GREP"} --repeat-each="$REPEAT"
+        env:
+          SPEC: ${{ inputs.spec }}
+          GREP: ${{ inputs.grep }}
+          REPEAT: ${{ inputs.repeat || '1' }}
+      # The traces of the tests that failed (playwright.config.ts), for `npx playwright show-trace`.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces
+          path: test-results/
+          retention-days: 7
 
   # gitleaks runs twice on purpose: `check` scans the working tree, this job scans git history.
   secrets-scan:

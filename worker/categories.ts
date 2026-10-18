@@ -38,6 +38,7 @@ export const categories = new Hono<AppEnv>()
         actor: c.var.member,
         type: 'category',
         summary: `Added Category ${name}`,
+        onlyIfChanged: false,
         after: { name, kind: KIND_LABELS[kind] },
       })
       return c.json({ id: added!.meta.last_row_id, name, kind }, 201)
