@@ -13,6 +13,7 @@ import { categoriesQuery } from '@/lib/queries'
 import { countSentence, directionOf, savedRuleSentence, tooManyNote } from '@/lib/rule-from-transaction'
 import { suggestRuleText } from '@/lib/rule-text'
 import { ruleWhen } from '@/lib/rules'
+import { isAccessRedirect, useSessionProblem } from '@/lib/session'
 import { NOT_TRANSFER_NOTE, notTransferSaved, transferEditHint, treatAsTransferAgainSaved, type TransferSource } from '@/lib/transfers'
 import { useDebounced } from '@/lib/use-debounced'
 
@@ -52,9 +53,13 @@ const COUNT_DELAY_MS = 700
 /** How long a count may take before it is given up as a count that failed: a Worker that never answers must not keep Save Category and Rule off for ever. Its work is the reading of every Transaction, which takes seconds. */
 const COUNT_TIMEOUT_MS = 15_000
 
+/** A count that met a problem with the sign-in (src/lib/session.ts): the banner over the page says so, and it is not a count that failed. */
+class SignInProblem extends Error {}
+
 type RuleCount = {
   /** The answer for the text and direction that were last asked about, or the one before while the next is on its way. */
   counts: { matches: number; uncategorised: number } | undefined
+  /** The count could not be had, for a reason of its own (the Worker failed, or did not answer in time), and the Rule can be saved without it. */
   failed: boolean
   /** An answer is on its way, or the Admin has typed since the one that is showing. */
   counting: boolean
@@ -65,7 +70,7 @@ type RuleCount = {
 /**
  * The count of what the Rule's text matches, from the Rules' preview (POST /api/rules/preview, which reads every Transaction once: ADR 0004). It is asked for once the Admin has stopped typing for
  * COUNT_DELAY_MS (the first one at once: the box starts with a suggestion), and a request that is overtaken by the next is cancelled, or given up after COUNT_TIMEOUT_MS and then counted as failed.
- * An answer is kept while the fields are open, so a text that was counted is not read again, and thrown away when they close (a Rule or an Override may have changed what it would say). Each
+ * A count that meets a problem with the sign-in says nothing of its own: the banner over the page does, and it is asked again once a call has worked. An answer is kept while the fields are open, so a text that was counted is not read again, and thrown away when they close (a Rule or an Override may have changed what it would say). Each
  * time they open is a session of its own in the key of the answers, so that what the last session knew is not shown, even as the answer to wait for, in the next.
  */
 function useRuleCount(rule: RuleDraft | null): RuleCount {
@@ -103,6 +108,7 @@ function useRuleCount(rule: RuleDraft | null): RuleCount {
       signal.addEventListener('abort', overtaken)
       try {
         const res = await api.rules.preview.$post({ json: { textContains: askedText, direction: askedDirection === '' ? null : askedDirection, uncategorised: true } }, { init: { signal: giveUp.signal } })
+        if (isAccessRedirect(res) || res.status === 401) throw new SignInProblem()
         if (!res.ok) throw new HttpError(res.status)
         const { matches, uncategorised } = await res.json()
         return { matches, uncategorised: uncategorised ?? 0 }
@@ -113,11 +119,18 @@ function useRuleCount(rule: RuleDraft | null): RuleCount {
     },
   })
   const current = text === askedText && direction === askedDirection
+  const signInProblem = count.isError && count.error instanceof SignInProblem
+  // Once the sign-in is good again (a call has worked, and the banner has gone), the count that could not be had is asked for again.
+  const problem = useSessionProblem()
+  const { refetch } = count
+  useEffect(() => {
+    if (signInProblem && problem === null) void refetch()
+  }, [signInProblem, problem, refetch])
   return {
     counts: count.data,
-    failed: count.isError,
+    failed: count.isError && !signInProblem,
     counting: text !== '' && (!current || count.isFetching),
-    ready: text !== '' && current && !count.isFetching && !count.isPlaceholderData && (count.isSuccess || count.isError),
+    ready: text !== '' && current && !count.isFetching && !count.isPlaceholderData && (count.isSuccess || (count.isError && !signInProblem)),
   }
 }
 

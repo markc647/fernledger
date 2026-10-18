@@ -1,8 +1,9 @@
-import type { BrowserContext, Page } from '@playwright/test'
+import type { BrowserContext, Page, Route } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
 import { categoryId, removeRule } from './rule-helpers'
 import { rowButton } from './row-actions-helpers'
+import { accessRedirect } from './session-helpers'
 
 // Create Rule, in a Transaction's Edit panel: the Admin makes a Rule from an Uncategorised Transaction and gives its Category to the others like it, in one press (README, Rules). The Worker's
 // answers are held by worker/rule-from-transaction.test.ts, and the suggested text by src/lib/rule-text.test.ts; this is the page: the panel, the live count, the line it says, and where focus goes.
@@ -384,3 +385,40 @@ test('a count that is never answered is given up after 15 seconds, and Save Cate
   await expect(saveRule).toBeEnabled()
   await expect(panel.getByText('Counting…')).toHaveCount(0)
 })
+
+// A count that meets a problem with the sign-in (src/lib/session.ts) is not a count that failed: the banner over the page says what is wrong, and says it once. The count is asked again when
+// the sign-in is good again, which the next call that works shows.
+for (const [name, problem, answer, statuses] of [
+  ['an expired sign-in', 'Your sign-in has expired', (route: Route) => accessRedirect(route), []],
+  ['the Worker not accepting the sign-in', 'Not signed in', (route: Route) => route.fulfill({ status: 401, json: { error: 'Unauthorised' } }), [401]],
+] as const) {
+  test.describe(name, () => {
+    test.use({ expectedStatuses: [...statuses] }) // Chrome logs a 401 as an error, and the spec's page fails on one it was not told to expect
+    test(`is the banner's to say, and is not "could not count"; the count comes when the sign-in is good again`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      const row = stubRow(4248, 'EFTPOS 1234 EXAMPLE SESSION AUCKLAND 12/10')
+      await stubList(page, [row])
+      let signedIn = false
+      await page.route('**/api/rules/preview', (route) => (signedIn ? route.fulfill({ json: { matches: 3, samples: [], uncategorised: 2 } }) : answer(route)))
+      await page.goto('/transactions')
+      await rowButton(page, 'Edit', `${row.description}, ${dateText(row.date)}`).click()
+      const panel = page.getByRole('region', { name: /^Edit Category and Note/ })
+      await panel.getByRole('button', { name: 'Create Rule' }).click()
+      await panel.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
+      const saveRule = panel.getByRole('button', { name: 'Save Category and Rule' })
+
+      await expect(page.getByRole('alert').filter({ hasText: problem })).toBeVisible()
+      await expect(panel.getByRole('status')).not.toContainText('could not count')
+      await expect(panel.getByText('Counting…')).toHaveCount(0)
+      await expect(saveRule).toBeDisabled() // there is no count to have seen, and a save would meet the same thing
+      await expect(textBox(page)).toHaveValue('EXAMPLE SESSION') // and what was typed is still there
+
+      // Signed in again: the next call that works (who is signed in, when the window is used) takes the banner away, and the count is asked for again.
+      signedIn = true
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange', { bubbles: true })))
+      await expect(panel.getByRole('status')).toContainText('3 Transactions match, 2 of them Uncategorised.')
+      await expect(page.getByRole('alert').filter({ hasText: problem })).toHaveCount(0)
+      await expect(saveRule).toBeEnabled()
+    })
+  })
+}
