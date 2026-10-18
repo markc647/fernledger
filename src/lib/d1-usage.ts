@@ -37,6 +37,47 @@ const meter = (noun: 'read' | 'written', used: number, limit: number): Meter => 
 /** The two bars: rows read (the allowance that ran out), then rows written. */
 export const meters = (usage: D1Usage): [Meter, Meter] => [meter('read', usage.rowsRead, usage.readLimit), meter('written', usage.rowsWritten, usage.writeLimit)]
 
+export type LeftLevel = 'plenty' | 'low' | 'almost-used'
+
+export type Allowance = {
+  /** Whole per cent of today's allowance left, of whichever of the two has less. */
+  percent: number
+  /** Which of the two that is: the reads (when the two leave the same). */
+  which: 'read' | 'written'
+  level: LeftLevel
+  /** The word that says it is running out, so the colour is not the only cue: none while there is plenty. */
+  word: 'Low' | 'Almost used' | null
+  /** Both figures, for a tooltip or a line under the bar. */
+  figures: [string, string]
+  /** What a screen reader says for the bar's value: the percentage, the word, both figures and that it is an estimate. */
+  valueText: string
+}
+
+/** Whole per cent left, rounded down so it is never shown as more than there is; 0 once the allowance is used up or passed. */
+const leftOf = (used: number, limit: number) => Math.max(0, Math.floor(((limit - used) * 100) / limit))
+
+/** Plenty from 20% left, Low below it, Almost used below 5%. */
+const leftLevelOf = (percent: number): LeftLevel => (percent < 5 ? 'almost-used' : percent < 20 ? 'low' : 'plenty')
+
+const LEFT_WORDS = { plenty: null, low: 'Low', 'almost-used': 'Almost used' } as const
+
+export const ESTIMATE_NOTE = 'An estimate: Cloudflare runs a few minutes behind.'
+
+/** The header's one bar: how much of today's free allowance is left, of the rows read (5,000,000 a day) or the rows written (100,000), whichever has less. */
+export function allowanceLeft(usage: D1Usage): Allowance {
+  const reads = leftOf(usage.rowsRead, usage.readLimit)
+  const writes = leftOf(usage.rowsWritten, usage.writeLimit)
+  const which = writes < reads ? 'written' : 'read'
+  const percent = Math.min(reads, writes)
+  const level = leftLevelOf(percent)
+  const word = LEFT_WORDS[level]
+  const figures: [string, string] = [
+    `Rows read today: ${formatCount(usage.rowsRead)} of ${formatCount(usage.readLimit)}`,
+    `Rows written today: ${formatCount(usage.rowsWritten)} of ${formatCount(usage.writeLimit)}`,
+  ]
+  return { percent, which, level, word, figures, valueText: `About ${percent}% left${word ? `, ${word}` : ''}. ${figures[0]}. ${figures[1]}. ${ESTIMATE_NOTE}` }
+}
+
 /** When D1's day changes (00:00 UTC, as the Worker says in `resetsAt`), in New Zealand time. */
 export const resetSentence = (usage: D1Usage) => `The allowance starts again on ${formatDateTime(usage.resetsAt)}, New Zealand time.`
 
