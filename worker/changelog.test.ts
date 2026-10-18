@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Member } from './auth'
-import { CHANGES, recordChange, type ChangeLogRow } from './changelog'
+import { changeLogStatement, CHANGES, recordChange, type ChangeLogRow } from './changelog'
 import { getSetting, putSetting } from './test-support'
 
 const admin: Member = { email: 'admin@example.com', role: 'admin' }
@@ -81,9 +81,9 @@ describe('recordChange', () => {
     })
   })
 
-  describe('an entry that counts what the statement before it changed (CHANGES in its summary)', () => {
+  describe('an entry that counts what the statement before it changed (countChanges, and CHANGES in its summary)', () => {
     const touch = (rows: number) => env.DB.prepare('UPDATE categories SET name = name WHERE id IN (SELECT id FROM categories ORDER BY id LIMIT ?)').bind(rows)
-    const entry = (summary: string) => ({ actor: admin, type: 'category', summary, onlyIfChanged: true }) as const
+    const entry = (summary: string) => ({ actor: admin, type: 'category', summary, onlyIfChanged: true, countChanges: true }) as const
 
     it('says how many rows the statement changed, counted by the database and not by the request', async () => {
       await recordChange(env.DB, touch(3), entry(`Touched Categories: ${CHANGES}`))
@@ -96,6 +96,19 @@ describe('recordChange', () => {
       await recordChange(env.DB, touch(0), entry(`Touched Categories: ${CHANGES}`))
 
       expect(await changeLog()).toEqual([])
+    })
+
+    it('is asked for, and not found in any summary that has the words (a Rule\'s text, an Account\'s name or a bank\'s description may)', async () => {
+      const words = `Added a Rule: text contains "${CHANGES}"`
+
+      await recordChange(env.DB, touch(2), { actor: admin, type: 'category', summary: words, onlyIfChanged: true })
+      await recordChange(env.DB, touch(2), { actor: admin, type: 'category', summary: words })
+
+      expect(await changeLog()).toMatchObject([{ summary: words }, { summary: words }])
+    })
+
+    it('says so when it is asked for and there is no place for the count', () => {
+      expect(() => changeLogStatement(env.DB, { actor: admin, type: 'category', summary: 'Touched Categories', onlyIfChanged: true, countChanges: true })).toThrow(/CHANGES/)
     })
 
     it('counts at the last place it is written, so the same words earlier in the summary (a name) are left as they are', async () => {

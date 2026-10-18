@@ -277,6 +277,13 @@ const number = new Intl.NumberFormat('en-NZ')
  */
 export const restartRerun = (db: D1Database) => db.prepare(RESTART).bind(RERUN_KIND)
 
+/**
+ * `restartRerun` for a change that may turn out not to be made (a Rule that is refused for want of room, or because the Transaction it was made from moved on): it sends the job back only
+ * if the statement just before it changed a row (`changes()`, as `onlyIfChanged` entries read it), so a refused request leaves a run that is going alone. Put it right after the statement
+ * that makes the change, or after that statement's entry, which is written only if the change was.
+ */
+export const restartRerunAfterChange = (db: D1Database) => db.prepare(`${RESTART} AND changes() > 0`).bind(RERUN_KIND)
+
 /** The latest job, running or ended, or null if there has never been one. */
 export const latestRerun = (db: D1Database): Promise<RerunJob | null> => latestForPage(db)
 

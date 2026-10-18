@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type Ref } from 'react'
 import { FieldLabel } from '@/components/field-label'
 import { NotATransfer, TreatAsTransferAgain } from '@/components/not-a-transfer'
@@ -49,6 +49,8 @@ const textareaStyle =
 
 /** How long the Admin stops typing before the count is asked for again: long enough that a few words typed at an ordinary speed are one request, since each one reads every Transaction. */
 const COUNT_DELAY_MS = 700
+/** How long a count may take before it is given up as a count that failed: a Worker that never answers must not keep Save Category and Rule off for ever. Its work is the reading of every Transaction, which takes seconds. */
+const COUNT_TIMEOUT_MS = 15_000
 
 type RuleCount = {
   /** The answer for the text and direction that were last asked about, or the one before while the next is on its way. */
@@ -62,8 +64,9 @@ type RuleCount = {
 
 /**
  * The count of what the Rule's text matches, from the Rules' preview (POST /api/rules/preview, which reads every Transaction once: ADR 0004). It is asked for once the Admin has stopped typing for
- * COUNT_DELAY_MS (the first one at once: the box starts with a suggestion), and a request that is overtaken by the next is cancelled. An answer is kept while the fields are open, so a text that was
- * counted is not read again, and thrown away when they close (a Rule or an Override may have changed what it would say).
+ * COUNT_DELAY_MS (the first one at once: the box starts with a suggestion), and a request that is overtaken by the next is cancelled, or given up after COUNT_TIMEOUT_MS and then counted as failed.
+ * An answer is kept while the fields are open, so a text that was counted is not read again, and thrown away when they close (a Rule or an Override may have changed what it would say). Each
+ * time they open is a session of its own in the key of the answers, so that what the last session knew is not shown, even as the answer to wait for, in the next.
  */
 function useRuleCount(rule: RuleDraft | null): RuleCount {
   const queryClient = useQueryClient()
@@ -72,23 +75,41 @@ function useRuleCount(rule: RuleDraft | null): RuleCount {
   const direction = rule?.direction ?? ''
   const askedText = useDebounced(text, COUNT_DELAY_MS, open)
   const askedDirection = useDebounced(direction, COUNT_DELAY_MS, open)
+  const [session, setSession] = useState(0)
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    // Set while rendering, which React draws again at once (https://react.dev/reference/react/useState#storing-information-from-previous-renders).
+    setWasOpen(open)
+    if (open) setSession((n) => n + 1)
+  }
   useEffect(() => {
     if (!open) return
     return () => queryClient.removeQueries({ queryKey: ['rule-count'] })
   }, [open, queryClient])
   const count = useQuery({
-    queryKey: ['rule-count', askedText, askedDirection],
+    queryKey: ['rule-count', session, askedText, askedDirection],
     enabled: open && askedText !== '',
     retry: false,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
-    // The previous answer stays while the next is asked for, so the line is not emptied and filled in again (which a screen reader would say twice).
-    placeholderData: keepPreviousData,
+    // The previous answer of this session stays while the next is asked for, so the line is not emptied and filled in again (which a screen reader would say twice). One from before the fields
+    // were closed does not: it was thrown away, and is not what they would say now.
+    placeholderData: (previous: { matches: number; uncategorised: number } | undefined, previousQuery) => (previousQuery?.queryKey[1] === session ? previous : undefined),
     queryFn: async ({ signal }) => {
-      const res = await api.rules.preview.$post({ json: { textContains: askedText, direction: askedDirection === '' ? null : askedDirection, uncategorised: true } }, { init: { signal } })
-      if (!res.ok) throw new HttpError(res.status)
-      const { matches, uncategorised } = await res.json()
-      return { matches, uncategorised: uncategorised ?? 0 }
+      // Given up on after COUNT_TIMEOUT_MS, which is an error like any other (and is not retried), and when the next count overtakes this one.
+      const giveUp = new AbortController()
+      const timer = setTimeout(() => giveUp.abort(), COUNT_TIMEOUT_MS)
+      const overtaken = () => giveUp.abort()
+      signal.addEventListener('abort', overtaken)
+      try {
+        const res = await api.rules.preview.$post({ json: { textContains: askedText, direction: askedDirection === '' ? null : askedDirection, uncategorised: true } }, { init: { signal: giveUp.signal } })
+        if (!res.ok) throw new HttpError(res.status)
+        const { matches, uncategorised } = await res.json()
+        return { matches, uncategorised: uncategorised ?? 0 }
+      } finally {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', overtaken)
+      }
     },
   })
   const current = text === askedText && direction === askedDirection

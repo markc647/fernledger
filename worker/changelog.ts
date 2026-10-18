@@ -32,12 +32,17 @@ export type ChangeEntry = {
    * always written.
    */
   onlyIfChanged?: boolean
+  /**
+   * With `onlyIfChanged`, for an entry that counts what the statement just before it changed: the last `CHANGES` in the `summary` is replaced by that number. It has to be asked for, because a
+   * summary may hold the words by chance (a Rule's text, an Account's name, a bank's description) and is then left as it is.
+   */
+  countChanges?: boolean
 }
 
 const json = (value: unknown) => (value === undefined ? null : JSON.stringify(value))
 
 /**
- * Written in the `summary` of an `onlyIfChanged` entry where the number of rows the statement just before it changed belongs ("Transactions given the Category: {changes}"). The
+ * Where the number of rows the statement just before an entry changed belongs in its `summary`, for an entry with `countChanges` ("Transactions given the Category: {changes}"). The
  * database counts them (`changes()`) as it writes the entry, so the entry says what happened and not what the request expected when it read. The last one in the summary is the
  * place; any other is only the words it is (a name that happens to contain it). It has no plural to get wrong: put the number after the thing counted.
  */
@@ -45,13 +50,14 @@ export const CHANGES = '{changes}'
 
 /**
  * The statement that writes an entry. With `onlyIfChanged` it writes only if the statement just before it in the batch changed a row (`changes()` is that statement's row count),
- * and puts that count where the summary has `CHANGES`.
+ * and, with `countChanges`, puts that count where the summary has `CHANGES`.
  * `recordChange` ends its batch with one; a change that makes a second entry (a kept Report that also drops another) puts that entry's statement after the one it describes,
  * in the same batch.
  */
 export function changeLogStatement(db: D1Database, entry: ChangeEntry): D1PreparedStatement {
-  const counted = entry.onlyIfChanged ? entry.summary.lastIndexOf(CHANGES) : -1
-  if (counted >= 0) {
+  if (entry.onlyIfChanged && entry.countChanges) {
+    const counted = entry.summary.lastIndexOf(CHANGES)
+    if (counted < 0) throw new Error('A Change Log entry that counts what changed needs CHANGES in its summary')
     return db
       .prepare('INSERT INTO change_log (actor, type, summary, before, after) SELECT ?, ?, ? || changes() || ?, ?, ? WHERE changes() > 0')
       .bind(entry.actor.email, entry.type, entry.summary.slice(0, counted), entry.summary.slice(counted + CHANGES.length), json(entry.before), json(entry.after))

@@ -565,6 +565,23 @@ describe('when another request lands between its reads and its batch', () => {
     expect(await changeLog()).toMatchObject([{ summary: expect.stringContaining('Added a Rule') }, { summary: 'Transactions given the Category Groceries by the new Rule (Rule 1): 2' }])
   })
 
+  it('refused, it gives the Category to nobody even when the newest Rule already looks for the same thing: that Rule is not the one this request would have added', async () => {
+    const { groceries, fuel } = categories
+    await env.DB.batch(Array.from({ length: MAX_RULES - 2 }, (_, i) => env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(i + 1, `filler ${i}`, fuel)))
+    await addRule({ textContains: SHOP, categoryId: groceries }) // the same text, direction and Category as the request below, and the newest Rule by its ID
+    const here = await made({ description: SHOP })
+    const other = await made({ description: `${SHOP} 2` })
+    // The last place is taken by a Rule with an ID below every other, so the newest Rule is still the one that looks for the same.
+    const takePlace = () => env.DB.prepare('INSERT INTO rules (id, position, text_contains, category_id) VALUES (0, ?, ?, ?)').bind(MAX_RULES, 'the last place', fuel).run()
+
+    const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(here), takePlace)
+
+    expect(res.status).toBe(409)
+    expect(await stored(here)).toMatchObject({ ruleId: null, ruleCategory: null })
+    expect(await stored(other)).toMatchObject({ ruleId: null, ruleCategory: null })
+    expect(await rules()).toHaveLength(MAX_RULES)
+  })
+
   it('a Rule added that matches one of them: that one is left to it, since it comes first, and is said to be held by it', async () => {
     const { fuel } = categories
     const here = await made({ description: SHOP })
@@ -579,6 +596,57 @@ describe('when another request lands between its reads and its batch', () => {
     expect(await stored(still)).toMatchObject({ ruleCategory: categories.groceries })
     expect(await rules()).toHaveLength(2)
     expect((await changeLog()).at(-1)!.summary).toMatch(/: 2$/)
+  })
+})
+
+describe('a request that is refused leaves a re-run that is going where it was', () => {
+  const request = (transactionId: number) => ({ transactionId, textContains: SHOP, categoryId: categories.groceries })
+  const cursor = async () => (await env.DB.prepare("SELECT cursor, restarts FROM data_migration_progress WHERE status = 'running'").first<{ cursor: number; restarts: number }>())!
+  /** More Transactions than a step looks at, one step done: the run is going and is somewhere. */
+  async function runGoing() {
+    await manyMade(1100, 'EXAMPLE FILLER ')
+    expect((await call('/api/rules/rerun', { method: 'POST', body: {} })).status).toBe(201)
+    await call('/api/rules/rerun/step', { method: 'POST', body: {} })
+    const where = await cursor()
+    expect(where.cursor).toBeGreaterThan(0)
+    return where
+  }
+
+  it('when the last place was taken', async () => {
+    await env.DB.batch(Array.from({ length: MAX_RULES - 1 }, (_, i) => env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(i + 1, `filler ${i}`, categories.fuel)))
+    const here = await made({ description: SHOP })
+    const where = await runGoing()
+
+    const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(here), () =>
+      env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(MAX_RULES, 'the last place', categories.fuel).run(),
+    )
+
+    expect(res.status).toBe(409)
+    expect(await cursor()).toEqual(where)
+  })
+
+  it('when the Category was removed', async () => {
+    const here = await made({ description: SHOP })
+    const where = await runGoing()
+
+    const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(here), () =>
+      env.DB.prepare('UPDATE categories SET removed_at = ? WHERE id = ?').bind('2026-01-01T00:00:00Z', categories.groceries).run(),
+    )
+
+    expect(res.status).toBe(400)
+    expect(await cursor()).toEqual(where)
+  })
+
+  it("when the Transaction's Override changed, and it was to be given the Category as an Override", async () => {
+    const here = await made({ description: 'SOMEWHERE ELSE' })
+    const where = await runGoing()
+
+    const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(here), () =>
+      env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(categories.fuel, here).run(),
+    )
+
+    expect(res.status).toBe(409)
+    expect(await cursor()).toEqual(where)
   })
 })
 
@@ -646,7 +714,7 @@ describe('what it costs (ADR 0004: 100,000 rows written and 5 million read a day
         return aShop(here)
       }),
     ).toBe(QUERIES.overridePath)
-    // This one as an Override and no others: the batch is the restart, the Override and its entry, the Rule and its entry.
+    // This one as an Override and no others: the batch is the Override and its entry, the Rule and its entry, the restart, and the Category given to nobody (no entry).
     expect(await queries(async () => aShop(await made({ description: 'SOMEWHERE ELSE' })))).toBe(QUERIES.overrideAlone)
     // This one left as it is, and the others given the Category: no Override.
     expect(
@@ -700,4 +768,4 @@ describe('what it costs (ADR 0004: 100,000 rows written and 5 million read a day
 /** The rows written besides two for each Transaction categorised: the Rule (3) and two Change Log entries (2 each), measured. */
 const FIXED_WRITES = 7
 /** The queries of a request on each path, measured (the 50 of ADR 0004 are not close): four reads, then a batch. */
-const QUERIES = { rulePath: 9, overridePath: 11, overrideAlone: 9, tooMany: 10 }
+const QUERIES = { rulePath: 9, overridePath: 11, overrideAlone: 11, tooMany: 10 }

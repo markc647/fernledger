@@ -1,6 +1,6 @@
 // Making a Rule from a Transaction: the Edit panel's Create Rule. The Admin has a Transaction in front of them, has chosen its Category, and wants every Transaction like it to
 // have that Category. In one D1 batch (so the Rule and what it did commit together or not at all) this
-//   1. adds the Rule, last in the order, as Add a Rule does (rules.ts), and sends a re-run that is going back to the start (rule-rerun.ts);
+//   1. adds the Rule, last in the order, as Add a Rule does (rules.ts), and, only if it was added, sends a re-run that is going back to the start (rule-rerun.ts);
 //   2. gives the Category to the other Transactions that have no Category and that the Rule is the first to match, now, as if the Rules had been applied to them;
 //   3. gives the Category to this Transaction: by the Rule if the Rule gives it (it is Uncategorised, the Rule matches it and no earlier Rule does), so it is a Rule's Category
 //      like the others; as an Override, as Save would, if not (the text was edited so that it no longer matches, an earlier Rule matches it, or it has another Category already,
@@ -20,21 +20,23 @@
 //   - one batch of four queries for the Category, the Rules in use, this Transaction and up to MAX_INLINE_APPLY + 1 of the others, which reads each Transaction
 //     at most once and stops once it has found that many (rule-preview.ts: the one pass over the Transactions is what a search for text costs, there being no index on it);
 //   - when there are more, one count of the Transactions after the last it found, so that the Transactions are read once between the two;
-//   - the batch of writes (at most 7 statements): nothing is walked, the Transactions are named by ID, and each is asked again whether it is still Uncategorised and whether the new Rule
+//   - the batch of writes (at most 7 statements, every one of them there when the Rule is made, so that the count of queries does not depend on how many Transactions it gives the Category to): nothing is walked, the Transactions are named by ID, and each is asked again whether it is still Uncategorised and whether the new Rule
 //     is the first to match it (a read for each Rule above the new one, as in rule-rerun.ts).
-// Queries: 9 on the usual path, 11 with an Override, 10 with too many (rule-from-transaction.test.ts pins them); the request's 50 are not close.
+// Queries: 9 on the usual path, 11 with an Override, 10 with too many (11 with an Override and nothing else to give) (rule-from-transaction.test.ts pins them); the request's 50 are not close.
 //
 // Another request can land between the reads and the batch, and what it did is never written over. The Rule is added only while there is room, its Category is in use and, when this
 // Transaction is to be given an Override, the Override was written (so the Override is only over the Override that was read: if it changed, nothing is added and the answer is 409 as
-// for Save). The Transactions are given the Category only if the Rule was added, only if each is still Uncategorised and only if the new Rule is the first to match it (a Rule added
-// since, an Override set, a Category removed), so the entry in the Change Log, which the database counts as it writes it, and the answer are what was written. An answer from a
-// request that lost such a race can be that this Transaction was left as it is (`kept`, `changed`), and `heldByEarlierRule` also counts a Transaction that was given a Category meanwhile.
+// for Save). Everything after the Rule waits for it: its Change Log entry and the restart of a re-run that is going follow it by `changes()`, so a request that is refused (409, 400, 404)
+// writes nothing and leaves a run alone; the Category is given only if the Rule is there (it is the newest, with this text, this direction and this Category, and newer than the newest
+// the reads saw), and only to each Transaction that is still Uncategorised and that the new Rule is still the first to match (a Rule added since, an Override set, a Category
+// removed). The entry in the Change Log, which the database counts as it writes it, and the answer are what was written. An answer from a request that lost such a race can be that this
+// Transaction was left as it is (`kept`, `changed`), and `heldByEarlierRule` also counts a Transaction that was given a Category meanwhile.
 import type { Member } from './auth'
 import { changeLogStatement, CHANGES, recordChange, type ChangeEntry } from './changelog'
 import { effectiveCategory } from './effective-category'
 import { firstMatchingRule } from './rule-apply'
 import { describeRule, MAX_RULES, ruleMatches, ruleRecord, type Criteria } from './rule-criteria'
-import { restartRerun } from './rule-rerun'
+import { restartRerunAfterChange } from './rule-rerun'
 import { describe as describeTransaction } from './transactions'
 
 /** The most other Transactions a Rule made from a Transaction gives the Category to in the request. More are left to Apply the Rules to all Transactions. */
@@ -66,8 +68,20 @@ export type RuleFromTransaction = {
 export type MadeRule = { kind: 'made'; made: RuleFromTransaction } | { kind: 'no-transaction' } | { kind: 'bad-category' } | { kind: 'full' } | { kind: 'changed' }
 
 const category = effectiveCategory()
-// The criteria are not saved, so they stand in for a `rules` row under the same column names (as rule-preview.ts does): the text (?1) and which way the money went (?2).
-const WANT = '(SELECT ?1 AS text_contains, NULL AS bank_type, ?2 AS direction, NULL AS min_cents, NULL AS max_cents) want'
+// What a Rule matches (`ruleMatches`, the one definition) for criteria that are not saved: the text (?1) and which way the money went (?2) are bound, and the criteria this panel does not
+// offer are none. The preview stands them in a one-row table (rule-preview.ts); here that would be in front of the Transactions, where the planner cannot see that it is one row and
+// sorts all the matches to put them in the order of their IDs (below), reading every Transaction, so the columns are replaced by their values. A column `ruleMatches` gains
+// that is not replaced here stops this file loading.
+const matching = (transaction: string) => {
+  const sql = ruleMatches('want', transaction)
+    .replaceAll('want.text_contains', '?1')
+    .replaceAll('want.direction', '?2')
+    .replaceAll('want.bank_type', 'NULL')
+    .replaceAll('want.min_cents', 'NULL')
+    .replaceAll('want.max_cents', 'NULL')
+  if (sql.includes('want.')) throw new Error('ruleMatches asks for a column that rule-from-transaction.ts does not bind')
+  return sql
+}
 const UNCATEGORISED = `${category.id} IS NULL AND NOT ${category.isTransfer}`
 
 // This Transaction, ?3: whether the text matches it, whether it is Uncategorised, whether a Rule that is in use matches it already, and whether its Category is the one chosen (?4) and it
@@ -75,18 +89,16 @@ const UNCATEGORISED = `${category.id} IS NULL AND NOT ${category.isTransfer}`
 const THIS_ONE = `
   SELECT t.id, t.date, t.description, t.override_category AS overrideCategory,
          (SELECT name FROM categories WHERE id = t.override_category AND removed_at IS NULL) AS overrideName,
-         ${ruleMatches('want', 't')} AS matches, (${UNCATEGORISED}) AS uncategorised, ${firstMatchingRule('t')} IS NOT NULL AS earlierRule,
+         ${matching('t')} AS matches, (${UNCATEGORISED}) AS uncategorised, ${firstMatchingRule('t')} IS NOT NULL AS earlierRule,
          (${category.id} = ?4 AND NOT ${category.isTransfer}) AS already
-  FROM ${WANT} CROSS JOIN transactions t ${category.joins}
+  FROM transactions t ${category.joins}
   WHERE t.id = ?3`
 
-// The other Transactions the text matches that are Uncategorised, one more than can be given the Category now. The criteria come first and `CROSS JOIN` keeps them there: put after
-// the Transactions' Category joins, the planner reads them again for every Transaction (twice the reads). The Transactions are read, and so found, in the order of their IDs, which is
-// how SQLite scans a table of rows with IDs; asking for that order (`ORDER BY t.id`) is not free, because with the criteria in front of the table the planner sorts all the matches
-// first, reading every Transaction, and the first pass would no longer stop early. The count of the rest below goes by that order too (a test spreads the matches among others).
-const OTHERS_FROM = `FROM ${WANT} CROSS JOIN transactions t ${category.joins} WHERE t.id <> ?3 AND ${ruleMatches('want', 't')} AND ${UNCATEGORISED}`
-const OTHERS = `SELECT t.id ${OTHERS_FROM} LIMIT ${MAX_INLINE_APPLY + 1}`
-// How many more there are after ?4, the last of those: the pass over the Transactions carries on where the one above stopped.
+// The other Transactions the text matches that are Uncategorised, one more than can be given the Category now, the lowest IDs first: that is the order a table of rows with IDs is scanned
+// in, so asking for it costs no sort and the pass still stops at the last it needs (a test pins the reads), and the count of the rest below can carry on after the last ID found.
+const OTHERS_FROM = `FROM transactions t ${category.joins} WHERE t.id <> ?3 AND ${matching('t')} AND ${UNCATEGORISED}`
+const OTHERS = `SELECT t.id ${OTHERS_FROM} ORDER BY t.id LIMIT ${MAX_INLINE_APPLY + 1}`
+// How many more there are after ?4, the last of those: the pass over the Transactions carries on where the one above stopped. (A count has no order to ask for.)
 const COUNT_REST = `SELECT COUNT(*) AS n ${OTHERS_FROM} AND t.id > ?4`
 
 // Adds the Rule last, as Add a Rule does (rules.ts), only while there is room and its Category (?3) is in use. ?1 text, ?2 direction, ?4 the most Rules. When this Transaction is
@@ -104,12 +116,15 @@ const SET_OVERRIDE = `
     AND (SELECT COUNT(*) FROM rules WHERE removed_at IS NULL) < ?4`
 
 // The Rule's result on the Transactions named in ?1 (a JSON array of IDs), as the re-run stores it (rule-rerun.ts WALK) for a Rule that gives a Category: the Rule's ID, its Category
-// (?2) and no Transfer mark. It runs right after the Change Log entry of the Rule, which is written only if the Rule was added, so `changes()` is 1 only then, and the Rule is the newest
-// (an ID never goes back, and nothing else runs between the statements of a batch). A Transaction is given it only if it is still Uncategorised and the new Rule is the first that
-// matches it, which is asked again here: a Rule added, a Category chosen or a Category removed since the reads leave it alone. The IDs it gave are returned.
+// (?2) and no Transfer mark. It runs after the restart of a re-run, which follows the Change Log entry of the Rule, so `changes()` no longer says whether the Rule was added: the Rule
+// is there if the newest Rule has an ID above the newest the reads saw (?3) and this text (?4), direction (?5) and Category (nothing else runs between the statements of a batch, and an
+// ID never goes back). A Transaction is given it only if it is still Uncategorised and the new Rule is the first that matches it, which is asked again here: a Rule added, a Category
+// chosen or a Category removed since the reads leave it alone. The IDs it gave are returned.
 const GIVE_CATEGORY = `
   UPDATE transactions SET rule_id = (SELECT MAX(id) FROM rules), rule_category = ?2, rule_transfer = NULL
-  WHERE changes() > 0
+  WHERE EXISTS (
+      SELECT 1 FROM rules WHERE id = (SELECT MAX(id) FROM rules) AND id > ?3 AND removed_at IS NULL AND text_contains IS ?4 AND direction IS ?5 AND category_id = ?2
+        AND bank_type IS NULL AND min_cents IS NULL AND max_cents IS NULL AND is_transfer = 0)
     AND id IN (
       SELECT t.id FROM transactions t ${category.joins}
       WHERE t.id IN (SELECT value FROM json_each(?1)) AND ${UNCATEGORISED} AND ${firstMatchingRule('t')} = (SELECT MAX(id) FROM rules))
@@ -139,7 +154,7 @@ export async function ruleFromTransaction(db: D1Database, actor: Member, request
   const want = [request.textContains, direction, request.transactionId] as const
   const [chosen, rulesInUse, thisRows, found] = await db.batch([
     db.prepare('SELECT id, name FROM categories WHERE id = ? AND removed_at IS NULL').bind(request.categoryId),
-    db.prepare('SELECT COUNT(*) AS n FROM rules WHERE removed_at IS NULL'),
+    db.prepare('SELECT COUNT(*) AS n, (SELECT COALESCE(MAX(id), 0) FROM rules) AS lastId FROM rules WHERE removed_at IS NULL'),
     db.prepare(THIS_ONE).bind(...want, request.categoryId),
     db.prepare(OTHERS).bind(...want),
   ])
@@ -147,7 +162,7 @@ export async function ruleFromTransaction(db: D1Database, actor: Member, request
   if (!here) return { kind: 'no-transaction' }
   const named = chosen!.results[0] as { id: number; name: string } | undefined
   if (!named) return { kind: 'bad-category' }
-  const inUse = (rulesInUse!.results[0] as { n: number }).n
+  const { n: inUse, lastId } = rulesInUse!.results[0] as { n: number; lastId: number }
   if (inUse >= MAX_RULES) return { kind: 'full' }
 
   // This one: by the Rule if the Rule would give it; left as it is if it has this Category already; otherwise as an Override.
@@ -167,7 +182,7 @@ export async function ruleFromTransaction(db: D1Database, actor: Member, request
   const number = inUse + 1
   const ruleEntry: ChangeEntry = { actor, type: 'rule', summary: `Added a Rule: ${describeRule(criteria, target)}`, after: ruleRecord(criteria, target), onlyIfChanged: true }
   // The database counts what it gave the Category to, as it writes the entry.
-  const givenEntry: ChangeEntry = { actor, type: 'rule', summary: `Transactions given the Category ${named.name} by the new Rule (Rule ${number}): ${CHANGES}`, onlyIfChanged: true }
+  const givenEntry: ChangeEntry = { actor, type: 'rule', summary: `Transactions given the Category ${named.name} by the new Rule (Rule ${number}): ${CHANGES}`, onlyIfChanged: true, countChanges: true }
   const overrideEntry: ChangeEntry = {
     actor,
     type: 'transaction',
@@ -177,23 +192,29 @@ export async function ruleFromTransaction(db: D1Database, actor: Member, request
     onlyIfChanged: true,
   }
 
-  // Each entry follows the statement it describes (`onlyIfChanged` looks at the one before it), and the batch ends with an entry.
-  const mutation: D1PreparedStatement[] = [restartRerun(db)]
+  // Each entry follows the statement it describes (`onlyIfChanged` looks at the one before it), and the batch ends with an entry. The restart of a re-run follows the Rule's entry, which is
+  // written only if the Rule was, and is only for a Rule that was added. The Category is given even to nobody (an empty list), so that the batch is the same whatever is found.
+  const mutation: D1PreparedStatement[] = []
   if (setsOverride) mutation.push(db.prepare(SET_OVERRIDE).bind(named.id, here.id, here.overrideCategory, MAX_RULES), changeLogStatement(db, overrideEntry))
   const added = mutation.length
-  mutation.push(db.prepare(ADD_RULE).bind(request.textContains, direction, named.id, MAX_RULES, setsOverride ? 1 : 0))
-  if (ids.length > 0) mutation.push(changeLogStatement(db, ruleEntry), db.prepare(GIVE_CATEGORY).bind(JSON.stringify(ids), named.id))
-  const results = await recordChange(db, mutation, ids.length > 0 ? givenEntry : ruleEntry)
+  mutation.push(
+    db.prepare(ADD_RULE).bind(request.textContains, direction, named.id, MAX_RULES, setsOverride ? 1 : 0),
+    changeLogStatement(db, ruleEntry),
+    restartRerunAfterChange(db),
+    db.prepare(GIVE_CATEGORY).bind(JSON.stringify(ids), named.id, lastId, request.textContains, direction),
+  )
+  const results = await recordChange(db, mutation, givenEntry)
 
   if (results[added]!.meta.changes === 0) {
     // Nothing was added: in the moments since the reads, the Transaction went, the last place was taken, the Category was removed or (for an Override) the Override moved on. Nothing else
-    // was written either, since each statement after the Override waits for the one before it. The Override already being what was asked for is not "done": the Rule was not made.
+    // was written either (the Rule's entry, the restart and the Category all wait for the Rule), and the Override waited for its room and Category too. The Override already being what was
+    // asked for is not "done": the Rule was not made.
     const now = (await db.prepare(WHY_NOT).bind(named.id, here.id).first<{ inUse: number; categoryInUse: number; transactionThere: number }>())!
     if (now.transactionThere === 0) return { kind: 'no-transaction' }
     if (now.inUse >= MAX_RULES) return { kind: 'full' }
     return now.categoryInUse === 0 ? { kind: 'bad-category' } : { kind: 'changed' }
   }
-  const given = ids.length > 0 ? (results.at(-1)!.results as { id: number }[]).map((row) => row.id) : []
+  const given = (results.at(-1)!.results as { id: number }[]).map((row) => row.id)
   const thisGiven = byRule && given.includes(here.id)
   return {
     kind: 'made',

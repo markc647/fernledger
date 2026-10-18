@@ -340,3 +340,47 @@ test('a count that the next one overtakes is cancelled, so the Worker is not lef
   await expect(panel.getByRole('status')).toContainText('3 Transactions match, 2 of them Uncategorised.')
   expect(await page.evaluate(() => (window as unknown as { aborted: string[] }).aborted)).toEqual(['preview']) // the one that was overtaken, and not the one that was answered
 })
+
+test('opening the Rule fields again does not show the count they had before they were closed', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  const row = stubRow(4246, 'EFTPOS 1234 EXAMPLE REOPEN AUCKLAND 12/10')
+  await stubList(page, [row])
+  // The first count is answered; the next is never answered, so what shows while it is on its way is all there is to see.
+  let asked = 0
+  await page.route('**/api/rules/preview', (route) => (++asked === 1 ? route.fulfill({ json: { matches: 3, samples: [], uncategorised: 2 } }) : undefined))
+  await page.goto('/transactions')
+  await rowButton(page, 'Edit', `${row.description}, ${dateText(row.date)}`).click()
+  const panel = page.getByRole('region', { name: /^Edit Category and Note/ })
+  await panel.getByRole('button', { name: 'Create Rule' }).click()
+  await expect(panel.getByRole('status')).toContainText('3 Transactions match, 2 of them Uncategorised.')
+
+  await panel.getByRole('button', { name: 'Cancel Rule' }).click()
+  await panel.getByRole('button', { name: 'Create Rule' }).click()
+
+  await expect(textBox(page)).toHaveValue('EXAMPLE REOPEN') // the same text, so the same question
+  await expect(panel.getByText('Counting…')).toBeVisible()
+  await expect(panel.getByRole('status')).not.toContainText('Transactions match')
+  expect(asked).toBe(2)
+})
+
+test('a count that is never answered is given up after 15 seconds, and Save Category and Rule is not kept off for ever', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  const row = stubRow(4247, 'EFTPOS 1234 EXAMPLE HUNG AUCKLAND 12/10')
+  await stubList(page, [row])
+  await page.route('**/api/rules/preview', () => undefined) // never answered
+  await page.clock.install()
+  await page.goto('/transactions')
+  await rowButton(page, 'Edit', `${row.description}, ${dateText(row.date)}`).click()
+  const panel = page.getByRole('region', { name: /^Edit Category and Note/ })
+  await panel.getByRole('button', { name: 'Create Rule' }).click()
+  await panel.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
+  const saveRule = panel.getByRole('button', { name: 'Save Category and Rule' })
+  await expect(panel.getByText('Counting…')).toBeVisible()
+  await expect(saveRule).toBeDisabled()
+
+  await page.clock.fastForward(16_000)
+
+  await expect(panel.getByRole('status')).toContainText('Fernledger could not count how many match. You can still save the Rule.')
+  await expect(saveRule).toBeEnabled()
+  await expect(panel.getByText('Counting…')).toHaveCount(0)
+})
