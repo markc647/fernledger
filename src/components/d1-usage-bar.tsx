@@ -12,12 +12,12 @@ import { HttpError } from '@/lib/me'
 // at 4.5:1 against the page, a card and the muted fill in both themes, so 3:1 for a graphic is met too). Colour is never the only signal:
 // the badge says Low, Medium or High in words, the figures are written under the bar, and the bar has a border, so Windows high contrast,
 // which removes fills, still shows how full it is (CanvasText for the fill there).
-const FILL: Record<Level, string> = {
+export const FILL: Record<Level, string> = {
   low: 'bg-success forced-colors:bg-[CanvasText]',
   medium: 'bg-warning forced-colors:bg-[CanvasText]',
   high: 'bg-danger forced-colors:bg-[CanvasText]',
 }
-const TONE = { low: 'success', medium: 'warning', high: 'danger' } as const
+export const TONE = { low: 'success', medium: 'warning', high: 'danger' } as const
 
 /**
  * The Admin's D1 usage, in two places on the Rules page: the question that opens before the Rules are applied to all Transactions (an alert dialog), and the frame of a run that is
@@ -78,7 +78,7 @@ function UsageMeter({ meter }: { meter: Meter }) {
         </span>
         <Badge variant={TONE[meter.level]}>{LEVEL_WORDS[meter.level]}</Badge>
       </div>
-      <Progress aria-labelledby={label} value={meter.percent} valueText={meter.valueText} className="mt-1 h-3 border border-muted-foreground" indicatorClassName={FILL[meter.level]} />
+      <Progress aria-labelledby={label} value={meter.percent} valueText={meter.valueText} className="mt-1" trackClassName="h-3 border border-muted-foreground" indicatorClassName={FILL[meter.level]} />
       <p className="mt-1">{meter.text}</p>
     </div>
   )

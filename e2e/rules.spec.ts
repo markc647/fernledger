@@ -980,7 +980,7 @@ test.describe('the D1 usage bar', () => {
         await expect(bar).toHaveAttribute('aria-valuetext', `${meter.text}, ${meter.percent}%`)
         // The fill is the level's colour (the theme's own token) and the track keeps its own.
         expect(await bar.locator('[data-slot="progress-indicator"]').evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(colours[meter.token])
-        expect(await bar.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(colours.muted)
+        expect(await bar.locator('[data-slot="progress-track"]').evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(colours.muted)
       }
       // Said once, for both bars.
       await expect(usagePanel(page).getByText('The allowance starts again on Thu 15 Oct 2026, 1:00 pm, New Zealand time.')).toBeVisible()
