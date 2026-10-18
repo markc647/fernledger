@@ -1,9 +1,10 @@
 // Deploys to the Cloudflare account you confirm: takes a complete backup, records a D1 restore point (bookmark),
-// applies remote migrations, deploys, then prints the bookmark with rollback instructions.
+// applies remote migrations, deploys, runs the smoke check (scripts/smoke.mjs), then prints the bookmark with rollback instructions.
 // Usage: node scripts/deploy.mjs [--dry-run] [--yes] [--workers-dev-registered] [--skip-build] [--skip-backup]
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { databaseHasTables, takeBackup } from './backup-run.mjs'
+import { readBuiltEntryScript, smokeCheckWithRetries, smokeSettings } from './smoke.mjs'
 import { ScriptError, askYesNo, bucketExists, confirmAccount, createRunner, databaseExists, main, readResourceNames, root } from './wrangler-cli.mjs'
 
 const args = process.argv.slice(2)
@@ -106,5 +107,33 @@ await main(async () => {
     return
   }
   console.log(dryRun ? '\nDry run only. Nothing was changed.' : '\nDeployed.')
+  const smokeFailed = await smoke()
+  if (smokeFailed) process.exitCode = 1
   console.log(rollbackInstructions(database, bookmark, accountId, backup))
 })
+
+// After the deploy, so a failure is reported with the rollback instructions; it never rolls back by itself.
+// Returns true when the check ran and failed.
+async function smoke() {
+  const settings = smokeSettings()
+  if (settings.missing) {
+    console.log(`Smoke check skipped: set ${settings.missing.join(', ')} to run it (docs/setup.md, "Smoke check").`)
+    return false
+  }
+  if (settings.problem) {
+    console.error(`Smoke check not run: ${settings.problem}`)
+    return true
+  }
+  if (dryRun) {
+    console.log(`Dry run: the smoke check would ask ${settings.origin} for the page and /api/me with the service token, and for the page without it.`)
+    return false
+  }
+  const entryScript = readBuiltEntryScript(resolve(root, 'dist/client/index.html'))
+  const failed = entryScript ? await smokeCheckWithRetries({ ...settings, entryScript }) : ["Could not find the build's entry script in dist/client/index.html."]
+  if (!failed.length) {
+    console.log(`Smoke check passed: ${settings.origin} serves this build behind Access, and the Worker refuses an identity with no email.`)
+    return false
+  }
+  console.error(['', 'Smoke check FAILED. The deploy is done; decide whether to roll back:', ...failed.map((f) => `  - ${f}`)].join('\n'))
+  return true
+}

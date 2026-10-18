@@ -217,6 +217,22 @@ If your Cloudflare account already has an account-wide Access rule (**Protect al
 
 `preview_urls` is off in `wrangler.jsonc`, so the Worker has no preview hostnames. A Workers application set to **All traffic** would cover them if you turned them on.
 
+### Smoke check (optional)
+
+After a deploy, `npm run deploy` can check the live site through an Access **service token**, a credential for a script and not a person. It makes three requests. First, the page with the token should come back 200 and name this build's entry script, which shows Access let the token in and the new version is being served. Second, `/api/me` with the token should come back 401 from the Worker: a service token carries no email, so the Worker refuses it (the log line is `auth.refused.bad-token` with `ERR_NO_EMAIL`), and the token never reaches any data. Third, the page without the token should not serve the app, which shows Access is still in front of it. If a request fails, deploy says which one and exits with an error, after the rollback instructions. It never rolls back by itself. Without the settings below, it says the check was skipped.
+
+1. **Zero Trust → Access → Service credentials → Service Tokens → Create Service Token.** Name it `fernledger-smoke` and choose a duration (a year, say). Note when it runs out, because the check fails from then on. Copy the **Client ID** and **Client Secret**. The secret is shown only once.
+2. On the Fernledger application, add a **second** policy: **Name:** Fernledger smoke check, **Action:** Service Auth, **Include → Service Token:** `fernledger-smoke`. Leave "Fernledger Members" as it is.
+3. Set three environment variables in the shell you deploy from. Keep them out of the repo and out of any file in it:
+
+   ```bash
+   export FERNLEDGER_URL=https://fernledger.<your-subdomain>.workers.dev FERNLEDGER_SMOKE_ID=<client id> FERNLEDGER_SMOKE_SECRET=<client secret>
+   ```
+
+   In PowerShell, use `$env:FERNLEDGER_URL = "…"` for each one. The check prints status codes only, never the token or a page.
+
+To stop using it, delete the service token. Its policy then matches nothing.
+
 ## D1 usage bar (optional)
 
 README ([What it does](../README.md#what-it-does)) says what the bar shows. D1 Free allows 5 million rows read and 100,000 rows written a day for the whole Cloudflare account, and setting up Rules can use the reads quickly. If you skip this, the Rules page says how to turn the bar on and nothing else changes. Turning it on lets the Worker ask **your own** Cloudflare account for its usage, the one extra outbound call ([ADR 0010](adr/0010-outbound-calls.md)). The request carries the token, your account ID and today's date, and none of your data.

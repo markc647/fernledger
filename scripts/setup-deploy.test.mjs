@@ -4,17 +4,19 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { after, test } from 'node:test'
+import { SMOKE_ENV } from './smoke.mjs'
 import { stripJsonComments } from './wrangler-cli.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const wranglerConfig = readFileSync(resolve(root, 'wrangler.jsonc'), 'utf8')
 
-// Runs a script as a subprocess. REGION is removed from the inherited environment so a Deployer's
-// shell can't change what the tests expect.
+// Runs a script as a subprocess. REGION, the account and the smoke check settings are removed from the
+// inherited environment so a Deployer's shell can't change what the tests expect.
 function run(script, args = [], env = {}) {
   const base = { ...process.env }
   delete base.REGION
   delete base.CLOUDFLARE_ACCOUNT_ID
+  for (const name of SMOKE_ENV) delete base[name] // a Deployer's smoke token must never send a test's deploy to the live site
   const r = spawnSync(process.execPath, [resolve(root, 'scripts', script), ...args], {
     cwd: root,
     encoding: 'utf8',
@@ -296,6 +298,28 @@ test('deploy dry run prints build, restore point, migrations, deploy, then the r
   ])
   assert.match(r.out, /CLOUDFLARE_ACCOUNT_ID=<account id> npx wrangler d1 time-travel restore fernledger --bookmark=<bookmark>/)
   assert.match(r.out, /CLOUDFLARE_ACCOUNT_ID=<account id> npx wrangler rollback/)
+})
+
+test('deploy skips the smoke check, and says how to turn it on, when its settings are missing', () => {
+  const r = run('deploy.mjs', ['--dry-run'], { FERNLEDGER_MIGRATIONS_DIR: migrationsDir(), FERNLEDGER_URL: 'https://fernledger.example.workers.dev' })
+  assert.equal(r.status, 0, r.out)
+  assert.match(r.out, /Smoke check skipped: set FERNLEDGER_SMOKE_ID, FERNLEDGER_SMOKE_SECRET to run it/)
+})
+
+test('deploy dry run says what the smoke check would ask, and asks nothing', () => {
+  const smoke = { FERNLEDGER_URL: 'https://fernledger.example.workers.dev', FERNLEDGER_SMOKE_ID: 'made-up-id', FERNLEDGER_SMOKE_SECRET: 'made-up-secret' }
+  const r = run('deploy.mjs', ['--dry-run'], { FERNLEDGER_MIGRATIONS_DIR: migrationsDir(), ...smoke })
+  assert.equal(r.status, 0, r.out)
+  assert.match(r.out, /Dry run: the smoke check would ask https:\/\/fernledger\.example\.workers\.dev for the page/)
+  assert.ok(!r.out.includes('made-up-secret'))
+})
+
+test('deploy exits 1, with the rollback instructions, when the smoke check address is not https', () => {
+  const smoke = { FERNLEDGER_URL: 'http://fernledger.example.workers.dev', FERNLEDGER_SMOKE_ID: 'made-up-id', FERNLEDGER_SMOKE_SECRET: 'made-up-secret' }
+  const r = run('deploy.mjs', ['--dry-run'], { FERNLEDGER_MIGRATIONS_DIR: migrationsDir(), ...smoke })
+  assert.equal(r.status, 1, r.out)
+  assert.match(r.out, /Smoke check not run: FERNLEDGER_URL must be/)
+  assert.match(r.out, /npx wrangler rollback/)
 })
 
 test('deploy dry run leaves out the migrations step when there are no migrations', () => {
