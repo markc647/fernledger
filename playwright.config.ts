@@ -26,7 +26,8 @@ export default defineConfig({
   // One at a time: the local D1 database is shared, and tests that change Settings must not overlap.
   workers: 1,
   // PLAYWRIGHT_CHANNEL=msedge (or chrome) uses a browser already on your machine instead of the download.
-  use: { baseURL, channel: process.env.PLAYWRIGHT_CHANNEL },
+  // A test that fails on CI is run again with a trace (test-results/, uploaded by ci.yml): `npx playwright show-trace <zip>` shows what the page did, which a log does not.
+  use: { baseURL, channel: process.env.PLAYWRIGHT_CHANNEL, trace: 'on-first-retry' },
   // Every test runs in the light project. The dark project emulates a device set to dark and runs only tests tagged `@theme`; see CODING_STANDARDS.md#tests.
   projects: [
     { name: 'light', use: { browserName: 'chromium', colorScheme: 'light' } },

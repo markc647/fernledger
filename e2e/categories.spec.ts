@@ -1,7 +1,7 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
-import { actionsButton, chooseAction, menuAction, noAxeViolationsFromTop, openActions, rowButton } from './row-actions-helpers'
+import { actionsButton, chooseAction, menuAction, openActions, rowButton } from './row-actions-helpers'
 import { atEveryTextSize, mainNav, navigateTo } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
@@ -40,7 +40,7 @@ test('the Admin sets an Override and a Note, the Transaction leaves the Uncatego
   await expect(page.getByLabel('Category', { exact: true })).toBeFocused()
   await page.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
   await page.getByLabel('Note', { exact: true }).fill(note)
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save', exact: true }).click()
 
   // The row has left the list, and focus is on the message that took its place, not on the next Transaction.
@@ -56,7 +56,7 @@ test('the Admin sets an Override and a Note, the Transaction leaves the Uncatego
   await row.getByRole('button', { name: /^Read the Note on / }).click()
   await expect(page.getByRole('dialog', { name: /^Note on / })).toContainText(note)
   await page.keyboard.press('Escape')
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 
   await page.goto('/change-log')
   await expect(page.getByRole('listitem').filter({ hasText: `Set Override on Transaction` }).filter({ hasText: description }).first()).toContainText('Groceries')
@@ -74,7 +74,7 @@ test('a Member sees Categories and Notes but cannot change them', async ({ page,
   await expect(rowFor(page, description)).toBeVisible()
   await expect(page.getByRole('button', { name: /^Edit/ })).toHaveCount(0)
   await expect(nav.getByRole('link', { name: 'Uncategorised' })).toHaveCount(0)
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 
   // The sidebar has no Set up group for a Member, but the page is still theirs to read, by its address.
   await expect(nav.getByRole('button', { name: 'Set up' })).toHaveCount(0)
@@ -87,7 +87,7 @@ test('a Member sees Categories and Notes but cannot change them', async ({ page,
   await expect(page.getByRole('row', { name: /^Loans/ })).toContainText('Loans')
   await expect(page.getByRole('row', { name: /^Groceries/ })).toContainText('Spending')
   await expect(page.getByLabel('New Category')).toHaveCount(0)
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 
   await page.goto('/uncategorised')
   await expect(page.getByText('Only the Admin can use this list.')).toBeVisible()
@@ -111,13 +111,13 @@ test('the Admin adds, renames and removes a Category', async ({ page, context },
   await page.getByLabel('New Category').fill(name.toUpperCase())
   await page.getByRole('button', { name: 'Add Category' }).click()
   await expect(page.getByRole('alert')).toContainText('already exists')
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
   await page.getByLabel('New Category').fill('')
 
   await chooseAction(actionsButton(page, name), 'Rename')
   await expect(page.getByLabel('Category name')).toBeFocused()
   await page.getByLabel('Category name').fill(renamed)
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save name' }).click()
   await expect(page.getByRole('cell', { name: renamed, exact: true })).toBeVisible()
   await expect(actionsButton(page, renamed)).toBeFocused()
@@ -125,7 +125,7 @@ test('the Admin adds, renames and removes a Category', async ({ page, context },
   await chooseAction(actionsButton(page, renamed), 'Remove')
   await expect(page.getByText(`Remove ${renamed}? Transactions with it as their Override lose that Override and fall back to their Rule or Akahu category, or Uncategorised if neither applies.`)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Keep it' })).toBeFocused()
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
   await page.getByRole('button', { name: 'Keep it' }).click()
   await expect(page.getByRole('cell', { name: renamed, exact: true })).toBeVisible()
   await expect(actionsButton(page, renamed)).toBeFocused()
@@ -156,7 +156,7 @@ test.describe('a refused rename or kind', () => {
     renameRefusal = { error: 'A Category with that name already exists' }
     await page.getByRole('button', { name: 'Save name' }).click()
     await expect(page.getByRole('alert')).toHaveText('A Category with that name already exists.')
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
     await page.getByRole('button', { name: 'Cancel' }).click()
 
     await chooseAction(actionsButton(page, 'Groceries'), 'Select kind')
@@ -186,7 +186,7 @@ test.describe('a Category removed meanwhile', () => {
 
     await expect(page.getByRole('status').filter({ hasText: 'had already been removed' })).toHaveText(`${name} had already been removed, so nothing was changed. The list is up to date now.`)
     await expect(page.getByRole('cell', { name, exact: true })).toHaveCount(0)
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
   })
 })
 
@@ -215,7 +215,7 @@ test('the Admin sets the kind of a Category, Members see it, and only a Spending
   await expect(kind).toBeFocused()
   await kind.selectOption('spending')
   await expect(page.locator('p[id^="kind-"]')).toContainText('Counts as spending, and can have a Budget.')
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save kind' }).click()
   await expect(page.getByRole('status').filter({ hasText: `${name} is now Spending.` })).toBeVisible()
   await expect(actions).toBeFocused()
@@ -323,7 +323,7 @@ test('the Categories sort by Category and by Kind, in plain words, and the first
   await expect(byCategory).toHaveAttribute('aria-sort', 'none')
   await expect(byKind).toHaveAttribute('aria-sort', 'none')
   await expect(byCategory.getByRole('button', { name: 'Category' })).toBeVisible()
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 
   await byCategory.getByRole('button').click()
   await expect(byCategory).toHaveAttribute('aria-sort', 'ascending')
@@ -342,7 +342,7 @@ test('the Categories sort by Category and by Kind, in plain words, and the first
   await expect(byCategory).toHaveAttribute('aria-sort', 'none')
   await said('Sorted by Kind, A to Z.')
   expect(await inTable(page)).toEqual(['Interest', 'Wages', 'Loan – Alice', 'Care Fees', 'Groceries'])
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 
   await byKind.getByRole('button').click()
   await expect(byKind).toHaveAttribute('aria-sort', 'descending')
@@ -374,7 +374,7 @@ test.describe('on a phone', () => {
     await expect(sortBy).toHaveValue('') // "Not sorted"
     await expect.poll(() => inCards(page)).toEqual(['Care Fees', 'Groceries', 'Interest', 'Loan – Alice', 'Wages'])
     expect(await sortBy.locator('option').allInnerTexts()).toEqual(['Not sorted', 'Category, A to Z', 'Category, Z to A', 'Kind, A to Z', 'Kind, Z to A'])
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
 
     await sortBy.selectOption({ label: 'Kind, Z to A' })
     await expect(page.getByRole('status').filter({ hasText: 'Sorted by Kind, Z to A.' })).toBeVisible()
@@ -392,7 +392,7 @@ test.describe('on a phone', () => {
     await chooseAction(actionsButton(page, 'Groceries'), 'Rename')
     await expect(page.getByLabel('Category name')).toBeFocused()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
     await page.getByRole('button', { name: 'Cancel' }).click()
     await expect(actionsButton(page, 'Groceries')).toBeFocused()
   })
@@ -482,7 +482,7 @@ test('a Note is a button that opens it, in All Transactions and in Uncategorised
     await expect(noteText(popup)).toBeFocused()
     const opened = (await popup.boundingBox())!
     expect(Math.abs(opened.x + opened.width - (box.x + box.width)), `${heading}: the pop-up ends where its button does`).toBeLessThanOrEqual(2) // to within the pixel it is rounded to
-    await noAxeViolationsFromTop(page)
+    await noAxeViolations(page)
 
     // Escape closes it and puts focus back on the button, a press outside it closes it too, and the keyboard opens it again.
     await page.keyboard.press('Escape')

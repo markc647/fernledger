@@ -300,6 +300,7 @@ export async function startRerun(db: D1Database, actor: Member): Promise<RerunJo
       actor,
       type: 'rule',
       summary: last === 0 ? 'Started applying the Rules to all Transactions (there are none yet)' : `Started applying the Rules to up to ${number.format(last)} Transactions`,
+      onlyIfChanged: false,
       after: { transactionsUpTo: last },
     })
   } catch (error) {

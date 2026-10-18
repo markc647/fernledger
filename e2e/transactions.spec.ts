@@ -2,7 +2,7 @@ import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { clearDate, dateField, expectDate, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
-import { noAxeViolationsFromTop, rowButton } from './row-actions-helpers'
+import { rowButton } from './row-actions-helpers'
 import { focusIndicator, siteHeader } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
@@ -666,7 +666,7 @@ test("a row's Edit button opens the Edit panel under that row without moving the
   await edit(page, first).click()
   await expect(editPanel(page)).toBeVisible()
   await expect(line).toHaveCount(0)
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
 
   // The table becoming cards starts the panel again, and what was typed in it stays, and focus stays in the box it was in (the Note here, not the first field).
   await editPanel(page).getByLabel('Note', { exact: true }).fill(`Across layouts ${stamp}`)
@@ -715,7 +715,7 @@ test("on a phone a row's Edit panel opens under that Transaction's card", async 
   await expect(rowAbove(editPanel(page), 'li')).toHaveAccessibleName(`Edit ${editName(row)}`)
   const [card, box] = await Promise.all([editPanel(page).locator('xpath=ancestor::li[1]/preceding-sibling::li[1]').boundingBox(), editPanel(page).boundingBox()])
   expect(box!.width).toBeCloseTo(card!.width, 0) // as wide as the card above it
-  await noAxeViolationsFromTop(page)
+  await noAxeViolations(page)
   await editPanel(page).getByRole('button', { name: 'Cancel' }).click()
   await expect(edit(page, row)).toBeFocused()
 })

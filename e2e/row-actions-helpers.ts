@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
-import { expect, noAxeViolations } from './fixtures'
+import { expect } from './fixtures'
 import { contrastOf, rgbOf, type Rgb } from './shell-helpers'
 
 // The "⋯" menu on a row of the Rules, Categories and kept Reports tables (src/components/row-actions.tsx), and the cards on a phone: the same button and menu at every width. A spec says which
@@ -15,12 +15,6 @@ export const rowButton = (page: Page, action: string, row: string) => page.getBy
 
 /** The "⋯" button of every Rule, in the order the page shows them. */
 export const ruleActionButtons = (page: Page) => page.getByRole('button', { name: /^Actions for Rule \d+$/ })
-
-/**
- * Axe on the page from the top of it (`fromTop`, e2e/fixtures.ts), for the specs of a page with a long list of rows with buttons: the Rules, the Categories and the menus of their rows.
- * The sticky header can be over most of a row's button wherever the page is scrolled to, which axe reads as a target too small to press.
- */
-export const noAxeViolationsFromTop = (page: Page) => noAxeViolations(page, { fromTop: true })
 
 /** The open menu, for `noAxeViolations(page, { within: OPEN_MENU })`: while it is open the rest of the page is hidden from a screen reader, and is not what is looked at. */
 export const OPEN_MENU = '[data-slot="dropdown-menu-content"]'

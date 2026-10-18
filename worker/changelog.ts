@@ -28,10 +28,10 @@ export type ChangeEntry = {
   after?: unknown
   /**
    * For a mutation that may find, when it runs, that there is nothing for it to do (it ends a job that another request
-   * has already ended): the entry is written only if the mutation's last statement changed a row. Without it the entry is
-   * always written.
+   * has already ended): the entry is written only if the mutation's last statement changed a row. `false` always writes it.
+   * Required, so a new route says which: a write guarded on what the request read (`WHERE name = ?old`) wants `true`.
    */
-  onlyIfChanged?: boolean
+  onlyIfChanged: boolean
   /**
    * With `onlyIfChanged`, for an entry that counts what the statement just before it changed: the last `CHANGES` in the `summary` is replaced by that number. It has to be asked for, because a
    * summary may hold the words by chance (a Rule's text, an Account's name, a bank's description) and is then left as it is.

@@ -268,6 +268,7 @@ export const imports = new Hono<AppEnv>()
       actor: c.var.member,
       type: 'import',
       summary: chunkSummary(outcome),
+      onlyIfChanged: false,
       ...(setsCutover ? { before: { cutoverDate: existing?.cutover_date ?? null } } : {}),
       after: chunkDetail(outcome, { file, rowsInChunk: rows.length, cutoverDate: effectiveCutover, newAccount: !existing }),
     })
