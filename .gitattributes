@@ -1,1 +1,4 @@
 * text=auto eol=lf
+# Parallel branches each claim Account number suffixes on lines of their own: keep both sides' lines instead of conflicting.
+# A bad result (two claims of one suffix, or a comma lost at the end) fails `npm run test:scripts` (scripts/e2e-accounts.test.mjs).
+e2e/account-numbers.json merge=union

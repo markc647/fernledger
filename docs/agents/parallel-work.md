@@ -1,6 +1,6 @@
 # Working beside other agents
 
-For an agent in a worktree, a subagent, or any checkout whose tests run while others' do. The coordinator's brief adds only the task, the branch, and your port.
+For an agent in a worktree, a subagent, or any checkout whose tests run while others' do. The coordinator's brief adds only the task and the branch.
 
 ## Start from the integration branch
 
@@ -34,7 +34,7 @@ A run too long for one call (10 minutes) is split by spec file.
 
 ## Sharing the machine
 
-- Use the `E2E_PORT` your brief names, so your server and database are your own. `TEST_TEMP_ROOT=<folder>` works inline on any command.
+- Each checkout gets its own browser-test port and database from its folder (`playwright.config.ts`), so briefs name no port. Set `E2E_PORT` only for a second run in the same checkout at the same time. `TEST_TEMP_ROOT=<folder>` works inline on any command.
 - `VITEST_MAX_WORKERS=2 npm run check` leaves CPU for the others.
 - At most two agents run browser specs at once; the coordinator staggers them.
 - Stop a process you started by its PID. Other agents' servers are node processes too, so killing by image name (`taskkill /IM`, `Stop-Process -Name`, `pkill`) stops their runs; `.claude/settings.json` refuses it.

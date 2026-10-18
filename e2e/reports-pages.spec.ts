@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { REPORTS } from '../src/lib/reports'
 import { expectDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { forgetKeptReportsAfterEach } from './report-helpers'
@@ -9,14 +10,8 @@ import { breadcrumb, mainNav, navGroup, navLink } from './shell-helpers'
 // row, and opens a Report the Admin has made from the Reports page (kept-reports.spec.ts, which also checks that page). This is what the pages have in common: where they say they are,
 // and what they read when nothing is chosen.
 
-const EXPECTED = [
-  { name: 'Spending by Category', path: '/reports/spending' },
-  { name: 'Income vs spending by month', path: '/reports/income-vs-spending' },
-  { name: 'Loans', path: '/reports/loans' },
-  { name: 'Transaction listing', path: '/reports/transactions' },
-  { name: 'Balances over time', path: '/reports/balances' },
-  { name: 'Budget vs actual', path: '/reports/budget-vs-actual' },
-] as const
+// From the Reports list itself, so a branch that adds a Report changes no spec that only goes through them all.
+const EXPECTED = Object.values(REPORTS).map((report) => ({ name: report.name, path: report.to }))
 
 /** The links in the sidebar's Reports group, which is the list that follows its button. */
 const reportsLinks = (page: Page) => navGroup(page, 'Reports').locator('xpath=following-sibling::ul').getByRole('link')
