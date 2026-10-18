@@ -78,7 +78,7 @@ type TransactionDetail = {
 
 /** Describes a Transaction in a Change Log summary: enough to find it, from its ID, date and description. */
 type Described = { id: number; date: string; description: string }
-const describe = (t: Described) => `Transaction ${t.id} (${t.date}, ${t.description})`
+export const describe = (t: Described) => `Transaction ${t.id} (${t.date}, ${t.description})`
 
 const findTransaction = (db: D1Database, id: number) =>
   db.prepare('SELECT id, date, description, override_category AS overrideCategory, note FROM transactions WHERE id = ?').bind(id).first<Described & { overrideCategory: number | null; note: string | null }>()

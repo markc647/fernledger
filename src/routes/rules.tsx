@@ -18,8 +18,9 @@ import { api } from '@/lib/api'
 import { formatCount, formatDate } from '@/lib/format'
 import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
+import { MAX_INLINE_APPLY } from '@/lib/rule-from-transaction'
 import { announcement, estimateSentence, frameTitle, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
-import { dollarsForInput, DRAG_INSTRUCTIONS, DRAG_ROLE, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, type RuleView } from '@/lib/rules'
+import { dollarsForInput, DRAG_INSTRUCTIONS, DRAG_ROLE, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleResult, ruleWhen, type RuleView } from '@/lib/rules'
 
 export const Route = createFileRoute('/rules')({
   component: Rules,
@@ -50,7 +51,7 @@ const rerunQuery = queryOptions({
   refetchOnWindowFocus: false,
 })
 
-const INTRO = 'A Rule is used for new Transactions as they are imported. The Transactions you already have change only when you choose Apply the Rules to all Transactions.'
+const INTRO = 'A Rule you add on this page is used for new Transactions as they are imported, and changes the Transactions you already have only when you choose Apply the Rules to all Transactions.'
 
 /** The page's help sheet: what a Rule is and when it is used, and, under its own heading, what applying the Rules does. */
 function RulesHelp() {
@@ -61,6 +62,10 @@ function RulesHelp() {
         on a Transaction (an Override) always beats a Rule, and a Rule beats the category Akahu suggests, if you use Akahu Sync. So does Not a Transfer, which the Admin chooses on a Transaction a Rule wrongly marks as a Transfer.
       </p>
       <p>{INTRO}</p>
+      <p>
+        A Rule made from a Transaction is the exception: choose Edit on it (on the Uncategorised or Transactions page), then the Category, then Create Rule. That Rule goes last in the list, and gives its Category at once to the
+        Transactions that have none and that it matches, up to {formatCount(MAX_INLINE_APPLY)} others at a time. For more, choose Apply the Rules to all Transactions.
+      </p>
       <HelpHeading>Apply the Rules to all Transactions</HelpHeading>
       <p>
         Fernledger goes through every Transaction you have, a few at a time, and gives each the Category of the first Rule that matches it. A Transaction that no Rule matches any more loses the
@@ -75,11 +80,6 @@ function RulesHelp() {
 const THEN_APPLY = 'To use the change on the Transactions you already have, choose Apply the Rules to all Transactions, below.'
 const RUN_GOING_BEFORE = 'A run is going. Saving starts it again from the first Transaction.'
 const afterChange = (runGoing: boolean) => (runGoing ? 'The run that is going starts again from the first Transaction, so that it uses the change.' : THEN_APPLY)
-
-const sentence = (parts: string[]) => {
-  const text = parts.join(' and ')
-  return text.charAt(0).toUpperCase() + text.slice(1)
-}
 
 type Item = { rule: RuleView; number: number; first: boolean; last: boolean }
 type Editing = { kind: 'add' } | { kind: 'edit'; rule: RuleView } | null
@@ -178,7 +178,7 @@ function AdminRules() {
   const columns: Column<Item>[] = [
     ...(items.length > 1 ? handle : []),
     { key: 'order', header: 'Order', className: 'whitespace-nowrap', cell: (item) => item.number },
-    { key: 'when', header: 'When', cell: (item) => sentence(ruleConditions(item.rule)) },
+    { key: 'when', header: 'When', cell: (item) => ruleWhen(item.rule) },
     { key: 'then', header: 'Then', cell: (item) => ruleResult(item.rule) },
     {
       key: 'actions',

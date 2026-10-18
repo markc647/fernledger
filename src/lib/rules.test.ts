@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dollarsForInput, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, type RuleView } from './rules'
+import { dollarsForInput, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleConditions, ruleResult, ruleWhen, type RuleView } from './rules'
 
 const rule = (over: Partial<RuleView> = {}): RuleView => ({
   id: 1,
@@ -67,6 +67,12 @@ describe('describing a Rule in words', () => {
       'money out',
       'amount from $5.00 to $90.00',
     ])
+  })
+
+  it('says when the Rule applies as one sentence that starts with a capital: the Rules table\'s "When" and what saving a Rule made from a Transaction says', () => {
+    expect(ruleWhen(rule({ textContains: 'COUNTDOWN' }))).toBe('Text contains “COUNTDOWN”')
+    expect(ruleWhen(rule({ textContains: 'COUNTDOWN', direction: 'out' }))).toBe('Text contains “COUNTDOWN” and money out')
+    expect(ruleWhen(rule({ direction: 'in', minCents: 1000 }))).toBe('Money in and amount of $10.00 or more')
   })
 
   it('says what the Rule does', () => {

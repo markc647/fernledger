@@ -1167,11 +1167,11 @@ test.describe('zoom', () => {
     })
   }
 
-  // A Transaction's details with every field filled in and long values, and the Admin's edit panel open: the longest text
+  // A Transaction's details with every field filled in and long values, and the Admin's edit panel open with Create Rule: the longest text
   // that page shows. The Transaction is stubbed, so this needs no data in the database.
   for (const { name, width, height } of zoomLevels) {
     for (const size of ['Medium', 'Xtra Large'] as const) {
-      test(`/transactions/4242 with every detail filled and the edit panel open at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
+      test(`/transactions/4242 with every detail filled and the edit panel open with Create Rule at ${name} and text size ${size} has no horizontal scrolling`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         const long = 'EXAMPLE'.padEnd(80, 'x')
         await page.route('**/api/transactions/4242', (route) =>
@@ -1206,6 +1206,11 @@ test.describe('zoom', () => {
         await chooseTextSize(page, size)
         await page.getByRole('button', { name: 'Edit Category and Note' }).click()
         await expect(page.getByRole('region', { name: 'Edit Category and Note' })).toBeVisible()
+        // Create Rule is open too: its fields, and the longest count it says (a Rule's text can be 100 characters, and the count and its warning are sentences).
+        await page.route('**/api/rules/preview', (route) => route.fulfill({ json: { matches: 1_234_567, samples: [], uncategorised: 1_234_000 } }))
+        await page.getByRole('button', { name: 'Create Rule' }).click()
+        await expect(page.getByRole('region', { name: 'Edit Category and Note' }).getByRole('status')).toContainText('1,234,567 Transactions match, 1,234,000 of them Uncategorised.')
+        await expect(page.getByRole('region', { name: 'Edit Category and Note' }).getByRole('status')).toContainText('too many to give a Category at once')
         await expect(page.getByRole('region', { name: 'From the bank' })).toContainText('First seen by Akahu')
         await expectTextSize(page, size)
         await settle(page)

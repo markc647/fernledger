@@ -54,16 +54,22 @@ export async function callWhileInterrupted(path: string, method: string, body: u
 }
 
 /**
- * D1 that totals the rows D1 says it read for what is run on it (what the free plan bills: ADR 0004), batches included. Pass it to `callAsAdminWith`. Its statements are
- * wrappers, so only `bind`, `first`, `all` and `run` work on them, and a batch takes the ones it made.
+ * D1 that totals the rows D1 says it read and wrote for what is run on it (what the free plan bills: ADR 0004), and how many queries it was asked (a statement in a batch is one
+ * each, as the 50 a request may run count them), batches included. Pass it to `callAsAdminWith`. Its statements are wrappers, so only `bind`, `first`, `all` and `run` work on them,
+ * and a batch takes the ones it made.
  */
 export function meteredDb() {
-  const usage = { rowsRead: 0 }
+  const usage = { rowsRead: 0, rowsWritten: 0, queries: 0 }
+  const count = (result: D1Result) => {
+    usage.rowsRead += result.meta.rows_read
+    usage.rowsWritten += result.meta.rows_written
+    usage.queries += 1
+  }
   const original = new WeakMap<object, D1PreparedStatement>()
   const wrap = (statement: D1PreparedStatement): D1PreparedStatement => {
     const read = async () => {
       const result = await statement.all()
-      usage.rowsRead += result.meta.rows_read
+      count(result)
       return result
     }
     const wrapped = {
@@ -72,7 +78,7 @@ export function meteredDb() {
       first: async () => (await read()).results[0] ?? null,
       run: async () => {
         const result = await statement.run()
-        usage.rowsRead += result.meta.rows_read
+        count(result)
         return result
       },
     }
@@ -83,7 +89,7 @@ export function meteredDb() {
     prepare: (sql: string) => wrap(env.DB.prepare(sql)),
     batch: async (statements: D1PreparedStatement[]) => {
       const results = await env.DB.batch(statements.map((statement) => original.get(statement)!))
-      for (const result of results) usage.rowsRead += result.meta.rows_read
+      for (const result of results) count(result)
       return results
     },
   } as unknown as D1Database

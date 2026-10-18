@@ -32,10 +32,24 @@ type CriteriaInput = { textContains?: string | null; bankType?: string | null; d
 const usesACriterion = (c: CriteriaInput) => [c.textContains, c.bankType, c.direction, c.minCents, c.maxCents].some((value) => value !== undefined && value !== null)
 const rangeIsOrdered = (c: CriteriaInput) => c.minCents == null || c.maxCents == null || c.minCents <= c.maxCents
 
-/** What the preview takes: criteria only, since it asks how many Transactions they match and changes nothing. */
+/**
+ * What the preview takes: criteria only, since it asks how many Transactions they match and changes nothing. With `uncategorised` it also counts how many of them have no
+ * Category, and shows no examples: the count Create Rule shows while the Admin types (rule-preview.ts).
+ */
 export const criteriaBody = z
-  .object(criteriaFields)
+  .object({ ...criteriaFields, uncategorised: z.optional(z.boolean()) })
   .check(z.refine(usesACriterion, { path: ['criteria'] }), z.refine(rangeIsOrdered, { path: ['maxCents'] }))
+
+/**
+ * What making a Rule from a Transaction takes (rule-from-transaction.ts): the Transaction, the text to look for, which way the money went (or either), and the Category
+ * the Admin chose in the Edit panel. The other criteria are not offered there, so the body names no others.
+ */
+export const fromTransactionBody = z.strictObject({
+  transactionId: z.int().check(z.positive()),
+  textContains: text(100),
+  direction: optionally(z.enum(['in', 'out'])),
+  categoryId: z.int().check(z.positive()),
+})
 
 /** What adding or changing a Rule takes: the criteria, and exactly one target, a Category or the Transfer flag. */
 export const ruleBody = z

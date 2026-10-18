@@ -696,6 +696,75 @@ describe('the preview', () => {
   })
 })
 
+describe('the preview that also counts the Uncategorised (the count Create Rule shows as the Admin types)', () => {
+  const sums = (body: unknown) => preview(body)
+
+  it('counts the matches and how many of them have no Category, leaving out a Transaction with an Override, a Rule or a Transfer, and showing no examples', async () => {
+    const groceries = await categoryId('Groceries')
+    const earlier = await addRule({ textContains: 'NOTHING THAT MATCHES', categoryId: groceries })
+    const gone = (await env.DB.prepare("INSERT INTO categories (name, removed_at) VALUES ('Old one', '2026-01-01T00:00:00Z') RETURNING id").first<{ id: number }>())!.id
+    await history({ description: 'EXAMPLE SHOP 1' })
+    await history({ description: 'EXAMPLE SHOP 2', cents: 700 })
+    const overridden = await history({ description: 'EXAMPLE SHOP 3' })
+    const ruled = await history({ description: 'EXAMPLE SHOP 4' })
+    const marked = await history({ description: 'EXAMPLE SHOP 5' })
+    const paired = await history({ description: 'EXAMPLE SHOP 6' })
+    const overriddenWithARemovedOne = await history({ description: 'EXAMPLE SHOP 7' })
+    await history({ description: 'EXAMPLE PHARMACY' })
+    await env.DB.batch([
+      env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(groceries, overridden),
+      env.DB.prepare('UPDATE transactions SET rule_id = ?, rule_category = ? WHERE id = ?').bind(earlier, groceries, ruled),
+      env.DB.prepare('UPDATE transactions SET rule_id = ?, rule_transfer = 1 WHERE id = ?').bind(earlier, marked),
+      env.DB.prepare('UPDATE transactions SET transfer_of = ? WHERE id = ?').bind(ruled, paired),
+      env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(gone, overriddenWithARemovedOne),
+    ])
+
+    const res = await sums({ textContains: 'example shop', uncategorised: true })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ matches: 7, samples: [], uncategorised: 3 })
+    expect(await (await sums({ textContains: 'example shop', direction: 'in', uncategorised: true })).json()).toEqual({ matches: 1, samples: [], uncategorised: 1 })
+    // Asked the usual way it says nothing of Categories, and still shows its examples.
+    expect(await (await sums({ textContains: 'example shop' })).json()).toEqual({ matches: 7, samples: expect.any(Array) })
+    expect(await rules()).toHaveLength(1)
+    expect(await changeLog()).toEqual([{ summary: expect.stringContaining('Added a Rule'), actor: expect.any(String), type: 'rule', before: null, after: expect.any(String) }])
+  })
+
+  it('counts none when nothing matches, and refuses an answer that is not yes or no', async () => {
+    await history({ description: 'EXAMPLE SHOP' })
+
+    expect(await (await sums({ textContains: 'zzz', uncategorised: true })).json()).toEqual({ matches: 0, samples: [], uncategorised: 0 })
+    const res = await sums({ textContains: 'example', uncategorised: 'yes' })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid request', field: 'uncategorised' })
+  })
+
+  it('reads each Transaction once, and a few more for each match that has a Category to look up', async () => {
+    const N = 400
+    const groceries = await categoryId('Groceries')
+    await env.DB.prepare(
+      "INSERT INTO transactions (account_id, date, amount_cents, description, bank_memo, bank_type, source) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?2) SELECT ?1, '2026-10-01', -1000, 'EXAMPLE SHOP ' || i, '', 'EFTPOS', 'import' FROM n",
+    )
+      .bind(accountId, N)
+      .run()
+    const { db, usage } = meteredDb()
+    const asked = async (criteria: Record<string, unknown>) => {
+      usage.rowsRead = 0
+      const res = await callAsAdminWith(db, '/api/rules/preview', 'POST', { ...criteria, uncategorised: true })
+      expect(res.status).toBe(200)
+      return usage.rowsRead
+    }
+
+    // All of them match and none has a Category: the one read each.
+    expect(await asked({ textContains: 'example shop' })).toBeLessThanOrEqual(N + 20)
+    // None matches: only the one read each, whatever the Categories are.
+    expect(await asked({ textContains: 'zzz' })).toBeLessThanOrEqual(N + 20)
+    // All of them match and every one has an Override and a Rule: each looks both up.
+    await env.DB.prepare('UPDATE transactions SET override_category = ?1, rule_category = ?1').bind(groceries).run()
+    expect(await asked({ textContains: 'example shop' })).toBeLessThanOrEqual(3 * N + 20)
+  })
+})
+
 describe('new Transactions', () => {
   it('get the first matching Rule when an Import adds them, and show it as the source of their Category', async () => {
     const groceries = await categoryId('Groceries')
