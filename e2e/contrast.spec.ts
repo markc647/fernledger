@@ -283,7 +283,7 @@ const PAGES: {
     },
   },
   {
-    // The Admin's list of Transactions with no Category. A Member is told it is the Admin's.
+    // The Admin's list of Transactions with no Category, and the edit panel of its first Transaction with Create Rule open: the Rule's fields, the count the Admin is told, and the buttons. A Member is told it is the Admin's.
     path: '/uncategorised',
     visit: async ({ page, role, scan }) => {
       await page.goto('/uncategorised')
@@ -291,6 +291,12 @@ const PAGES: {
       if (role === 'member') await expect(page.getByText('Only the Admin can use this list.')).toBeVisible()
       else await expect(page.getByRole('row').filter({ has: page.getByRole('cell') }).first()).toBeVisible()
       await scan()
+      if (role === 'admin') {
+        await page.getByRole('button', { name: /^Edit / }).first().click()
+        await page.getByRole('button', { name: 'Create Rule' }).click()
+        await expect(page.getByRole('region', { name: /^Edit Category and Note/ }).getByRole('status')).toContainText('match')
+        await scan('with Create Rule open', { fromTop: true })
+      }
     },
   },
   {
