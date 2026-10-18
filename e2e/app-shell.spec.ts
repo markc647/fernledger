@@ -1,4 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
+import { REPORTS } from '../src/lib/reports'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import {
   blockStorage,
@@ -185,7 +186,7 @@ test.describe('the sidebar navigation', () => {
     expect(await outline(page)).toEqual([
       'Dashboard',
       'Transactions: All Transactions, Uncategorised, Import, Export',
-      'Reports: Reports, Net worth, Spending by Category, Income vs spending by month, Loans, Transaction listing, Balances over time, Budget vs actual',
+      `Reports: Reports, Net worth, ${Object.values(REPORTS).map((report) => report.name).join(', ')}`, // the Reports from their own list (reports-pages.spec.ts checks the names)
       'Set up: Accounts, Categories, Rules, Budgets, Settings',
       'Help: Change Log, About your data, How to sign in',
     ])

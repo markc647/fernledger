@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { defineConfig } from '@playwright/test'
@@ -6,17 +7,20 @@ import { defineConfig } from '@playwright/test'
 // which these tests select with a cookie (the dev-only switcher bar is not in a production build).
 // Run with `npm run test:e2e`. They are kept out of `npm run check` because they need a browser and are slower;
 // CI runs them as their own job. The first run needs `npx playwright install chromium`.
-const port = Number(process.env.E2E_PORT ?? 5199) // E2E_PORT lets parallel checkouts each run their own server
+// Each checkout has a port of its own, from its folder, so parallel checkouts never share a server or a database. E2E_PORT overrides it:
+// for two runs at once in one checkout, or to find a run's server. 20000–29999 is clear of Vite (5173), Wrangler (8787) and Windows' reserved ranges.
+const checkoutPort = 20_000 + (parseInt(createHash('sha256').update(import.meta.dirname.toLowerCase()).digest('hex').slice(0, 8), 16) % 10_000)
+const port = Number(process.env.E2E_PORT ?? checkoutPort)
 const baseURL = `http://localhost:${port}` // the one place the port is used; the specs get it from Playwright
-// TEST_TEMP_ROOT (a RAM disk, say) takes the tests' throwaway files off the system disk: each run's database, one folder per port
-// so parallel checkouts don't share one, and the temp files of the browsers and the Worker runtime. Without it the database is in the checkout.
+// The database is one folder per port, so no two servers share one. TEST_TEMP_ROOT (a RAM disk, say) takes the tests' throwaway files off the
+// system disk: that database, and the temp files of the browsers and the Worker runtime. Without it the database is in the checkout's .wrangler.
 const tempRoot = process.env.TEST_TEMP_ROOT
 if (tempRoot) {
   const temp = join(tempRoot, 'Temp')
   mkdirSync(temp, { recursive: true })
   process.env.TEMP = process.env.TMP = process.env.TMPDIR = temp
 }
-const state = tempRoot ? join(tempRoot, `e2e-state-${port}`) : '.wrangler/e2e-state'
+const state = join(tempRoot ?? '.wrangler', `e2e-state-${port}`)
 
 export default defineConfig({
   testDir: './e2e',

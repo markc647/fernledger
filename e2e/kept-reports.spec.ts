@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test'
+import { REPORTS } from '../src/lib/reports'
 import { pickDate } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
@@ -226,7 +227,7 @@ test.describe('the Reports page', () => {
     await page.goto('/reports')
     await expect(page.locator('[data-slot="card"]')).toHaveCount(0)
     await expect(navGroup(page, 'Reports')).toHaveAttribute('aria-expanded', 'true')
-    for (const name of ['Spending by Category', 'Income vs spending by month', 'Loans', 'Transaction listing', 'Balances over time', 'Budget vs actual']) {
+    for (const { name } of Object.values(REPORTS)) {
       await expect(navLink(page, name)).toBeVisible()
     }
   })
