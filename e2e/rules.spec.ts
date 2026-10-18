@@ -944,19 +944,26 @@ test.describe('the D1 usage bar', () => {
     expect(asked).toEqual([])
   })
 
-  // Two runs show every level on both bars: the read bar Medium and then Low, the written bar High (past the end of its allowance) and then Low.
+  // Three runs show every level on both bars (the same words and colours as the header's bar says of the same figures, e2e/allowance-bar.spec.ts): Running low on the rows read and Used up on
+  // the rows written (past the end of its allowance), then Plenty left on both, then Almost used on the rows read and Running low on the rows written.
   for (const { runs, figures, reads, writes } of [
     {
-      runs: 'Medium on the rows read and High on the rows written',
-      figures: { rowsRead: 2_750_000, rowsWritten: 105_000 },
-      reads: { level: 'Medium', percent: 55, drawn: 55, token: 'warning', text: '2,750,000 of 5,000,000 rows read' },
-      writes: { level: 'High', percent: 105, drawn: 100, token: 'danger', text: '105,000 of 100,000 rows written' }, // the bar stops at its end
+      runs: 'Running low on the rows read and Used up on the rows written',
+      figures: { rowsRead: 3_750_000, rowsWritten: 105_000 },
+      reads: { level: 'Running low', percent: 75, drawn: 75, token: 'warning', text: '3,750,000 of 5,000,000 rows read' },
+      writes: { level: 'Used up', percent: 105, drawn: 100, token: 'danger', text: '105,000 of 100,000 rows written' }, // the bar stops at its end
     },
     {
-      runs: 'Low on both',
+      runs: 'Plenty left on both',
       figures: { rowsRead: 1_234_567, rowsWritten: 4_321 },
-      reads: { level: 'Low', percent: 24, drawn: 24, token: 'success', text: '1,234,567 of 5,000,000 rows read' },
-      writes: { level: 'Low', percent: 4, drawn: 4, token: 'success', text: '4,321 of 100,000 rows written' },
+      reads: { level: 'Plenty left', percent: 24, drawn: 24, token: 'success', text: '1,234,567 of 5,000,000 rows read' },
+      writes: { level: 'Plenty left', percent: 4, drawn: 4, token: 'success', text: '4,321 of 100,000 rows written' },
+    },
+    {
+      runs: 'Almost used on the rows read and Running low on the rows written',
+      figures: { rowsRead: 4_500_000, rowsWritten: 70_000 },
+      reads: { level: 'Almost used', percent: 90, drawn: 90, token: 'danger', text: '4,500,000 of 5,000,000 rows read' },
+      writes: { level: 'Running low', percent: 70, drawn: 70, token: 'warning', text: '70,000 of 100,000 rows written' },
     },
   ]) {
     test(`shows ${runs}: each badge sits with its own bar, and the bar's fill is the level's colour while its track keeps its own`, { tag: '@theme' }, async ({ page, context }) => {

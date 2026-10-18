@@ -133,7 +133,7 @@ const AKAHU_ONLY_IF = 'It contacts no one but Akahu (only if this Fernledger use
 const contacts = {
   off: `${AKAHU_ONLY_IF} and, to check a sign-in, your own Cloudflare Access.`,
   on: `${AKAHU_ONLY_IF} and your own Cloudflare account: its Access, to check a sign-in, and its usage figures, which whoever runs Fernledger has turned on to show the Admin how much of the day's free database allowance is left. Asking for those sends no Transactions, Notes or other data of yours.`,
-  unknown: `${AKAHU_ONLY_IF} and your own Cloudflare account: its Access, to check a sign-in, and, if whoever runs Fernledger has turned it on, its usage figures, to show the Admin how much of the day's free database allowance is left.`,
+  unknown: `${AKAHU_ONLY_IF} and your own Cloudflare account: its Access, to check a sign-in, and, if whoever runs Fernledger has turned it on, its usage figures for the Admin, to show how much of the day's free database allowance is left.`,
 }
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {

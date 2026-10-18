@@ -1,6 +1,7 @@
 import { AxeBuilder } from '@axe-core/playwright'
 import { expect, test as base, type BrowserContext, type Page } from '@playwright/test'
 import type { Role } from '../src/generated/api/auth'
+import type { D1Usage } from '../src/generated/api/d1-usage'
 
 // A spec that creates Accounts uses numbers of its own (99-9999-9999999-NN), one set for each project, because the light and dark projects and every spec share one
 // local database. Take unused NN from account-numbers.json and add them there: `npm run test:scripts` fails when two specs use the same one.
@@ -34,9 +35,8 @@ export const test = base.extend<{ expectedStatuses: number[]; expectedConsoleErr
     page.on('pageerror', (error) => problems.push(`uncaught: ${error.message}`))
     // Local development has no Cloudflare token, so the D1 usage figures are never real here. A spec that says the D1 usage bar is set up (`/api/features`) makes the Admin's header ask for
     // them (src/components/allowance-bar.tsx), and gets these unless it answers for itself: a route added later is the one that is used.
-    await page.route('**/api/d1-usage', (route) =>
-      route.fulfill({ json: { rowsRead: 1_234_567, rowsWritten: 4_321, readLimit: 5_000_000, writeLimit: 100_000, resetsAt: '2026-10-15T00:00:00.000Z' } }),
-    )
+    const usage: D1Usage = { rowsRead: 1_234_567, rowsWritten: 4_321, readLimit: 5_000_000, writeLimit: 100_000, resetsAt: '2026-10-15T00:00:00.000Z' }
+    await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usage }))
     await page.addInitScript(() => {
       document.addEventListener('securitypolicyviolation', (event) => {
         console.error(`CSP violation: ${event.violatedDirective} blocked ${event.blockedURI || 'inline'}`)

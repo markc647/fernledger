@@ -4,9 +4,12 @@ import { usageFigures, usageOn } from './rule-helpers'
 import { expectTextSize, navigateTo, openHeaderControls, siteHeader, textSizeButton, textSizeGroup } from './shell-helpers'
 
 // The Admin's free allowance bar, in the header on every page (src/components/allowance-bar.tsx): how much of today's free D1 allowance is left, of whichever of the rows read and the rows
-// written has less. Local development has no Cloudflare token, so each test says the D1 usage bar is set up (`/api/features`) and answers the figures itself.
+// written has gone further, with the Rules page's words and colours for the same figures (src/lib/d1-usage.ts). Local development has no Cloudflare token, so each test says the D1 usage bar
+// is set up (`/api/features`) and answers the figures itself.
 
-const WIDE = { width: 1500, height: 800 } // more than 82rem of header at every text size but the largest; the specs that go there set their own
+// The header has the bar, with the controls, from 62rem of it (the controls alone fold into the menu at 56rem, e2e/display.spec.ts), and writes the bar's words out from 82rem.
+const WIDE = { width: 1500, height: 800 } // the words written out, at every text size but the largest
+const COMPACT = { width: 1100, height: 800 } // the bar and its value
 const PHONE = { width: 390, height: 844 }
 const PIXELS = { Medium: 16, 'Xtra Large': 20 } as const
 const SAVED = { Medium: 'medium', 'Xtra Large': 'xlarge' } as const
@@ -16,13 +19,18 @@ async function stubAllowance(page: Page, figures: Record<string, unknown> = {}) 
   await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures(figures) }))
 }
 
-/** The bar in the header: a progressbar named for what it is, which its label is. */
-const bar = (page: Page) => siteHeader(page).getByRole('progressbar', { name: 'Free allowance left today' })
+const LABEL = 'Free allowance left today'
+
+/** The bar in the header: a progressbar named for what it is, which its label is (written out or not). */
+const bar = (page: Page) => siteHeader(page).getByRole('progressbar', { name: LABEL })
+
+/** Whether the words are written out beside the bar: its label is there for a screen reader either way, and is clipped to a pixel when there is no room. */
+const writtenOut = (page: Page) => siteHeader(page).getByText(LABEL).evaluate((label) => label.getBoundingClientRect().width > 2)
 
 const FIGURES_READ = 'Rows read today: 1,234,567 of 5,000,000'
 const FIGURES_WRITTEN = 'Rows written today: 4,321 of 100,000'
 
-test.describe('the Admin\'s header', () => {
+test.describe("the Admin's header", () => {
   test('says how much of today is left, in one bar named for it, as an estimate, with no word while there is plenty', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await stubAllowance(page)
@@ -32,22 +40,42 @@ test.describe('the Admin\'s header', () => {
     await expect(bar(page)).toBeVisible()
     await expect(bar(page)).toHaveAttribute('aria-valuenow', '75') // 3,765,433 of the 5,000,000 rows read are left, and 95% of the rows written
     await expect(bar(page)).toHaveAttribute('aria-valuetext', `About 75% left. ${FIGURES_READ}. ${FIGURES_WRITTEN}. An estimate: Cloudflare runs a few minutes behind.`)
-    await expect(siteHeader(page).getByText('Free allowance left today')).toBeVisible()
+    await expect(siteHeader(page).getByText(LABEL)).toBeVisible()
     await expect(siteHeader(page).getByText('about 75%')).toBeVisible() // "about": Cloudflare's figures run a few minutes behind
     await expect(siteHeader(page).locator('[data-slot="badge"]')).toHaveCount(0)
     await noAxeViolations(page)
   })
 
-  test('is one bar, of whichever has less left: the rows written when they leave less than the rows read', async ({ page, context }) => {
+  test('is one bar, of whichever has gone further: the rows written when they have, and says what the Rules page says of those figures', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await stubAllowance(page, { rowsWritten: 60_000 })
     await page.setViewportSize(WIDE)
     await page.goto('/reports')
-
     await expect(bar(page)).toHaveAttribute('aria-valuenow', '40')
     await expect(siteHeader(page).getByText('about 40%')).toBeVisible()
     await expect(siteHeader(page).getByRole('progressbar')).toHaveCount(1)
     await expect(bar(page)).toHaveAttribute('aria-valuetext', /^About 40% left\. Rows read today: 1,234,567 of 5,000,000\. Rows written today: 60,000 of 100,000\./)
+  })
+
+  // Compact, where the controls are in the bar too: the bar and its value, and the words that are its name are its accessible name and the first line of its tooltip.
+  test('is the bar and its value from 62rem, with its name for a screen reader and in its tooltip, and the text size, theme and Sign out beside it', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await stubAllowance(page, { rowsRead: 3_750_000 }) // Running low
+    await page.setViewportSize(COMPACT)
+    await page.goto('/reports/income-vs-spending')
+
+    await expect(bar(page)).toBeVisible() // named, though the words are not written out
+    expect(await writtenOut(page)).toBe(false)
+    await expect(siteHeader(page).getByText('about 25%')).toBeVisible()
+    await expect(siteHeader(page).locator('[data-slot="badge"]')).toBeHidden() // no room for the word: a shape beside the value says it is going, and the value text says it in words
+    await expect(siteHeader(page).locator('[data-slot="progress-value"] svg')).toBeVisible()
+    await expect(bar(page)).toHaveAttribute('aria-valuetext', /^About 25% left, Running low\. /)
+    await expect(textSizeGroup(page)).toBeVisible()
+    await expect(siteHeader(page).getByRole('link', { name: 'Sign out' })).toBeVisible()
+    await bar(page).focus()
+    await expect(page.getByRole('tooltip')).toContainText(LABEL)
+    await expect(page.getByRole('tooltip')).toContainText('Rows read today: 3,750,000 of 5,000,000')
+    await noAxeViolations(page)
   })
 
   // Hover is not the only way: the bar is a tab stop, and both figures open on its focus too.
@@ -58,6 +86,7 @@ test.describe('the Admin\'s header', () => {
     await page.goto('/reports/income-vs-spending') // a page of Reports, whose group is a link
     const tooltip = page.getByRole('tooltip')
     const expectFigures = async () => {
+      await expect(tooltip).toContainText(LABEL)
       await expect(tooltip).toContainText(FIGURES_READ)
       await expect(tooltip).toContainText(FIGURES_WRITTEN)
       await expect(tooltip).toContainText('An estimate: Cloudflare runs a few minutes behind.')
@@ -82,15 +111,42 @@ test.describe('the Admin\'s header', () => {
     await expect(tooltip).toHaveCount(0)
   })
 
-  // The words are there as well as the colour: Low below 20% left (amber), Almost used below 5% (red), nothing at 20% and over. The fill is the theme's own colour for it.
+  // A touch screen has no hover, and a tap does not focus a tooltip open: a tap opens it, a tap elsewhere shuts it, and the bar is a target of 44px.
+  test.describe('on a touch screen', () => {
+    test.use({ hasTouch: true })
+
+    test('has a target of at least 44px, and a tap opens both figures and a tap elsewhere shuts them', async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await stubAllowance(page)
+      await page.setViewportSize(WIDE)
+      await page.goto('/reports')
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      const box = (await bar(page).boundingBox())!
+      expect(box.height).toBeGreaterThanOrEqual(44)
+      expect(box.width).toBeGreaterThanOrEqual(44)
+
+      const tooltip = page.getByRole('tooltip')
+      await expect(tooltip).toHaveCount(0)
+      await bar(page).tap()
+      await expect(tooltip).toContainText(FIGURES_READ)
+      await expect(tooltip).toContainText(FIGURES_WRITTEN)
+      await page.getByRole('heading', { level: 1, name: 'Reports' }).tap()
+      await expect(tooltip).toHaveCount(0)
+    })
+  })
+
+  // The words are there as well as the colour. The scale is the Rules page's (src/lib/d1-usage.ts): amber (Running low) from 70% used, which is 30% left, red (Almost used) from 85% used, which
+  // is 15% left, and Used up only when the allowance has been reached; the percentage is rounded down, so 0% is not Used up. The fill is the theme's own colour for it.
   for (const { left, figures, word, token } of [
-    { left: 20, figures: { rowsRead: 4_000_000 }, word: null, token: 'success' },
-    { left: 19, figures: { rowsRead: 4_000_001 }, word: 'Low', token: 'warning' }, // 19.99998% is left: rounded down, so it is never shown as more than is left, and is Low
-    { left: 5, figures: { rowsRead: 4_750_000 }, word: 'Low', token: 'warning' },
-    { left: 4, figures: { rowsRead: 4_750_001 }, word: 'Almost used', token: 'danger' }, // 4.99998%
-    { left: 0, figures: { rowsRead: 5_100_000 }, word: 'Almost used', token: 'danger' },
+    { left: 30, figures: { rowsRead: 3_499_999 }, word: null, token: 'success' }, // 30.00002% is left: not yet 70% used
+    { left: 30, figures: { rowsRead: 3_500_000 }, word: 'Running low', token: 'warning' },
+    { left: 15, figures: { rowsRead: 4_249_999 }, word: 'Running low', token: 'warning' },
+    { left: 15, figures: { rowsRead: 4_250_000 }, word: 'Almost used', token: 'danger' },
+    { left: 0, figures: { rowsRead: 4_999_999 }, word: 'Almost used', token: 'danger' }, // 0% is shown, and it is not used up
+    { left: 0, figures: { rowsRead: 5_100_000 }, word: 'Used up', token: 'danger' },
+    { left: 0, figures: { rowsWritten: 100_000 }, word: 'Used up', token: 'danger' },
   ] as const) {
-    test(`at ${left}% left says ${word ?? 'nothing'}, and the bar is the ${token} colour`, { tag: '@theme' }, async ({ page, context }) => {
+    test(`at ${left}% left with ${JSON.stringify(figures)} says ${word ?? 'nothing'}, and the bar is the ${token} colour`, { tag: '@theme' }, async ({ page, context }) => {
       await signInAs(context, 'admin')
       await stubAllowance(page, figures)
       await page.setViewportSize(WIDE)
@@ -196,7 +252,7 @@ test.describe('the Admin\'s header', () => {
     await signInAs(context, 'admin')
     await page.goto('/reports')
     await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible()
-    await expect(siteHeader(page).getByText('Free allowance left today')).toHaveCount(0)
+    await expect(siteHeader(page).getByText(LABEL)).toHaveCount(0)
     await expect(siteHeader(page).getByText('Allowance unknown')).toHaveCount(0)
     await page.waitForLoadState('networkidle')
     expect(asked).toEqual([])
@@ -206,14 +262,14 @@ test.describe('the Admin\'s header', () => {
     await signInAs(context, 'member')
     await page.goto('/reports')
     await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible()
-    await expect(siteHeader(page).getByText('Free allowance left today')).toHaveCount(0)
+    await expect(siteHeader(page).getByText(LABEL)).toHaveCount(0)
     await page.waitForLoadState('networkidle')
     expect(asked).toEqual([])
   })
 
-  // The figures are read as the page loads, every five minutes while the window is in view and when it is used again after a minute: not on every page, and not with a timer of its own
-  // that a background tab would keep running (the browser's own pause of it is not tested here).
-  test('reads the figures as the page loads, every five minutes, and when the window is used again after a minute, and not from page to page', async ({ page, context }) => {
+  // The figures are read as the page loads and every five minutes while the window is in view, and when the window comes back into view if the last reading is five minutes old: not on every
+  // page, and not in a background tab (which asks for nothing, and is brought up to date when it is used again). So an open window asks about 12 times an hour, at the most.
+  test('reads the figures as the page loads, every five minutes, and when a window that was out of view is used again, and not from page to page', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
     let asked = 0
@@ -237,20 +293,29 @@ test.describe('the Admin\'s header', () => {
     await expect(bar(page)).toHaveAttribute('aria-valuenow', '70') // the second reading
     expect(asked).toBe(2)
 
-    // The window is used again: not within a minute of the last reading, and after one.
-    const windowUsedAgain = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange', { bubbles: true })))
-    await page.clock.runFor(30_000)
-    await windowUsedAgain()
+    // Using the window again (it was in view all along): not five minutes since the last reading, so nothing is asked. That is what keeps a window that is used a lot to about 12 an hour.
+    const visibility = (state: 'visible' | 'hidden') =>
+      page.evaluate((now) => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => now })
+        document.dispatchEvent(new Event('visibilitychange', { bubbles: true }))
+      }, state)
+    await page.clock.runFor(60_000)
+    await visibility('visible')
     await page.waitForLoadState('networkidle')
     expect(asked).toBe(2)
-    await page.clock.runFor(31_000)
-    await windowUsedAgain()
+
+    // A window that is out of view asks for nothing, however long it is, and is brought up to date when it is used again: one reading, and not one for each interval that passed.
+    await visibility('hidden')
+    await page.clock.runFor(12 * 60_000)
+    await page.waitForLoadState('networkidle')
+    expect(asked).toBe(2)
+    await visibility('visible')
     await expect(bar(page)).toHaveAttribute('aria-valuenow', '60') // the third
     expect(asked).toBe(3)
   })
 
-  // The header is one menu on a phone, and the bar is in it with both figures written out (a touch screen has no hover).
-  test('is in the header\'s menu on a phone, with both figures written under it', async ({ page, context }) => {
+  // The header is one menu on a phone, and the bar is in it with its words and both figures written out (a touch screen has no hover).
+  test("is in the header's menu on a phone, with its words and both figures written under it", async ({ page, context }) => {
     await signInAs(context, 'admin')
     await stubAllowance(page, { rowsRead: 4_100_000 })
     await page.setViewportSize(PHONE)
@@ -260,11 +325,12 @@ test.describe('the Admin\'s header', () => {
 
     await openHeaderControls(page) // ...but in its menu
     const menu = page.locator('[data-slot="popover-content"]')
-    const inMenu = menu.getByRole('progressbar', { name: 'Free allowance left today' })
+    const inMenu = menu.getByRole('progressbar', { name: LABEL })
     await expect(inMenu).toBeVisible()
     await expect(inMenu).toHaveAttribute('aria-valuenow', '18')
+    await expect(menu.getByText(LABEL)).toBeVisible()
     await expect(menu.getByText('about 18%')).toBeVisible()
-    await expect(menu.locator('[data-slot="badge"]')).toHaveText('Low')
+    await expect(menu.locator('[data-slot="badge"]')).toHaveText('Running low')
     await expect(menu.getByText('Rows read today: 4,100,000 of 5,000,000')).toBeVisible()
     await expect(menu.getByText(FIGURES_WRITTEN)).toBeVisible()
     await expect(menu.getByText('An estimate: Cloudflare runs a few minutes behind.')).toBeVisible()
@@ -275,14 +341,14 @@ test.describe('the Admin\'s header', () => {
     await noAxeViolations(page)
   })
 
-  // The bar needs room, so the controls fold into the menu sooner than the 56rem the other pages have: 82rem, where the widest it gets (Almost used, on the longest page name) still leaves the
-  // page's name whole. A window that is narrower has the bar in the menu.
+  // The bar needs a little room, so with it the controls fold into the menu at 62rem and not 56rem (the page's name has no room to spare at 56), and its words are written out from 82rem. At every
+  // edge, the widest it gets (Almost used, on the longest page name) still leaves the page's name whole.
   for (const size of ['Medium', 'Xtra Large'] as const) {
-    test(`keeps the page name whole: the bar and the controls are in the bar from 82rem wide and in the menu below it, at ${size}`, async ({ page, context }) => {
+    test(`keeps the page name whole: the bar and the controls are in the bar from 62rem wide and in the menu below it, and its words are written out from 82rem, at ${size}`, async ({ page, context }) => {
       await signInAs(context, 'admin')
       await page.addInitScript(([key, value]) => localStorage.setItem(key, value), ['fernledger-text-size-v2', SAVED[size]])
       await stubAllowance(page, { rowsRead: 4_900_000, rowsWritten: 99_000 }) // "about 1%" and Almost used: the widest
-      const edge = 82 * PIXELS[size]
+      const px = PIXELS[size]
       const menuButton = siteHeader(page).getByRole('button', { name: 'Display settings and sign out' })
       const pageName = siteHeader(page).locator('[aria-current="page"]')
       const expectNameWhole = async (what: string) => {
@@ -290,23 +356,41 @@ test.describe('the Admin\'s header', () => {
         expect(await pageName.evaluate((el) => el.scrollWidth <= el.clientWidth), `${what}: the page's name is cut short`).toBe(true)
       }
 
-      await page.setViewportSize({ width: edge + 20, height: 800 }) // a scrollbar's width wider than the bar it holds, and 20px clears it
+      // A scrollbar's width wider than the bar it holds, and 20px clears it.
+      await page.setViewportSize({ width: 82 * px + 20, height: 800 })
       await page.goto('/reports/income-vs-spending')
       await expectTextSize(page, size)
       await settle(page)
       await expect(bar(page)).toBeVisible()
+      expect(await writtenOut(page)).toBe(true)
+      await expect(siteHeader(page).locator('[data-slot="badge"]')).toHaveText('Almost used')
       await expect(textSizeGroup(page)).toBeVisible()
       await expect(menuButton).toBeHidden()
-      await expectNameWhole('in the bar')
+      await expectNameWhole('with its words written out')
 
-      await page.setViewportSize({ width: edge - 20, height: 800 })
+      await page.setViewportSize({ width: 82 * px - 20, height: 800 })
+      await settle(page)
+      await expect(bar(page)).toBeVisible()
+      expect(await writtenOut(page)).toBe(false) // the words are still its name
+      await expect(siteHeader(page).locator('[data-slot="badge"]')).toBeHidden()
+      await expect(textSizeGroup(page)).toBeVisible()
+      await expect(menuButton).toBeHidden()
+      await expectNameWhole('compact')
+
+      await page.setViewportSize({ width: 62 * px + 20, height: 800 })
+      await settle(page)
+      await expect(bar(page)).toBeVisible()
+      await expect(textSizeGroup(page)).toBeVisible()
+      await expectNameWhole('compact, at the edge')
+
+      await page.setViewportSize({ width: 62 * px - 20, height: 800 })
       await settle(page)
       await expect(bar(page)).toBeHidden()
       await expect(textSizeGroup(page)).toBeHidden()
       await expect(menuButton).toBeVisible()
       await expectNameWhole('in the menu')
       await openHeaderControls(page)
-      await expect(page.locator('[data-slot="popover-content"]').getByRole('progressbar', { name: 'Free allowance left today' })).toBeVisible()
+      await expect(page.locator('[data-slot="popover-content"]').getByRole('progressbar', { name: LABEL })).toBeVisible()
     })
   }
 })

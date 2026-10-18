@@ -33,14 +33,15 @@ export const ALLOWANCE_REFRESH_MS = 5 * 60_000
 /**
  * The same figures for the Admin's header (src/components/allowance-bar.tsx), which is on every page. A query of its own, because the question above is fresh each time it opens and
  * keeps nothing, and a key shared with it would show the header's older figures in it while its own came. This one is read as the page loads, every five minutes while the window is in
- * view (a background tab does not ask), and when the window is used again if a minute has passed. Going from page to page asks for nothing: the header stays. A failure is not retried
- * before the next of these, and the bar then says it does not know.
+ * view (a background tab does not ask), and when the window is used again if the last reading is that old (`staleTime` is the interval, so a window that is used a lot asks no more often
+ * than one that is not: about 12 an hour at the most for each open window). Going from page to page asks for nothing: the header stays. A failure is not retried before the next of
+ * these, and the bar then says it does not know.
  */
 export const d1AllowanceQuery = queryOptions({
   queryKey: ['d1-usage', 'allowance'],
   queryFn: readUsage,
   refetchInterval: ALLOWANCE_REFRESH_MS,
   refetchOnWindowFocus: true,
-  staleTime: 60_000,
+  staleTime: ALLOWANCE_REFRESH_MS,
   retry: false,
 })

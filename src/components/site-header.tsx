@@ -33,8 +33,9 @@ function SignOut({ className }: { className?: string }) {
  * the theme and Sign out. From `md` up, and while the bar itself is 56rem wide, the controls sit in the bar: that is the room the four sizes, the theme, Sign out and a long
  * page's name ("Income vs spending by month") need together. On a phone, or when the text is large enough that they would leave the page's name cut short (a container query,
  * whose rem is the page's, so it follows the text size, which a media query's rem does not), they fold into one menu, so the bar is still one row at 320px and the largest text.
- * The Admin's free allowance bar (`allowance`, src/components/allowance-bar.tsx) is one more thing in the bar, before the controls, and as wide as its words (a long label, a value and the
- * word Low or Almost used), which is why the edge is 82rem and not 56rem while it shows: at 82rem the widest it gets still leaves the longest page's name whole. Below that it is in the menu.
+ * The Admin's free allowance bar (`allowance`, src/components/allowance-bar.tsx) is one more thing in the bar, before the controls. It is compact there, a bar and its value (and a small
+ * icon when it is going), which is why the edge is 62rem and not 56rem while it shows: the page's name has no room to spare at 56rem. From 82rem it has room for its words as well, and
+ * writes them out. Below 62rem it is in the menu with the controls.
  * Navigation and display controls mean nothing on paper, so none of it is printed. A page that wants the title in its printout writes it itself.
  */
 export function SiteHeader({
@@ -88,14 +89,14 @@ export function SiteHeader({
           </BreadcrumbList>
         </Breadcrumb>
 
-        <div className={cn('ms-auto hidden items-center gap-2', allowance ? 'md:@min-[82rem]/header:flex' : 'md:@min-[56rem]/header:flex')}>
+        <div className={cn('ms-auto hidden items-center gap-2', allowance ? 'md:@min-[62rem]/header:flex' : 'md:@min-[56rem]/header:flex')}>
           {allowance && <AllowanceBar layout="bar" />}
           <TextSizeControl size={textSize} onChange={onTextSize} />
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           <SignOut />
         </div>
 
-        <div className={cn('ms-auto', allowance ? 'md:@min-[82rem]/header:hidden' : 'md:@min-[56rem]/header:hidden')}>
+        <div className={cn('ms-auto', allowance ? 'md:@min-[62rem]/header:hidden' : 'md:@min-[56rem]/header:hidden')}>
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="icon" aria-label="Display settings and sign out">
