@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useCallback, useMemo } from 'react'
 import { PageHeading } from '@/components/help-sheet'
 import { TransactionList } from '@/components/transaction-list'
+import { formatCount } from '@/lib/format'
 import { meQuery } from '@/lib/me'
 import { MAX_INLINE_APPLY } from '@/lib/rule-from-transaction'
 import { parseTransactionSearch, tidy, type TransactionSearch } from '@/lib/transaction-search'
@@ -42,7 +43,7 @@ function Uncategorised() {
               </p>
               <p>
                 To give a Category to every Transaction like one on this list, choose Edit on it, then the Category, then Create Rule. The Rule starts with the words that name the shop, and says how many Transactions match as you change
-                them. Save Category and Rule adds the Rule and gives the Category to the Uncategorised Transactions it matches, up to {MAX_INLINE_APPLY} others at once.
+                them. Save Category and Rule adds the Rule and gives the Category to the Uncategorised Transactions it matches, up to {formatCount(MAX_INLINE_APPLY)} others at a time.
               </p>
             </>
           )

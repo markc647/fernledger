@@ -26,10 +26,13 @@ const PREFIXES = [
   'ONLINE PAYMENT',
   'AUTOMATIC PAYMENT',
   'AUTO PAYMENT',
+  'BILL PAYMENT',
   'DIRECT DEBIT',
   'DIRECT CREDIT',
   'DEBIT CARD',
   'POS W/D',
+  'A/P',
+  'D/D',
   'EFTPOS',
   'PAYWAVE',
   'CONTACTLESS',
@@ -83,12 +86,18 @@ const PLACES = [
   'PETONE',
   'PARAPARAUMU',
   'JOHNSONVILLE',
+  'MAUNGANUI',
   'NEW ZEALAND',
   'NZL',
   'NZ',
 ]
   .map((phrase) => phrase.split(' '))
   .toSorted((a, b) => b.length - a.length)
+
+// Words a name does not end on: taking a place off "BANK OF NEW ZEALAND" would leave "BANK OF", which finds every bank, so the place stays.
+const CONNECTORS = new Set(['OF', 'THE', 'AND', 'AT', 'IN', 'ON', 'FOR', 'TO', 'FROM'])
+// Words in front of a place's name that go with it: "LAKE" in "LAKE TAUPO", "MOUNT" in "MOUNT MAUNGANUI".
+const QUALIFIERS = new Set(['LAKE', 'MOUNT', 'MT', 'PORT'])
 
 // Words that name a number which follows them (REF 887766, CARD 1234).
 const LABELS = new Set(['REF', 'REFERENCE', 'REC', 'RECEIPT', 'TXN', 'TRANS', 'AUTH', 'TERM', 'TERMINAL', 'INV', 'INVOICE', 'NO', 'NUMBER', 'CARD'])
@@ -124,6 +133,11 @@ function noiseIn(tokens: Token[], from: number): boolean[] {
     // REF 887766, CARD 1234, TERM 5
     if (next && LABELS.has(token.core.toUpperCase()) && digitsIn(next.core) > 0) noise[i] = noise[i + 1] = true
   })
+  // A dash or other mark on its own between two words is part of what the bank wrote ("ASB BANK - INTEREST"), and cutting there would keep "ASB BANK", which is in every Transaction
+  // the bank itself makes. Beside a number, or at an end, it is not between words and goes with the rest.
+  tokens.forEach((token, i) => {
+    if (i > from && token.core === '' && !noise[i - 1] && noise[i + 1] === false) noise[i] = false
+  })
   return noise
 }
 
@@ -142,14 +156,18 @@ function prefixLength(tokens: Token[]): number {
 // The words of the description from the first token to the last, as written. It ends on a letter or digit.
 const span = (description: string, run: Token[]) => description.slice(run[0]!.start, run.at(-1)!.end).replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
 
-/** Takes a place, and then another, off the end of the run, while enough of the merchant is left. */
+/**
+ * Takes a place, and then another, off the end of the run, while enough of the merchant is left and what is left is a name that could end there: a word that goes with the place
+ * ("LAKE" in "LAKE TAUPO") goes with it, and a name that would stop on "OF" or "THE" keeps its place.
+ */
 function withoutPlaces(description: string, run: Token[]): Token[] {
   for (;;) {
     const words = run.map((token) => token.core.toUpperCase())
     const place = PLACES.find((phrase) => run.length > phrase.length && phrase.every((word, i) => words[words.length - phrase.length + i] === word))
     if (!place) return run
     const shorter = run.slice(0, run.length - place.length)
-    if (span(description, shorter).length < MIN_BEFORE_PLACE) return run
+    while (shorter.length > 0 && QUALIFIERS.has(shorter.at(-1)!.core.toUpperCase())) shorter.pop()
+    if (shorter.length === 0 || CONNECTORS.has(shorter.at(-1)!.core.toUpperCase()) || span(description, shorter).length < MIN_BEFORE_PLACE) return run
     run = shorter
   }
 }

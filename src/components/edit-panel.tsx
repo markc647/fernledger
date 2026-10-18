@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { api } from '@/lib/api'
 import { formatDate } from '@/lib/format'
-import { HttpError } from '@/lib/me'
+import { HttpError, reasonOf } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
 import { countSentence, directionOf, savedRuleSentence, tooManyNote } from '@/lib/rule-from-transaction'
 import { suggestRuleText } from '@/lib/rule-text'
@@ -47,39 +47,67 @@ export type EditDraft = { categoryId: number | null; note: string; rule: RuleDra
 const textareaStyle =
   'block min-h-20 w-full rounded-lg border border-input bg-background px-3 py-2 text-base focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring'
 
-/** How long the Admin stops typing before the count is asked for again. */
-const COUNT_DELAY_MS = 400
+/** How long the Admin stops typing before the count is asked for again: long enough that a few words typed at an ordinary speed are one request, since each one reads every Transaction. */
+const COUNT_DELAY_MS = 700
+
+type RuleCount = {
+  /** The answer for the text and direction that were last asked about, or the one before while the next is on its way. */
+  counts: { matches: number; uncategorised: number } | undefined
+  failed: boolean
+  /** An answer is on its way, or the Admin has typed since the one that is showing. */
+  counting: boolean
+  /** The answer on show is for what is in the boxes now (or could not be had): the Rule is not saved before the Admin has been told how many it matches. */
+  ready: boolean
+}
 
 /**
- * The Rule fields of Create Rule, and the count of what the text matches. The count is asked for once the Admin has stopped typing for COUNT_DELAY_MS (the first one at once: the box starts with a
- * suggestion), from the Rules' preview (POST /api/rules/preview, which reads every Transaction once: ADR 0004), and is kept for as long as the fields are open, so typing a text again that was
- * counted is not read again. A screen reader is told the count politely, when it has changed, and not as each letter is typed: the line is only rewritten when an answer arrives.
+ * The count of what the Rule's text matches, from the Rules' preview (POST /api/rules/preview, which reads every Transaction once: ADR 0004). It is asked for once the Admin has stopped typing for
+ * COUNT_DELAY_MS (the first one at once: the box starts with a suggestion), and a request that is overtaken by the next is cancelled. An answer is kept while the fields are open, so a text that was
+ * counted is not read again, and thrown away when they close (a Rule or an Override may have changed what it would say).
  */
-function CreateRuleFields({ rule, onChange, thisIsUncategorised, textRef }: { rule: RuleDraft; onChange: (rule: RuleDraft) => void; thisIsUncategorised: boolean; textRef: Ref<HTMLInputElement> }) {
-  const text = rule.text.trim()
-  const askedText = useDebounced(text, COUNT_DELAY_MS)
-  const askedDirection = useDebounced(rule.direction, COUNT_DELAY_MS)
+function useRuleCount(rule: RuleDraft | null): RuleCount {
+  const queryClient = useQueryClient()
+  const open = rule !== null
+  const text = rule?.text.trim() ?? ''
+  const direction = rule?.direction ?? ''
+  const askedText = useDebounced(text, COUNT_DELAY_MS, open)
+  const askedDirection = useDebounced(direction, COUNT_DELAY_MS, open)
+  useEffect(() => {
+    if (!open) return
+    return () => queryClient.removeQueries({ queryKey: ['rule-count'] })
+  }, [open, queryClient])
   const count = useQuery({
     queryKey: ['rule-count', askedText, askedDirection],
-    enabled: askedText !== '',
+    enabled: open && askedText !== '',
     retry: false,
     staleTime: Infinity,
-    gcTime: 0,
     refetchOnWindowFocus: false,
     // The previous answer stays while the next is asked for, so the line is not emptied and filled in again (which a screen reader would say twice).
     placeholderData: keepPreviousData,
-    queryFn: async () => {
-      const res = await api.rules.preview.$post({ json: { textContains: askedText, direction: askedDirection === '' ? null : askedDirection, uncategorised: true } })
+    queryFn: async ({ signal }) => {
+      const res = await api.rules.preview.$post({ json: { textContains: askedText, direction: askedDirection === '' ? null : askedDirection, uncategorised: true } }, { init: { signal } })
       if (!res.ok) throw new HttpError(res.status)
       const { matches, uncategorised } = await res.json()
       return { matches, uncategorised: uncategorised ?? 0 }
     },
   })
-  const counting = text !== '' && (text !== askedText || rule.direction !== askedDirection || count.isFetching)
-  const note = count.data ? tooManyNote(count.data.uncategorised, thisIsUncategorised) : null
+  const current = text === askedText && direction === askedDirection
+  return {
+    counts: count.data,
+    failed: count.isError,
+    counting: text !== '' && (!current || count.isFetching),
+    ready: text !== '' && current && !count.isFetching && !count.isPlaceholderData && (count.isSuccess || count.isError),
+  }
+}
+
+/** The Rule fields of Create Rule, and the count of what the text matches. A screen reader is told the count politely, when it has changed, and not as each letter is typed: the line is only rewritten when an answer arrives. */
+function CreateRuleFields({ rule, onChange, count, thisIsUncategorised, textRef }: { rule: RuleDraft; onChange: (rule: RuleDraft) => void; count: RuleCount; thisIsUncategorised: boolean; textRef: Ref<HTMLInputElement> }) {
+  const typed = rule.text.trim() !== ''
+  const note = count.counts ? tooManyNote(count.counts.uncategorised, thisIsUncategorised) : null
 
   return (
-    <section aria-labelledby="edit-rule-heading" className="space-y-4 rounded-xl border-2 p-4">
+    // A group and not a section: the panel is already a region, and a second landmark inside it would be one more place for a screen reader's list to stop at.
+    <div role="group" aria-labelledby="edit-rule-heading" className="space-y-4 rounded-xl border-2 p-4">
       <h3 id="edit-rule-heading" className="text-lg font-medium">
         Rule for Transactions like this one
       </h3>
@@ -104,26 +132,26 @@ function CreateRuleFields({ rule, onChange, thisIsUncategorised, textRef }: { ru
         </Select>
       </div>
       <div>
-        {/* Polite, and only rewritten when an answer arrives. "Counting…" is for the eye: a screen reader is told the result, not that it is on its way. */}
-        <div role="status" aria-live="polite" aria-atomic="true">
-          {text === '' ? (
+        {/* Polite, and only rewritten when an answer arrives. "Counting…" is for the eye: a screen reader is told the result, not that it is on its way (and that it is busy). */}
+        <div role="status" aria-live="polite" aria-atomic="true" aria-busy={count.counting}>
+          {!typed ? (
             <p>Type what the Rule should look for to see how many Transactions match.</p>
-          ) : count.isError ? (
+          ) : count.failed ? (
             <p>Fernledger could not count how many match. You can still save the Rule.</p>
-          ) : count.data ? (
+          ) : count.counts ? (
             <>
-              <p className="font-medium">{countSentence(count.data)}</p>
+              <p className="font-medium">{countSentence(count.counts)}</p>
               {note && <p className="mt-1">{note}</p>}
             </>
           ) : null}
         </div>
-        {counting && (
+        {count.counting && (
           <p aria-hidden className="text-muted-foreground">
             Counting…
           </p>
         )}
       </div>
-    </section>
+    </div>
   )
 }
 
@@ -154,6 +182,7 @@ export function EditPanel({
   const [categoryId, setCategoryId] = useState<number | null>(draft ? draft.categoryId : startCategory)
   const [note, setNote] = useState(draft ? draft.note : (row.note ?? ''))
   const [rule, setRule] = useState<RuleDraft | null>(draft ? draft.rule : null)
+  const count = useRuleCount(rule)
   const param = { id: String(row.id) }
   const transferHint = transferEditHint(row)
   const noteChanged = note.trim() !== (row.note ?? '')
@@ -202,11 +231,10 @@ export function EditPanel({
         if (!res.ok) throw new HttpError(res.status)
       }
       const res = await api.rules['from-transaction'].$post({ json: { transactionId: row.id, textContains: made.rule.text.trim(), direction: made.rule.direction === '' ? null : made.rule.direction, categoryId: made.categoryId } })
-      if (!res.ok) throw new HttpError(res.status)
+      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined) // 409: 100 Rules already, or the Transaction changed under the Admin
       return res.json()
     },
     onSuccess: async (made, asked) => {
-      queryClient.removeQueries({ queryKey: ['rule-count'] })
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['transactions'] }), queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
       const when = ruleWhen({ textContains: asked.rule.text.trim(), bankType: null, direction: asked.rule.direction === '' ? null : asked.rule.direction, minCents: null, maxCents: null })
       onSaved(savedRuleSentence(made, { when, categoryName: categories?.find((c) => c.id === asked.categoryId)?.name ?? 'chosen' }))
@@ -215,7 +243,9 @@ export function EditPanel({
   const ruleFailure =
     saveRule.error instanceof HttpError
       ? saveRule.error.status === 409
-        ? 'There are already 100 Rules. Remove one before adding another.'
+        ? saveRule.error.reason === 'changed'
+          ? 'This Transaction changed while you were saving. Try again.'
+          : 'There are already 100 Rules. Remove one before adding another.'
         : saveRule.error.status === 404
           ? 'This Transaction is no longer there. Reload the page.'
           : 'The Rule could not be saved. Check the Category and the text, and try again.'
@@ -240,7 +270,7 @@ export function EditPanel({
         onSubmit={(event) => {
           event.preventDefault()
           if (rule === null) save.mutate()
-          else if (ruleProblem === null && chosen) saveRule.mutate({ rule, categoryId: chosen.id })
+          else if (ruleProblem === null && count.ready && chosen) saveRule.mutate({ rule, categoryId: chosen.id })
         }}
       >
         <div>
@@ -268,7 +298,7 @@ export function EditPanel({
           </p>
           {isError && <p role="alert" className="mt-1 font-medium text-destructive">The Categories could not be loaded. Reload the page to try again.</p>}
         </div>
-        {rule && <CreateRuleFields rule={rule} onChange={setRule} thisIsUncategorised={row.categoryId === null && row.transfer === null} textRef={textBox} />}
+        {rule && <CreateRuleFields rule={rule} onChange={setRule} count={count} thisIsUncategorised={row.categoryId === null && row.transfer === null} textRef={textBox} />}
         <div>
           <label htmlFor="edit-note" className="block font-medium">
             Note
@@ -283,16 +313,19 @@ export function EditPanel({
               <Button key="save" type="submit" size="touch" disabled={save.isPending || !categories}>
                 Save
               </Button>
-              <Button key="create-rule" ref={createButton} type="button" size="touch" variant="outline" onClick={createRule}>
-                Create Rule
-              </Button>
+              {/* A Transfer is not spending, so it has no Category for a Rule to give: Not a Transfer, below, is what this panel offers it. */}
+              {!row.transfer && (
+                <Button key="create-rule" ref={createButton} type="button" size="touch" variant="outline" onClick={createRule}>
+                  Create Rule
+                </Button>
+              )}
               <Button key="cancel" type="button" size="touch" variant="outline" onClick={onCancel}>
                 Cancel
               </Button>
             </>
           ) : (
             <>
-              <Button key="save-rule" type="submit" size="touch" disabled={saveRule.isPending || !categories || ruleProblem !== null} aria-describedby={ruleProblem ? 'edit-rule-problem' : undefined}>
+              <Button key="save-rule" type="submit" size="touch" disabled={saveRule.isPending || !categories || ruleProblem !== null || !count.ready} aria-describedby={ruleProblem ? 'edit-rule-problem' : undefined}>
                 Save Category and Rule
               </Button>
               <Button key="cancel-rule" type="button" size="touch" variant="outline" onClick={cancelRule}>

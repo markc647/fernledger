@@ -51,7 +51,7 @@ const rerunQuery = queryOptions({
   refetchOnWindowFocus: false,
 })
 
-const INTRO = 'A Rule is used for new Transactions as they are imported. The Transactions you already have change only when you choose Apply the Rules to all Transactions.'
+const INTRO = 'A Rule you add on this page is used for new Transactions as they are imported, and changes the Transactions you already have only when you choose Apply the Rules to all Transactions.'
 
 /** The page's help sheet: what a Rule is and when it is used, and, under its own heading, what applying the Rules does. */
 function RulesHelp() {
@@ -63,8 +63,8 @@ function RulesHelp() {
       </p>
       <p>{INTRO}</p>
       <p>
-        A Rule can also be made from a Transaction: choose Edit on it (on the Uncategorised or Transactions page), then the Category, then Create Rule. That Rule goes last in the list, and gives its Category to the Transactions
-        that have none and that it matches, up to {MAX_INLINE_APPLY} others at once. For more, choose Apply the Rules to all Transactions.
+        A Rule made from a Transaction is the exception: choose Edit on it (on the Uncategorised or Transactions page), then the Category, then Create Rule. That Rule goes last in the list, and gives its Category at once to the
+        Transactions that have none and that it matches, up to {formatCount(MAX_INLINE_APPLY)} others at a time. For more, choose Apply the Rules to all Transactions.
       </p>
       <HelpHeading>Apply the Rules to all Transactions</HelpHeading>
       <p>

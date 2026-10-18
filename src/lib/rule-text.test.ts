@@ -20,6 +20,11 @@ const merchants: [description: string, suggested: string][] = [
   ['AUTOMATIC PAYMENT MERIDIAN ENERGY LTD REF 887766', 'MERIDIAN ENERGY LTD'],
   ['DIRECT CREDIT ACME BUILDING LTD WAGES RECEIPT 20261012', 'ACME BUILDING LTD WAGES'],
   ['EFTPOS $45.60 PHARMACY 44 DUNEDIN', 'PHARMACY 44'],
+  ['A/P ACME POWER LTD 20261012', 'ACME POWER LTD'],
+  ['D/D SPARK NZ', 'SPARK'],
+  ['BILL PAYMENT VODAFONE NZ 4455', 'VODAFONE'],
+  ['EFTPOS NEW WORLD LAKE TAUPO 12/10', 'NEW WORLD'],
+  ['EFTPOS COUNTDOWN MOUNT MAUNGANUI', 'COUNTDOWN'],
 ]
 
 describe('suggestRuleText', () => {
@@ -36,6 +41,22 @@ describe('suggestRuleText', () => {
   it('keeps a trailing word that is also a surname, so a payee is not cut down to a first name', () => {
     expect(suggestRuleText('MARY NELSON')).toBe('MARY NELSON')
     expect(suggestRuleText('EFTPOS COUNTDOWN HAMILTON')).toBe('COUNTDOWN HAMILTON')
+  })
+
+  it('does not take a place off if that leaves a name that stops short, or leaves only a word that belongs to the place', () => {
+    expect(suggestRuleText('BANK OF NEW ZEALAND')).toBe('BANK OF NEW ZEALAND') // "BANK OF" is not a name, and would find every bank
+    expect(suggestRuleText('EFTPOS THE WAREHOUSE AND NEW LYNN')).toBe('THE WAREHOUSE AND NEW LYNN') // "THE WAREHOUSE AND" stops short too
+    expect(suggestRuleText('LAKE TAUPO')).toBe('LAKE TAUPO') // all there is
+    expect(suggestRuleText('MOUNT MAUNGANUI')).toBe('MOUNT MAUNGANUI')
+  })
+
+  it('keeps a dash between the words of a description, so a bank\'s own words are not cut to the half that finds everything', () => {
+    // "ASB BANK" alone is in every Transaction the bank itself makes; the dash is part of how the bank wrote it.
+    expect(suggestRuleText('ASB BANK - INTEREST')).toBe('ASB BANK - INTEREST')
+    expect(suggestRuleText('PAYPAL - SPOTIFY 4029357733')).toBe('PAYPAL - SPOTIFY')
+    // But a dash beside a number or at an end is not between words.
+    expect(suggestRuleText('EFTPOS 1234 - COUNTDOWN')).toBe('COUNTDOWN')
+    expect(suggestRuleText('COUNTDOWN - 1234')).toBe('COUNTDOWN')
   })
 
   it('only takes a place off the end', () => {
@@ -66,7 +87,7 @@ describe('suggestRuleText', () => {
     const descriptions = [...merchants.map(([description]) => description), 'MĀORI MARKET  ŌTĀKOU 1234', 'a/b c.d e-f g_h', 'Café du Monde 12/10', '###', '*', '4835 4835 4835 4835', 'EFTPOS EFTPOS EFTPOS']
     for (const description of descriptions) {
       const suggested = suggestRuleText(description)
-      expect(description.toLowerCase(), description).toContain(suggested.toLowerCase())
+      expect(description, description).toContain(suggested)
       if (description.trim() !== '') expect(suggested, description).not.toBe('')
     }
   })
