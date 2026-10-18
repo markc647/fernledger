@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Member } from './auth'
-import { recordChange, type ChangeLogRow } from './changelog'
+import { CHANGES, recordChange, type ChangeLogRow } from './changelog'
 import { getSetting, putSetting } from './test-support'
 
 const admin: Member = { email: 'admin@example.com', role: 'admin' }
@@ -78,6 +78,30 @@ describe('recordChange', () => {
       await recordChange(env.DB, rename('Some other title', 'Changed'), { actor: admin, type: 'settings', summary: 'Tried to change the app title' })
 
       expect(await changeLog()).toMatchObject([{ summary: 'Tried to change the app title' }])
+    })
+  })
+
+  describe('an entry that counts what the statement before it changed (CHANGES in its summary)', () => {
+    const touch = (rows: number) => env.DB.prepare('UPDATE categories SET name = name WHERE id IN (SELECT id FROM categories ORDER BY id LIMIT ?)').bind(rows)
+    const entry = (summary: string) => ({ actor: admin, type: 'category', summary, onlyIfChanged: true }) as const
+
+    it('says how many rows the statement changed, counted by the database and not by the request', async () => {
+      await recordChange(env.DB, touch(3), entry(`Touched Categories: ${CHANGES}`))
+      await recordChange(env.DB, touch(1), entry(`Touched Categories: ${CHANGES}`))
+
+      expect(await changeLog()).toMatchObject([{ summary: 'Touched Categories: 3' }, { summary: 'Touched Categories: 1' }])
+    })
+
+    it('writes nothing when the statement changed no row', async () => {
+      await recordChange(env.DB, touch(0), entry(`Touched Categories: ${CHANGES}`))
+
+      expect(await changeLog()).toEqual([])
+    })
+
+    it('counts at the last place it is written, so the same words earlier in the summary (a name) are left as they are', async () => {
+      await recordChange(env.DB, touch(2), entry(`Touched ${CHANGES} Categories: ${CHANGES}`))
+
+      expect(await changeLog()).toMatchObject([{ summary: `Touched ${CHANGES} Categories: 2` }])
     })
   })
 

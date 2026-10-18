@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { MAX_RULES } from './rule-criteria'
 import { MAX_INLINE_APPLY } from './rule-from-transaction'
 import { callAsAdminWith, callWhileInterrupted, meteredDb } from './test-support'
+import { CHANGED_MEANWHILE } from './validate'
 
 // Seam 1: the Edit panel's Create Rule, through the Worker's exported handler (POST /api/rules/from-transaction). The Admin makes a Rule from a Transaction, and in one batch the
 // Rule is added last, the other Uncategorised Transactions it matches are given its Category, and this Transaction is given it too. The Rules' own tests are in rules.test.ts.
@@ -70,8 +71,9 @@ type Created = {
   id: number
   number: number
   categorised: number
-  thisBy: 'rule' | 'override'
-  overrideBecause: 'no-match' | 'earlier-rule' | 'categorised' | null
+  thisBy: 'rule' | 'override' | 'kept'
+  because: 'no-match' | 'earlier-rule' | 'categorised' | 'already' | 'changed' | null
+  heldByEarlierRule: number | null
   moreUncategorised: number | null
 }
 type Body = { transactionId: number; textContains: string; direction?: 'in' | 'out' | null; categoryId: number }
@@ -107,7 +109,7 @@ describe('making a Rule from a Transaction', () => {
 
     const result = await created({ transactionId: here, textContains: SHOP, direction: 'out', categoryId: groceries! })
 
-    expect(result).toEqual({ id: expect.any(Number), number: 2, categorised: 3, thisBy: 'rule', overrideBecause: null, moreUncategorised: null })
+    expect(result).toEqual({ id: expect.any(Number), number: 2, categorised: 3, thisBy: 'rule', because: null, heldByEarlierRule: 0, moreUncategorised: null })
     expect(await rules()).toMatchObject([{ id: earlier }, { id: result.id, position: 2, textContains: SHOP, direction: 'out', categoryId: groceries, transfer: 0 }])
     for (const id of [here, other, inTheMemo]) expect(await stored(id), `Transaction ${id}`).toEqual({ id, override: null, ruleId: result.id, ruleCategory: groceries, ruleTransfer: null })
     expect(await stored(noMatch)).toMatchObject({ override: null, ruleId: null, ruleCategory: null })
@@ -118,7 +120,7 @@ describe('making a Rule from a Transaction', () => {
     expect(await changeLog()).toEqual([
       // The Rule is logged as Add a Rule logs it.
       { summary: `Added a Rule: text contains "${SHOP}" and money out, category Groceries`, type: 'rule', before: null, after: expect.stringContaining('"category":"Groceries"') },
-      { summary: 'Gave 3 Transactions the Category Groceries with the new Rule (Rule 2)', type: 'rule', before: null, after: JSON.stringify({ transactionsGivenTheCategory: 3 }) },
+      { summary: 'Transactions given the Category Groceries by the new Rule (Rule 2): 3', type: 'rule', before: null, after: null },
     ])
   })
 
@@ -213,13 +215,13 @@ describe('making a Rule from a Transaction', () => {
 
       const result = await created({ transactionId: here, textContains: 'WOOLWORTHS', categoryId: groceries! })
 
-      expect(result).toMatchObject({ categorised: 1, thisBy: 'override', overrideBecause: 'no-match', moreUncategorised: null })
+      expect(result).toMatchObject({ categorised: 1, thisBy: 'override', because: 'no-match', moreUncategorised: null })
       expect(await stored(here)).toMatchObject({ override: groceries, ruleId: null })
       expect(await stored(other)).toMatchObject({ ruleId: result.id })
       expect(await changeLog()).toMatchObject([
         { type: 'transaction', summary: `Set Override on Transaction ${here} (${DAY}, EFTPOS 1234 COUNTDOWN AUCKLAND 12/10) to Groceries`, before: '{"override":null}', after: '{"override":"Groceries"}' },
         { type: 'rule', summary: 'Added a Rule: text contains "WOOLWORTHS", category Groceries' },
-        { type: 'rule', summary: 'Gave 1 Transaction the Category Groceries with the new Rule (Rule 1)' },
+        { type: 'rule', summary: 'Transactions given the Category Groceries by the new Rule (Rule 1): 1' },
       ])
     })
 
@@ -230,26 +232,70 @@ describe('making a Rule from a Transaction', () => {
 
       const result = await created({ transactionId: here, textContains: SHOP, categoryId: groceries! })
 
-      expect(result).toMatchObject({ categorised: 0, thisBy: 'override', overrideBecause: 'earlier-rule' })
+      expect(result).toMatchObject({ categorised: 0, thisBy: 'override', because: 'earlier-rule' })
       expect(await stored(here)).toMatchObject({ override: groceries, ruleId: null })
     })
 
-    it('because it already has a Category, from a Rule or the Admin, or is a Transfer; and leaves an Override that is already this Category as it is', async () => {
+    it('because it already has another Category, from a Rule or the Admin, or is a Transfer (which an Override takes out of the Transfers, as Save does)', async () => {
       const { groceries, fuel, eatingOut } = categories
       const earlier = await addRule({ textContains: 'NOTHING THAT MATCHES', categoryId: fuel })
       const fromARule = await made({ description: `${SHOP} 1`, rule: { id: earlier, category: fuel } })
       const byHand = await made({ description: `${SHOP} 2`, override: eatingOut })
       const aTransfer = await made({ description: `${SHOP} 3`, pairedWith: byHand })
-      const alreadyIt = await made({ description: `${SHOP} 4`, override: groceries })
+      // A Transfer shows no Category, so even one whose Rule says this Category is not "already" in it.
+      const aTransferWithTheRulesCategory = await made({ description: `${SHOP} 4`, pairedWith: byHand, rule: { id: earlier, category: groceries } })
 
-      for (const id of [fromARule, byHand, aTransfer, alreadyIt]) {
-        const result = await created({ transactionId: id, textContains: `${SHOP} ${[fromARule, byHand, aTransfer, alreadyIt].indexOf(id) + 1}`, categoryId: groceries! })
-        expect(result, `Transaction ${id}`).toMatchObject({ categorised: 0, thisBy: 'override', overrideBecause: 'categorised' })
+      for (const [i, id] of [fromARule, byHand, aTransfer, aTransferWithTheRulesCategory].entries()) {
+        const result = await created({ transactionId: id, textContains: `${SHOP} ${i + 1}`, categoryId: groceries! })
+        expect(result, `Transaction ${id}`).toMatchObject({ categorised: 0, thisBy: 'override', because: 'categorised' })
         expect(await stored(id), `Transaction ${id}`).toMatchObject({ override: groceries })
       }
-      // Only three of those four changed an Override, and each of the four added a Rule.
-      expect((await changeLog()).filter((entry) => entry.type === 'transaction')).toHaveLength(3)
-      expect(await rules()).toHaveLength(5)
+      expect((await changeLog()).filter((entry) => entry.type === 'transaction')).toHaveLength(4)
+    })
+
+    it('but not when it already has this Category, from the Admin or from a Rule: it is left as it is, and an Override is not added to what the Rule gives', async () => {
+      const { groceries, fuel } = categories
+      const earlier = await addRule({ textContains: 'NOTHING THAT MATCHES', categoryId: groceries })
+      const byHand = await made({ description: `${SHOP} 1`, override: groceries })
+      const byARule = await made({ description: `${SHOP} 2`, rule: { id: earlier, category: groceries } })
+      const elsewhere = await made({ description: `${SHOP} 3`, rule: { id: earlier, category: fuel } })
+      await env.DB.prepare('DELETE FROM change_log').run()
+
+      for (const [i, id] of [byHand, byARule].entries()) {
+        const result = await created({ transactionId: id, textContains: `${SHOP} ${i + 1}`, categoryId: groceries! })
+        expect(result, `Transaction ${id}`).toMatchObject({ categorised: 0, thisBy: 'kept', because: 'already' })
+      }
+      expect(await stored(byHand)).toMatchObject({ override: groceries, ruleId: null })
+      expect(await stored(byARule)).toMatchObject({ override: null, ruleId: earlier, ruleCategory: groceries })
+      expect(await stored(elsewhere)).toMatchObject({ override: null })
+      expect((await changeLog()).filter((entry) => entry.type === 'transaction')).toEqual([])
+      expect(await rules()).toHaveLength(3)
+    })
+  })
+
+  describe('says how many others an earlier Rule holds, which it leaves for Apply the Rules to all Transactions', () => {
+    it('as many as match, are Uncategorised, and have an earlier Rule that matches them too', async () => {
+      const { groceries, fuel } = categories
+      await addRule({ textContains: 'FIRST', categoryId: fuel })
+      const here = await made({ description: SHOP })
+      await made({ description: `${SHOP} FIRST 1` })
+      await made({ description: `${SHOP} FIRST 2` })
+      await made({ description: `${SHOP} THIRD` })
+
+      const result = await created({ transactionId: here, textContains: SHOP, categoryId: groceries! })
+
+      expect(result).toMatchObject({ categorised: 2, heldByEarlierRule: 2, moreUncategorised: null }) // this one and the third; the two the first Rule matches are left
+    })
+
+    it('and none are said to be held when too many are left, which is a count of its own', async () => {
+      const { groceries, fuel } = categories
+      await addRule({ textContains: 'FIRST', categoryId: fuel })
+      const here = await made({ description: SHOP })
+      await manyMade(MAX_INLINE_APPLY + 3, `${SHOP} FIRST `)
+
+      const result = await created({ transactionId: here, textContains: SHOP, categoryId: groceries! })
+
+      expect(result).toMatchObject({ categorised: 1, heldByEarlierRule: null, moreUncategorised: MAX_INLINE_APPLY + 3 })
     })
   })
 
@@ -276,7 +322,7 @@ describe('making a Rule from a Transaction', () => {
       expect(await rules()).toHaveLength(1)
       expect(await stored(here)).toMatchObject({ ruleId: result.id })
       expect(await countWhere('rule_id IS NOT NULL')).toBe(1)
-      expect(await changeLog()).toMatchObject([{ summary: expect.stringContaining('Added a Rule') }, { summary: 'Gave 1 Transaction the Category Groceries with the new Rule (Rule 1)' }])
+      expect(await changeLog()).toMatchObject([{ summary: expect.stringContaining('Added a Rule') }, { summary: 'Transactions given the Category Groceries by the new Rule (Rule 1): 1' }])
 
       // The button the Rules page has gives the rest the Category, and this one is as the re-run would have it.
       expect((await call('/api/rules/rerun', { method: 'POST', body: {} })).status).toBe(201)
@@ -298,6 +344,19 @@ describe('making a Rule from a Transaction', () => {
       expect(result).toMatchObject({ categorised: 6, moreUncategorised: null })
       expect(await countWhere(`override_category = ${fuel}`)).toBe(MAX_INLINE_APPLY + 100)
       expect(await countWhere(`rule_id = ${result.id}`)).toBe(6)
+    })
+
+    it('counts the ones it did not reach exactly when they are spread among Transactions the text does not match', async () => {
+      const { groceries } = categories
+      const here = await made({ description: SHOP })
+      for (let round = 0; round < 20; round++) {
+        await manyMade(60, `${SHOP} ROUND ${round} `)
+        await manyMade(40, `EXAMPLE OTHER ${round} `)
+      }
+
+      const result = await created({ transactionId: here, textContains: SHOP, categoryId: groceries! })
+
+      expect(result).toMatchObject({ categorised: 1, moreUncategorised: 1200 })
     })
 
     it('with more, and this Transaction not matched by the text, gives it an Override and nothing else', async () => {
@@ -418,7 +477,8 @@ describe('what it refuses, and writes nothing for', () => {
 })
 
 describe('when another request lands between its reads and its batch', () => {
-  const request = (transactionId: number) => ({ transactionId, textContains: SHOP, categoryId: categories.groceries })
+  const request = (transactionId: number, over: Record<string, unknown> = {}) => ({ transactionId, textContains: SHOP, categoryId: categories.groceries, ...over })
+  const removeGroceries = () => env.DB.prepare('UPDATE categories SET removed_at = ? WHERE id = ?').bind('2026-01-01T00:00:00Z', categories.groceries).run()
 
   it('the last place taken: 409, and no Override, no Category on a Transaction and no entry is written', async () => {
     await env.DB.batch(Array.from({ length: MAX_RULES - 1 }, (_, i) => env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(i + 1, `filler ${i}`, categories.fuel)))
@@ -431,24 +491,67 @@ describe('when another request lands between its reads and its batch', () => {
       const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(id), takePlace)
 
       expect(res.status, `Transaction ${id}`).toBe(409)
+      expect(await res.json()).toEqual({ error: `There are already ${MAX_RULES} Rules; remove one first` })
       expect(await stored(id)).toMatchObject({ override: null, ruleId: null })
       expect(await stored(matched)).toMatchObject({ override: null, ruleId: null })
       expect(await changeLog()).toEqual([])
     }
   })
 
-  it('the Category removed: 400, and nothing is written', async () => {
-    const here = await made({ description: SHOP })
-    const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(here), () => env.DB.prepare('UPDATE categories SET removed_at = ? WHERE id = ?').bind('2026-01-01T00:00:00Z', categories.groceries).run())
+  it('the Category removed: 400, and nothing is written, whether this one is given it by the Rule or as an Override', async () => {
+    const matched = await made({ description: SHOP })
+    const elsewhere = await made({ description: 'SOMEWHERE ELSE' })
 
-    expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'Invalid request', field: 'categoryId' })
-    expect(await rules()).toHaveLength(0)
-    expect(await stored(here)).toMatchObject({ override: null, ruleId: null })
-    expect(await changeLog()).toEqual([])
+    for (const id of [matched, elsewhere]) {
+      await env.DB.prepare('UPDATE categories SET removed_at = NULL WHERE id = ?').bind(categories.groceries).run()
+      const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(id), removeGroceries)
+
+      expect(res.status, `Transaction ${id}`).toBe(400)
+      expect(await res.json()).toEqual({ error: 'Invalid request', field: 'categoryId' })
+      expect(await rules()).toHaveLength(0)
+      expect(await stored(id)).toMatchObject({ override: null, ruleId: null }) // an Override of a Category that was removed would be one the Admin never sees
+      expect(await stored(matched)).toMatchObject({ override: null, ruleId: null })
+      expect(await changeLog()).toEqual([])
+    }
   })
 
-  it('the Admin giving a Transaction it was about to categorise a Category of their own: that one is left as they set it, and the others are given the Rule', async () => {
+  it("this Transaction's Override changed: 409 as it is for Save, and the Rule is not added either", async () => {
+    const { fuel, groceries } = categories
+    const elsewhere = await made({ description: 'SOMEWHERE ELSE' }) // not matched by the text, so it is given the Category as an Override
+    const other = await made({ description: `${SHOP} 2` })
+
+    // Another request gave it a different Category, and gave it the Category that was asked for.
+    for (const meanwhile of [fuel, groceries]) {
+      const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(elsewhere), () => env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(meanwhile, elsewhere).run())
+
+      expect(res.status, `an Override of ${meanwhile}`).toBe(409)
+      expect(await res.json()).toEqual(CHANGED_MEANWHILE)
+      expect(await stored(elsewhere)).toMatchObject({ override: meanwhile }) // as the other request left it
+      expect(await stored(other)).toMatchObject({ ruleId: null })
+      expect(await rules()).toHaveLength(0)
+      expect(await changeLog()).toEqual([])
+      await env.DB.prepare('UPDATE transactions SET override_category = NULL WHERE id = ?').bind(elsewhere).run()
+    }
+    // And the Transaction gone: not found, with nothing written.
+    const gone = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(elsewhere), () => env.DB.prepare('DELETE FROM transactions WHERE id = ?').bind(elsewhere).run())
+    expect(gone.status).toBe(404)
+    expect(await rules()).toHaveLength(0)
+  })
+
+  it('the Admin giving this Transaction a Category of their own when the Rule was to give it: it is left as they set it, and the answer does not say the Rule gave it', async () => {
+    const here = await made({ description: SHOP })
+    const other = await made({ description: `${SHOP} 2` })
+
+    const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(here), () => env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(categories.fuel, here).run())
+
+    expect(res.status).toBe(201)
+    expect(await res.json()).toMatchObject({ categorised: 1, thisBy: 'kept', because: 'changed' }) // the other one only
+    expect(await stored(here)).toMatchObject({ override: categories.fuel, ruleId: null, ruleCategory: null })
+    expect(await stored(other)).toMatchObject({ ruleCategory: categories.groceries })
+    expect(await changeLog()).toMatchObject([{ summary: expect.stringContaining('Added a Rule') }, { summary: expect.stringMatching(/: 1$/) }])
+  })
+
+  it('the Admin giving another Transaction it was about to categorise a Category of their own: that one is left as they set it, the others are given the Rule, and the entry counts what was written', async () => {
     const here = await made({ description: SHOP })
     const meanwhile = await made({ description: `${SHOP} 2` })
     const still = await made({ description: `${SHOP} 3` })
@@ -456,9 +559,26 @@ describe('when another request lands between its reads and its batch', () => {
     const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(here), () => env.DB.prepare('UPDATE transactions SET override_category = ? WHERE id = ?').bind(categories.fuel, meanwhile).run())
 
     expect(res.status).toBe(201)
-    expect(((await res.json()) as Created).categorised).toBe(2) // the count is what was written, not what was read
+    expect(await res.json()).toMatchObject({ categorised: 2, thisBy: 'rule' }) // the count is what was written, not what was read
     expect(await stored(meanwhile)).toMatchObject({ override: categories.fuel, ruleId: null, ruleCategory: null })
     expect(await stored(still)).toMatchObject({ ruleCategory: categories.groceries })
+    expect(await changeLog()).toMatchObject([{ summary: expect.stringContaining('Added a Rule') }, { summary: 'Transactions given the Category Groceries by the new Rule (Rule 1): 2' }])
+  })
+
+  it('a Rule added that matches one of them: that one is left to it, since it comes first, and is said to be held by it', async () => {
+    const { fuel } = categories
+    const here = await made({ description: SHOP })
+    const held = await made({ description: `${SHOP} 2` })
+    const still = await made({ description: `${SHOP} 3` })
+
+    const res = await callWhileInterrupted('/api/rules/from-transaction', 'POST', request(here), async () => void (await addRule({ textContains: `${SHOP} 2`, categoryId: fuel })))
+
+    expect(res.status).toBe(201)
+    expect(await res.json()).toMatchObject({ categorised: 2, thisBy: 'rule', heldByEarlierRule: 1 })
+    expect(await stored(held)).toMatchObject({ ruleId: null, ruleCategory: null })
+    expect(await stored(still)).toMatchObject({ ruleCategory: categories.groceries })
+    expect(await rules()).toHaveLength(2)
+    expect((await changeLog()).at(-1)!.summary).toMatch(/: 2$/)
   })
 })
 
@@ -473,7 +593,7 @@ describe('what it costs (ADR 0004: 100,000 rows written and 5 million read a day
     return { usage, result: (await res.json()) as Created }
   }
 
-  it('writes two rows for each Transaction it categorises (its row and its entry in the Category index) and a few more for the Rule and its entries, in a few queries', async () => {
+  it('writes two rows for each Transaction it categorises (its row and its entry in the Category index) and seven more for the Rule and its two entries', async () => {
     const written: number[] = []
     for (const others of [10, 60]) {
       await env.DB.batch(['transactions', 'rules', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
@@ -481,7 +601,6 @@ describe('what it costs (ADR 0004: 100,000 rows written and 5 million read a day
       await manyMade(others, `${SHOP} `)
       const { usage, result } = await metered({ transactionId: here, textContains: SHOP, categoryId: GROCERIES() })
       expect(result.categorised).toBe(others + 1)
-      expect(usage.queries).toBeLessThanOrEqual(12)
       written.push(usage.rowsWritten)
     }
     // 50 more Transactions are 100 more rows written, and nothing else grows.
@@ -489,8 +608,62 @@ describe('what it costs (ADR 0004: 100,000 rows written and 5 million read a day
     // What there is besides: the Rule (its row, its entry in rules_position and the count of IDs given out), its two Change Log entries (a row and an index entry each), and the
     // re-run's restart, which writes nothing when none is going.
     expect(written[0]).toBe(2 * 11 + FIXED_WRITES)
-    // At the limit, a request writes about a thousand of the day's 100,000 rows.
-    expect(2 * (MAX_INLINE_APPLY + 1) + FIXED_WRITES).toBeLessThan(1100)
+  })
+
+  it(`at the limit, ${MAX_INLINE_APPLY} others and this one are ${2 * (MAX_INLINE_APPLY + 1) + FIXED_WRITES} rows written, about 2% of the day, as measured`, async () => {
+    const here = await made({ description: SHOP })
+    await manyMade(MAX_INLINE_APPLY, `${SHOP} `)
+
+    const { usage, result } = await metered({ transactionId: here, textContains: SHOP, categoryId: GROCERIES() })
+
+    expect(result.categorised).toBe(MAX_INLINE_APPLY + 1)
+    expect(usage.rowsWritten).toBe(2 * (MAX_INLINE_APPLY + 1) + FIXED_WRITES)
+    expect(usage.queries).toBe(QUERIES.rulePath)
+  })
+
+  it('takes the same few queries however many Transactions it gives the Category to, on each path', async () => {
+    const queries = async (setup: () => Promise<Body>) => {
+      await env.DB.batch(['transactions', 'rules', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+      return (await metered(await setup())).usage.queries
+    }
+    const aShop = async (transactionId: number, over: Partial<Body> = {}): Promise<Body> => ({ transactionId, textContains: SHOP, categoryId: GROCERIES(), ...over })
+
+    // This one by the Rule, with others: the reads (4), and the batch of restart, Rule, its entry, the Category given, its entry.
+    expect(
+      await queries(async () => {
+        const here = await made({ description: SHOP })
+        await manyMade(3, `${SHOP} `)
+        return aShop(here)
+      }),
+    ).toBe(QUERIES.rulePath)
+    // This one by the Rule and nothing else to give: the same.
+    expect(await queries(async () => aShop(await made({ description: SHOP })))).toBe(QUERIES.rulePath)
+    // This one as an Override and others: the Override and its entry are two more.
+    expect(
+      await queries(async () => {
+        const here = await made({ description: 'SOMEWHERE ELSE' })
+        await manyMade(3, `${SHOP} `)
+        return aShop(here)
+      }),
+    ).toBe(QUERIES.overridePath)
+    // This one as an Override and no others: the batch is the restart, the Override and its entry, the Rule and its entry.
+    expect(await queries(async () => aShop(await made({ description: 'SOMEWHERE ELSE' })))).toBe(QUERIES.overrideAlone)
+    // This one left as it is, and the others given the Category: no Override.
+    expect(
+      await queries(async () => {
+        const here = await made({ description: SHOP, override: GROCERIES() })
+        await manyMade(3, `${SHOP} `)
+        return aShop(here)
+      }),
+    ).toBe(QUERIES.rulePath)
+    // Too many for now: one more, for the ones that are left.
+    expect(
+      await queries(async () => {
+        const here = await made({ description: SHOP })
+        await manyMade(MAX_INLINE_APPLY + 2, `${SHOP} `)
+        return aShop(here)
+      }),
+    ).toBe(QUERIES.tooMany)
   })
 
   it('reads each Transaction once to find the ones that match, and some for each one it categorises', async () => {
@@ -504,11 +677,10 @@ describe('what it costs (ADR 0004: 100,000 rows written and 5 million read a day
 
     expect(result.categorised).toBe(101)
     // The walk reads every Transaction once (3,101 rows). Each of the 100 others then walks the 30 Rules above the new one (a read each, as in rule-rerun.ts) and is updated by its ID.
-    // Measured: 7,438. A walk that read the criteria again for each Transaction was 10,522.
     expect(usage.rowsRead).toBeLessThanOrEqual(HISTORY + 101 + 101 * (30 + 15))
   })
 
-  it('with too many to do now, finds that out without reading the history to its end, counts them, and writes only the Rule and this Transaction', async () => {
+  it('with too many to do now, reads each Transaction once in all, counts the ones it did not reach, and writes only the Rule and this Transaction', async () => {
     const HISTORY = 2000
     const MATCHES = 2000
     await manyMade(HISTORY, 'EXAMPLE OLD ')
@@ -519,11 +691,13 @@ describe('what it costs (ADR 0004: 100,000 rows written and 5 million read a day
     const { usage, result } = await metered({ transactionId: here, textContains: SHOP, categoryId: GROCERIES() })
 
     expect(result).toMatchObject({ categorised: 1, moreUncategorised: MATCHES })
-    // The pass that looks for the others stops at the 501st it finds, so it reads the history and 501 more; then the count reads everything. Without the stop it is twice `rows`.
-    expect(usage.rowsRead).toBeLessThanOrEqual(rows + HISTORY + MAX_INLINE_APPLY + 200)
+    // The pass that looks for the others stops at the 1,001st it finds, and the count carries on from there: the Transactions are read once between them. A count that began again was twice `rows`.
+    expect(usage.rowsRead).toBeLessThanOrEqual(rows + 200)
     expect(usage.rowsWritten).toBeLessThanOrEqual(2 + FIXED_WRITES)
   })
 })
 
 /** The rows written besides two for each Transaction categorised: the Rule (3) and two Change Log entries (2 each), measured. */
 const FIXED_WRITES = 7
+/** The queries of a request on each path, measured (the 50 of ADR 0004 are not close): four reads, then a batch. */
+const QUERIES = { rulePath: 9, overridePath: 11, overrideAlone: 9, tooMany: 10 }

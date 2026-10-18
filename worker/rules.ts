@@ -81,6 +81,7 @@ export const rules = new Hono<AppEnv>()
     if (outcome.kind === 'no-transaction') return c.json({ error: 'Not found' }, 404)
     if (outcome.kind === 'bad-category') return c.json(badCategory, 400)
     if (outcome.kind === 'full') return c.json(RULES_FULL, 409)
+    if (outcome.kind === 'changed') return c.json(CHANGED_MEANWHILE, 409)
     return c.json(outcome.made, 201)
   })
   // The new Rule goes last in priority; the Admin moves it up with PUT /order.

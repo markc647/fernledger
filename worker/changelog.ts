@@ -37,11 +37,25 @@ export type ChangeEntry = {
 const json = (value: unknown) => (value === undefined ? null : JSON.stringify(value))
 
 /**
- * The statement that writes an entry. With `onlyIfChanged` it writes only if the statement just before it in the batch changed a row (`changes()` is that statement's row count).
+ * Written in the `summary` of an `onlyIfChanged` entry where the number of rows the statement just before it changed belongs ("Transactions given the Category: {changes}"). The
+ * database counts them (`changes()`) as it writes the entry, so the entry says what happened and not what the request expected when it read. The last one in the summary is the
+ * place; any other is only the words it is (a name that happens to contain it). It has no plural to get wrong: put the number after the thing counted.
+ */
+export const CHANGES = '{changes}'
+
+/**
+ * The statement that writes an entry. With `onlyIfChanged` it writes only if the statement just before it in the batch changed a row (`changes()` is that statement's row count),
+ * and puts that count where the summary has `CHANGES`.
  * `recordChange` ends its batch with one; a change that makes a second entry (a kept Report that also drops another) puts that entry's statement after the one it describes,
  * in the same batch.
  */
 export function changeLogStatement(db: D1Database, entry: ChangeEntry): D1PreparedStatement {
+  const counted = entry.onlyIfChanged ? entry.summary.lastIndexOf(CHANGES) : -1
+  if (counted >= 0) {
+    return db
+      .prepare('INSERT INTO change_log (actor, type, summary, before, after) SELECT ?, ?, ? || changes() || ?, ?, ? WHERE changes() > 0')
+      .bind(entry.actor.email, entry.type, entry.summary.slice(0, counted), entry.summary.slice(counted + CHANGES.length), json(entry.before), json(entry.after))
+  }
   return db
     .prepare(
       entry.onlyIfChanged
