@@ -42,9 +42,10 @@ export const isAccessRedirect = ({ type, status }: Pick<Response, 'type' | 'stat
 /**
  * `fetch` for the typed API client (src/lib/api.ts): the same call, but a redirect is not followed and what the answer says of the sign-in is noted. The answer is handed back
  * as it is (a redirect is `ok: false`, status 0), so a caller that treats any failure as one still does; the page shows the sign-in problem in place of what the call was for.
+ * It only wraps the browser's own `fetch` for the API client's own-origin calls: nothing here names an address (ADR 0010).
  */
 export const sessionAwareFetch =
-  (inner: typeof fetch = (input, init) => fetch(input, init)): typeof fetch =>
+  (inner: typeof fetch = fetch): typeof fetch =>
   async (input, init) => {
     const res = await inner(input, { ...init, redirect: 'manual' })
     if (isAccessRedirect(res)) note('expired')
