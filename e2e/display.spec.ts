@@ -1694,7 +1694,7 @@ test.describe('forced colours (Windows high contrast)', { tag: '@theme' }, () =>
 
     const bar = page.getByRole('progressbar', { name: 'Database rows read today' })
     await expect(bar).toBeVisible()
-    const drawn = await bar.evaluate((track) => {
+    const drawn = await bar.locator('[data-slot="progress-track"]').evaluate((track) => {
       const colour = (value: string) => {
         const probe = document.createElement('div')
         probe.style.backgroundColor = value

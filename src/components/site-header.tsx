@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { LogOut, SlidersHorizontal } from 'lucide-react'
+import { AllowanceBar } from '@/components/allowance-bar'
 import { TextSizeControl } from '@/components/text-size-control'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
@@ -32,12 +33,16 @@ function SignOut({ className }: { className?: string }) {
  * the theme and Sign out. From `md` up, and while the bar itself is 56rem wide, the controls sit in the bar: that is the room the four sizes, the theme, Sign out and a long
  * page's name ("Income vs spending by month") need together. On a phone, or when the text is large enough that they would leave the page's name cut short (a container query,
  * whose rem is the page's, so it follows the text size, which a media query's rem does not), they fold into one menu, so the bar is still one row at 320px and the largest text.
+ * The Admin's free allowance bar (`allowance`, src/components/allowance-bar.tsx) is one more thing in the bar, before the controls. It is compact there, a bar and its value (and a small
+ * icon when it is going), which is why the edge is 66rem and not 56rem while it shows: the page's name has no room to spare at 56rem. From 86rem it has room for its words as well, and
+ * writes them out. Below 66rem it is in the menu with the controls.
  * Navigation and display controls mean nothing on paper, so none of it is printed. A page that wants the title in its printout writes it itself.
  */
 export function SiteHeader({
   group,
   groupTo,
   page,
+  allowance,
   textSize,
   onTextSize,
   theme,
@@ -47,6 +52,8 @@ export function SiteHeader({
   /** For a page that belongs to another page (a Report, to Reports): the address of that page, which the group is a link to. It is a link at every width, because on a phone it is the way back. */
   groupTo?: string
   page: string
+  /** The Admin's free allowance bar is showing (src/components/allowance-bar.tsx: the Admin, once the D1 usage bar is set up). It needs room, so the controls fold into the menu sooner. */
+  allowance: boolean
   textSize: TextSize
   onTextSize: (size: TextSize) => void
   theme: Theme
@@ -82,13 +89,14 @@ export function SiteHeader({
           </BreadcrumbList>
         </Breadcrumb>
 
-        <div className="ms-auto hidden items-center gap-2 md:@min-[56rem]/header:flex">
+        <div className={cn('ms-auto hidden items-center gap-2', allowance ? 'md:@min-[66rem]/header:flex' : 'md:@min-[56rem]/header:flex')}>
+          {allowance && <AllowanceBar layout="bar" />}
           <TextSizeControl size={textSize} onChange={onTextSize} />
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           <SignOut />
         </div>
 
-        <div className="ms-auto md:@min-[56rem]/header:hidden">
+        <div className={cn('ms-auto', allowance ? 'md:@min-[66rem]/header:hidden' : 'md:@min-[56rem]/header:hidden')}>
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="icon" aria-label="Display settings and sign out">
@@ -97,6 +105,7 @@ export function SiteHeader({
             </PopoverTrigger>
             {/* On a short or landscape screen, or with the largest text, the menu is as tall as the room there is, and scrolls. */}
             <PopoverContent align="end" className="max-h-(--radix-popover-content-available-height) w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto">
+              {allowance && <AllowanceBar layout="menu" />}
               <div className="flex flex-col gap-1">
                 <span className="text-muted-foreground">Text size</span>
                 <TextSizeControl size={textSize} onChange={onTextSize} layout="grid" />

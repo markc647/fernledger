@@ -3,27 +3,17 @@ import { useId } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { LEVEL_WORDS, meters, resetSentence, STALE_NOTE, unavailableNote, type Level, type Meter } from '@/lib/d1-usage'
+import { FILL, LEVEL_WORDS, meters, resetSentence, STALE_NOTE, TONE, unavailableNote, type Meter } from '@/lib/d1-usage'
 import { d1UsageQuery } from '@/lib/d1-usage-query'
 import { featuresQuery } from '@/lib/features'
 import { HttpError } from '@/lib/me'
-
-// The same three colours as the Status component (the --success, --warning and --danger tokens, each pinned in scripts/theme-contrast.test.mjs
-// at 4.5:1 against the page, a card and the muted fill in both themes, so 3:1 for a graphic is met too). Colour is never the only signal:
-// the badge says Low, Medium or High in words, the figures are written under the bar, and the bar has a border, so Windows high contrast,
-// which removes fills, still shows how full it is (CanvasText for the fill there).
-const FILL: Record<Level, string> = {
-  low: 'bg-success forced-colors:bg-[CanvasText]',
-  medium: 'bg-warning forced-colors:bg-[CanvasText]',
-  high: 'bg-danger forced-colors:bg-[CanvasText]',
-}
-const TONE = { low: 'success', medium: 'warning', high: 'danger' } as const
 
 /**
  * The Admin's D1 usage, in two places on the Rules page: the question that opens before the Rules are applied to all Transactions (an alert dialog), and the frame of a run that is
  * paused for the allowance (the button that opens the question is off while a run is going). It is read when it shows, in either, and not while it is shut or the run is working: rows
  * read and rows written today against the free plan's
- * allowance, each a label and a badge, the bar, then the figures and the percentage. When Cloudflare gave no figures, the panel says so and no
+ * allowance, each a label and a badge (Plenty left, Running low, Almost used or Used up: the header's bar has the same words and colours for the same figures, src/lib/d1-usage.ts),
+ * the bar, then the figures and the percentage. When Cloudflare gave no figures, the panel says so and no
  * bars are drawn, so figures from before a failed refresh are not shown as today's.
  */
 export function D1UsageBar() {
@@ -78,7 +68,7 @@ function UsageMeter({ meter }: { meter: Meter }) {
         </span>
         <Badge variant={TONE[meter.level]}>{LEVEL_WORDS[meter.level]}</Badge>
       </div>
-      <Progress aria-labelledby={label} value={meter.percent} valueText={meter.valueText} className="mt-1 h-3 border border-muted-foreground" indicatorClassName={FILL[meter.level]} />
+      <Progress aria-labelledby={label} value={meter.percent} valueText={meter.valueText} className="mt-1" trackClassName="h-3 border border-muted-foreground" indicatorClassName={FILL[meter.level]} />
       <p className="mt-1">{meter.text}</p>
     </div>
   )

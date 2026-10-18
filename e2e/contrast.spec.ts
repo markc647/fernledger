@@ -503,7 +503,7 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
   }
 
   // The Rules page: the table of Rules (cards on a phone). A Member is told it is the Admin's. The Admin's Rule has its "⋯" menu opened with the keyboard, as far as Remove, whose words are red on a pale
-  // red when it is highlighted; Apply the Rules to all Transactions asks its question, with the D1 usage bar in it (switched on, with the Medium and High levels showing); and the page is looked at
+  // red when it is highlighted; Apply the Rules to all Transactions asks its question, with the D1 usage bar in it (switched on, with the Running low and Used up levels showing); and the page is looked at
   // again with a run of the Rules that is going, and one that is paused (the frame of its progress).
   for (const onPhone of [false, true]) {
     test(`/rules has no colour contrast violations${onPhone ? ' on a phone' : ''}, as ${onPhone ? 'the Admin' : 'the Admin and as a Member'}`, async ({ page, context, baseURL }, testInfo) => {
@@ -511,7 +511,7 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
       await seed(context, baseURL!, project)
       if (onPhone) await page.setViewportSize(PHONE)
       await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
-      await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures({ rowsRead: 2_750_000, rowsWritten: 105_000 }) }))
+      await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures({ rowsRead: 3_750_000, rowsWritten: 105_000 }) }))
       await withRules(context, baseURL!, testInfo, ['CONTRAST'], async ([rule]) => {
         try {
           for (const role of onPhone ? (['admin'] as const) : ROLES) {
@@ -576,6 +576,39 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
     await openHeaderControls(page)
     await scanner(page, testInfo.project.name, 'the phone\'s display settings menu', 'admin')('open', { within: '[data-slot="popover-content"]' })
   })
+
+  // The Admin's free allowance bar (src/components/allowance-bar.tsx) in each state, in the header's two forms (compact from 66rem, with its words written out from 86rem), with its figures open on
+  // focus (a tooltip), then the same bar in the phone's menu. Its words and the icon that goes with Running low and Almost used are on the header's tint, and its fill and edge are measured as drawn.
+  for (const { state, figures } of [
+    { state: 'with plenty left', figures: {} },
+    { state: 'Running low', figures: { rowsRead: 3_750_000 } },
+    { state: 'Almost used', figures: { rowsRead: 4_500_000 } },
+    { state: 'Used up', figures: { rowsRead: 4_900_000, rowsWritten: 100_000 } },
+  ]) {
+    test(`the header's free allowance bar has no colour contrast violations, ${state}, compact, with its words, and in the phone's menu`, async ({ page, context }, testInfo) => {
+      await signInAs(context, 'admin')
+      await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+      await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures(figures) }))
+      const scan = scanner(page, testInfo.project.name, "the header's free allowance bar", 'admin')
+      const bar = siteHeader(page).getByRole('progressbar', { name: 'Free allowance left today' })
+      const tooltip = page.locator('[data-slot="tooltip-content"]')
+      for (const [form, width] of [['compact', 1100], ['with its words', 1500]] as const) {
+        await page.setViewportSize({ width, height: 800 })
+        await page.goto('/reports')
+        await heading(page, 'Reports')
+        await bar.focus()
+        await expect(tooltip).toBeVisible()
+        await scan(`${state}, ${form}, with its figures showing`)
+        await page.keyboard.press('Escape')
+        await expect(tooltip).toHaveCount(0)
+      }
+
+      await page.setViewportSize(PHONE)
+      await openHeaderControls(page)
+      await expect(page.locator('[data-slot="popover-content"]').getByRole('progressbar', { name: 'Free allowance left today' })).toBeVisible()
+      await scan(`${state}, in the phone's menu`, { within: '[data-slot="popover-content"]' })
+    })
+  }
 
   // The sidebar as the icon rail, with the tooltip of the group that has focus showing.
   test('the sidebar rail with a tooltip showing has no colour contrast violations, as the Admin', async ({ page, context }, testInfo) => {

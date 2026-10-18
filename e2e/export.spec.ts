@@ -3,6 +3,7 @@ import type { Locator } from '@playwright/test'
 import { pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { importRows } from './report-helpers'
+import { accessRedirect } from './session-helpers'
 
 // The Export page (src/routes/export.tsx): the Transactions page's filters, and Download CSV for the Transactions that match them. The light and dark projects share one local database,
 // so each has an Account of its own. Dated in 2008, a year no other spec's Transactions are in, and found by a stamp in their descriptions.
@@ -128,6 +129,32 @@ test('says what a saved file leaves unprotected, always, and warns of the cap on
 
   // What leaves Fernledger's protection is explained in the README, and the explanation links to that section.
   await expect(explanation.getByRole('link', { name: "what it can't protect against" })).toHaveAttribute('href', 'https://github.com/markc647/fernledger#what-it-cant-protect-against')
+})
+
+// The link is followed by the browser itself and not through the API client, so once Access's session has run out it would save Access's sign-in page as the CSV file. The sign-in is
+// checked through the client first (src/components/transaction-export.tsx): the banner says so, and nothing is asked for or saved until the next press works.
+test('Download CSV saves no file when the sign-in has expired, says so, and saves it once signed in again', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  let expired = false
+  await page.route('**/api/me', (route) => (expired ? accessRedirect(route) : route.fallback()))
+  let saved = 0
+  page.on('download', () => saved++)
+  await page.goto('/export')
+  const link = page.getByRole('link', { name: 'Download CSV' })
+  await expect(link).toBeVisible()
+  await expect(page.locator('#filter-download-count')).toContainText('Transaction')
+
+  expired = true
+  await link.click()
+  await expect(page.getByRole('alert').filter({ hasText: 'Your sign-in has expired' })).toBeVisible()
+  await page.waitForLoadState('networkidle')
+  expect(saved).toBe(0) // Access's sign-in page is not saved as the CSV
+
+  expired = false
+  const [file] = await Promise.all([page.waitForEvent('download'), link.click()])
+  expect(file.suggestedFilename()).toMatch(/\.csv$/)
+  expect(saved).toBe(1)
+  await expect(page.getByRole('alert').filter({ hasText: 'sign-in' })).toHaveCount(0) // who is signed in worked, and the banner went
 })
 
 test('an address naming no such Account or Category, or a range that runs backwards, says so and has no file to download', async ({ page, context }) => {

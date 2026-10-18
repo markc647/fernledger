@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose'
+import { createRemoteJWKSet, errors, jwtVerify, type JWTVerifyGetKey } from 'jose'
 import { parse as parseCookie } from 'hono/utils/cookie'
 import * as z from 'zod/mini'
 
@@ -18,21 +18,29 @@ export const roleFor = (email: string, adminEmail: string | undefined): Role =>
 
 const emailClaim = z.string().check(z.trim(), z.minLength(1))
 
-/** Verifies the Cloudflare Access JWT. Returns null for anything that isn't a valid, signed, in-date token for this app. */
-export async function authenticate(request: Request, config: AuthConfig): Promise<Member | null> {
+/**
+ * Why a request was refused, for the log (`logEvent`): the event says which of three things it was (a Worker secret is missing, no Access token, or one that did not verify). For a
+ * token that did not verify, `code` is jose's own fixed code (`ERR_JWT_EXPIRED`; `ERR_JWT_CLAIM_VALIDATION_FAILED` for another application or issuer;
+ * `ERR_JWS_SIGNATURE_VERIFICATION_FAILED`...) or ours (`ERR_NO_EMAIL`), and `error` is the class of anything else that went wrong, such as the key set not being fetched. Never jose's
+ * message, which can echo the token. The page sees only a 401.
+ */
+export type Refusal = { event: string; code?: string; error?: unknown }
+
+/** Verifies the Cloudflare Access JWT: the Member it is for, or why not (anything that isn't a valid, signed, in-date token for this app). */
+export async function authenticate(request: Request, config: AuthConfig): Promise<{ member: Member } | { refused: Refusal }> {
   const token = request.headers.get('Cf-Access-Jwt-Assertion')
-  if (!token) return null
+  if (!token) return { refused: { event: 'auth.refused.no-token' } }
   try {
     const { payload } = await jwtVerify(token, config.getKey, {
       issuer: config.issuer,
       audience: config.audience,
     })
     const parsed = z.safeParse(emailClaim, payload.email)
-    if (!parsed.success) return null
+    if (!parsed.success) return { refused: { event: 'auth.refused.bad-token', code: 'ERR_NO_EMAIL' } }
     const email = parsed.data.toLowerCase()
-    return { email, role: roleFor(email, config.adminEmail) }
-  } catch {
-    return null
+    return { member: { email, role: roleFor(email, config.adminEmail) } }
+  } catch (error) {
+    return { refused: error instanceof errors.JOSEError ? { event: 'auth.refused.bad-token', code: error.code } : { event: 'auth.refused.bad-token', error } }
   }
 }
 

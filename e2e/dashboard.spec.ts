@@ -65,7 +65,7 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
 const dollars = (cents: number) => `${cents < 0 ? '−' : ''}$${(Math.abs(cents) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 /** The cards of the Summary and the Dashboard, in the order they are read. */
-const CARDS = ['Balances', 'Budget vs actual', 'Recent transactions']
+const CARDS = ['Balances', 'Recent transactions', 'Budget vs actual']
 
 /**
  * A card's live region: the one status element it has, on the page before anything happens and empty, so that what it comes to say is a change a screen reader

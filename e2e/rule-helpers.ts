@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, signInAs } from './fixtures'
+import type { D1Usage } from '../src/generated/api/d1-usage'
 
 // Rules made through the API for a spec to look at and change, and taken away again when it is done: the order of the Rules is the same for every spec and both themes, so a spec
 // works only with the Rules it made, and leaves none behind (rules.spec.ts, rules-reorder.spec.ts and row-actions.spec.ts).
@@ -47,8 +48,8 @@ export async function withRules<Words extends string[]>(
 /** What the Worker says of the features when the D1 usage bar is switched on (local development has no Cloudflare token, so the specs that look at the bar stub it). */
 export const usageOn = { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] }
 
-/** What the Worker says of the day's database use, changed by what a spec passes: Low on both bars unless it says otherwise. */
-export const usageFigures = (over: Record<string, unknown> = {}) => ({
+/** What the Worker says of the day's database use, changed by what a spec passes: Plenty left on both bars unless it says otherwise. */
+export const usageFigures = (over: Partial<D1Usage> = {}): D1Usage => ({
   rowsRead: 1_234_567,
   rowsWritten: 4_321,
   readLimit: 5_000_000,
@@ -56,6 +57,20 @@ export const usageFigures = (over: Record<string, unknown> = {}) => ({
   resetsAt: '2026-10-15T00:00:00.000Z',
   ...over,
 })
+
+/**
+ * Answers the day's database use, in turn, for the question the Rules page asks before it applies the Rules, which reads it each time it opens. The Admin's header reads it once as the
+ * page loads (src/components/allowance-bar.tsx), before anything on the page can, and gets `forHeader`; the question's own readings come after, `answer(0)` for the first, and
+ * `readings()` is how many there have been. (A spec that counts or tells the readings apart uses this, not a route of its own.)
+ */
+export async function stubUsageReadings(page: Page, answer: (reading: number) => { status?: number; json: unknown }, forHeader: D1Usage = usageFigures()) {
+  let calls = 0
+  await page.route('**/api/d1-usage', (route) => {
+    const call = calls++
+    return call === 0 ? route.fulfill({ json: forHeader }) : route.fulfill(answer(call - 1))
+  })
+  return { readings: () => Math.max(0, calls - 1) }
+}
 
 /** The "⋯" button of a Rule's row or card, by the Rule's id (the page puts the id in the button's own, so it is found wherever the Rule is in the list). */
 export const ruleActions = (page: Page, id: number) => page.locator(`#rule-${id}-actions`)
