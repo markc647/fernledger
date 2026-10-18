@@ -34,8 +34,13 @@ export const app = new Hono<AppEnv>()
   // Every /api request is authenticated before routing, so unknown routes reveal nothing. Fail closed.
   .use('/api/*', async (c, next) => {
     const config = authConfigFromEnv(c.env)
-    const member = devMember(c.req.raw, c.env) ?? (config && (await authenticate(c.req.raw, config)))
-    if (!member) return c.json({ error: 'Unauthorised' }, 401)
+    const dev = devMember(c.req.raw, c.env)
+    const verified = dev ? { member: dev } : config ? await authenticate(c.req.raw, config) : { refused: { event: 'auth.refused.not-configured' } }
+    if ('refused' in verified) {
+      logEvent(verified.refused.event, verified.refused)
+      return c.json({ error: 'Unauthorised' }, 401)
+    }
+    const { member } = verified
     c.set('member', member)
     await next()
   })

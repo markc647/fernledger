@@ -1,7 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import worker from './index'
 
 const issuer = `https://${env.ACCESS_TEAM_DOMAIN}`
@@ -115,6 +115,68 @@ describe('Access verification on /api', () => {
     const res = await call('/api/nothing-here', { token: await sign({ email: 'sib@example.com' }) })
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'Not found' })
+  })
+})
+
+// A 401 from here is the one thing the page cannot tell apart on its own: the Worker log says which kind it was (README, Logs), as an event name and never the token.
+describe('the log of a refused /api request', () => {
+  const logged = () => {
+    const lines: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((...args) => void lines.push(args.join(' ')))
+    return lines
+  }
+  afterEach(() => vi.restoreAllMocks())
+
+  it('says there was no token', async () => {
+    const lines = logged()
+    expect((await call('/api/me')).status).toBe(401)
+    expect(lines.map((line) => JSON.parse(line))).toEqual([{ event: 'auth.refused.no-token' }])
+  })
+
+  // Which way it did not verify is jose's own fixed code (never its message, which can echo the token), so the log tells a wrong application or team domain from an old token.
+  it('says a token did not verify, and by which of the fixed codes jose gives, and never writes the token', async () => {
+    const other = await generateKeyPair('RS256')
+    const expired = Math.floor(Date.now() / 1000) - 60
+    for (const [token, code] of [
+      [await sign({ email: 'admin@example.com' }, { key: other.privateKey }), 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED'],
+      [await sign({ email: 'admin@example.com' }, { aud: 'other-app' }), 'ERR_JWT_CLAIM_VALIDATION_FAILED'],
+      [await sign({ email: 'admin@example.com' }, { iss: 'https://other.cloudflareaccess.com' }), 'ERR_JWT_CLAIM_VALIDATION_FAILED'],
+      [await sign({ email: 'admin@example.com' }, { exp: expired }), 'ERR_JWT_EXPIRED'],
+      [await sign({}), 'ERR_NO_EMAIL'], // verified, with no email to say who it is
+    ] as const) {
+      const lines = logged()
+      expect((await call('/api/me', { token })).status).toBe(401)
+      expect(lines.map((line) => JSON.parse(line))).toEqual([{ event: 'auth.refused.bad-token', code }])
+      expect(lines.join()).not.toContain(token.slice(-20))
+      expect(lines.join()).not.toContain('example.com')
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('tells a key set that could not be fetched from a token that did not verify: it has no jose code, and the class of what failed', async () => {
+    const lines = logged()
+    const token = await sign({ email: 'admin@example.com' })
+    // The test's fetch only knows the one team domain's keys, and fails for any other.
+    expect((await callWith('https://app.test/api/me', { ACCESS_TEAM_DOMAIN: 'down.cloudflareaccess.com' }, { token })).status).toBe(401)
+    const [line] = lines.map((entry) => JSON.parse(entry))
+    expect(lines).toHaveLength(1)
+    expect(line.event).toBe('auth.refused.bad-token')
+    expect(line.code).toBeUndefined()
+    expect(line.errorClass).toMatch(/^[A-Za-z]+$/)
+    expect(lines.join()).not.toContain('down.cloudflareaccess.com')
+  })
+
+  it.each(['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'ADMIN_EMAIL'] as const)('says Access is not set up when %s is missing', async (name) => {
+    const lines = logged()
+    const token = await sign({ email: 'admin@example.com' })
+    expect((await callWith('https://app.test/api/me', { [name]: undefined }, { token })).status).toBe(401)
+    expect(lines.map((line) => JSON.parse(line))).toEqual([{ event: 'auth.refused.not-configured' }])
+  })
+
+  it('writes nothing for a request that is let in', async () => {
+    const lines = logged()
+    expect((await call('/api/me', { token: await sign({ email: 'sib@example.com' }) })).status).toBe(200)
+    expect(lines).toEqual([])
   })
 })
 

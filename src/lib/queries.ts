@@ -8,15 +8,16 @@ import { HttpError } from './me'
 import { loadBalances } from './report-balances'
 import { loadLoans } from './report-loans'
 import { loadListing } from './report-transactions'
+import { retryAtMost } from './session'
 import { apiQuery, filterQuery, filtersOf, type TransactionSearch } from './transaction-search'
 
 export const PAGE_SIZE = 50
 
 /**
  * A Report's reads are asked for again when they fail, as any read is, except when the Worker refuses them (403): a Member who asks for a Report the Admin has not made is told so
- * at once, and asking again would only be refused again.
+ * at once, and asking again would only be refused again. Nor once the sign-in is known to be gone (src/lib/session.ts), which asking again would only meet again.
  */
-const retryUnlessRefused = (count: number, error: unknown) => !(error instanceof HttpError && error.status === 403) && count < 3
+const retryUnlessRefused = (count: number, error: unknown) => !(error instanceof HttpError && error.status === 403) && retryAtMost(3)(count)
 
 export const accountsQuery = queryOptions({
   queryKey: ['accounts'],
@@ -78,7 +79,7 @@ export const transactionCountQuery = (search: TransactionSearch) => {
 export const transactionQuery = (id: string) =>
   queryOptions({
     queryKey: ['transactions', 'detail', id],
-    retry: (count, error) => !(error instanceof HttpError && error.status === 404) && count < 3,
+    retry: (count, error) => !(error instanceof HttpError && error.status === 404) && retryAtMost(3)(count),
     queryFn: async () => {
       const res = await api.transactions[':id'].$get({ param: { id } })
       if (!res.ok) throw new HttpError(res.status)
@@ -312,7 +313,7 @@ export const balancesQuery = queryOptions({
 /** Balance Check warnings (where the bank and the Transactions disagree), and each Account's latest check. */
 export const balanceChecksQuery = queryOptions({
   queryKey: ['balance-checks'],
-  retry: 1, // the Balances table waits for it: one more try, and then it says so, not three tries and a long wait
+  retry: retryAtMost(1), // the Balances table waits for it: one more try, and then it says so, not three tries and a long wait
   queryFn: async () => {
     const res = await api['balance-checks'].$get()
     if (!res.ok) throw new HttpError(res.status)
@@ -343,7 +344,7 @@ export const netWorthQuery = (range: NetWorthRange) =>
     queryKey: ['balances', 'net-worth', range],
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
-    retry: 1, // a failed answer has already read a great deal, so it is asked for once more at most (ADR 0004)
+    retry: retryAtMost(1), // a failed answer has already read a great deal, so it is asked for once more at most (ADR 0004)
     queryFn: async () => {
       const res = await api.charts['net-worth'].$get({ query: { range } })
       if (!res.ok) throw new HttpError(res.status)
