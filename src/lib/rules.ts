@@ -61,6 +61,12 @@ export function ruleConditions(rule: Pick<RuleView, 'textContains' | 'bankType' 
   return conditions
 }
 
+/** When a Rule applies, as one sentence: "Text contains “COUNTDOWN” and money out". The Rules table's "When" column, and what saving a Rule made from a Transaction says. */
+export function ruleWhen(rule: Pick<RuleView, 'textContains' | 'bankType' | 'direction' | 'minCents' | 'maxCents'>): string {
+  const text = ruleConditions(rule).join(' and ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 /** What a Rule does to a Transaction it matches. */
 export function ruleResult(rule: Pick<RuleView, 'transfer' | 'categoryName' | 'categoryRemoved'>): string {
   if (rule.transfer) return 'Mark as a Transfer'

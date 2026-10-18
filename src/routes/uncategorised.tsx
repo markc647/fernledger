@@ -4,6 +4,7 @@ import { useCallback, useMemo } from 'react'
 import { PageHeading } from '@/components/help-sheet'
 import { TransactionList } from '@/components/transaction-list'
 import { meQuery } from '@/lib/me'
+import { MAX_INLINE_APPLY } from '@/lib/rule-from-transaction'
 import { parseTransactionSearch, tidy, type TransactionSearch } from '@/lib/transaction-search'
 
 // Only the order and the page are in the address (?sort=amount&page=2): the list is always the Transactions with no Category.
@@ -34,10 +35,16 @@ function Uncategorised() {
       <PageHeading
         help={
           admin && (
-            <p>
-              Transactions with no Category. Choose Edit on a Transaction's row to set an Override; it leaves this list once it has a Category. Transfers between your own Accounts are left out, as they are not spending. Until a
-              Transaction has a Category it counts as Spending, so money in left here, such as a wage, reduces Spending.
-            </p>
+            <>
+              <p>
+                Transactions with no Category. Choose Edit on a Transaction's row to set an Override; it leaves this list once it has a Category. Transfers between your own Accounts are left out, as they are not spending. Until a
+                Transaction has a Category it counts as Spending, so money in left here, such as a wage, reduces Spending.
+              </p>
+              <p>
+                To give a Category to every Transaction like one on this list, choose Edit on it, then the Category, then Create Rule. The Rule starts with the words that name the shop, and says how many Transactions match as you change
+                them. Save Category and Rule adds the Rule and gives the Category to the Uncategorised Transactions it matches, up to {MAX_INLINE_APPLY} others at once.
+              </p>
+            </>
           )
         }
       >
