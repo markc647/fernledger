@@ -10,6 +10,7 @@ Self-hosted NZ bank-account tracker on Cloudflare Workers (free plan) + D1 + R2,
 - `docs/releasing.md`: how a release is made; `test/sample-dbs/` holds the databases every release must upgrade from.
 - `docs/bank-formats/`: bank CSV layouts, with made-up examples. Real exports never enter this repo.
 - `docs/agents/parallel-work.md`: read it first when you are in a worktree, a subagent, or testing beside other agents.
+- `docs/agents/design-review.md`: screenshots of a UI change with made-up data, for the user to review.
 
 ## Before reporting work done
 - Run `npm run check` (lint, typecheck, tests, script tests, migration check, secret scan and its self-test). It's green when it exits 0. The first scan downloads a pinned, checksum-verified gitleaks into your user cache.
