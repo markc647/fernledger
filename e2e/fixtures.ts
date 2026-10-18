@@ -32,6 +32,11 @@ export const test = base.extend<{ expectedStatuses: number[]; expectedConsoleErr
       problems.push(`console: ${message.text()}`)
     })
     page.on('pageerror', (error) => problems.push(`uncaught: ${error.message}`))
+    // Local development has no Cloudflare token, so the D1 usage figures are never real here. A spec that says the D1 usage bar is set up (`/api/features`) makes the Admin's header ask for
+    // them (src/components/allowance-bar.tsx), and gets these unless it answers for itself: a route added later is the one that is used.
+    await page.route('**/api/d1-usage', (route) =>
+      route.fulfill({ json: { rowsRead: 1_234_567, rowsWritten: 4_321, readLimit: 5_000_000, writeLimit: 100_000, resetsAt: '2026-10-15T00:00:00.000Z' } }),
+    )
     await page.addInitScript(() => {
       document.addEventListener('securitypolicyviolation', (event) => {
         console.error(`CSP violation: ${event.violatedDirective} blocked ${event.blockedURI || 'inline'}`)

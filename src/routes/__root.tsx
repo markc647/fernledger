@@ -1,6 +1,7 @@
 import { useQuery, type QueryClient } from '@tanstack/react-query'
 import { createRootRouteWithContext, Outlet, useRouter, useRouterState } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
+import { useAllowanceOn } from '@/components/allowance-bar'
 import { AppSidebar } from '@/components/app-sidebar'
 import { DevIdentitySwitcher } from '@/components/dev-identity-switcher'
 import { SessionProblemPage } from '@/components/session-problem'
@@ -25,6 +26,7 @@ const focusStyle = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus
 function Layout() {
   const { data: me, error: meError } = useQuery(meQuery)
   const sessionProblem = useSessionProblem()
+  const allowance = useAllowanceOn(me?.role === 'admin')
   // Until the title arrives the sidebar's title is blank rather than flashing "Fernledger" over the Admin's own title.
   // The Settings screen writes its saved Settings into this same query, so the sidebar changes without a reload.
   const { data: settings, isPending: titlePending } = useQuery(settingsQuery)
@@ -71,7 +73,7 @@ function Layout() {
         onOpenChange={chooseSidebar}
         className="flex-col"
       >
-        <SiteHeader group={trail.group} groupTo={trail.parent} page={trail.page ?? appTitle} textSize={textSize} onTextSize={chooseTextSize} theme={theme} onToggleTheme={toggleTheme} />
+        <SiteHeader group={trail.group} groupTo={trail.parent} page={trail.page ?? appTitle} allowance={allowance} textSize={textSize} onTextSize={chooseTextSize} theme={theme} onToggleTheme={toggleTheme} />
         <div className="flex flex-1">
           <AppSidebar appTitle={appTitle} sections={sections} activeTo={trail.to} roleKnown={roleKnown} email={me?.email} role={me?.role} />
           {/* On paper the page is the paper's: no margin for the sidebar (important, because the collapsed sidebar's margin is more specific), no rounded edge or shadow. */}

@@ -57,6 +57,20 @@ export const usageFigures = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+/**
+ * Answers the day's database use, in turn, for the question the Rules page asks before it applies the Rules, which reads it each time it opens. The Admin's header reads it once as the
+ * page loads (src/components/allowance-bar.tsx), before anything on the page can, and gets `forHeader`; the question's own readings come after, `answer(0)` for the first, and
+ * `readings()` is how many there have been. (A spec that counts or tells the readings apart uses this, not a route of its own.)
+ */
+export async function stubUsageReadings(page: Page, answer: (reading: number) => { status?: number; json: unknown }, forHeader: Record<string, unknown> = usageFigures()) {
+  let calls = 0
+  await page.route('**/api/d1-usage', (route) => {
+    const call = calls++
+    return call === 0 ? route.fulfill({ json: forHeader }) : route.fulfill(answer(call - 1))
+  })
+  return { readings: () => Math.max(0, calls - 1) }
+}
+
 /** The "⋯" button of a Rule's row or card, by the Rule's id (the page puts the id in the button's own, so it is found wherever the Rule is in the list). */
 export const ruleActions = (page: Page, id: number) => page.locator(`#rule-${id}-actions`)
 

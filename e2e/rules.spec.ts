@@ -2,7 +2,7 @@ import type { BrowserContext, Page } from '@playwright/test'
 import { expect, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
 import { findTransactions, transactionId } from './report-helpers'
-import { addRule, applyAnswer, applyButton, applyDialog, applyTheRules, categoryId, frameHeading, openApplyDialog, pageOrder, progressFrame, removeRule, ruleActions, ruleIds, runningJob, spinner, usageFigures, usageOn, withRules } from './rule-helpers'
+import { addRule, applyAnswer, applyButton, applyDialog, applyTheRules, categoryId, frameHeading, openApplyDialog, pageOrder, progressFrame, removeRule, ruleActions, ruleIds, runningJob, spinner, stubUsageReadings, usageFigures, usageOn, withRules } from './rule-helpers'
 import { arrowTo, chooseAction, menuAction, noAxeViolationsFromTop, openActions, ruleActionButtons } from './row-actions-helpers'
 import { chooseTextSize, mainNav, navGroup, navigateTo } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
@@ -993,9 +993,8 @@ test.describe('the D1 usage bar', () => {
     await signInAs(context, 'admin')
     // Each answer is a little further on, as the account's day is while a run uses it.
     const answers = [usageFigures(), usageFigures({ rowsRead: 2_750_000 }), usageFigures({ rowsRead: 4_200_000 })]
-    let asked = 0
     await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
-    await page.route('**/api/d1-usage', (route) => route.fulfill({ json: answers[Math.min(asked++, answers.length - 1)] }))
+    const usage = await stubUsageReadings(page, (reading) => ({ json: answers[Math.min(reading, answers.length - 1)] })) // (the header's reading as the page loads is not one of these)
     // The run: the first step is a step like any other, the next ends it.
     let job: ReturnType<typeof runningJob> | null = null
     let steps = 0
@@ -1007,23 +1006,23 @@ test.describe('the D1 usage bar', () => {
     const dialog = await openApplyDialog(page)
     await expect(dialog.getByText('1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
     await quiet(page)
-    expect(asked).toBe(1) // (a bar on the page would have asked as the page loaded, and the second opening below would then ask for nothing)
+    expect(usage.readings()).toBe(1) // (the question asks when it opens and not as the page loads: the one reading made then is the header's, which is not counted here)
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     await openApplyDialog(page)
     await expect(dialog.getByText('2,750,000 of 5,000,000 rows read · 55%')).toBeVisible()
     await quiet(page)
-    expect(asked).toBe(2)
+    expect(usage.readings()).toBe(2)
 
     await applyAnswer(page).click()
     await expect(progressFrame(page)).toContainText('Finished. Looked at all 20,000 Transactions')
     expect(steps).toBe(2)
     await quiet(page)
-    expect(asked).toBe(2) // two steps and an end, and the bar was shut: nothing was asked
+    expect(usage.readings()).toBe(2) // two steps and an end, and the question was shut: it asked for nothing
 
     await openApplyDialog(page)
     await expect(dialog.getByText('4,200,000 of 5,000,000 rows read · 84%')).toBeVisible() // the figures after the run, not the ones from before it
     await quiet(page)
-    expect(asked).toBe(3)
+    expect(usage.readings()).toBe(3)
   })
 
   test.describe('when Cloudflare cannot give the figures', () => {
@@ -1032,10 +1031,7 @@ test.describe('the D1 usage bar', () => {
     test('says why and what to check, still lets the Rules be applied, and shows the figures when asked again', async ({ page, context }) => {
       await signInAs(context, 'admin')
       await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
-      let asked = 0
-      await page.route('**/api/d1-usage', (route) =>
-        asked++ === 0 ? route.fulfill({ status: 502, json: { error: 'Usage unavailable', reason: 'no-account' } }) : route.fulfill({ json: usageFigures() }),
-      )
+      const usage = await stubUsageReadings(page, (reading) => (reading === 0 ? { status: 502, json: { error: 'Usage unavailable', reason: 'no-account' } } : { json: usageFigures() }))
       await page.goto('/rules')
       await openApplyDialog(page)
 
@@ -1051,18 +1047,16 @@ test.describe('the D1 usage bar', () => {
       await panel.getByRole('button', { name: 'Check again' }).click()
       await expect(panel.getByText('1,234,567 of 5,000,000 rows read · 24%')).toBeVisible()
       await expect(panel.getByText('Usage unavailable.')).toHaveCount(0)
-      expect(asked).toBe(2)
+      expect(usage.readings()).toBe(2)
       await noAxeViolationsFromTop(page)
     })
 
     test('after figures, a reading that fails takes them down rather than leaving them as today, and asking again brings them back', async ({ page, context }) => {
       await signInAs(context, 'admin')
       await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
-      let asked = 0
-      await page.route('**/api/d1-usage', (route) => {
-        const n = asked++
-        return n === 1 ? route.fulfill({ status: 502, json: { error: 'Usage unavailable', reason: 'unreachable' } }) : route.fulfill({ json: usageFigures(n === 0 ? {} : { rowsRead: 3_000_000 }) })
-      })
+      const usage = await stubUsageReadings(page, (reading) =>
+        reading === 1 ? { status: 502, json: { error: 'Usage unavailable', reason: 'unreachable' } } : { json: usageFigures(reading === 0 ? {} : { rowsRead: 3_000_000 }) },
+      )
       await page.goto('/rules')
       await openApplyDialog(page)
       const panel = usagePanel(page)
@@ -1079,7 +1073,7 @@ test.describe('the D1 usage bar', () => {
       await panel.getByRole('button', { name: 'Check again' }).click()
       await expect(panel.getByText('3,000,000 of 5,000,000 rows read · 60%')).toBeVisible()
       await expect(panel.getByText('Usage unavailable.')).toHaveCount(0)
-      expect(asked).toBe(3)
+      expect(usage.readings()).toBe(3)
     })
   })
 })

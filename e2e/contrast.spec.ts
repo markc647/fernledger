@@ -577,6 +577,33 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
     await scanner(page, testInfo.project.name, 'the phone\'s display settings menu', 'admin')('open', { within: '[data-slot="popover-content"]' })
   })
 
+  // The Admin's free allowance bar (src/components/allowance-bar.tsx) in each state: its words and the word that goes with Low and Almost used, on the header's tint, its fill and edge, and
+  // its figures open on focus (a tooltip), then the same bar in the phone's menu.
+  for (const { state, figures } of [
+    { state: 'with plenty left', figures: {} },
+    { state: 'Low', figures: { rowsRead: 4_100_000 } },
+    { state: 'Almost used', figures: { rowsRead: 4_900_000, rowsWritten: 99_000 } },
+  ]) {
+    test(`the header's free allowance bar has no colour contrast violations, ${state}, in the header and in the phone's menu`, async ({ page, context }, testInfo) => {
+      await signInAs(context, 'admin')
+      await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+      await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures(figures) }))
+      const scan = scanner(page, testInfo.project.name, 'the header\'s free allowance bar', 'admin')
+      await page.setViewportSize({ width: 1500, height: 800 })
+      await page.goto('/reports')
+      await heading(page, 'Reports')
+      await siteHeader(page).getByRole('progressbar', { name: 'Free allowance left today' }).focus()
+      await expect(page.locator('[data-slot="tooltip-content"]')).toBeVisible()
+      await scan(`${state}, with its figures showing`)
+
+      await page.keyboard.press('Escape')
+      await page.setViewportSize(PHONE)
+      await openHeaderControls(page)
+      await expect(page.locator('[data-slot="popover-content"]').getByRole('progressbar', { name: 'Free allowance left today' })).toBeVisible()
+      await scan(`${state}, in the phone's menu`, { within: '[data-slot="popover-content"]' })
+    })
+  }
+
   // The sidebar as the icon rail, with the tooltip of the group that has focus showing.
   test('the sidebar rail with a tooltip showing has no colour contrast violations, as the Admin', async ({ page, context }, testInfo) => {
     await signInAs(context, 'admin')
