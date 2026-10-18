@@ -16,7 +16,7 @@
     "report-notes.spec.ts": [35],
     "report-spending.spec.ts": [74, 75, 76, 77, 78, 79],
     "reports.spec.ts": [60, 61, 62, 63],
-    "rule-from-transaction.spec.ts": [26, 27],
+    "rule-from-transaction.spec.ts": [26],
     "rules.spec.ts": [84, 85],
     "summary.spec.ts": [86, 87],
     "table-look.spec.ts": [36, 37],

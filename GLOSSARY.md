@@ -104,8 +104,12 @@ _Avoid_: Unassigned, unknown
 An Admin-defined pattern that gives matching Transactions a Category, or marks them as Transfers. How Rules match and take precedence is in README [How it works](README.md#how-it-works).
 _Avoid_: Filter, mapping
 
+**Rule made from a Transaction**:
+A Rule the Admin makes with Create Rule in a Transaction's Edit panel, giving the Category chosen there to Transactions like it. It looks for text and a way the money went, and goes last in the order. As it is saved it also gives that Category to this Transaction (as a Rule's Category, or as an Override if the Rule does not give it) and to up to 1,000 other Uncategorised Transactions that it is the first Rule to match; the Re-run does the rest. README [How it works](README.md#how-it-works) says how.
+_Avoid_: Quick rule, auto-categorise
+
 **Re-run**:
-Applying the Rules as they are now to every Transaction already on file, in steps that keep their place, so a Rule change reaches the past as well as new Imports. It gives each Transaction the result of the first Rule that matches, or none, and never touches an Override or a Note. The Rules page's button for it, beside "Add a Rule", says "Apply the Rules to all Transactions", which is the same thing in the words an Admin would use; it asks first. How it runs is in README [How it works](README.md#how-it-works).
+Applying the Rules as they are now to every Transaction already on file, in steps that keep their place, so a Rule change reaches the past as well as new Imports. It gives each Transaction the result of the first Rule that matches, or none, and never touches an Override or a Note. It is also what gives the Category of a Rule made from a Transaction to the Uncategorised Transactions beyond the 1,000 that Rule gave it at once, and to those an earlier Rule matches. The Rules page's button for it, beside "Add a Rule", says "Apply the Rules to all Transactions", which is the same thing in the words an Admin would use; it asks first. How it runs is in README [How it works](README.md#how-it-works).
 _Avoid_: Reapply, backfill, refresh
 
 **Override**:

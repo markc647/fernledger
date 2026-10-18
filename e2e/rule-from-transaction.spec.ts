@@ -7,22 +7,23 @@ import { rowButton } from './row-actions-helpers'
 // Create Rule, in a Transaction's Edit panel: the Admin makes a Rule from an Uncategorised Transaction and gives its Category to the others like it, in one press (README, Rules). The Worker's
 // answers are held by worker/rule-from-transaction.test.ts, and the suggested text by src/lib/rule-text.test.ts; this is the page: the panel, the live count, the line it says, and where focus goes.
 //
-// The light and dark projects share one local database, so each has an Account of its own (26 and 27) and a year of its own (2006 and 2007, which no other spec uses), and a stamp of letters in
-// the words it looks for: no earlier run has them, and a stamp in digits would be taken for a receipt number and left out of the suggestion. The Transactions are the biggest money out there is, so
-// the Uncategorised list, newest amount first (?sort=amount), has them at the top whatever other specs left in it.
-const account = (project: string) => `99-9999-9999999-${project === 'dark' ? '27' : '26'}`
-const year = (project: string) => (project === 'dark' ? '2007' : '2006')
+// The light and dark projects share one local database with every other spec. No test here is tagged @theme, so only the light project runs them, and they have the one Account (26) and the one
+// year (2023) that no other spec uses: every year from 2000 to 2020 has an owner (report-loans.spec.ts says whose), 2022 is the Spending by Category Report's, and 2026 is the year the
+// Dashboard and the Summary read. The words they look for have a stamp of letters: no earlier run has them, and a stamp in digits would be taken for a receipt number and left out of the
+// suggestion. The Transactions are the biggest money out there is, so the Uncategorised list, largest money out first (?sort=amount), has them at the top whatever other specs left in it.
+const ACCOUNT = '99-9999-9999999-26'
+const YEAR = '2023'
 const letters = (n: number) => [...String(n)].map((digit) => 'ABCDEFGHIJ'[Number(digit)]).join('')
 
 type Seed = { date: string; description: string; amountCents: number }
 
-async function importRows(context: BrowserContext, baseURL: string, project: string, rows: Seed[]) {
+async function importRows(context: BrowserContext, baseURL: string, rows: Seed[]) {
   const res = await context.request.post('/api/imports/chunks', {
     headers: { Origin: baseURL },
     data: {
-      account: { number: account(project) },
+      account: { number: ACCOUNT },
       chunk: { index: 0, count: 1 },
-      file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: `${year(project)}-10-01`, to: `${year(project)}-10-31`, ledgerBalance: { cents: 0, date: `${year(project)}-10-31` } },
+      file: { adapterId: 'asb', rowCount: rows.length, skipped: 0, from: `${YEAR}-10-01`, to: `${YEAR}-10-31`, ledgerBalance: { cents: 0, date: `${YEAR}-10-31` } },
       rows: rows.map((row, i) => ({ date: row.date, uniqueId: `RFT${letters(Date.now())}${i}`, tranType: 'EFTPOS', chequeNumber: null, payee: row.description, bankMemo: 'EFTPOS', amountCents: row.amountCents })),
     },
   })
@@ -56,11 +57,10 @@ const watchCounts = (page: Page) => {
 
 test.describe.configure({ mode: 'serial' })
 
-test('the Admin makes a Rule from an Uncategorised Transaction: the text is suggested, the count follows what they type, and saving gives the Category to the others', async ({ page, context, baseURL }, testInfo) => {
+test('the Admin makes a Rule from an Uncategorised Transaction: the text is suggested, the count follows what they type, and saving gives the Category to the others', async ({ page, context, baseURL }) => {
   await signInAs(context, 'admin')
-  const project = testInfo.project.name
   const word = `COUNTDOWN${letters(Date.now())}`
-  const date = (day: string) => `${year(project)}-10-${day}`
+  const date = (day: string) => `${YEAR}-10-${day}`
   const rows = {
     here: { date: date('12'), description: `EFTPOS 1234 ${word} AUCKLAND 12/10`, amountCents: -8_765_432 },
     other: { date: date('11'), description: `POS W/D 12OCT ${word} ALBANY 4521`, amountCents: -8_765_431 },
@@ -69,13 +69,15 @@ test('the Admin makes a Rule from an Uncategorised Transaction: the text is sugg
     refund: { date: date('08'), description: `${word} REFUND`, amountCents: 5_000 }, // money in
     unrelated: { date: date('07'), description: `EFTPOS 5678 OTHERSHOP${letters(Date.now())} MANUKAU`, amountCents: -8_765_428 },
   }
-  await importRows(context, baseURL!, project, Object.values(rows))
+  await importRows(context, baseURL!, Object.values(rows))
   const fuel = await categoryId(context, 'Fuel')
   const chosenId = await idOf(context, word, rows.chosen.description)
   expect((await context.request.put(`/api/transactions/${chosenId}/override`, { headers: { Origin: baseURL! }, data: { categoryId: fuel } })).ok()).toBe(true)
 
   try {
     const asked = watchCounts(page)
+    const saves: unknown[] = []
+    page.on('request', (request) => request.url().endsWith('/api/rules/from-transaction') && saves.push(request.postDataJSON()))
     await page.goto('/uncategorised?sort=amount')
     await editButton(page, rows.here.description, rows.here.date).click()
     const panel = panelOf(page, rows.here.description, rows.here.date)
@@ -99,28 +101,36 @@ test('the Admin makes a Rule from an Uncategorised Transaction: the text is sugg
     const order = await panel.locator('label[for="edit-category"], label[for="edit-rule-text"], label[for="edit-note"]').evaluateAll((labels) => labels.map((label) => label.getAttribute('for')))
     expect(order).toEqual(['edit-category', 'edit-rule-text', 'edit-note'])
 
-    // The count is read as the Admin stops typing, and the line is a polite status.
+    // The count is read as the Admin stops typing, and the line is a polite status. The Category is chosen first, so that only the count can keep Save Category and Rule off.
     const count = panel.getByRole('status')
+    const saveRule = panel.getByRole('button', { name: 'Save Category and Rule' })
     await expect(count).toHaveAttribute('aria-live', 'polite')
-    await expect(count).toContainText('4 Transactions match, 3 of them uncategorised.') // this one and the two like it, and the one that has its Category already
-    expect(asked).toEqual([{ textContains: word, direction: 'out', uncategorised: true }])
-    await panel.getByLabel('Money in or out').selectOption({ label: 'Either' })
-    await expect(count).toContainText('5 Transactions match, 4 of them uncategorised.') // and the refund
-    await panel.getByLabel('Money in or out').selectOption({ label: 'Money out only' })
-    await expect(count).toContainText('4 Transactions match, 3 of them uncategorised.')
-    const before = asked.length
-    await textBox(page).press('End')
-    await textBox(page).pressSequentially('ZZZ', { delay: 100 }) // three keys, each within the pause of the one before, ask once and not three times
-    await expect(count).toContainText('No Transactions match.')
-    expect(asked).toHaveLength(before + 1)
-    expect(asked.at(-1)).toMatchObject({ textContains: `${word}ZZZ` })
-    await textBox(page).fill(word)
-    await expect(count).toContainText('4 Transactions match, 3 of them uncategorised.')
-    expect(asked).toHaveLength(before + 2)
-
     await panel.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
     await expect(panel.getByText('Choose a Category above to save it with a Rule.')).toHaveCount(0)
-    await expect(panel.getByRole('button', { name: 'Save Category and Rule' })).toBeEnabled()
+    await expect(count).toContainText('4 Transactions match, 3 of them Uncategorised.') // this one and the two like it, and the one that has its Category already
+    expect(asked).toEqual([{ textContains: word, direction: 'out', uncategorised: true }])
+    await expect(saveRule).toBeEnabled()
+    await panel.getByLabel('Money in or out').selectOption({ label: 'Either' })
+    await expect(saveRule).toBeDisabled() // the count on show is not for what is in the boxes now
+    await expect(count).toContainText('5 Transactions match, 4 of them Uncategorised.') // and the refund
+    await expect(saveRule).toBeEnabled()
+    // An answer that was had is not asked for again while the fields are open.
+    await panel.getByLabel('Money in or out').selectOption({ label: 'Money out only' })
+    await expect(count).toContainText('4 Transactions match, 3 of them Uncategorised.')
+    await expect(saveRule).toBeEnabled()
+    expect(asked).toHaveLength(2)
+    // Three keys, each within the pause of the one before, ask once and not three times; and Enter before the answer is in saves nothing.
+    await textBox(page).press('End')
+    await textBox(page).pressSequentially('ZZZ', { delay: 100 })
+    await textBox(page).press('Enter')
+    await expect(count).toContainText('No Transactions match.')
+    expect(asked).toHaveLength(3)
+    expect(asked.at(-1)).toMatchObject({ textContains: `${word}ZZZ` })
+    expect(saves).toEqual([])
+    await textBox(page).fill(word)
+    await expect(count).toContainText('4 Transactions match, 3 of them Uncategorised.')
+    expect(asked).toHaveLength(3) // it was counted already
+    await expect(saveRule).toBeEnabled()
     await noAxeViolations(page)
 
     // One press saves the Rule, gives the others the Category, and says what it did where the Transaction was, with focus there: the three leave the list.
@@ -151,22 +161,21 @@ test('the Admin makes a Rule from an Uncategorised Transaction: the text is sugg
 
     await page.goto('/change-log')
     await expect(page.getByRole('listitem').filter({ hasText: `Added a Rule: text contains "${word}" and money out, category Groceries` })).toHaveCount(1)
-    await expect(page.getByRole('listitem').filter({ hasText: 'Gave 3 Transactions the Category Groceries with the new Rule' }).first()).toBeVisible()
+    await expect(page.getByRole('listitem').filter({ hasText: 'Transactions given the Category Groceries by the new Rule (Rule' }).first()).toBeVisible()
   } finally {
     await removeRulesFor(context, baseURL!, word)
   }
 })
 
-test('Create Rule suggests the whole description when nothing of a shop is left, Cancel Rule goes back, and a text that does not match this Transaction gives it its Category as an Override', async ({ page, context, baseURL }, testInfo) => {
+test('Create Rule suggests the whole description when nothing of a shop is left, Cancel Rule goes back, and a text that does not match this Transaction gives it its Category as an Override', async ({ page, context, baseURL }) => {
   await signInAs(context, 'admin')
-  const project = testInfo.project.name
   const stamp = Date.now()
   const shop = `BAKERY${letters(stamp)}`
   const rows = {
-    noise: { date: `${year(project)}-10-20`, description: `POS W/D ${stamp}`, amountCents: -8_654_321 }, // how it was paid, and a number: nothing of a shop
-    shop: { date: `${year(project)}-10-19`, description: `EFTPOS 4821 ${shop} PONSONBY 05/10`, amountCents: -8_654_320 },
+    noise: { date: `${YEAR}-10-20`, description: `POS W/D ${stamp}`, amountCents: -8_654_321 }, // how it was paid, and a number: nothing of a shop
+    shop: { date: `${YEAR}-10-19`, description: `EFTPOS 4821 ${shop} PONSONBY 05/10`, amountCents: -8_654_320 },
   }
-  await importRows(context, baseURL!, project, Object.values(rows))
+  await importRows(context, baseURL!, Object.values(rows))
 
   try {
     await page.goto('/uncategorised?sort=amount')
@@ -188,11 +197,11 @@ test('Create Rule suggests the whole description when nothing of a shop is left,
     await expect(textBox(page)).toHaveValue(rows.noise.description)
     await textBox(page).fill(shop)
     await panel.getByLabel('Category', { exact: true }).selectOption({ label: 'Eating out' })
-    await expect(panel.getByRole('status')).toContainText('1 Transaction matches, and it is uncategorised.')
+    await expect(panel.getByRole('status')).toContainText('1 Transaction matches, and it is Uncategorised.')
     await panel.getByRole('button', { name: 'Save Category and Rule' }).click()
     const saved = page.getByRole('status').filter({ hasText: /^Saved Rule \d+ \(/ })
     await expect(saved).toHaveText(
-      new RegExp(`^Saved Rule \\d+ \\(Text contains “${shop}” and money out\\) and gave 1 Transaction the Category Eating out\\. This Transaction does not match the text, so its Category is an Override on it instead\\.$`),
+      new RegExp(`^Saved Rule \\d+ \\(Text contains “${shop}” and money out\\) and gave 1 Transaction the Category Eating out\\. This Transaction does not match the text, so it was given the Category as an Override instead\\.$`),
     )
     await expect(saved).toBeFocused()
 
@@ -262,11 +271,11 @@ test('with more Uncategorised Transactions than can be given the Category at onc
   const groceries = await categoryId(context, 'Groceries')
   const row = stubRow(4241, 'EFTPOS 1234 EXAMPLE STUBSHOP AUCKLAND 12/10')
   await stubList(page, [row])
-  await page.route('**/api/rules/preview', (route) => route.fulfill({ json: { matches: 912, samples: [], uncategorised: 887 } }))
+  await page.route('**/api/rules/preview', (route) => route.fulfill({ json: { matches: 2_912, samples: [], uncategorised: 2_887 } }))
   let sent: unknown = null
   await page.route('**/api/rules/from-transaction', (route) => {
     sent = route.request().postDataJSON()
-    return route.fulfill({ status: 201, json: { id: 41, number: 7, categorised: 1, thisBy: 'rule', overrideBecause: null, moreUncategorised: 886 } })
+    return route.fulfill({ status: 201, json: { id: 41, number: 7, categorised: 1, thisBy: 'rule', because: null, heldByEarlierRule: null, moreUncategorised: 2_886 } })
   })
 
   await page.goto('/transactions')
@@ -274,14 +283,60 @@ test('with more Uncategorised Transactions than can be given the Category at onc
   const panel = page.getByRole('region', { name: /^Edit Category and Note/ })
   await panel.getByRole('button', { name: 'Create Rule' }).click()
   await expect(textBox(page)).toHaveValue('EXAMPLE STUBSHOP')
-  await expect(panel.getByRole('status')).toContainText('912 Transactions match, 887 of them uncategorised.')
-  await expect(panel.getByRole('status')).toContainText('That is more than 500, too many to give a Category at once.')
+  await expect(panel.getByRole('status')).toContainText('2,912 Transactions match, 2,887 of them Uncategorised.')
+  await expect(panel.getByRole('status')).toContainText('That is more than 1,000, too many to give a Category at once.')
   await expect(panel.getByRole('status')).toContainText('Apply the Rules to all Transactions, on the Rules page')
 
   await panel.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' })
   await panel.getByRole('button', { name: 'Save Category and Rule' }).click()
   await expect(page.getByText(/^Saved Rule 7 \(/).first()).toHaveText(
-    'Saved Rule 7 (Text contains “EXAMPLE STUBSHOP” and money out) and gave this Transaction the Category Groceries. 886 more Uncategorised Transactions match: that is too many to give the Category at once. Choose Apply the Rules to all Transactions, on the Rules page, to give them theirs.',
+    'Saved Rule 7 (Text contains “EXAMPLE STUBSHOP” and money out) and gave this Transaction the Category Groceries. 2,886 more Uncategorised Transactions match: that is too many to give the Category at once. Choose Apply the Rules to all Transactions, on the Rules page, to give them theirs.',
   )
   expect(sent).toEqual({ transactionId: 4241, textContains: 'EXAMPLE STUBSHOP', direction: 'out', categoryId: groceries })
+})
+
+test('a Transfer has no Create Rule: it is not spending, so there is no Category for a Rule to give it, and Not a Transfer is what its panel offers', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  const transfer = { ...stubRow(4243, 'EXAMPLE TRANSFER TO SAVINGS'), transfer: 'pair', transferAccountName: 'Example savings', canMarkNotTransfer: true }
+  const plain = stubRow(4244, 'EXAMPLE PLAIN PAYMENT')
+  await page.route(/\/api\/transactions\?/, (route) => route.fulfill({ json: new URL(route.request().url()).searchParams.get('count') === 'only' ? { total: 2, transactions: [] } : { total: null, transactions: [transfer, plain] } }))
+  await page.goto('/transactions')
+
+  await rowButton(page, 'Edit', `${transfer.description}, ${dateText(transfer.date)}`).click()
+  const panel = page.getByRole('region', { name: /^Edit Category and Note, EXAMPLE TRANSFER/ })
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'Not a Transfer' })).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'Create Rule' })).toHaveCount(0)
+
+  await rowButton(page, 'Edit', `${plain.description}, ${dateText(plain.date)}`).click()
+  await expect(page.getByRole('region', { name: /^Edit Category and Note, EXAMPLE PLAIN/ }).getByRole('button', { name: 'Create Rule' })).toBeVisible()
+})
+
+test('a count that the next one overtakes is cancelled, so the Worker is not left reading every Transaction for an answer nobody will see', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  const row = stubRow(4245, 'EFTPOS 1234 EXAMPLE SLOWSHOP AUCKLAND 12/10')
+  await stubList(page, [row])
+  // The first count is never answered, as if the Worker were slow; the next one is answered at once.
+  await page.route('**/api/rules/preview', (route) => (route.request().postDataJSON().textContains === 'EXAMPLE SLOWSHOP' ? undefined : route.fulfill({ json: { matches: 3, samples: [], uncategorised: 2 } })))
+  // A request the page cancels is not reported as failed when a test answers its requests itself, so the page's own fetch is watched for the signal it was given.
+  await page.addInitScript(() => {
+    const aborted: string[] = []
+    Object.assign(window, { aborted })
+    const ask = window.fetch.bind(window)
+    window.fetch = (input, init) => {
+      const signal = input instanceof Request ? input.signal : init?.signal
+      if (String(input instanceof Request ? input.url : input).endsWith('/api/rules/preview')) signal?.addEventListener('abort', () => aborted.push('preview'))
+      return ask(input, init)
+    }
+  })
+  await page.goto('/transactions')
+  await rowButton(page, 'Edit', `${row.description}, ${dateText(row.date)}`).click()
+  const panel = page.getByRole('region', { name: /^Edit Category and Note/ })
+  await panel.getByRole('button', { name: 'Create Rule' }).click()
+  await expect(textBox(page)).toHaveValue('EXAMPLE SLOWSHOP')
+  await expect(panel.getByText('Counting…')).toBeVisible()
+
+  await textBox(page).fill('EXAMPLE SLOWSHOP TWO')
+  await expect(panel.getByRole('status')).toContainText('3 Transactions match, 2 of them Uncategorised.')
+  expect(await page.evaluate(() => (window as unknown as { aborted: string[] }).aborted)).toEqual(['preview']) // the one that was overtaken, and not the one that was answered
 })

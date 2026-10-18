@@ -1209,7 +1209,7 @@ test.describe('zoom', () => {
         // Create Rule is open too: its fields, and the longest count it says (a Rule's text can be 100 characters, and the count and its warning are sentences).
         await page.route('**/api/rules/preview', (route) => route.fulfill({ json: { matches: 1_234_567, samples: [], uncategorised: 1_234_000 } }))
         await page.getByRole('button', { name: 'Create Rule' }).click()
-        await expect(page.getByRole('region', { name: 'Edit Category and Note' }).getByRole('status')).toContainText('1,234,567 Transactions match, 1,234,000 of them uncategorised.')
+        await expect(page.getByRole('region', { name: 'Edit Category and Note' }).getByRole('status')).toContainText('1,234,567 Transactions match, 1,234,000 of them Uncategorised.')
         await expect(page.getByRole('region', { name: 'Edit Category and Note' }).getByRole('status')).toContainText('too many to give a Category at once')
         await expect(page.getByRole('region', { name: 'From the bank' })).toContainText('First seen by Akahu')
         await expectTextSize(page, size)

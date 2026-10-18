@@ -40,8 +40,8 @@ test('the Admin checks how many Transactions a Rule matches, saves it, and new T
 
   await page.goto('/rules')
   await expect(page.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible()
-  await expect(page.getByText('The Transactions you already have change only when you choose Apply the Rules to all Transactions')).toBeHidden() // it is in the page's help sheet
-  await expect(await openHelp(page)).toContainText('The Transactions you already have change only when you choose Apply the Rules to all Transactions.')
+  await expect(page.getByText('changes the Transactions you already have only when you choose Apply the Rules to all Transactions')).toBeHidden() // it is in the page's help sheet
+  await expect(await openHelp(page)).toContainText('changes the Transactions you already have only when you choose Apply the Rules to all Transactions.')
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Add a Rule' }).click()
   await expect(page.getByLabel('Text contains', { exact: true })).toBeFocused()
