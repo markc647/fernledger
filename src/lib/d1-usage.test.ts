@@ -146,10 +146,10 @@ describe('the allowance left, for the header', () => {
     expect(allowanceLeft(usage({ rowsWritten: 100_001 })).percent).toBe(0)
   })
 
-  it('is plain until 70% is used (30% left), Running low from there and Almost used from 85% used (15% left), in words as well as colour', () => {
+  it('says Plenty left until 70% is used (30% left), Running low from there and Almost used from 85% used (15% left), in words as well as colour, as the Rules page does', () => {
     const at = (used: number) => allowanceLeft(usage({ rowsRead: used, rowsWritten: 0 }))
-    expect(at(0)).toMatchObject({ percent: 100, level: 'plenty', word: null })
-    expect(at(3_499_999)).toMatchObject({ percent: 30, level: 'plenty', word: null }) // 30.00002% is left: 69.99998% is used, so not yet
+    expect(at(0)).toMatchObject({ percent: 100, level: 'plenty', word: 'Plenty left' })
+    expect(at(3_499_999)).toMatchObject({ percent: 30, level: 'plenty', word: 'Plenty left' }) // 30.00002% is left: 69.99998% is used, so not yet
     expect(at(3_500_000)).toMatchObject({ percent: 30, level: 'low', word: 'Running low' })
     expect(at(4_249_999)).toMatchObject({ percent: 15, level: 'low', word: 'Running low' })
     expect(at(4_250_000)).toMatchObject({ percent: 15, level: 'almost', word: 'Almost used' })
@@ -182,6 +182,6 @@ describe('the allowance left, for the header', () => {
     const left = allowanceLeft(usage({ rowsRead: 4_100_000, rowsWritten: 4_321 })) // 18% of the reads left
     expect(left.figures).toEqual(['Rows read today: 4,100,000 of 5,000,000', 'Rows written today: 4,321 of 100,000'])
     expect(left.valueText).toBe('About 18% left, Running low. Rows read today: 4,100,000 of 5,000,000. Rows written today: 4,321 of 100,000. An estimate: Cloudflare runs a few minutes behind.')
-    expect(allowanceLeft(usage()).valueText).toMatch(/^About 75% left\. Rows read today/) // no word, no comma
+    expect(allowanceLeft(usage()).valueText).toMatch(/^About 75% left, Plenty left\. Rows read today/) // the calm word too, so a screen reader hears the same as the Rules page says
   })
 })

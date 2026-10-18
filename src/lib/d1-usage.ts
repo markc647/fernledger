@@ -55,8 +55,8 @@ export type Allowance = {
   /** Whole per cent of today's allowance left, of whichever of the two has gone further. */
   percent: number
   level: Level
-  /** The word that says it is running out, so the colour is not the only cue: none while there is plenty. */
-  word: string | null
+  /** The word for how far it has gone, so the colour is not the only cue: the Rules page's own (Plenty left, Running low, Almost used, Used up). */
+  word: string
   /** Both figures, for a tooltip or a line under the bar. */
   figures: [string, string]
   /** What a screen reader says for the bar's value: the percentage, the word, both figures and that it is an estimate. */
@@ -74,12 +74,12 @@ export function allowanceLeft(usage: D1Usage): Allowance {
   const [used, limit] = writes ? [usage.rowsWritten, usage.writeLimit] : [usage.rowsRead, usage.readLimit]
   const percent = leftOf(used, limit)
   const level = levelOf(used, limit)
-  const word = level === 'plenty' ? null : LEVEL_WORDS[level]
+  const word = LEVEL_WORDS[level]
   const figures: [string, string] = [
     `Rows read today: ${formatCount(usage.rowsRead)} of ${formatCount(usage.readLimit)}`,
     `Rows written today: ${formatCount(usage.rowsWritten)} of ${formatCount(usage.writeLimit)}`,
   ]
-  return { percent, level, word, figures, valueText: `About ${percent}% left${word ? `, ${word}` : ''}. ${figures[0]}. ${figures[1]}. ${ESTIMATE_NOTE}` }
+  return { percent, level, word, figures, valueText: `About ${percent}% left, ${word}. ${figures[0]}. ${figures[1]}. ${ESTIMATE_NOTE}` }
 }
 
 /** When D1's day changes (00:00 UTC, as the Worker says in `resetsAt`), in New Zealand time. */

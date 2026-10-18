@@ -223,7 +223,8 @@ test.describe('when the Worker refuses the sign-in', () => {
     await page.getByLabel('App title').fill('Typed, not yet saved')
     refuse = true
     await page.getByRole('button', { name: 'Save settings' }).click()
-    await expect(page.getByRole('alert').filter({ hasText: 'Not signed in' })).toContainText('Reload the page to try again')
+    await expect(page.getByRole('alert').filter({ hasText: 'Not signed in' })).toContainText("Fernledger couldn't confirm who you are")
+    await expect(page.getByRole('alert').filter({ hasText: 'Not signed in' })).not.toContainText('nothing on this page has been lost') // a refusal may be the start of a reload, which would lose it
     await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
     await expect(page.getByLabel('App title')).toHaveValue('Typed, not yet saved')
     await expect(page.getByRole('link', { name: 'Sign in again' })).toHaveCount(0)

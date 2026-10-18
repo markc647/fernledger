@@ -60,7 +60,7 @@ const pairs = [
   ['sidebar-marker', 'sidebar-accent', 3],
   // The colour of an amount (green for what came in, red for what went out) and the statuses are text on the page or a card (the Amount and Status components).
   ...['success', 'warning', 'danger'].flatMap((fg) => [[fg, 'background', 4.5], [fg, 'card', 4.5], [fg, 'muted', 4.5]]),
-  // The Admin's free allowance bar in the header (src/components/allowance-bar.tsx): its word (Low, Almost used) is badge text on the header's tint, and its fill is a graphic on the same tint.
+  // The Admin's free allowance bar in the header (src/components/allowance-bar.tsx): its word (Plenty left, Running low, Almost used, Used up) is badge text on the header's tint, and its fill is a graphic on the same tint.
   ...['success', 'warning', 'danger'].map((fg) => [fg, 'sidebar', 4.5]),
   // The line and the bars of the charts (src/components/charts) are graphics that carry meaning: 3:1 against the page and a card (1.4.11).
   // They use --chart-2, which passes. Another chart token may be added here and used once it does: the stock --chart-1 is a dark blue in the dark theme, under 3:1 on its background.

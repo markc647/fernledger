@@ -35,14 +35,14 @@ export function useAllowanceOn(admin: boolean) {
  * estimate, because Cloudflare's figures run a few minutes behind, and says so ("about").
  *
  * In the header it is compact, the bar and its value, because the controls are there too: the words "Free allowance left today" are the bar's name for a screen reader and the first line of its
- * tooltip, and are written out beside it only where the header has room (from 82rem). Both figures are in the tooltip, which opens on hover, on keyboard focus (the bar is a tab stop), and on a
+ * tooltip, and are written out beside it only where the header has room (from 86rem). Both figures are in the tooltip, which opens on hover, on keyboard focus (the bar is a tab stop), and on a
  * tap on a touch screen, and in what a screen reader says for the bar's value. In the phone's menu (`menu`) the words and both figures are written out under it. It never raises an alert: if
  * the figures cannot be had it says "Allowance unknown". The Rules page's own question reads the figures afresh each time it opens (`d1UsageQuery`); this is read every few minutes
  * (`d1AllowanceQuery`). Mounted only while `useAllowanceOn`.
  */
 export function AllowanceBar({ layout }: { layout: 'bar' | 'menu' }) {
   const usage = useQuery(d1AllowanceQuery)
-  const touch = useMediaQuery('(pointer: coarse)')
+  const touch = useMediaQuery('(any-pointer: coarse)') // a touch screen, even where a mouse is the main pointer (a laptop's)
   const [open, setOpen] = useState(false)
 
   // Checked before the data: a refresh that failed leaves the last figures in the query, and after midnight UTC they are yesterday's.
@@ -52,25 +52,23 @@ export function AllowanceBar({ layout }: { layout: 'bar' | 'menu' }) {
   const left = allowanceLeft(usage.data)
   const inBar = layout === 'bar'
   const icon = ICON[left.level]
-  // As wide as its value in the header (`w-max`: nothing wraps, and the header has made room for it); the width of the menu in the menu. A touch screen has a target of 44px.
+  // As wide as its value in the header (`w-max`: nothing wraps, and the header has made room for it); the width of the menu in the menu. A touch screen has a target of 44px (any pointer that is coarse, as a laptop's touch screen is beside its mouse).
   const bar = (
     <Progress
       value={left.percent}
       valueText={left.valueText}
       tabIndex={inBar ? 0 : undefined}
-      className={inBar ? 'w-max rounded-md pointer-coarse:min-h-11 pointer-coarse:content-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring' : undefined}
+      className={inBar ? 'w-max rounded-md any-pointer-coarse:min-h-11 any-pointer-coarse:content-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring' : undefined}
       trackClassName="h-2.5 border border-muted-foreground"
       indicatorClassName={FILL[left.level]}
     >
-      <ProgressLabel className={inBar ? 'sr-only @min-[82rem]/header:not-sr-only' : undefined}>{LABEL}</ProgressLabel>
+      <ProgressLabel className={inBar ? 'sr-only @min-[86rem]/header:not-sr-only' : undefined}>{LABEL}</ProgressLabel>
       <ProgressValue className="flex items-center gap-2">
         about {left.percent}%
-        {inBar && icon && <icon.Icon aria-hidden className={cn('size-4 @min-[82rem]/header:hidden', icon.colour)} />}
-        {left.word && (
-          <Badge variant={TONE[left.level]} className={cn('min-h-0 py-0', inBar && 'hidden @min-[82rem]/header:inline-flex')}>
-            {left.word}
-          </Badge>
-        )}
+        {inBar && icon && <icon.Icon aria-hidden className={cn('size-4 @min-[86rem]/header:hidden', icon.colour)} />}
+        <Badge variant={TONE[left.level]} className={cn('min-h-0 py-0', inBar && 'hidden @min-[86rem]/header:inline-flex')}>
+          {left.word}
+        </Badge>
       </ProgressValue>
     </Progress>
   )
@@ -100,6 +98,7 @@ export function AllowanceBar({ layout }: { layout: 'bar' | 'menu' }) {
       </TooltipTrigger>
       <TooltipContent className="space-y-1">
         <p className="font-medium">{LABEL}</p>
+        <p>{left.word}</p>
         <p>{left.figures[0]}</p>
         <p>{left.figures[1]}</p>
         <p>{ESTIMATE_NOTE}</p>

@@ -47,7 +47,7 @@ export function SessionProblemPage({ problem }: { problem: SessionProblem }) {
  */
 export function SessionBanner({ problem }: { problem: SessionProblem }) {
   return (
-    <div role="alert" className="sticky top-(--header-height) z-40 mb-4 rounded-lg border-2 border-warning bg-background p-4 text-foreground">
+    <div role="alert" className="sticky top-(--header-height) z-40 mb-4 rounded-lg border-2 border-warning bg-background p-4 text-foreground print:hidden">
       {problem === 'expired' ? (
         <>
           <p className="font-medium">Your sign-in has expired. Sign in again, then save again; nothing on this page has been lost.</p>
@@ -61,7 +61,7 @@ export function SessionBanner({ problem }: { problem: SessionProblem }) {
           </a>
         </>
       ) : (
-        <p className="font-medium">Not signed in. Fernledger did not accept your sign-in just now. Reload the page to try again; nothing on this page has been lost.</p>
+        <p className="font-medium">Not signed in. Fernledger couldn't confirm who you are. Try again; if it keeps happening, reload the page (anything unsaved here will be lost).</p>
       )}
     </div>
   )

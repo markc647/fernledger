@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { isAccessRedirect, sessionAwareFetch, sessionProblem, signInAgainUrl, withoutSignInParam } from './session'
+import { isAccessRedirect, retryAtMost, sessionAwareFetch, sessionProblem, signInAgainUrl, withoutSignInParam } from './session'
 
 // A call that is answered with `status` (and `answer`), recording what it was asked with.
 const answering = (status: number, answer: ResponseInit = {}) => {
@@ -91,6 +91,24 @@ describe('sessionAwareFetch', () => {
     expect(sessionProblem()).toBe('expired')
     await answering(200).fetch('/api/me')
     expect(sessionProblem()).toBeNull()
+  })
+})
+
+// A read that fails is asked for again a few times, and not once the sign-in is known to be gone, which asking again would only meet again.
+describe('retryAtMost', () => {
+  it('allows the number of tries asked for, and no more', () => {
+    expect([0, 1, 2].map((failures) => retryAtMost(2)(failures))).toEqual([true, true, false])
+    expect(retryAtMost(1)(0)).toBe(true)
+    expect(retryAtMost(1)(1)).toBe(false)
+  })
+
+  it('allows none while the sign-in is gone, whatever it was, and again once a call has worked', async () => {
+    for (const status of [302, 401]) {
+      await answering(status).fetch('/api/me')
+      expect(retryAtMost(3)(0)).toBe(false)
+      await answering(200).fetch('/api/me')
+      expect(retryAtMost(3)(0)).toBe(true)
+    }
   })
 })
 

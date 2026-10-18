@@ -65,6 +65,9 @@ export const sessionAwareFetch =
     return res
   }
 
+/** For a read's `retry`: up to `times` more tries, and none once the sign-in is known to be gone, which asking again would only meet again. */
+export const retryAtMost = (times: number) => (failures: number) => failures < times && problem === null
+
 /** The query Fernledger adds when it sends the visitor to sign in again, and removes once the page has loaded. Its value only has to be new each time. */
 const SIGN_IN_PARAM = '_signin'
 

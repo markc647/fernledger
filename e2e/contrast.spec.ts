@@ -577,7 +577,7 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
     await scanner(page, testInfo.project.name, 'the phone\'s display settings menu', 'admin')('open', { within: '[data-slot="popover-content"]' })
   })
 
-  // The Admin's free allowance bar (src/components/allowance-bar.tsx) in each state, in the header's two forms (compact from 62rem, with its words written out from 82rem), with its figures open on
+  // The Admin's free allowance bar (src/components/allowance-bar.tsx) in each state, in the header's two forms (compact from 66rem, with its words written out from 86rem), with its figures open on
   // focus (a tooltip), then the same bar in the phone's menu. Its words and the icon that goes with Running low and Almost used are on the header's tint, and its fill and edge are measured as drawn.
   for (const { state, figures } of [
     { state: 'with plenty left', figures: {} },

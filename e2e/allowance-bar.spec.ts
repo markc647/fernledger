@@ -1,20 +1,21 @@
 import type { Page } from '@playwright/test'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { usageFigures, usageOn } from './rule-helpers'
+import type { D1Usage } from '../src/generated/api/d1-usage'
 import { expectTextSize, navigateTo, openHeaderControls, siteHeader, textSizeButton, textSizeGroup } from './shell-helpers'
 
 // The Admin's free allowance bar, in the header on every page (src/components/allowance-bar.tsx): how much of today's free D1 allowance is left, of whichever of the rows read and the rows
 // written has gone further, with the Rules page's words and colours for the same figures (src/lib/d1-usage.ts). Local development has no Cloudflare token, so each test says the D1 usage bar
 // is set up (`/api/features`) and answers the figures itself.
 
-// The header has the bar, with the controls, from 62rem of it (the controls alone fold into the menu at 56rem, e2e/display.spec.ts), and writes the bar's words out from 82rem.
+// The header has the bar, with the controls, from 66rem of it (the controls alone fold into the menu at 56rem, e2e/display.spec.ts), and writes the bar's words out from 86rem.
 const WIDE = { width: 1500, height: 800 } // the words written out, at every text size but the largest
 const COMPACT = { width: 1100, height: 800 } // the bar and its value
 const PHONE = { width: 390, height: 844 }
 const PIXELS = { Medium: 16, 'Xtra Large': 20 } as const
 const SAVED = { Medium: 'medium', 'Xtra Large': 'xlarge' } as const
 
-async function stubAllowance(page: Page, figures: Record<string, unknown> = {}) {
+async function stubAllowance(page: Page, figures: Partial<D1Usage> = {}) {
   await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
   await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures(figures) }))
 }
@@ -31,7 +32,7 @@ const FIGURES_READ = 'Rows read today: 1,234,567 of 5,000,000'
 const FIGURES_WRITTEN = 'Rows written today: 4,321 of 100,000'
 
 test.describe("the Admin's header", () => {
-  test('says how much of today is left, in one bar named for it, as an estimate, with no word while there is plenty', async ({ page, context }) => {
+  test('says how much of today is left, in one bar named for it, as an estimate, and with the word the Rules page has for it, Plenty left', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await stubAllowance(page)
     await page.setViewportSize(WIDE)
@@ -39,10 +40,10 @@ test.describe("the Admin's header", () => {
 
     await expect(bar(page)).toBeVisible()
     await expect(bar(page)).toHaveAttribute('aria-valuenow', '75') // 3,765,433 of the 5,000,000 rows read are left, and 95% of the rows written
-    await expect(bar(page)).toHaveAttribute('aria-valuetext', `About 75% left. ${FIGURES_READ}. ${FIGURES_WRITTEN}. An estimate: Cloudflare runs a few minutes behind.`)
+    await expect(bar(page)).toHaveAttribute('aria-valuetext', `About 75% left, Plenty left. ${FIGURES_READ}. ${FIGURES_WRITTEN}. An estimate: Cloudflare runs a few minutes behind.`)
     await expect(siteHeader(page).getByText(LABEL)).toBeVisible()
     await expect(siteHeader(page).getByText('about 75%')).toBeVisible() // "about": Cloudflare's figures run a few minutes behind
-    await expect(siteHeader(page).locator('[data-slot="badge"]')).toHaveCount(0)
+    await expect(siteHeader(page).locator('[data-slot="badge"]')).toHaveText('Plenty left')
     await noAxeViolations(page)
   })
 
@@ -54,11 +55,11 @@ test.describe("the Admin's header", () => {
     await expect(bar(page)).toHaveAttribute('aria-valuenow', '40')
     await expect(siteHeader(page).getByText('about 40%')).toBeVisible()
     await expect(siteHeader(page).getByRole('progressbar')).toHaveCount(1)
-    await expect(bar(page)).toHaveAttribute('aria-valuetext', /^About 40% left\. Rows read today: 1,234,567 of 5,000,000\. Rows written today: 60,000 of 100,000\./)
+    await expect(bar(page)).toHaveAttribute('aria-valuetext', /^About 40% left, Plenty left\. Rows read today: 1,234,567 of 5,000,000\. Rows written today: 60,000 of 100,000\./)
   })
 
   // Compact, where the controls are in the bar too: the bar and its value, and the words that are its name are its accessible name and the first line of its tooltip.
-  test('is the bar and its value from 62rem, with its name for a screen reader and in its tooltip, and the text size, theme and Sign out beside it', async ({ page, context }) => {
+  test('is the bar and its value from 66rem, with its name for a screen reader and in its tooltip, and the text size, theme and Sign out beside it', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await stubAllowance(page, { rowsRead: 3_750_000 }) // Running low
     await page.setViewportSize(COMPACT)
@@ -68,7 +69,7 @@ test.describe("the Admin's header", () => {
     expect(await writtenOut(page)).toBe(false)
     await expect(siteHeader(page).getByText('about 25%')).toBeVisible()
     await expect(siteHeader(page).locator('[data-slot="badge"]')).toBeHidden() // no room for the word: a shape beside the value says it is going, and the value text says it in words
-    await expect(siteHeader(page).locator('[data-slot="progress-value"] svg')).toBeVisible()
+    await expect(siteHeader(page).locator('[data-slot="progress-value"] svg')).toBeVisible() // none while there is plenty: see the next test
     await expect(bar(page)).toHaveAttribute('aria-valuetext', /^About 25% left, Running low\. /)
     await expect(textSizeGroup(page)).toBeVisible()
     await expect(siteHeader(page).getByRole('link', { name: 'Sign out' })).toBeVisible()
@@ -138,7 +139,7 @@ test.describe("the Admin's header", () => {
   // The words are there as well as the colour. The scale is the Rules page's (src/lib/d1-usage.ts): amber (Running low) from 70% used, which is 30% left, red (Almost used) from 85% used, which
   // is 15% left, and Used up only when the allowance has been reached; the percentage is rounded down, so 0% is not Used up. The fill is the theme's own colour for it.
   for (const { left, figures, word, token } of [
-    { left: 30, figures: { rowsRead: 3_499_999 }, word: null, token: 'success' }, // 30.00002% is left: not yet 70% used
+    { left: 30, figures: { rowsRead: 3_499_999 }, word: 'Plenty left', token: 'success' }, // 30.00002% is left: not yet 70% used
     { left: 30, figures: { rowsRead: 3_500_000 }, word: 'Running low', token: 'warning' },
     { left: 15, figures: { rowsRead: 4_249_999 }, word: 'Running low', token: 'warning' },
     { left: 15, figures: { rowsRead: 4_250_000 }, word: 'Almost used', token: 'danger' },
@@ -146,7 +147,7 @@ test.describe("the Admin's header", () => {
     { left: 0, figures: { rowsRead: 5_100_000 }, word: 'Used up', token: 'danger' },
     { left: 0, figures: { rowsWritten: 100_000 }, word: 'Used up', token: 'danger' },
   ] as const) {
-    test(`at ${left}% left with ${JSON.stringify(figures)} says ${word ?? 'nothing'}, and the bar is the ${token} colour`, { tag: '@theme' }, async ({ page, context }) => {
+    test(`at ${left}% left with ${JSON.stringify(figures)} says ${word}, and the bar is the ${token} colour`, { tag: '@theme' }, async ({ page, context }) => {
       await signInAs(context, 'admin')
       await stubAllowance(page, figures)
       await page.setViewportSize(WIDE)
@@ -154,12 +155,8 @@ test.describe("the Admin's header", () => {
 
       await expect(bar(page)).toHaveAttribute('aria-valuenow', String(left))
       await expect(siteHeader(page).getByText(`about ${left}%`)).toBeVisible()
-      if (word) {
-        await expect(siteHeader(page).locator('[data-slot="badge"]')).toHaveText(word)
-        await expect(bar(page)).toHaveAttribute('aria-valuetext', new RegExp(`^About ${left}% left, ${word}\\. `)) // said to a screen reader as well
-      } else {
-        await expect(siteHeader(page).locator('[data-slot="badge"]')).toHaveCount(0)
-      }
+      await expect(siteHeader(page).locator('[data-slot="badge"]')).toHaveText(word)
+      await expect(bar(page)).toHaveAttribute('aria-valuetext', new RegExp(`^About ${left}% left, ${word}\\. `)) // said to a screen reader as well
       const painted = await page.evaluate((name) => {
         const probe = document.createElement('div')
         probe.style.backgroundColor = `var(--${name})`
@@ -341,56 +338,71 @@ test.describe("the Admin's header", () => {
     await noAxeViolations(page)
   })
 
-  // The bar needs a little room, so with it the controls fold into the menu at 62rem and not 56rem (the page's name has no room to spare at 56), and its words are written out from 82rem. At every
-  // edge, the widest it gets (Almost used, on the longest page name) still leaves the page's name whole.
+  // The bar needs room, so with it the controls fold into the menu at 66rem and not 56rem (the page's name has no room to spare at 56), and its words are written out from 86rem. At each edge
+  // the page's name is whole, and has room to spare besides: a font that is a little wider than this one (another system's) must not be what cuts it short. The widest each form gets is
+  // tried: "about 30%" with a shape and "about 30%" with Running low (a long word), and "about 100%" with Plenty left.
   for (const size of ['Medium', 'Xtra Large'] as const) {
-    test(`keeps the page name whole: the bar and the controls are in the bar from 62rem wide and in the menu below it, and its words are written out from 82rem, at ${size}`, async ({ page, context }) => {
-      await signInAs(context, 'admin')
-      await page.addInitScript(([key, value]) => localStorage.setItem(key, value), ['fernledger-text-size-v2', SAVED[size]])
-      await stubAllowance(page, { rowsRead: 4_900_000, rowsWritten: 99_000 }) // "about 1%" and Almost used: the widest
-      const px = PIXELS[size]
-      const menuButton = siteHeader(page).getByRole('button', { name: 'Display settings and sign out' })
-      const pageName = siteHeader(page).locator('[aria-current="page"]')
-      const expectNameWhole = async (what: string) => {
-        await expect(pageName).toHaveText('Income vs spending by month')
-        expect(await pageName.evaluate((el) => el.scrollWidth <= el.clientWidth), `${what}: the page's name is cut short`).toBe(true)
-      }
+    for (const { state, figures } of [
+      { state: 'Running low', figures: { rowsRead: 3_500_000, rowsWritten: 0 } },
+      { state: 'Plenty left', figures: { rowsRead: 0, rowsWritten: 0 } },
+    ]) {
+      test(`keeps the page name whole, with room to spare, at ${state}: the bar and the controls are in the bar from 66rem wide and in the menu below it, and its words are written out from 86rem, at ${size}`, async ({ page, context }) => {
+        await signInAs(context, 'admin')
+        await page.addInitScript(([key, value]) => localStorage.setItem(key, value), ['fernledger-text-size-v2', SAVED[size]])
+        await stubAllowance(page, figures)
+        const px = PIXELS[size]
+        const menuButton = siteHeader(page).getByRole('button', { name: 'Display settings and sign out' })
+        const pageName = siteHeader(page).locator('[aria-current="page"]')
+        // Whole, and with at least 2rem between the end of its words and what is beside it.
+        const expectNameWhole = async (what: string) => {
+          await expect(pageName).toHaveText('Income vs spending by month')
+          expect(await pageName.evaluate((el) => el.scrollWidth <= el.clientWidth), `${what}: the page's name is cut short`).toBe(true)
+          const spare = await page.evaluate(() => {
+            const name = document.querySelector('header [aria-current="page"]')!
+            const range = document.createRange()
+            range.selectNodeContents(name)
+            const cluster = [...document.querySelectorAll('header .ms-auto')].find((element) => element.getBoundingClientRect().width > 0) // the controls, or the menu button
+            return cluster ? cluster.getBoundingClientRect().left - range.getBoundingClientRect().right - 8 : Number.POSITIVE_INFINITY // 8: the gap between them
+          })
+          expect(spare, `${what}: the room left beside the page's name`).toBeGreaterThanOrEqual(2 * px)
+        }
 
-      // A scrollbar's width wider than the bar it holds, and 20px clears it.
-      await page.setViewportSize({ width: 82 * px + 20, height: 800 })
-      await page.goto('/reports/income-vs-spending')
-      await expectTextSize(page, size)
-      await settle(page)
-      await expect(bar(page)).toBeVisible()
-      expect(await writtenOut(page)).toBe(true)
-      await expect(siteHeader(page).locator('[data-slot="badge"]')).toHaveText('Almost used')
-      await expect(textSizeGroup(page)).toBeVisible()
-      await expect(menuButton).toBeHidden()
-      await expectNameWhole('with its words written out')
+        // A scrollbar's width wider than the bar it holds, and 20px clears it.
+        await page.setViewportSize({ width: 86 * px + 20, height: 800 })
+        await page.goto('/reports/income-vs-spending')
+        await expectTextSize(page, size)
+        await settle(page)
+        await expect(bar(page)).toBeVisible()
+        expect(await writtenOut(page)).toBe(true)
+        await expect(siteHeader(page).locator('[data-slot="badge"]')).toHaveText(state)
+        await expect(textSizeGroup(page)).toBeVisible()
+        await expect(menuButton).toBeHidden()
+        await expectNameWhole('with its words written out')
 
-      await page.setViewportSize({ width: 82 * px - 20, height: 800 })
-      await settle(page)
-      await expect(bar(page)).toBeVisible()
-      expect(await writtenOut(page)).toBe(false) // the words are still its name
-      await expect(siteHeader(page).locator('[data-slot="badge"]')).toBeHidden()
-      await expect(textSizeGroup(page)).toBeVisible()
-      await expect(menuButton).toBeHidden()
-      await expectNameWhole('compact')
+        await page.setViewportSize({ width: 86 * px - 20, height: 800 })
+        await settle(page)
+        await expect(bar(page)).toBeVisible()
+        expect(await writtenOut(page)).toBe(false) // the words are still its name
+        await expect(siteHeader(page).locator('[data-slot="badge"]')).toBeHidden()
+        await expect(textSizeGroup(page)).toBeVisible()
+        await expect(menuButton).toBeHidden()
+        await expectNameWhole('compact')
 
-      await page.setViewportSize({ width: 62 * px + 20, height: 800 })
-      await settle(page)
-      await expect(bar(page)).toBeVisible()
-      await expect(textSizeGroup(page)).toBeVisible()
-      await expectNameWhole('compact, at the edge')
+        await page.setViewportSize({ width: 66 * px + 20, height: 800 })
+        await settle(page)
+        await expect(bar(page)).toBeVisible()
+        await expect(textSizeGroup(page)).toBeVisible()
+        await expectNameWhole('compact, at the edge')
 
-      await page.setViewportSize({ width: 62 * px - 20, height: 800 })
-      await settle(page)
-      await expect(bar(page)).toBeHidden()
-      await expect(textSizeGroup(page)).toBeHidden()
-      await expect(menuButton).toBeVisible()
-      await expectNameWhole('in the menu')
-      await openHeaderControls(page)
-      await expect(page.locator('[data-slot="popover-content"]').getByRole('progressbar', { name: LABEL })).toBeVisible()
-    })
+        await page.setViewportSize({ width: 66 * px - 20, height: 800 })
+        await settle(page)
+        await expect(bar(page)).toBeHidden()
+        await expect(textSizeGroup(page)).toBeHidden()
+        await expect(menuButton).toBeVisible()
+        await expectNameWhole('in the menu')
+        await openHeaderControls(page)
+        await expect(page.locator('[data-slot="popover-content"]').getByRole('progressbar', { name: LABEL })).toBeVisible()
+      })
+    }
   }
 })
