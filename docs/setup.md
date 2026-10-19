@@ -182,8 +182,8 @@ You protect the Worker itself, with an Access application of the **Workers** typ
 
 If your Cloudflare account already has an account-wide Access rule (**Protect all Workers**) or a wildcard policy, for example from another project, this Worker still gets **its own** application. Access applies the most specific rule that matches: a hostname or path application first, then a Worker's own application, then the account-wide rule. So the other project's policy won't apply here.
 
-1. **One-time PIN.** In Zero Trust, go to **Integrations → Identity providers** and make sure **One-time PIN** is listed. If it isn't, choose **Add new identity provider**, then **One-time PIN** (a new Zero Trust account doesn't get it automatically).
-2. **Zero Trust → Access → Applications → Add an application → Workers.** (Cloudflare's own pages call the Access menu "Access controls".) Deploy the Worker first so it can be chosen.
+1. **One-time PIN.** In Zero Trust, go to **Integrations → Identity providers** in the left-hand menu and make sure **One-time PIN** is listed. If it isn't, choose **Add new identity provider**, then **One-time PIN** (a new Zero Trust account doesn't get it automatically). It is not under **Settings**, where Cloudflare used to keep it as Authentication → Login methods; that page now offers only Team Domain, Downloads, Admin controls, Plan and Permissions.
+2. **Zero Trust → Access controls → Applications → Create new application → Self-hosted and private → Private destinations → Continue with Self-hosted and private.** Deploy the Worker first so it can be chosen.
    - **Worker:** `fernledger`, the `name` in `wrangler.jsonc`.
    - **Traffic:** **All traffic**. **Previews only** would leave the live app open.
    - **Session duration:** 24 hours. This is the length of a sign-in, and the only place it is set: Fernledger has no session of its own. When it runs out anyone sees **Your sign-in has expired** and presses **Sign in again** (README [What it does](../README.md#what-it-does)).
@@ -203,7 +203,7 @@ If your Cloudflare account already has an account-wide Access rule (**Protect al
    npx wrangler secret put ADMIN_EMAIL          # the Admin's email
    ```
 
-   Your team name is under **Zero Trust → Settings**. It is also the start of the address of Cloudflare's sign-in page (`<your-team>.cloudflareaccess.com`), which you reach by opening the app's address in a private window. Until all three secrets are set, every API request returns 401. The app fails closed.
+   Your team domain is shown under **Zero Trust → Settings → Team domain**, in the form `<your-team>.cloudflareaccess.com`. It is also the address of Cloudflare's sign-in page (`<your-team>.cloudflareaccess.com`), which you reach by opening the app's address in a private window. Until all three secrets are set, every API request returns 401. The app fails closed.
 6. **Check it.** Open `https://fernledger.<your-subdomain>.workers.dev` in a private window. A Member's email should be sent a code and then reach the app. Then try an email that isn't on the list: it should get no code.
 7. **Check Sign out.** Press **Sign out** in the header once (the README's [What it does](../README.md#what-it-does) says what it does). The next visit should ask for a code. [Local development](#local-development) can't try it.
 
