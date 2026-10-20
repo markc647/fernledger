@@ -39,20 +39,22 @@ async function setNote(context: BrowserContext, baseURL: string, account: string
 
 test.describe.configure({ mode: 'serial' })
 
-test('the Admin sets the Cutover Date from the file’s last date, and the Import drops rows on or after it', async ({ page, context }, testInfo) => {
+// The offer is the day AFTER the file's last date, so taking it imports every row of the file and leaves nothing behind for
+// nobody to supply. Offering the last date itself dropped the rows on it, which cost real Transactions on a live import (#40).
+test('the Admin takes the Cutover Date offer, and every row of the file is imported', async ({ page, context }, testInfo) => {
   await signInAs(context, 'admin')
   await page.goto('/import')
   await chooseFile(page, asbFile(suffix(testInfo), ['2026/09/29', '2026/09/30', '2026/10/01']))
   await page.getByLabel('Account name').fill(accountName(testInfo))
 
-  await page.getByLabel(/Set the Cutover Date to the last date in this file, Thu 1 Oct 2026/).check()
-  await expect(page.getByText('1 row in this file is dated on or after Thu 1 Oct 2026 and will not be imported.')).toBeVisible()
+  await page.getByLabel(/Set the Cutover Date to the day after the last date in this file, Fri 2 Oct 2026/).check()
+  await expect(page.getByText('0 rows in this file are dated on or after Fri 2 Oct 2026 and will not be imported.')).toBeVisible()
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Import 3 transactions' }).click()
 
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
-  await expect(summaryValue(page, 'Added')).toHaveText('2')
-  await expect(summaryValue(page, 'On or after the Cutover Date (not imported)')).toHaveText('1')
+  await expect(summaryValue(page, 'Added')).toHaveText('3')
+  await expect(summaryValue(page, 'On or after the Cutover Date (not imported)')).toHaveText('0')
 })
 
 test('the Admin changes and clears the Cutover Date in Settings, which explains what it does', async ({ page, context }, testInfo) => {
@@ -64,7 +66,8 @@ test('the Admin changes and clears the Cutover Date in Settings, which explains 
   await expect(await openHelp(page)).toContainText('Setting or clearing it deletes nothing already saved: imported rows already saved on or after the date stay')
   await page.keyboard.press('Escape')
   const label = `Cutover Date for ${name}`
-  await expectDate(page, label, '2026-10-01')
+  // What the Import set above: the day after that file's last date of 1 Oct.
+  await expectDate(page, label, '2026-10-02')
   await noAxeViolations(page)
 
   await pickDate(page, label, '2026-09-30')
@@ -114,7 +117,7 @@ test('a Cutover Date from before the years a calendar offers is shown and can be
 
 test('the Admin replaces imported history after confirming, and the old rows go, with the Notes that found no match reported as lost', async ({ page, context, baseURL }, testInfo) => {
   await signInAs(context, 'admin')
-  // Both old rows have a Note of the Admin's own, and nothing in the replacement file has either's unique ID.
+  // Two of the three old rows have a Note of the Admin's own, and nothing in the replacement file has either's unique ID.
   await setNote(context, baseURL!, accountName(testInfo), 'EXAMPLE SHOP 29', 'Example note one')
   await setNote(context, baseURL!, accountName(testInfo), 'EXAMPLE SHOP 30', 'Example note two')
   await page.goto('/import')
@@ -124,7 +127,7 @@ test('the Admin replaces imported history after confirming, and the old rows go,
   const trigger = page.getByRole('button', { name: 'Replace imported history…' })
   const dialog = page.getByRole('alertdialog')
   await trigger.click()
-  await expect(dialog).toContainText('removes the 2 Transactions that were imported into this Account')
+  await expect(dialog).toContainText('removes the 3 Transactions that were imported into this Account')
   await expect(dialog).toContainText("2 Transactions have an Override (your own Category), a Note or a Not a Transfer mark. 0 of them carry over to this file; 2 won't.")
   await expect(dialog).not.toContainText('will be lost')
   // The safe answer has focus, so Enter or a stray tap doesn't remove anything.
@@ -144,7 +147,7 @@ test('the Admin replaces imported history after confirming, and the old rows go,
 
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
   await expect(summaryValue(page, 'Added')).toHaveText('3')
-  await expect(summaryValue(page, 'Old imported Transactions removed')).toHaveText('2')
+  await expect(summaryValue(page, 'Old imported Transactions removed')).toHaveText('3')
   await expect(summaryValue(page, 'Transactions that kept their Override, Note or Not a Transfer mark')).toHaveText('0')
   await expect(summaryValue(page, 'Transactions that lost their Override, Note or Not a Transfer mark')).toHaveText('2')
   await expect(page.getByText("2 Transactions lost their Override, Note or Not a Transfer mark. The new file has no Transaction with the bank's own number for them")).toBeVisible()
@@ -230,11 +233,21 @@ test('the Cutover Date checkbox has a touch target of at least 44px', async ({ p
   expect(box?.height).toBeGreaterThanOrEqual(44)
 })
 
-test('the Import refuses to offer a replace that would import nothing', async ({ page, context }, testInfo) => {
+// The offer can no longer produce this on its own: it is always after the file's last row, so taking it imports everything. The
+// refusal still has to work for an Account whose Cutover Date already falls before the file's rows, which is this.
+test('the Import refuses to offer a replace that would import nothing', async ({ page, context, baseURL }, testInfo) => {
+  const name = accountName(testInfo)
   await signInAs(context, 'admin')
+  // The Account's own Cutover Date is what puts every row of the file out of reach. The offer cannot do it: it is always the day
+  // after the file's last row, so taking it imports everything.
+  const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
+  const account = accounts.find((a) => a.name === name)
+  expect(account, name).toBeDefined()
+  const put = await context.request.put(`/api/accounts/${account!.id}/cutover-date`, { headers: { Origin: baseURL! }, data: { cutoverDate: '2026-10-02' } })
+  expect(put.ok()).toBe(true)
+
   await page.goto('/import')
-  await chooseFile(page, asbFile(suffix(testInfo), ['2026/10/01']))
-  await page.getByLabel(/Set the Cutover Date to the last date in this file/).check() // the only row is dated on the file's last date
+  await chooseFile(page, asbFile(suffix(testInfo), ['2026/10/03']))
 
   await expect(page.getByRole('button', { name: 'Replace imported history…' })).toBeDisabled()
   await expect(page.getByText('there is nothing to replace the old history with')).toBeVisible()
