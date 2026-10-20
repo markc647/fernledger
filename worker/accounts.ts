@@ -5,14 +5,19 @@ import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { CHANGED_MEANWHILE, pathId, validate } from './validate'
 
-type AccountRow = { id: number; name: string; accountNumber: string; cutoverDate: string | null }
+type AccountRow = { id: number; name: string; accountNumber: string; cutoverDate: string | null; akahuAccountId: string | null }
 
 const rename = z.object({ name: accountName })
 const cutover = z.object({ cutoverDate: z.nullable(isoDate) })
+// Akahu's own account ID, which is opaque: its shape is all that can be checked, and the link is only as good as the Admin's choice
+// from /api/akahu/accounts. Null unlinks the Account.
+const link = z.object({ akahuAccountId: z.nullable(z.string().check(z.regex(/^acc_[A-Za-z0-9]{1,64}$/))) })
 
 export const accounts = new Hono<AppEnv>()
   .get('/', async (c) => {
-    const { results } = await c.env.DB.prepare('SELECT id, name, account_number AS accountNumber, cutover_date AS cutoverDate FROM accounts ORDER BY name COLLATE NOCASE, id').all<AccountRow>()
+    const { results } = await c.env.DB.prepare(
+      'SELECT id, name, account_number AS accountNumber, cutover_date AS cutoverDate, akahu_account_id AS akahuAccountId FROM accounts ORDER BY name COLLATE NOCASE, id',
+    ).all<AccountRow>()
     return c.json(results)
   })
   .patch('/:id', validate('json', rename), async (c) => {
@@ -66,4 +71,38 @@ export const accounts = new Hono<AppEnv>()
       return now.cutover_date === cutoverDate ? c.json({ id, cutoverDate }) : c.json(CHANGED_MEANWHILE, 409)
     }
     return c.json({ id, cutoverDate })
+  })
+  // The Account Link (spec 29): which Akahu account this Account receives Sync from, or null to stop syncing it. Only linked
+  // Accounts are ever synced (ADR 0008), and unlinking deletes no Transaction: what Sync already brought in stays.
+  .put('/:id/akahu-link', validate('json', link), async (c) => {
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
+    const { akahuAccountId } = c.req.valid('json')
+    const db = c.env.DB
+    const account = await db.prepare('SELECT name, akahu_account_id FROM accounts WHERE id = ?').bind(id).first<{ name: string; akahu_account_id: string | null }>()
+    if (!account) return c.json({ error: 'Not found' }, 404)
+    if (account.akahu_account_id === akahuAccountId) return c.json({ id, akahuAccountId })
+    // One Akahu account feeds at most one Account (the unique index in migration 2701), so say which Account has it rather than
+    // letting the write fail. Another request could still take it between this read and the write; that surfaces as the 409 below.
+    if (akahuAccountId !== null) {
+      const taken = await db.prepare('SELECT name FROM accounts WHERE akahu_account_id = ? AND id <> ?').bind(akahuAccountId, id).first<{ name: string }>()
+      if (taken) return c.json({ error: `That Akahu account is already linked to ${taken.name}` }, 409)
+    }
+
+    // As the Cutover Date is: only over the link that was read (`IS` is `=` that also matches NULL), and an entry only if it changed something.
+    const [update] = await recordChange(db, db.prepare('UPDATE accounts SET akahu_account_id = ?1 WHERE id = ?2 AND akahu_account_id IS ?3').bind(akahuAccountId, id, account.akahu_account_id), {
+      actor: c.var.member,
+      type: 'account',
+      // Akahu's ID is not in the summary: the Change Log is read by Members, and which Akahu account it is says nothing to them.
+      summary: akahuAccountId === null ? `Unlinked ${account.name} from Akahu` : `Linked ${account.name} to an Akahu account`,
+      before: { akahuAccountId: account.akahu_account_id },
+      after: { akahuAccountId },
+      onlyIfChanged: true,
+    })
+    if (update!.meta.changes === 0) {
+      const now = await db.prepare('SELECT akahu_account_id FROM accounts WHERE id = ?').bind(id).first<{ akahu_account_id: string | null }>()
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      return now.akahu_account_id === akahuAccountId ? c.json({ id, akahuAccountId }) : c.json(CHANGED_MEANWHILE, 409)
+    }
+    return c.json({ id, akahuAccountId })
   })

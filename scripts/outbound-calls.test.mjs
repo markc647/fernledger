@@ -25,14 +25,17 @@ const OUTBOUND = [/\bfetch\s*\(/, /\bnew\s+WebSocket\b/, /\bXMLHttpRequest\b/, /
 
 /**
  * Source files that may make an outbound call, by path from the repo root, each with the one address it may call and the name of
- * the constant that holds it. Akahu Sync will add its one module here, and worker/outbound.test.ts must then exercise it against
- * the Akahu host. A file here is not let off: `checkAllowedFile` holds it to exactly one call, to that constant, and to that address
- * as the only one it names.
+ * the constant that holds it. A file here is not let off: `checkAllowedFile` holds it to exactly one call, to that constant, and to
+ * that address as the only one it names.
  * - worker/d1-usage.ts: the D1 usage bar asks Cloudflare's GraphQL Analytics API for the Deployer's own account usage, and only when
  *   CF_ANALYTICS_TOKEN and CF_ACCOUNT_ID are set (ADR 0010, amended 2026-10-14). worker/outbound.test.ts reaches it with both set.
+ * - worker/akahu.ts: Akahu, the one third party, and only when both Akahu tokens are set (ADR 0008, ADR 0010). It is a REST API
+ *   reached by path, so its call is a template literal beginning with the constant. worker/outbound.test.ts reaches it with both
+ *   tokens set, from the Admin's route for listing Akahu accounts and from the Sync cron.
  */
 const ALLOWED_FILES = {
   'worker/d1-usage.ts': { url: 'https://api.cloudflare.com/client/v4/graphql', urlName: 'GRAPHQL_URL' },
+  'worker/akahu.ts': { url: 'https://api.akahu.io/v1', urlName: 'AKAHU_API' },
 }
 
 /** Returns "file:line: text" for each outbound call in the source. Comment-only lines are skipped. */
@@ -53,7 +56,9 @@ export function checkAllowedFile(file, source, { url, urlName }) {
   const calls = findOutboundCalls(file, source)
   const problems = []
   if (calls.length !== 1) problems.push(`${file}: it may make exactly one outbound call, and makes ${calls.length}`)
-  else if (!new RegExp(`\\bfetch\\(${urlName}[,)]`).test(calls[0])) problems.push(`${file}: its one call must be fetch(${urlName}, ...): ${calls[0]}`)
+  // The constant alone, or a template literal that begins with it (an API reached by path). Appending a path cannot change the
+  // host: a literal address anywhere in the file is caught below, so there is nothing to build another one out of.
+  else if (!new RegExp(String.raw`\bfetch\((?:${urlName}[,)]|\x60\$\{${urlName}\})`).test(calls[0])) problems.push(`${file}: its one call must be fetch(${urlName}, ...): ${calls[0]}`)
   if (!code.some((text) => text.includes(`const ${urlName} = '${url}'`))) problems.push(`${file}: ${urlName} must be '${url}'`)
   const named = [...new Set(code.flatMap((text) => text.match(URL_LITERAL) ?? []))].filter((name) => name !== url)
   if (named.length > 0) problems.push(`${file}: it may name no address but ${url}, and names ${named.join(', ')}`)
@@ -86,7 +91,11 @@ test('an allowed file is held to one call, to one address', () => {
   const allowed = { url: 'https://api.example.test/graphql', urlName: 'API_URL' }
   const ok = "// see https://docs.example.test/page\nexport const API_URL = 'https://api.example.test/graphql'\nconst res = await fetch(API_URL, { method: 'POST' })"
   assert.deepEqual(checkAllowedFile('x.ts', ok, allowed), [])
+  // An API reached by path: the call may be a template literal, but only one that BEGINS with the constant.
+  const byPath = ok.replace('fetch(API_URL', 'fetch(`${API_URL}/accounts/${id}/transactions`')
+  assert.deepEqual(checkAllowedFile('x.ts', byPath, allowed), [])
   const bad = {
+    'a template literal that does not begin with the constant': ok.replace('fetch(API_URL', 'fetch(`${host}${API_URL}`'),
     'a second call': `${ok}\nawait fetch(API_URL)`,
     'no call at all': "export const API_URL = 'https://api.example.test/graphql'",
     'a call to something else': ok.replace('fetch(API_URL', 'fetch(otherUrl'),

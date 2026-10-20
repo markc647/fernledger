@@ -53,7 +53,9 @@ for (const name of sampleNames) {
 
 test('a later add-only migration keeps the data: the upgrade applies it and the check passes', () => {
   const dir = migrationsCopy()
-  writeFileSync(join(dir, '0999_later.sql'), 'ALTER TABLE accounts ADD COLUMN akahu_account_id TEXT;\nCREATE INDEX accounts_name ON accounts (name);\n')
+  // A column no real migration adds, so this stays a test of the check and not a collision with one (it was `akahu_account_id`
+  // until migration 2701 added that for real).
+  writeFileSync(join(dir, '0999_later.sql'), 'ALTER TABLE accounts ADD COLUMN example_later_column TEXT;\nCREATE INDEX accounts_name ON accounts (name);\n')
   const { sql, snapshot } = sample(sampleNames[0])
   assert.deepEqual(verifySample(sql, snapshot, dir), [])
 })
