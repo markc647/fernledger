@@ -55,7 +55,7 @@ it('totalWritten adds up the Accounts', () => {
   expect(totalWritten(run([done(1, 2), done(2, 40), { accountId: 3, written: 0, removed: 0, complete: false, failure: 'unreachable' }]))).toBe(42)
 })
 
-// Spec 49: a bank can withdraw a Transaction and re-issue it with a new ID, so each Sync re-checks the last 30 days and takes
+// Spec 49: a Transaction already synced can still change, so each Sync re-checks the last RECHECK_DAYS days and takes
 // out what Akahu has stopped returning. The Admin is told, because Transactions disappearing unannounced is alarming.
 describe('Transactions the bank withdrew', () => {
   it('says how many were removed, as part of a finished Account', () => {

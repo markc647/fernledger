@@ -3,10 +3,10 @@
 // Sync is optional per Account and the whole app works without it (ADR 0008). Nothing here runs unless the Deployer has set
 // both Akahu tokens (worker/features.ts: AKAHU_SYNC) and the Admin has linked at least one Account.
 //
-// The window, per Account: from the later of its Cutover Date and 30 days before its last successful Sync, to now. The Cutover
-// Date is the floor because an Import owns everything before it and the two sources never overlap (ADR 0003). The 30 days are
-// because banks sometimes delete and re-issue a Transaction, so a settled day can still change; ticket 28 (#29) adds the removal
-// of Transactions Akahu no longer returns within that window, which is why the re-check is here from the start.
+// The window, per Account: from the later of its Cutover Date and RECHECK_DAYS before its last successful Sync, to now. The
+// Cutover Date is the floor because an Import owns everything before it and the two sources never overlap (ADR 0003). The
+// re-check is because a Transaction already synced can still change, and anything Akahu stops returning inside the window is
+// removed (spec 49).
 //
 // Repeating a Sync is safe: every row carries Akahu's own ID and is written with ON CONFLICT DO UPDATE on it, so an overlapping
 // window updates what it already holds and never adds a second copy (spec 48).
@@ -33,8 +33,18 @@ import { pairTransfersStatement } from './transfers'
  */
 export const SYNC_CRON = '0 18 * * *'
 
-/** How many days before the last successful Sync are asked for again, because a bank can still change them (spec 49). */
-export const RECHECK_DAYS = 30
+/**
+ * How many days before the last successful Sync are asked for again (spec 49).
+ *
+ * Fourteen, not the thirty the spec first said. An NZ bank closes its transactions off daily and does not edit a settled one:
+ * a correction arrives as an adjustment Transaction of its own, which is a new row and needs no re-check to be seen. What does
+ * change state is a credit card's pending Transaction becoming a real one, and that settles in days.
+ *
+ * So the window is margin, not the mechanism, and two weeks is generous margin. It costs: every day of it is Transactions
+ * fetched and written again on an account with any volume, out of one invocation's 50 subrequests and the page budget every
+ * Account shares (worker/akahu.ts: MAX_PAGES).
+ */
+export const RECHECK_DAYS = 14
 
 /**
  * The D1 queries one Sync may spend, and what one Account costs at most.
