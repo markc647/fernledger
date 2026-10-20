@@ -9,8 +9,10 @@
 export type AccountOutcome = {
   accountId: number
   written: number
+  /** Transactions Akahu no longer returns, removed from the window (spec 49). */
+  removed: number
   complete: boolean
-  failure?: 'refused' | 'unreachable' | 'unreadable' | 'no-window'
+  failure?: 'refused' | 'unreachable' | 'unreadable' | 'no-window' | 'no-budget'
 }
 
 /** A whole run (worker/sync.ts: SyncOutcome). `ran` is false when no Account is linked to Akahu, so there was nothing to do. */
@@ -50,10 +52,20 @@ export function accountNote(account: AccountOutcome): { tone: Tone; text: string
       return { tone: 'danger', text: "Akahu answered, but not with Transactions. Nothing was brought in. Try again, and if it keeps happening it's Akahu's end." }
     case 'no-window':
       return { tone: 'warning', text: 'This Account has imported Transactions but no Cutover Date, so Sync left it alone. Set its Cutover Date above, then run a Sync.' }
+    // Not a fault, and not the Admin's to fix: a Sync spends only part of what one invocation may ask of the database, so an
+    // Account it did not reach waits. It is first in the next run, so saying "run a Sync" is honest here where it is not for
+    // the page cap below.
+    case 'no-budget':
+      return { tone: 'neutral', text: 'Sync ran out of its share of the database for this run before reaching this Account. It is first next time; run a Sync again to do it now.' }
     default:
       // The page cap: MAX_PAGES is the most pages one Sync may ask for over all its Accounts (worker/akahu.ts), so running again
       // asks for the same window again and gets no further. Don't offer that as a fix.
       if (!account.complete) return { tone: 'warning', text: `Brought in ${count(account.written)} and stopped at the most Akahu pages one Sync may ask for, so not everything was read.` }
+      if (account.removed > 0) {
+        // The bank withdrew a Transaction and usually re-issued it with a new ID, so this is the ledger catching up, not a loss.
+        const removed = `${account.removed === 1 ? '1 Transaction the bank has withdrawn was' : `${account.removed} Transactions the bank has withdrawn were`} removed.`
+        return { tone: 'success', text: account.written === 0 ? `Finished. ${removed}` : `Finished and brought in ${count(account.written)}. ${removed}` }
+      }
       return { tone: 'success', text: account.written === 0 ? 'Finished. Nothing new to bring in.' : `Finished and brought in ${count(account.written)}.` }
   }
 }

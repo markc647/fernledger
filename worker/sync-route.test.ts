@@ -74,7 +74,7 @@ describe('POST /api/sync/runs', () => {
     const res = await runNow({ secrets: SECRETS })
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ran: true, success: true, accounts: [{ accountId, written: 1, complete: true }] })
+    expect(await res.json()).toEqual({ ran: true, success: true, accounts: [{ accountId, written: 1, removed: 0, complete: true }] })
     expect(await rowCount()).toBe(1)
   })
 
@@ -84,7 +84,7 @@ describe('POST /api/sync/runs', () => {
     const res = await runNow({ secrets: SECRETS })
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ran: true, success: false, accounts: [{ accountId, written: 0, complete: false, failure: 'refused' }] })
+    expect(await res.json()).toEqual({ ran: true, success: false, accounts: [{ accountId, written: 0, removed: 0, complete: false, failure: 'refused' }] })
     // The reason is one of Akahu's three fixed words, never Akahu's own message, which can echo a token.
     expect(JSON.stringify(logged)).not.toContain('Unauthorized')
     for (const token of Object.values(SECRETS)) expect(JSON.stringify(logged)).not.toContain(token)

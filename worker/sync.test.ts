@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AKAHU_API, MAX_PAGES } from './akahu'
 import worker from './index'
-import { hasBankTime, RECHECK_DAYS, SYNC_CRON, toCents, windowStart } from './sync'
+import { hasBankTime, MAX_QUERIES, QUERIES_PER_ACCOUNT, RECHECK_DAYS, SYNC_CRON, toCents, windowStart } from './sync'
 
 // Seam 1: the daily Sync cron through the Worker's exported handler, with Akahu faked at `fetch`, so nothing here reaches
 // Akahu. What is checked is what the ticket promises: only linked Accounts are stored, a re-run never duplicates, the window
@@ -317,6 +317,101 @@ describe('the daily Sync', () => {
     stubAkahu(() => onePage([transaction()]))
     await runSync(SECRETS, '0 15 * * SUN')
     expect(calls).toEqual([])
+  })
+
+  // Spec 49: a bank can withdraw a Transaction and re-issue it with a new ID. Each Sync re-checks the window, so what Akahu
+  // has stopped returning goes, and the ledger does not end up holding both.
+  it('removes a Transaction Akahu no longer returns, and keeps the one that replaced it', async () => {
+    stubAkahu(() => onePage([transaction()]))
+    await runSync()
+    expect((await rows()).map((r) => r.akahu_id)).toEqual(['trans_0000000000000000001'])
+
+    // The same money, re-issued under a new ID: the old one is gone from Akahu's answer.
+    stubAkahu(() => onePage([transaction({ _id: 'trans_0000000000000000002' })]))
+    await runSync()
+
+    expect((await rows()).map((r) => r.akahu_id)).toEqual(['trans_0000000000000000002'])
+  })
+
+  it('removes nothing when the run did not finish, because it has not seen the whole window', async () => {
+    stubAkahu(() => onePage([transaction()]))
+    await runSync()
+    // Every page offers another, so the run stops at the cap having read only part of the window.
+    stubAkahu(() => asJson({ items: [transaction({ _id: 'trans_0000000000000000009' })], cursor: { next: 'more' } }))
+    await runSync()
+
+    // The first Transaction is still there: not being in a partial answer is not evidence that Akahu withdrew it.
+    expect((await rows()).map((r) => r.akahu_id)).toContain('trans_0000000000000000001')
+  })
+
+  it('never removes an imported Transaction, whatever Akahu returns', async () => {
+    await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source, bank_unique_id) VALUES (?, '2026-10-05', -100, 'EXAMPLE IMPORTED', 'import', 'ID1')").bind(accountId).run()
+    stubAkahu(() => onePage([]))
+    await runSync()
+
+    const stored = await rows()
+    expect(stored).toHaveLength(1)
+    expect(stored[0]).toMatchObject({ source: 'import' })
+  })
+
+  it('never removes a Synced Transaction from before the window', async () => {
+    // Dated before the Cutover Date of 2026-10-01, so outside what Akahu was asked about.
+    await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source, akahu_id) VALUES (?, '2026-08-01', -100, 'EXAMPLE OLD SYNC', 'sync', 'trans_0000000000000000008')").bind(accountId).run()
+    stubAkahu(() => onePage([]))
+    await runSync()
+
+    expect((await rows()).map((r) => r.akahu_id)).toEqual(['trans_0000000000000000008'])
+  })
+
+  // The budget is shared across the run, so the Accounts it does not reach must not be left behind every morning.
+  it('takes the least recently synced Account first, so one Account cannot starve the others', async () => {
+    await env.DB.prepare('UPDATE accounts SET akahu_account_id = ?, cutover_date = ?, akahu_synced_at = ? WHERE id = ?')
+      .bind(OTHER, '2026-10-01', '2026-10-19T18:00:00.000Z', otherAccountId)
+      .run()
+    // id 1 has synced more recently than id 2, so id 2 is asked about first.
+    await env.DB.prepare('UPDATE accounts SET akahu_synced_at = ? WHERE id = ?').bind('2026-10-20T06:00:00.000Z', accountId).run()
+    stubAkahu(() => onePage([]))
+    await runSync()
+
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual([`/v1/accounts/${OTHER}/transactions`, `/v1/accounts/${LINKED}/transactions`])
+  })
+
+  // A batch cut off part way would leave an Account's rows written with no Rules, no pairing and no mark, so Sync stops before
+  // an Account instead. Reading the Accounts costs one query, so this many fit in a run:
+  const ACCOUNTS_PER_RUN = Math.floor((MAX_QUERIES - 1) / QUERIES_PER_ACCOUNT)
+
+  it('stops before an Account it has no database budget left for, and does not call the run a success', async () => {
+    // One more linked Account than a run can take.
+    await env.DB.prepare('UPDATE accounts SET akahu_account_id = ?, cutover_date = ? WHERE id = ?').bind(OTHER, '2026-10-01', otherAccountId).run()
+    for (let i = 0; i < ACCOUNTS_PER_RUN; i++) {
+      await account(`Spare ${i}`, `99-9999-9999999-1${i}`, { akahu: `acc_spare00000000000000${i}`, cutover: '2026-10-01' })
+    }
+    stubAkahu(() => onePage([]))
+
+    await runSync()
+
+    expect(calls).toHaveLength(ACCOUNTS_PER_RUN)
+    const text = logged.join(' ')
+    expect(text).toContain('sync.account.no-budget')
+    expect(text).toContain('sync.incomplete')
+  })
+
+  it('reaches the Accounts it skipped on the next run, because they are the stalest', async () => {
+    await env.DB.prepare('UPDATE accounts SET akahu_account_id = ?, cutover_date = ? WHERE id = ?').bind(OTHER, '2026-10-01', otherAccountId).run()
+    for (let i = 0; i < ACCOUNTS_PER_RUN; i++) {
+      await account(`Spare ${i}`, `99-9999-9999999-1${i}`, { akahu: `acc_spare00000000000000${i}`, cutover: '2026-10-01' })
+    }
+    stubAkahu(() => onePage([]))
+
+    await runSync()
+    const first = new Set(calls.map((call) => new URL(call.url).pathname))
+    calls.length = 0
+    await runSync()
+    const second = calls.map((call) => new URL(call.url).pathname)
+
+    // Nothing the first run finished is asked about again before the ones it never reached.
+    expect(second.some((path) => !first.has(path))).toBe(true)
+    expect(second[0]).not.toBe([...first][0])
   })
 
   it('puts neither token in a log line', async () => {
