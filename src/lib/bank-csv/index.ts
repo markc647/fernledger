@@ -1,10 +1,11 @@
 import { asbAdapter } from './asb'
+import { kiwibankAdapter } from './kiwibank'
 import { BankCsvError, type BankCsvAdapter, type BankCsvResult } from './types'
 
 export * from './types'
 
 /** Add a bank by writing an adapter and listing it here. */
-export const adapters: readonly BankCsvAdapter[] = [asbAdapter]
+export const adapters: readonly BankCsvAdapter[] = [asbAdapter, kiwibankAdapter]
 
 /** Picks the adapter by detecting the file's header, then parses. Throws `BankCsvError` for unknown or damaged files. */
 export function parseBankCsv(text: string, registry: readonly BankCsvAdapter[] = adapters): BankCsvResult {
