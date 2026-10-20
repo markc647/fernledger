@@ -84,8 +84,16 @@ const accountsAnswer = z.object({ items: z.array(akahuAccount) })
 
 export type AkahuResult<T> = { ok: true; value: T } | { ok: false; reason: AkahuFailure }
 
-const failed = (reason: AkahuFailure, error?: unknown): { ok: false; reason: AkahuFailure } => {
-  logEvent(EVENTS[reason], error === undefined ? {} : { error })
+/**
+ * `status` is the HTTP status Akahu answered with, logged as `ERR_HTTP_<status>`. A status is a number of Akahu's protocol, not a
+ * word of Akahu's and nothing of the Deployer's: no token, no email, no Transaction. It is logged because without it every failure
+ * that is not 401 or 403 reads the same, and "unreachable" alone cannot tell a timeout from a rejected query.
+ */
+const failed = (reason: AkahuFailure, { error, status }: { error?: unknown; status?: number } = {}): { ok: false; reason: AkahuFailure } => {
+  logEvent(EVENTS[reason], {
+    ...(error === undefined ? {} : { error }),
+    ...(status === undefined ? {} : { code: `ERR_HTTP_${status}` }),
+  })
   return { ok: false, reason }
 }
 
@@ -110,12 +118,12 @@ async function get<T>(path: string, tokens: AkahuTokens, shape: z.ZodMiniType<T>
       // The tokens go to this address only: a redirect, followed, would carry them somewhere else.
       redirect: 'manual',
     })
-    if (!res.ok) return failed(res.status === 401 || res.status === 403 ? 'refused' : 'unreachable')
+    if (!res.ok) return failed(res.status === 401 || res.status === 403 ? 'refused' : 'unreachable', { status: res.status })
     const parsed = z.safeParse(shape, await res.json())
     return parsed.success ? { ok: true, value: parsed.data } : failed('unreadable')
   } catch (error) {
     // A body that is not JSON is Akahu answering badly; anything else (no network, the time limit) is the call failing.
-    return error instanceof SyntaxError ? failed('unreadable') : failed('unreachable', error)
+    return error instanceof SyntaxError ? failed('unreadable') : failed('unreachable', { error })
   } finally {
     clearTimeout(timer)
   }
@@ -131,8 +139,7 @@ export const listAkahuAccounts = async (tokens: AkahuTokens): Promise<AkahuResul
  * One linked Akahu account's Transactions from `start` to `end`, following `cursor.next` to the last page.
  *
  * `start` is EXCLUSIVE at Akahu's end, so the caller passes the instant just before the first one it wants. Both are ISO 8601.
- * A null `start` asks with no lower bound, and Akahu gives as much history as the consent and the app's history setting allow;
- * that is for an Account syncing from scratch with nothing imported to overlap (worker/sync.ts: SyncWindow).
+ * Both are required: Akahu answers a query with no `start` with an error, not with all of history.
  *
  * `budget` is how many pages this call may ask for, counted down across the whole Sync. Running out is not an error: the
  * Transactions read so far are returned with `complete: false`, so the caller can record that the Account is not up to date
@@ -141,7 +148,7 @@ export const listAkahuAccounts = async (tokens: AkahuTokens): Promise<AkahuResul
 export async function fetchAkahuTransactions(
   tokens: AkahuTokens,
   akahuAccountId: string,
-  range: { start: string | null; end: string },
+  range: { start: string; end: string },
   budget: { pagesLeft: number },
 ): Promise<AkahuResult<{ transactions: AkahuTransaction[]; complete: boolean }>> {
   const transactions: AkahuTransaction[] = []
@@ -151,8 +158,7 @@ export async function fetchAkahuTransactions(
   do {
     if (budget.pagesLeft <= 0) return { ok: true, value: { transactions, complete: false } }
     budget.pagesLeft -= 1
-    const query = new URLSearchParams({ end: range.end })
-    if (range.start !== null) query.set('start', range.start)
+    const query = new URLSearchParams({ start: range.start, end: range.end })
     if (cursor !== null) query.set('cursor', cursor)
     const answer: AkahuResult<z.infer<typeof page>> = await get(`/accounts/${akahuAccountId}/transactions?${query}`, tokens, page)
     if (!answer.ok) return answer

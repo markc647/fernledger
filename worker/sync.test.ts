@@ -88,32 +88,25 @@ afterEach(() => {
 })
 
 describe('the Sync window', () => {
-  const imported = { has_imports: 1 }
-  const nothingImported = { has_imports: 0 }
-
   it('starts at the Cutover Date when the Account has never synced', () => {
-    expect(windowStart({ cutover_date: '2026-10-01', akahu_synced_at: null, ...imported })).toEqual({ kind: 'from', date: '2026-10-01' })
+    expect(windowStart({ cutover_date: '2026-10-01', akahu_synced_at: null })).toEqual({ kind: 'from', date: '2026-10-01' })
   })
 
   it(`re-checks the ${RECHECK_DAYS} days before the last success when that is later than the Cutover Date`, () => {
-    expect(windowStart({ cutover_date: '2026-01-01', akahu_synced_at: '2026-10-20T18:00:00.000Z', ...imported })).toEqual({ kind: 'from', date: '2026-09-21' })
+    expect(windowStart({ cutover_date: '2026-01-01', akahu_synced_at: '2026-10-20T18:00:00.000Z' })).toEqual({ kind: 'from', date: '2026-09-21' })
   })
 
   it('never starts before the Cutover Date, which an Import owns up to', () => {
-    expect(windowStart({ cutover_date: '2026-10-15', akahu_synced_at: '2026-10-20T18:00:00.000Z', ...imported })).toEqual({ kind: 'from', date: '2026-10-15' })
+    expect(windowStart({ cutover_date: '2026-10-15', akahu_synced_at: '2026-10-20T18:00:00.000Z' })).toEqual({ kind: 'from', date: '2026-10-15' })
   })
 
-  // Akahu as the only source: nothing was imported, so there is no imported history for Sync to overlap and no Cutover Date is needed.
-  it('asks for everything Akahu has when nothing was imported and there is no Cutover Date', () => {
-    expect(windowStart({ cutover_date: null, akahu_synced_at: null, ...nothingImported })).toEqual({ kind: 'all' })
-  })
-
-  it('skips an Account that holds imported Transactions but has no Cutover Date', () => {
-    expect(windowStart({ cutover_date: null, akahu_synced_at: null, ...imported })).toEqual({ kind: 'skip' })
+  // An Account is imported first and linked to Akahu after, so this is one that was linked before that was done.
+  it('skips an Account with no Cutover Date, rather than asking Akahu for everything', () => {
+    expect(windowStart({ cutover_date: null, akahu_synced_at: null })).toEqual({ kind: 'skip' })
   })
 
   it('re-checks from the last success once it has one, Cutover Date or not', () => {
-    expect(windowStart({ cutover_date: null, akahu_synced_at: '2026-10-20T18:00:00.000Z', ...nothingImported })).toEqual({ kind: 'from', date: '2026-09-21' })
+    expect(windowStart({ cutover_date: null, akahu_synced_at: '2026-10-20T18:00:00.000Z' })).toEqual({ kind: 'from', date: '2026-09-21' })
   })
 })
 
@@ -257,6 +250,17 @@ describe('the daily Sync', () => {
     expect(await syncedAt(accountId)).toBe('2026-10-20T18:00:00.000Z')
   })
 
+  // Without the status every failure that is not 401 or 403 reads the same, and a rejected query cannot be told from a timeout.
+  it('logs the HTTP status Akahu answered with, and nothing else of the answer', async () => {
+    stubAkahu(() => asJson({ message: 'Invalid query: start is required' }, 400))
+    await runSync()
+    const text = logged.join('\n')
+    expect(text).toContain('akahu.unreachable')
+    expect(text).toContain('ERR_HTTP_400')
+    // Akahu's own words never reach a log: they can echo what was sent.
+    expect(text).not.toContain('Invalid query')
+  })
+
   it('leaves the last success alone when Akahu refuses, so the window is asked for again', async () => {
     await env.DB.prepare('UPDATE accounts SET akahu_synced_at = ? WHERE id = ?').bind('2026-10-19T18:00:00.000Z', accountId).run()
     stubAkahu(() => asJson({ error: 'nope' }, 401))
@@ -265,29 +269,35 @@ describe('the daily Sync', () => {
     expect(logged.join('\n')).toContain('akahu.refused')
   })
 
-  it('skips a linked Account that holds imported Transactions but has no Cutover Date', async () => {
+  // Akahu refuses a transactions query with no `start`, so there is nothing to fall back to: the Account waits for a Cutover Date.
+  it('skips a linked Account with no Cutover Date, and contacts Akahu not at all', async () => {
     await env.DB.prepare('UPDATE accounts SET cutover_date = NULL WHERE id = ?').bind(accountId).run()
-    await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source) VALUES (?, '2026-09-01', -100, 'EXAMPLE IMPORTED', 'import')").bind(accountId).run()
     stubAkahu(() => onePage([transaction()]))
     await runSync()
     expect(calls).toEqual([])
     expect(logged.join('\n')).toContain('sync.account.no-window')
   })
 
-  // Akahu as the only source, which is this deployment before any CSV is imported.
-  it('asks Akahu for everything it has when the Account has no Cutover Date and nothing imported', async () => {
-    await env.DB.prepare('UPDATE accounts SET cutover_date = NULL WHERE id = ?').bind(accountId).run()
+  it('always sends a start, because Akahu rejects a query without one', async () => {
     stubAkahu(() => onePage([transaction()]))
     await runSync()
-    expect(calls).toHaveLength(1)
     const params = new URL(calls[0]!.url).searchParams
-    expect(params.has('start')).toBe(false)
+    expect(params.get('start')).toBe('2026-09-30T10:59:59.999Z')
     expect(params.get('end')).toBe('2026-10-20T18:00:00.000Z')
-    expect(await rows()).toHaveLength(1)
   })
 
-  it('stops asking for everything once it has synced once, and re-checks from the last success instead', async () => {
-    await env.DB.prepare('UPDATE accounts SET cutover_date = NULL WHERE id = ?').bind(accountId).run()
+  // Having synced does not move the window earlier than the Cutover Date: the 30-day re-check reaches back to 21 September,
+  // which is before this Account's Cutover Date of 1 October, so the Cutover Date still decides. An Import owns what is before it.
+  it('keeps the Cutover Date as the floor on a second run', async () => {
+    stubAkahu(() => onePage([transaction()]))
+    await runSync()
+    await runSync()
+    expect(new URL(calls[1]!.url).searchParams.get('start')).toBe('2026-09-30T10:59:59.999Z')
+  })
+
+  // With an older Cutover Date the re-check is what decides, so a settled day a bank re-issued is asked for again.
+  it('asks from the re-check when the Cutover Date is older than it', async () => {
+    await env.DB.prepare("UPDATE accounts SET cutover_date = '2026-01-01' WHERE id = ?").bind(accountId).run()
     stubAkahu(() => onePage([transaction()]))
     await runSync()
     await runSync()

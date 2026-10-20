@@ -38,15 +38,10 @@ type LinkedAccount = {
   akahu_account_id: string
   cutover_date: string | null
   akahu_synced_at: string | null
-  /** 1 when the Account holds Transactions from a CSV Import, which is what the Cutover Date keeps Sync away from. */
-  has_imports: number
 }
 
-// Whether the Account has imported Transactions is asked here rather than per Account, so the whole run still costs one query to
-// start. `EXISTS` stops at the first row it finds.
 export const LINKED_ACCOUNTS = `
-  SELECT id, account_number, akahu_account_id, cutover_date, akahu_synced_at,
-         EXISTS (SELECT 1 FROM transactions WHERE account_id = accounts.id AND source = 'import') AS has_imports
+  SELECT id, account_number, akahu_account_id, cutover_date, akahu_synced_at
   FROM accounts WHERE akahu_account_id IS NOT NULL ORDER BY id`
 
 // One statement for the whole Account's Transactions: the rows ride as a single JSON parameter and are unpacked with json_each,
@@ -178,21 +173,20 @@ const daysBefore = (date: string, days: number): string => new Date(Date.parse(`
  * Where a Sync of this Account starts:
  * - `from` a date: the later of the Cutover Date and RECHECK_DAYS before the last successful Sync. An Account that has never
  *   synced starts at its Cutover Date.
- * - `all`: everything Akahu will give. Only for an Account that has no Cutover Date AND holds no imported Transaction, which is
- *   a deployment using Akahu as its only source (ADR 0008 allows that as much as CSV alone). There is no imported history for
- *   Sync to overlap, so the date the Cutover Date would have supplied is not needed.
- * - `skip`: the Account holds imported Transactions but has no Cutover Date, so where one source stops and the other starts is
- *   not known. Syncing would silently double up the imported history that the Cutover Date exists to separate (ADR 0003). That
- *   is the Admin's to fix by setting one, and until they do this Account is left alone.
+ * - `skip`: the Account has no Cutover Date, so where the imported history stops and Sync starts is not known.
+ *
+ * An Account is set up by importing a CSV first and linked to Akahu after, so by the time it is synced it has a Cutover Date
+ * (README: Setting up an Account). Skipping is for an Account linked before that was done, and it is the Admin's to fix.
+ *
+ * Syncing from the beginning of Akahu's history instead is not an option, and not only because it would overlap the imported
+ * history the Cutover Date exists to separate (ADR 0003): Akahu refuses a transactions query with no `start`, which is what a
+ * live run on 2026-10-20 answered before the Cutover Date was set.
  */
-export type SyncWindow = { kind: 'from'; date: string } | { kind: 'all' } | { kind: 'skip' }
+export type SyncWindow = { kind: 'from'; date: string } | { kind: 'skip' }
 
-export function windowStart(account: Pick<LinkedAccount, 'cutover_date' | 'akahu_synced_at' | 'has_imports'>): SyncWindow {
+export function windowStart(account: Pick<LinkedAccount, 'cutover_date' | 'akahu_synced_at'>): SyncWindow {
   const recheckFrom = account.akahu_synced_at === null ? null : daysBefore(nzDate(new Date(account.akahu_synced_at)), RECHECK_DAYS)
-  if (account.cutover_date === null) {
-    if (recheckFrom !== null) return { kind: 'from', date: recheckFrom }
-    return account.has_imports ? { kind: 'skip' } : { kind: 'all' }
-  }
+  if (account.cutover_date === null) return recheckFrom === null ? { kind: 'skip' } : { kind: 'from', date: recheckFrom }
   // ISO dates compare correctly as text.
   if (recheckFrom === null || recheckFrom <= account.cutover_date) return { kind: 'from', date: account.cutover_date }
   return { kind: 'from', date: recheckFrom }
@@ -229,9 +223,8 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
       continue
     }
     // Akahu's `start` is exclusive, so the instant asked for is the millisecond before NZ midnight on the window's first date: a
-    // Transaction stamped at exactly that midnight is inside the window, not just outside it. An 'all' window asks with no
-    // `start`, and Akahu gives what the Admin's consent and their app's history setting allow.
-    const start = window.kind === 'all' ? null : new Date(Date.parse(nzDayStart(window.date)) - 1).toISOString()
+    // Transaction stamped at exactly that midnight is inside the window, not just outside it.
+    const start = new Date(Date.parse(nzDayStart(window.date)) - 1).toISOString()
     const answer = await fetchAkahuTransactions(tokens, account.akahu_account_id, { start, end }, budget)
     if (!answer.ok) {
       logEvent('sync.account.failed', { id: account.id })
