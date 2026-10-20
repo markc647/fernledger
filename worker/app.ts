@@ -21,6 +21,7 @@ import { reports } from './reports'
 import { isJson, isWrite } from './request-format'
 import { rules } from './rules'
 import { SECURITY_HEADERS } from './security-headers'
+import { sync } from './sync-route'
 import { readSettings, rejectedFields, settingsPatch, updateSettings } from './settings'
 import { transactions } from './transactions'
 import { CHANGED_MEANWHILE } from './validate'
@@ -83,6 +84,7 @@ export const app = new Hono<AppEnv>()
   .route('/api/kept-reports', keptReports)
   .route('/api/reports', reports)
   .route('/api/rules', rules)
+  .route('/api/sync', sync)
   .route('/api/transactions', transactions)
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404))

@@ -84,6 +84,26 @@ test('the Admin is told what to set up, and how, for a feature that is switched 
   await expect(setup).toContainText('The steps are in docs/setup.md, under "D1 usage bar (optional)".')
 })
 
+// "Run a Sync now" (worker/sync-route.ts). The browser tests run with no Akahu tokens, so what is reachable here is the
+// Setup-needed state: the offer is there, it says what to set up, and it asks the Worker for nothing (a run would be refused
+// with "Not set up" and would contact no one). A run that reaches Akahu is pinned at the Worker boundary in worker/sync-route.test.ts.
+test('the Admin is offered a Sync to run now, and told to set Akahu up first while it is off', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  await page.goto('/settings')
+  const section = page.getByRole('region', { name: 'Run a Sync now' })
+  await expect(section).toContainText("Akahu Sync isn't set up yet, so there is nothing to run.")
+  // What to add is said once on this screen, in Setup needed below, and not repeated here.
+  await expect(section).not.toContainText('AKAHU_APP_TOKEN')
+  await expect(section.getByRole('button', { name: 'Run a Sync now' })).toHaveCount(0)
+})
+
+test('a Member is not offered a Sync to run', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  await page.goto('/settings')
+  await expect(page.getByText('Only the Admin can change settings.')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Run a Sync now' })).toHaveCount(0)
+})
+
 test('the Admin is not a Setting', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.goto('/settings')

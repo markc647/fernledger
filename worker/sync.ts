@@ -11,6 +11,11 @@
 // Repeating a Sync is safe: every row carries Akahu's own ID and is written with ON CONFLICT DO UPDATE on it, so an overlapping
 // window updates what it already holds and never adds a second copy (spec 48).
 //
+// Two Syncs can also overlap: the cron and the Admin's "Run a Sync now" (worker/sync-route.ts), or two of those. Nothing stops
+// them, and nothing here knows a Sync is going. The same repeatability makes that safe, and a lock would block the retry the
+// manual run exists to give: [ADR 0013](../docs/adr/0013-no-sync-lock.md) has the argument, including what the last-success
+// mark and the page cap do when two runs overlap.
+//
 // D1 and subrequest budget (ADR 0004: 50 subrequests and 50 queries an invocation). One Account costs one page request for each
 // 100 Transactions (akahu.ts caps the run at MAX_PAGES) and one batch of 4 statements. A household's daily Sync is a page or two
 // an Account. A run that reaches the page cap, or that any Account fails in, is not a success and does not move that Account's
@@ -204,8 +209,8 @@ export type AccountOutcome = { accountId: number; written: number; complete: boo
 export type SyncOutcome = { ran: boolean; success: boolean; accounts: AccountOutcome[] }
 
 /**
- * Sync every linked Account. `now` is the moment the run belongs to (the cron's scheduled time), so a run's window and the
- * `akahu_synced_at` it writes agree with each other however long the run takes.
+ * Sync every linked Account. `now` is the moment the run belongs to (the cron's scheduled time, or when the Admin asked for a
+ * run of their own), so a run's window and the `akahu_synced_at` it writes agree with each other however long the run takes.
  *
  * The run is a success only when every linked Account finished (spec 47). An Account that failed, or that stopped at the page
  * cap, keeps its old `akahu_synced_at`, so the next run asks for its window again.
