@@ -3,6 +3,7 @@ import { HTTPException } from 'hono/http-exception'
 import { validator } from 'hono/validator'
 import * as z from 'zod/mini'
 import { accounts } from './accounts'
+import { akahu } from './akahu-route'
 import type { AppEnv } from './app-env'
 import { authConfigFromEnv, authenticate, devMember } from './auth'
 import { balanceChecks, balances } from './balances'
@@ -70,6 +71,7 @@ export const app = new Hono<AppEnv>()
     },
   )
   .route('/api/accounts', accounts)
+  .route('/api/akahu', akahu)
   .route('/api/balance-checks', balanceChecks)
   .route('/api/balances', balances)
   .route('/api/budgets', budgets)

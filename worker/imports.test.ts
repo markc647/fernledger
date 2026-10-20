@@ -428,7 +428,9 @@ describe('what importing a row writes', () => {
     const holdingARow = indexes.filter((index) => !index.sql.includes(' WHERE ') || index.sql.endsWith('WHERE bank_unique_id IS NOT NULL'))
     expect(holdingARow.map((index) => index.name)).toEqual(['transactions_account_bank_unique_id', 'transactions_account_date', 'transactions_date'])
     expect(1 + holdingARow.length).toBe(WRITES_PER_ROW)
-    expect(indexes).toHaveLength(holdingARow.length + 4) // and the four partial ones: an Override, a Rule's Category, a Transfer and a Not a Transfer mark
+    expect(indexes).toHaveLength(holdingARow.length + 5) // and the five partial ones: an Override, a Rule's Category, a Transfer, a Not a Transfer mark and Akahu's ID
+    // Akahu's ID is why an imported row's cost did not change: that index is partial on a column only Sync fills, so a row from a
+    // file is not in it. A Synced row is, and costs one write more than WRITES_PER_ROW; Sync's own budget is in worker/sync.ts.
 
     const removed = (await env.DB.prepare(DELETE_IMPORTED).bind(accountId, REPLACE_SLICE).run()).meta
     expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions').first<{ n: number }>())!.n).toBe(0)

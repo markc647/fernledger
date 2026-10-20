@@ -15,12 +15,15 @@ import worker from './index'
 // The one other address is Cloudflare's GraphQL Analytics API, which the D1 usage bar asks for the account's own usage
 // (worker/d1-usage.ts). It is not in ALLOWED_HOSTS: only the tests that set CF_ANALYTICS_TOKEN and CF_ACCOUNT_ID may see
 // it, as exactly this URL, once, from the one route that asks. With the secrets unset nothing may reach it.
-// Akahu Sync is not built yet; when it is, its host is added here together with an exercise that reaches it, not by
-// widening the list in passing.
+// Akahu is the one third party the Worker ever contacts, and only with both Akahu tokens set (ADR 0008, ADR 0010). It is not in
+// ALLOWED_HOSTS either: only the tests that set AKAHU_APP_TOKEN and AKAHU_USER_TOKEN may see it, as its own host, from the Admin's
+// route for listing Akahu accounts and from the Sync cron. With the tokens unset nothing may reach it.
 const ACCESS_HOST = env.ACCESS_TEAM_DOMAIN!
 const ALLOWED_HOSTS = [ACCESS_HOST]
 const CLOUDFLARE_API_URL = 'https://api.cloudflare.com/client/v4/graphql'
 const USAGE_SECRETS = { CF_ANALYTICS_TOKEN: 'cf_token_SECRET_VALUE_1', CF_ACCOUNT_ID: 'account_SECRET_VALUE_2' }
+const AKAHU_HOST = 'api.akahu.io'
+const AKAHU_SECRETS = { AKAHU_APP_TOKEN: 'app_token_SECRET_VALUE_3', AKAHU_USER_TOKEN: 'user_token_SECRET_VALUE_4' }
 
 // Same as `triggers.crons` in wrangler.jsonc; scripts/wrangler-config.test.mjs fails if the two differ.
 const CRONS = ['0 18 * * *', '0 22 * * *', BACKUP_CRON]
@@ -116,6 +119,9 @@ const EXERCISES: Exercise[] = [
   { route: 'DELETE /api/categories/:id', path: () => `/api/categories/${made.categoryId}`, opts: { method: 'DELETE', body: {} } },
   { route: 'GET /api/imports/imported/:accountId', path: (id) => `/api/imports/imported/${id}` },
   { route: 'PUT /api/accounts/:id/cutover-date', path: (id) => `/api/accounts/${id}/cutover-date`, opts: { method: 'PUT', body: { cutoverDate: '2026-11-01' } } },
+  // The Account Link. Writing it contacts no one: it records which Akahu account the Sync cron will ask for, and the Admin picked
+  // it from GET /api/akahu/accounts, which is the route that does the asking.
+  { route: 'PUT /api/accounts/:id/akahu-link', path: (id) => `/api/accounts/${id}/akahu-link`, opts: { method: 'PUT', body: { akahuAccountId: 'acc_example00000000000000' } } },
   { route: 'POST /api/imports/clear-history', path: () => '/api/imports/clear-history', opts: (id) => ({ method: 'POST', body: { accountId: id } }) },
   // A replace that stops after its first part holds the Overrides and Notes of the removed Transaction (it has a Note by now),
   // which the next two routes forecast and discard.
@@ -133,6 +139,8 @@ const EXERCISES: Exercise[] = [
   { route: 'GET /api/features', path: () => '/api/features' },
   // The D1 usage bar: with no secrets it answers Not set up (503) and goes nowhere. Only the run below that sets both reaches Cloudflare's API.
   { route: 'GET /api/d1-usage', path: () => '/api/d1-usage' },
+  // Akahu, the same way: with no tokens it answers Not set up (503) and goes nowhere. Only the run below that sets both reaches Akahu.
+  { route: 'GET /api/akahu/accounts', path: () => '/api/akahu/accounts' },
   { route: 'GET /api/accounts', path: () => '/api/accounts' },
   { route: 'GET /api/change-log', path: () => '/api/change-log' },
   { route: 'GET /api/transactions', path: () => '/api/transactions?text=example&from=2026-01-01&sort=amount&dir=asc&transfers=exclude' },
@@ -181,7 +189,9 @@ async function exerciseEveryRoute(secrets?: Partial<Env>) {
     }
     // Each exercise must reach its handler's success path, or it proves nothing about that route. (Clear-history refuses a small history.)
     // The usage route is Not set up (503) without its secrets, and with them it reaches its call, which the recorder refuses: Usage unavailable (502).
-    if (route === 'GET /api/d1-usage') expect(res.status, route).toBe(secrets ? 502 : 503)
+    // A feature's route is Not set up (503) without its own secrets, and with them it reaches its call, which the recorder refuses (502).
+    if (route === 'GET /api/d1-usage') expect(res.status, route).toBe(secrets?.CF_ANALYTICS_TOKEN ? 502 : 503)
+    else if (route === 'GET /api/akahu/accounts') expect(res.status, route).toBe(secrets?.AKAHU_APP_TOKEN ? 502 : 503)
     else if (route !== 'POST /api/imports/clear-history') expect(res.status, route).toBeLessThan(400)
   }
   for (const path of OTHER_PATHS) await call(path, {}, secrets)
@@ -223,6 +233,36 @@ describe('outbound calls', () => {
 
   it('with the D1 usage secrets set, makes none from the scheduled handler, on any cron', async () => {
     for (const cron of CRONS) await worker.scheduled!(createScheduledController({ cron, scheduledTime: new Date('2026-10-11T15:00:00Z') }), { ...env, ...USAGE_SECRETS })
+
+    expect(attempts).toEqual([])
+  })
+
+  // Akahu Sync: with both tokens set, the Admin's route for listing Akahu accounts is the only route that reaches Akahu, and it
+  // reaches nothing else.
+  it('with the Akahu tokens set, contacts only api.akahu.io, from the Akahu route', { timeout: 30_000 }, async () => {
+    await exerciseEveryRoute(AKAHU_SECRETS)
+
+    expect(hostsContacted()).toEqual([AKAHU_HOST])
+    expect(attempts).toHaveLength(1)
+  })
+
+  // And on the cron: a linked Account is what makes Sync ask at all, so this is the one place the scheduled handler calls out.
+  it('with the Akahu tokens set and an Account linked, contacts only api.akahu.io, from the Sync cron', async () => {
+    await env.DB.prepare('DELETE FROM transactions').run()
+    await env.DB.prepare('DELETE FROM accounts').run()
+    await env.DB.prepare("INSERT INTO accounts (account_number, name, akahu_account_id, cutover_date) VALUES ('99-9999-9999999-97', 'Example linked', 'acc_example00000000000001', '2026-10-01')").run()
+
+    for (const cron of CRONS) await worker.scheduled!(createScheduledController({ cron, scheduledTime: new Date('2026-10-11T15:00:00Z') }), { ...env, ...AKAHU_SECRETS })
+
+    expect(hostsContacted()).toEqual([AKAHU_HOST])
+  })
+
+  it('with no Akahu tokens, the Sync cron contacts no one even with an Account linked', async () => {
+    await env.DB.prepare('DELETE FROM transactions').run()
+    await env.DB.prepare('DELETE FROM accounts').run()
+    await env.DB.prepare("INSERT INTO accounts (account_number, name, akahu_account_id, cutover_date) VALUES ('99-9999-9999999-96', 'Example linked', 'acc_example00000000000002', '2026-10-01')").run()
+
+    for (const cron of CRONS) await worker.scheduled!(createScheduledController({ cron, scheduledTime: new Date('2026-10-11T15:00:00Z') }), env)
 
     expect(attempts).toEqual([])
   })
