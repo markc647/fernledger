@@ -129,6 +129,12 @@ function parseRow(fields: string[]): RowResult {
       payee,
       bankMemo: description,
       amountCents,
+      // The payment details ASB's export does not have, and which the Transaction detail view shows (spec 50). The other
+      // party's own particulars, code and reference are read but not kept: they are what the other party wrote on their side
+      // of the payment, and Fernledger has no column for them.
+      particulars: value('Particulars') || null,
+      paymentCode: value('Code') || null,
+      counterpartyAccount: value('Other Party Account Number') || null,
     },
   }
 }

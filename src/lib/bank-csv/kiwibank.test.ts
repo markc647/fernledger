@@ -34,7 +34,14 @@ describe('parseBankCsv with a Kiwibank export', () => {
       payee: 'EXAMPLE SAVINGS',
       bankMemo: 'TRANSFER TO SAVINGS',
       amountCents: -25000,
+      particulars: 'SAVING',
+      paymentCode: 'MONTHLY',
+      counterpartyAccount: '99-9999-9999999-01',
     })
+  })
+
+  it('leaves the payment details null when the bank printed none', () => {
+    expect(parseBankCsv(everyday).rows[1]).toMatchObject({ particulars: null, paymentCode: null, counterpartyAccount: null })
   })
 
   it('falls back to the description as the payee when there is no other party', () => {

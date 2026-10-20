@@ -1,15 +1,28 @@
 import { isRealDate } from './dates'
 
-/** One Transaction row from a bank CSV, as the browser sends it. The browser's `BankCsvRow` (src/lib/bank-csv/types.ts) is this type. Dates are ISO `YYYY-MM-DD` NZ dates; money is integer NZD cents. */
+/**
+ * One Transaction row from a bank CSV, as the browser sends it. The browser's `BankCsvRow` (src/lib/bank-csv/types.ts) is this
+ * type. Dates are ISO `YYYY-MM-DD` NZ dates; money is integer NZD cents.
+ *
+ * The last three are the payment details a bank may print beside a Transaction. ASB's export has none of them, so until
+ * Kiwibank's was read they existed only as columns Akahu Sync fills (migration 1201). A bank that gives them sends them here; an
+ * adapter with nothing to put in one leaves it out, and the column stays NULL as it always has.
+ */
 export type ImportRow = {
   date: string
-  /** The bank's own unique ID for the row. */
+  /** The bank's own unique ID for the row, or one the adapter made from the row when the bank gives none (docs/bank-formats/kiwibank.md). */
   uniqueId: string
   tranType: string
   chequeNumber: string | null
   payee: string
   bankMemo: string
   amountCents: number
+  /** The payment's Particulars, as entered when it was made. */
+  particulars?: string | null
+  /** The payment's Code. Not source code: the bank's own field, beside Particulars and Reference (`bank_payment_code`). */
+  paymentCode?: string | null
+  /** The other party's account number, as the bank printed it. */
+  counterpartyAccount?: string | null
 }
 
 export const MAX_ROWS_PER_CHUNK = 500
@@ -103,6 +116,11 @@ export function badRowField(rows: unknown): string | null {
     if (!isText(row.payee, 200)) return `rows.${i}.payee`
     if (!isText(row.bankMemo, 200)) return `rows.${i}.bankMemo`
     if (!Number.isSafeInteger(row.amountCents)) return `rows.${i}.amountCents`
+    // Optional: a row from a bank that prints none of these leaves them out entirely, which is not a bad row.
+    for (const field of ['particulars', 'paymentCode', 'counterpartyAccount'] as const) {
+      const value = row[field]
+      if (value !== undefined && value !== null && !isText(value, 100)) return `rows.${i}.${field}`
+    }
   }
   return null
 }
@@ -110,7 +128,19 @@ export function badRowField(rows: unknown): string | null {
 /** The chunk's rows as JSON for the database, with only the known fields: anything extra a client sent is dropped. */
 export const serialiseRows = (rows: readonly ImportRow[]) =>
   JSON.stringify(
-    rows.map(({ date, uniqueId, tranType, chequeNumber, payee, bankMemo, amountCents }) => ({ date, uniqueId, tranType, chequeNumber, payee, bankMemo, amountCents })),
+    rows.map(({ date, uniqueId, tranType, chequeNumber, payee, bankMemo, amountCents, particulars, paymentCode, counterpartyAccount }) => ({
+      date,
+      uniqueId,
+      tranType,
+      chequeNumber,
+      payee,
+      bankMemo,
+      amountCents,
+      // Always written, so the SQL reads the same field for every row: a bank that prints none of these stores NULL, as before.
+      particulars: particulars ?? null,
+      paymentCode: paymentCode ?? null,
+      counterpartyAccount: counterpartyAccount ?? null,
+    })),
   )
 
 /** What the Replace question sends for each row of the file: the bank's unique ID and the amount, to forecast what would carry over (carry-over.ts). */

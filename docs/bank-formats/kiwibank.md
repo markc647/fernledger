@@ -20,11 +20,11 @@ Account number,Effective Date,Transaction Date,Description,Transaction Code,Part
 | Transaction Date | Not used. Equal to the Effective Date in every sample seen |
 | Description | `bank_memo`, and the payee when there is no other party |
 | Transaction Code | `bank_type` (`POS`, `TRANSFER`, `DIRECT DEBIT`, `INTEREST`, …) |
-| Particulars, Code | **Not imported yet**: `ImportRow` has no field for them |
+| Particulars, Code | `bank_particulars` and `bank_payment_code` |
 | Reference | `bank_reference`, through `ImportRow`'s `chequeNumber`, which is the column the Worker writes there |
 | Other Party Name | The payee, when it is not empty |
-| Other Party Account Number | **Not imported yet** |
-| Other Party Particulars, Code, Reference | **Not imported yet** |
+| Other Party Account Number | `bank_counterparty_account` |
+| Other Party Particulars, Code, Reference | Not kept: what the other party wrote on their side of the payment, which Fernledger has no column for |
 | Amount | Integer cents; negative is money out |
 | Balance | The account's balance after this Transaction. The file's ledger balance is the last row's |
 
@@ -51,9 +51,11 @@ Why those three fields:
 
 It follows that a file whose rows are not in the bank's own order, or whose balances have been edited, produces different IDs and therefore duplicates. The adapter does not re-sort rows: a file that is not as the bank wrote it is not one to trust.
 
-### What is not imported yet
+### The payment details
 
-Kiwibank gives the payment's Particulars and Code and the other party's account number, particulars and code. The database has columns for the first three (`bank_particulars`, `bank_payment_code`, `bank_counterparty_account`, added in migration 1201) but `ImportRow` has no fields for them, because ASB's export has none of them and Import has never needed to carry them. Until `ImportRow` is extended, a Kiwibank import drops those columns.
+Kiwibank prints the payment's Particulars and Code and the other party's account number. The database has had columns for them since migration 1201, where they were added for Akahu Sync to fill, because ASB's export has none of them. `ImportRow` carries them as optional fields, so an Import fills them too: an adapter with nothing to put in one leaves it out and the column stays NULL, exactly as ASB's rows always have.
+
+The other party's own Particulars, Code and Reference are read and discarded. They are what the other party wrote on their side of the payment, and Fernledger has no column for them.
 
 ## Credit cards
 

@@ -100,7 +100,8 @@ const previewRequest = z.object({ accountId: z.int().check(z.minimum(1)), rows: 
 // swallow a bad row. A repeat is a duplicate: it adds no row, so duplicates = rows kept - rows added.
 // ?3 is the Cutover Date (or null): rows dated on or after it are not inserted. ISO dates compare correctly as text.
 export const INSERT_ROWS = `
-  INSERT INTO transactions (account_id, date, amount_cents, description, bank_memo, bank_type, bank_reference, source, bank_unique_id)
+  INSERT INTO transactions (account_id, date, amount_cents, description, bank_memo, bank_type, bank_reference, source, bank_unique_id,
+                            bank_particulars, bank_payment_code, bank_counterparty_account)
   SELECT (SELECT id FROM accounts WHERE account_number = ?1),
          json_extract(value, '$.date'),
          json_extract(value, '$.amountCents'),
@@ -109,7 +110,12 @@ export const INSERT_ROWS = `
          json_extract(value, '$.tranType'),
          json_extract(value, '$.chequeNumber'),
          'import',
-         json_extract(value, '$.uniqueId')
+         json_extract(value, '$.uniqueId'),
+         -- The payment details a bank may print beside a Transaction (migration 1201). ASB prints none and stores NULL in all
+         -- three, exactly as before; Kiwibank prints Particulars and Code and the other party's account number.
+         json_extract(value, '$.particulars'),
+         json_extract(value, '$.paymentCode'),
+         json_extract(value, '$.counterpartyAccount')
   FROM json_each(?2)
   WHERE ?3 IS NULL OR json_extract(value, '$.date') < ?3
   ON CONFLICT (account_id, bank_unique_id) WHERE bank_unique_id IS NOT NULL DO NOTHING`
