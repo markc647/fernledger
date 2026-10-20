@@ -187,6 +187,34 @@ const syncShown = async (p) => {
  * one (which Sync leaves alone, and says so). Only for the run with made-up Akahu tokens set, which is what makes the
  * control live; Akahu then refuses them, so the shot is of a run that failed, said why per Account, and wrote nothing.
  */
+const linkSection = (p) => p.getByRole('region', { name: 'Akahu Sync' })
+
+/** Scrolls the Account Link into view: with no Akahu tokens this is its Setup-needed state. */
+const linkShown = async (p) => {
+  await linkSection(p).scrollIntoViewIfNeeded()
+  await linkSection(p).waitFor()
+}
+
+/**
+ * The Account Link with its states side by side: one Account linked and given a Cutover Date, one linked without one (which
+ * Sync skips, and the row says so), and the rest not linked. Only for the run with made-up Akahu tokens, which is what makes
+ * the control live. Asking for the list of Akahu accounts then fails, because the tokens are not real, so the shot also shows
+ * how that failure reads — which is the part worth reviewing, the happy path needing a real Akahu account.
+ */
+const accountLink = async (p) => {
+  const accounts = await api('GET', '/api/accounts')
+  const id = (name) => accounts.find((a) => a.name === name).id
+  await api('PUT', `/api/accounts/${id(ACCOUNTS.everyday.name)}/akahu-link`, { akahuAccountId: 'acc_example00000000000001' })
+  await api('PUT', `/api/accounts/${id(ACCOUNTS.everyday.name)}/cutover-date`, { cutoverDate: addDays(END, 1) })
+  await api('PUT', `/api/accounts/${id(ACCOUNTS.savings.name)}/akahu-link`, { akahuAccountId: 'acc_example00000000000002' })
+  await p.reload()
+  const button = linkSection(p).getByRole('button', { name: 'Show my Akahu accounts' })
+  await button.waitFor()
+  await button.scrollIntoViewIfNeeded()
+  await button.click()
+  await linkSection(p).getByRole('alert').first().waitFor()
+}
+
 const syncRun = async (p) => {
   const accounts = await api('GET', '/api/accounts')
   const id = (name) => accounts.find((a) => a.name === name).id
@@ -223,6 +251,11 @@ const SHOTS = [
   // And a run, which needs the tokens. They reach the Worker through the build, so this one cannot use --skip-build:
   // AKAHU_APP_TOKEN=… AKAHU_USER_TOKEN=… node scripts/review-shots.mjs --only settings-sync-run
   { name: 'settings-sync-run', path: '/settings', fullPage: false, akahu: true, before: syncRun },
+  // The Account Link (spec 29): its Setup-needed state, which is what an instance with no Akahu tokens sees.
+  { name: 'settings-account-link', path: '/settings', fullPage: false, before: linkShown },
+  // And the live control, which needs the tokens, as the run above does:
+  // AKAHU_APP_TOKEN=… AKAHU_USER_TOKEN=… node scripts/review-shots.mjs --only settings-account-link-chosen
+  { name: 'settings-account-link-chosen', path: '/settings', fullPage: false, akahu: true, before: accountLink },
   { name: 'change-log', path: '/change-log' },
   { name: 'summary-member', path: '/', role: 'member' },
   { name: 'dashboard-dark', path: '/', theme: 'dark' },
