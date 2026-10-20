@@ -1,0 +1,8 @@
+Account number,Effective Date,Transaction Date,Description,Transaction Code,Particulars,Code,Reference,Other Party Name,Other Party Account Number,Other Party Particulars,Other Party Code,Other Party Reference,Amount,Balance
+99-9999-9999999-00,2026-09-01,2026-09-01,GOOD ROW,POS,,,,,,,,,-1.00,99.00
+99-9999-9999999-00,2026-02-30,2026-02-30,BAD DATE,POS,,,,,,,,,-1.00,98.00
+99-9999-9999999-00,2026-09-03,2026-09-03,BAD AMOUNT,POS,,,,,,,,,twelve,97.00
+99-9999-9999999-00,2026-09-04,2026-09-04,TOO FEW COLUMNS,POS,-1.00
+99-9999-9999999-00,2026-09-05,2026-09-05,"UNBALANCED QUOTE,POS,,,,,,,,,-1.00,96.00
+not-an-account,2026-09-06,2026-09-06,BAD ACCOUNT,POS,,,,,,,,,-1.00,95.00
+99-9999-9999999-00,2026-09-07,2026-09-07,LAST GOOD ROW,POS,,,,,,,,,-2.00,93.00
