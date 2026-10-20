@@ -174,6 +174,32 @@ const DATES = `from=${START}&to=${END}`
 const DESKTOP = { width: 1440, height: 900 }
 const PHONE = { width: 390, height: 844, phone: true }
 const tableShown = (p) => p.getByRole('table').first().waitFor()
+const syncSection = (p) => p.getByRole('region', { name: 'Run a Sync now' })
+
+/** Scrolls "Run a Sync now" into view and frames the Settings screen on it. */
+const syncShown = async (p) => {
+  await syncSection(p).scrollIntoViewIfNeeded()
+  await syncSection(p).waitFor()
+}
+
+/**
+ * A Sync the Admin runs, with its Accounts set up for it first: one linked and given a Cutover Date, one linked without
+ * one (which Sync leaves alone, and says so). Only for the run with made-up Akahu tokens set, which is what makes the
+ * control live; Akahu then refuses them, so the shot is of a run that failed, said why per Account, and wrote nothing.
+ */
+const syncRun = async (p) => {
+  const accounts = await api('GET', '/api/accounts')
+  const id = (name) => accounts.find((a) => a.name === name).id
+  await api('PUT', `/api/accounts/${id(ACCOUNTS.everyday.name)}/akahu-link`, { akahuAccountId: 'acc_example00000000000001' })
+  await api('PUT', `/api/accounts/${id(ACCOUNTS.everyday.name)}/cutover-date`, { cutoverDate: addDays(END, 1) })
+  await api('PUT', `/api/accounts/${id(ACCOUNTS.savings.name)}/akahu-link`, { akahuAccountId: 'acc_example00000000000002' })
+  await p.reload()
+  const button = syncSection(p).getByRole('button', { name: 'Run a Sync now' })
+  await button.waitFor()
+  await button.scrollIntoViewIfNeeded()
+  await button.click()
+  await syncSection(p).getByText(/^Sync (finished|did not finish)/).waitFor({ timeout: 30_000 })
+}
 const SHOTS = [
   { name: 'dashboard', path: '/' },
   { name: 'transactions', path: '/transactions' },
@@ -192,6 +218,11 @@ const SHOTS = [
   { name: 'rules-menu', path: '/rules', fullPage: false, before: async (p) => { await p.getByRole('button', { name: /^Actions for Rule/ }).first().click(); await p.getByRole('menu').waitFor() } },
   { name: 'budgets', path: '/budgets' },
   { name: 'settings', path: '/settings' },
+  // "Run a Sync now": its Setup-needed state, which is what an instance with no Akahu tokens sees.
+  { name: 'settings-sync', path: '/settings', fullPage: false, before: syncShown },
+  // And a run, which needs the tokens. They reach the Worker through the build, so this one cannot use --skip-build:
+  // AKAHU_APP_TOKEN=… AKAHU_USER_TOKEN=… node scripts/review-shots.mjs --only settings-sync-run
+  { name: 'settings-sync-run', path: '/settings', fullPage: false, akahu: true, before: syncRun },
   { name: 'change-log', path: '/change-log' },
   { name: 'summary-member', path: '/', role: 'member' },
   { name: 'dashboard-dark', path: '/', theme: 'dark' },
@@ -207,7 +238,10 @@ async function shootAll() {
   const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL })
   const problems = []
   try {
-    for (const shot of SHOTS.filter((s) => !only || only.test(s.name))) {
+    // A shot marked `akahu` needs both Akahu tokens in the environment, which `serverEnv` passes to the Worker. Without
+    // them Sync is switched off and there is nothing to photograph, so it is left out rather than failing.
+    const akahuOn = Boolean(process.env.AKAHU_APP_TOKEN && process.env.AKAHU_USER_TOKEN)
+    for (const shot of SHOTS.filter((s) => (!only || only.test(s.name)) && (!s.akahu || akahuOn))) {
       const { role = 'admin', theme = 'light', viewport = DESKTOP } = shot
       const context = await browser.newContext({ viewport, colorScheme: theme, ...(viewport.phone ? { isMobile: true, hasTouch: true } : {}) })
       await context.addCookies([{ name: 'fernledger_dev_as', value: role, domain: 'localhost', path: '/' }])

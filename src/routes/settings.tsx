@@ -4,6 +4,7 @@ import { useState, type ChangeEvent } from 'react'
 import { DatePicker } from '@/components/date-picker'
 import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { Status } from '@/components/status'
+import { SyncNow } from '@/components/sync-now'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { featuresQuery } from '@/lib/features'
@@ -61,6 +62,7 @@ function AdminSettings() {
     <>
       <SettingsForm saved={settings} />
       <CutoverDates />
+      <SyncNow />
       <SetupNeeded />
     </>
   )

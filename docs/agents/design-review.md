@@ -14,6 +14,7 @@ One foreground command, about two minutes. It gives a fresh local database (in `
 - `--skip-build` reuses `dist/` when nothing has changed since the last build.
 - `--out <folder>` puts them elsewhere. The default is `test-results/review-shots/`, which git ignores.
 - `PLAYWRIGHT_CHANNEL=msedge` (or `chrome`) uses a browser already on the machine, as the browser tests do.
+- A few screenshots need a feature the Deployer's secrets switch on, and are left out of a run without them. Akahu Sync is one: `AKAHU_APP_TOKEN=app_example AKAHU_USER_TOKEN=user_example node scripts/review-shots.mjs --only settings-sync-run` photographs a Sync the Admin ran, which Akahu then refuses (made-up tokens, so it is a failed run, which is the state worth reviewing). Use made-up tokens, never real ones. Secrets reach the Worker through the build, so a run like this cannot use `--skip-build`; a later run without them has to rebuild too.
 
 It exits 1 and names each screenshot that failed. The others are still taken.
 

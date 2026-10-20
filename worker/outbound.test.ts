@@ -17,7 +17,8 @@ import worker from './index'
 // it, as exactly this URL, once, from the one route that asks. With the secrets unset nothing may reach it.
 // Akahu is the one third party the Worker ever contacts, and only with both Akahu tokens set (ADR 0008, ADR 0010). It is not in
 // ALLOWED_HOSTS either: only the tests that set AKAHU_APP_TOKEN and AKAHU_USER_TOKEN may see it, as its own host, from the Admin's
-// route for listing Akahu accounts and from the Sync cron. With the tokens unset nothing may reach it.
+// route for listing Akahu accounts, from the Sync cron, and from "Run a Sync now", which is that same Sync started by hand.
+// With the tokens unset nothing may reach it.
 const ACCESS_HOST = env.ACCESS_TEAM_DOMAIN!
 const ALLOWED_HOSTS = [ACCESS_HOST]
 const CLOUDFLARE_API_URL = 'https://api.cloudflare.com/client/v4/graphql'
@@ -141,6 +142,9 @@ const EXERCISES: Exercise[] = [
   { route: 'GET /api/d1-usage', path: () => '/api/d1-usage' },
   // Akahu, the same way: with no tokens it answers Not set up (503) and goes nowhere. Only the run below that sets both reaches Akahu.
   { route: 'GET /api/akahu/accounts', path: () => '/api/akahu/accounts' },
+  // "Run a Sync now": the same, and it is the Admin's own Sync, so with the tokens set it asks Akahu for the Account linked
+  // above. With them unset it is Not set up (503) and contacts no one, exactly as the cron does.
+  { route: 'POST /api/sync/runs', path: () => '/api/sync/runs', opts: { method: 'POST', body: {} } },
   { route: 'GET /api/accounts', path: () => '/api/accounts' },
   { route: 'GET /api/change-log', path: () => '/api/change-log' },
   { route: 'GET /api/transactions', path: () => '/api/transactions?text=example&from=2026-01-01&sort=amount&dir=asc&transfers=exclude' },
@@ -192,6 +196,9 @@ async function exerciseEveryRoute(secrets?: Partial<Env>) {
     // A feature's route is Not set up (503) without its own secrets, and with them it reaches its call, which the recorder refuses (502).
     if (route === 'GET /api/d1-usage') expect(res.status, route).toBe(secrets?.CF_ANALYTICS_TOKEN ? 502 : 503)
     else if (route === 'GET /api/akahu/accounts') expect(res.status, route).toBe(secrets?.AKAHU_APP_TOKEN ? 502 : 503)
+    // A Sync reports what it did rather than failing: with the tokens set it reaches Akahu, the recorder refuses, and the
+    // Account comes back unfinished with a reason (200). Without them it never gets that far: Not set up (503).
+    else if (route === 'POST /api/sync/runs') expect(res.status, route).toBe(secrets?.AKAHU_APP_TOKEN ? 200 : 503)
     else if (route !== 'POST /api/imports/clear-history') expect(res.status, route).toBeLessThan(400)
   }
   for (const path of OTHER_PATHS) await call(path, {}, secrets)
@@ -239,11 +246,14 @@ describe('outbound calls', () => {
 
   // Akahu Sync: with both tokens set, the Admin's route for listing Akahu accounts is the only route that reaches Akahu, and it
   // reaches nothing else.
-  it('with the Akahu tokens set, contacts only api.akahu.io, from the Akahu route', { timeout: 30_000 }, async () => {
+  it('with the Akahu tokens set, contacts only api.akahu.io, from the Akahu route and a Sync the Admin runs', { timeout: 30_000 }, async () => {
     await exerciseEveryRoute(AKAHU_SECRETS)
 
     expect(hostsContacted()).toEqual([AKAHU_HOST])
-    expect(attempts).toHaveLength(1)
+    // Exactly two: listing the Akahu accounts, and one page of Transactions for the Account linked by the exercises, which
+    // "Run a Sync now" asks for. A third would be a route that reaches Akahu without ADR 0010's reason to.
+    expect(attempts).toHaveLength(2)
+    expect(attempts.filter((url) => url.includes('/transactions'))).toHaveLength(1)
   })
 
   // And on the cron: a linked Account is what makes Sync ask at all, so this is the one place the scheduled handler calls out.
