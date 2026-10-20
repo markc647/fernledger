@@ -15,6 +15,7 @@ import { formatBalance, formatDate } from '@/lib/format'
 import { describeCarryBefore, describeDiffering, describeLost, describeWaiting } from '@/lib/import-carry'
 import { countOnOrAfter, DAILY_ROW_WRITES, MAX_IMPORT_ROWS, previewChunks, REPLACE_SLICE, replaceWrites, WRITES_PER_ROW } from '@/lib/import-chunks'
 import { describeStop } from '@/lib/import-stop'
+import { nextDay } from '@/lib/iso-date'
 import { meQuery } from '@/lib/me'
 import { accountsQuery, carryPreviewQuery, importedRowsQuery } from '@/lib/queries'
 import { ImportStopped, runImport, type ImportSummary, type LostTransaction } from '@/lib/run-import'
@@ -80,7 +81,7 @@ function ImportFlow() {
     try {
       const summary = await runImport(
         file,
-        { accountName: accountName.trim() || undefined, cutoverDate: setCutover ? file.dateRange.to : undefined, replaceAccountId },
+        { accountName: accountName.trim() || undefined, cutoverDate: setCutover ? offeredCutover(file) : undefined, replaceAccountId },
         (sent, total) => setStep({ name: 'sending', sent, total }),
       )
       setStep({ name: 'done', summary })
@@ -388,7 +389,7 @@ function Preview(props: {
   const tooMany = count > MAX_IMPORT_ROWS
   const replaceButton = useRef<HTMLButtonElement>(null)
   // The Cutover Date that will apply to this Import: the one being set, else the Account's own.
-  const effectiveCutover = props.setCutover ? file.dateRange.to : (existing?.cutoverDate ?? null)
+  const effectiveCutover = props.setCutover ? offeredCutover(file) : (existing?.cutoverDate ?? null)
   // The Worker refuses a replace that would remove the old history and import nothing; the screen says so first.
   const nothingToReplaceWith = count > 0 && countOnOrAfter(file.rows, effectiveCutover) === count
   const firstRows = file.rows.slice(0, PREVIEW_ROWS)
@@ -597,6 +598,20 @@ function ReplaceDialog(props: {
 }
 
 /** Tells the Admin what the Account's Cutover Date will do to this file, and offers the file's last date as the Cutover Date. */
+/**
+ * The Cutover Date the screen offers for a file: the day **after** its last date.
+ *
+ * Offering the last date itself drops every row dated on it, because an Import skips rows on or after the Cutover Date, and it
+ * leaves the file's own ledger balance unchecked, because that balance is dated that same last day. For an Account linked to
+ * Akahu that was nearly harmless, since Sync covers the Cutover Date onwards; for one not linked, those Transactions were simply
+ * missing, and the balance that would have shown it was skipped too. Found importing real files on 2026-10-20.
+ *
+ * The day after is right either way: every row imports, the balance is checked, and Sync still starts where the file stops.
+ *
+ * A file's last date is a date the adapter produced, so `nextDay` always has one; the fallback keeps the type honest.
+ */
+const offeredCutover = (file: BankCsvResult) => nextDay(file.dateRange.to) ?? file.dateRange.to
+
 function CutoverChoice(props: { file: BankCsvResult; accountCutover: string | null; effective: string | null; setCutover: boolean; onSetCutover: (set: boolean) => void }) {
   const { file, accountCutover, effective } = props
   const dropped = countOnOrAfter(file.rows, effective)
@@ -607,8 +622,8 @@ function CutoverChoice(props: { file: BankCsvResult; accountCutover: string | nu
       <label htmlFor="set-cutover" className="flex min-h-11 cursor-pointer items-start gap-3 py-2">
         <input id="set-cutover" type="checkbox" className="mt-0.5 size-5 shrink-0" checked={props.setCutover} onChange={(event) => props.onSetCutover(event.target.checked)} />
         <span>
-          {accountCutover === null ? 'Set' : 'Change'} the Cutover Date to the last date in this file, {formatDate(file.dateRange.to)}. Rows dated on or after it are not imported. This is for an Account you'll sync with Akahu; leave it
-          unticked otherwise.
+          {accountCutover === null ? 'Set' : 'Change'} the Cutover Date to the day after the last date in this file, {formatDate(offeredCutover(file))}. Every row in this file is imported, and Akahu Sync covers that day onwards
+          once the Account is linked.
         </span>
       </label>
       {effective !== null && (

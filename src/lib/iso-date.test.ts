@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isoDateParts } from './iso-date'
+import { isoDateParts, nextDay } from './iso-date'
 
 describe('isoDateParts (a stored date, if it is one)', () => {
   it('reads the year, the month from 1 and the day', () => {
@@ -29,5 +29,25 @@ describe('isoDateParts (a stored date, if it is one)', () => {
     ['the NZ written form', '8/10/2026'],
   ])('is nothing for %s', (_why, date) => {
     expect(isoDateParts(date)).toBeUndefined()
+  })
+})
+
+describe('nextDay', () => {
+  it('steps one day', () => {
+    expect(nextDay('2026-10-01')).toBe('2026-10-02')
+  })
+
+  it('rolls over a month and a year', () => {
+    expect(nextDay('2026-09-30')).toBe('2026-10-01')
+    expect(nextDay('2026-12-31')).toBe('2027-01-01')
+  })
+
+  it('knows which Februaries have 29 days', () => {
+    expect(nextDay('2024-02-28')).toBe('2024-02-29')
+    expect(nextDay('2026-02-28')).toBe('2026-03-01')
+  })
+
+  it('has no answer for something that is not a stored date', () => {
+    for (const value of ['', '2026-02-30', '8 Oct 2026', '2026-13-01']) expect(nextDay(value)).toBeUndefined()
   })
 })

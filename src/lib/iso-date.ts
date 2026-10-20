@@ -16,3 +16,13 @@ export function isoDateParts(value: string) {
   const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
   return day <= (month === 2 && !leap ? 28 : DAYS_IN_MONTH[month - 1]!) ? { year, month, day } : undefined
 }
+
+/**
+ * The day after a stored date, or undefined if it is not one. Calendar dates only: no time zone is involved, so UTC is used to
+ * step the day and month and year roll over with it.
+ */
+export function nextDay(value: string): string | undefined {
+  const parts = isoDateParts(value)
+  if (!parts) return undefined
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1)).toISOString().slice(0, 10)
+}
