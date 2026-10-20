@@ -149,3 +149,32 @@ test('fields and the save button are at least 44px tall', async ({ page, context
     expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(44)
   }
 })
+
+// The Account Link (spec 29), on the same screen as the Cutover Dates a Sync depends on. The browser tests run with no Akahu
+// tokens, so what is reachable here is the Setup-needed state: the section says so and asks the Worker for nothing, because the
+// route would answer "Not set up" and contact no one. Linking itself is pinned at the Worker boundary in
+// worker/account-link.test.ts, and the one call to Akahu in worker/outbound.test.ts.
+test('the Admin is told to set Akahu up before anything can be linked, and nothing asks Akahu', async ({ page, context }) => {
+  const asked: string[] = []
+  await page.route('**/api/akahu/**', (route) => {
+    asked.push(route.request().url())
+    return route.abort()
+  })
+  await signInAs(context, 'admin')
+  await page.goto('/settings')
+
+  const section = page.getByRole('region', { name: 'Akahu Sync' })
+  await expect(section).toContainText("Akahu Sync isn't set up yet, so there is nothing to link to.")
+  // What to add is said once on this screen, in Setup needed below.
+  await expect(section).not.toContainText('AKAHU_APP_TOKEN')
+  await expect(section.getByRole('button', { name: 'Show my Akahu accounts' })).toHaveCount(0)
+  // The list of Akahu accounts is never fetched as the page loads: asking contacts Akahu (ADR 0010).
+  expect(asked).toEqual([])
+})
+
+test('a Member sees no Account Link controls', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  await page.goto('/settings')
+  await expect(page.getByText('Only the Admin can change settings.')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Akahu Sync' })).toHaveCount(0)
+})

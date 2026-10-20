@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, type ChangeEvent } from 'react'
+import { AccountLink } from '@/components/account-link'
 import { DatePicker } from '@/components/date-picker'
 import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { Status } from '@/components/status'
@@ -62,6 +63,7 @@ function AdminSettings() {
     <>
       <SettingsForm saved={settings} />
       <CutoverDates />
+      <AccountLink />
       <SyncNow />
       <SetupNeeded />
     </>
