@@ -29,3 +29,14 @@ export function nzDayStart(date: string): string {
   }
   throw new Error('No NZ midnight for that date')
 }
+
+/**
+ * The UTC instant (ISO 8601) of a wall-clock time (`HH:MM`) on an NZ date, or null when NZ had no such time (clocks went forward
+ * past it) or had it twice (clocks went back), because then the instant is a guess and Fernledger does not guess.
+ */
+export function nzClockTime(date: string, time: string): string | null {
+  const instants = [12, 13]
+    .map((offsetHours) => new Date(Date.parse(`${date}T${time}:00Z`) - offsetHours * 3_600_000))
+    .filter((instant) => midnightCheck.format(instant).replace(',', '') === `${date} ${time}`)
+  return instants.length === 1 ? instants[0]!.toISOString() : null
+}
