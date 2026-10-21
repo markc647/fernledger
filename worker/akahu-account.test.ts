@@ -100,6 +100,11 @@ describe('what Sync keeps of an Akahu account', () => {
     ])
   })
 
+  it('keeps an instant as an ISO instant, and nothing for one that is not an instant, which the screen could not write as a time', () => {
+    const details = toDetails(parse({ ...full(), refreshed: { balance: '2026-10-21T15:46:00+13:00', meta: 'yesterday' } }).data!)
+    expect(details).toMatchObject({ akahuRefreshedBalanceAt: '2026-10-21T02:46:00.000Z', akahuRefreshedMetaAt: null, akahuRefreshedTransactionsAt: null })
+  })
+
   it('keeps a balance with no available figure as a current balance alone', () => {
     const details = toDetails(parse({ ...full(), balance: { currency: 'NZD', current: -12.34 } }).data!)
     expect(details).toMatchObject({ akahuBalanceCurrency: 'NZD', akahuBalanceCurrentCents: -1234, akahuBalanceAvailableCents: null })

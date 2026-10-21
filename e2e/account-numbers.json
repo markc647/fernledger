@@ -1,5 +1,6 @@
 {
   "specs": {
+    "accounts-akahu.spec.ts": [27, 28, 29, 32],
     "budgets.spec.ts": [57, 58],
     "categories.spec.ts": [88, 89],
     "change-log.spec.ts": [90, 91],

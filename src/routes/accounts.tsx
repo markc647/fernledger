@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { RowButton, useFocusBack } from '@/components/row-actions'
 import { focusPanel, RowPanel, useDrafts, type Drafts } from '@/components/row-panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { akahuWords } from '@/lib/akahu'
+import { formatBalance, formatDateTime } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { accountsQuery } from '@/lib/queries'
 import { api } from '@/lib/api'
@@ -15,7 +17,24 @@ export const Route = createFileRoute('/accounts')({
   staticData: { nav: { label: 'Accounts', group: 'setup', order: 30, member: { group: 'reports', order: 60 } } },
 })
 
-type Account = { id: number; name: string; accountNumber: string }
+// What Akahu said about a linked Account, as Sync last kept it (worker/akahu-details.ts). Null for an Account that is not linked, and until Sync has read it.
+// The logo URL Akahu gives is kept by the Worker and is not here: nothing on this page draws it or asks Akahu's CDN for it (ADR 0010).
+type Account = {
+  id: number
+  name: string
+  accountNumber: string
+  akahuAccountId: string | null
+  akahuName: string | null
+  akahuStatus: string | null
+  akahuType: string | null
+  akahuConnectionName: string | null
+  akahuBalanceCurrency: string | null
+  akahuBalanceCurrentCents: number | null
+  akahuBalanceAvailableCents: number | null
+  akahuRefreshedBalanceAt: string | null
+  akahuRefreshedMetaAt: string | null
+  akahuRefreshedTransactionsAt: string | null
+}
 
 /** The id of an Account's Rename button, which focus goes back to when its rename form is closed. */
 const renameId = (id: number) => `account-${id}-rename`
@@ -40,6 +59,7 @@ function Accounts() {
   const columns: Column<Account>[] = [
     { key: 'name', header: 'Name', cell: (account) => account.name },
     { key: 'number', header: 'Account number', cell: (account) => <span className="tabular-nums">{account.accountNumber}</span> },
+    { key: 'akahu', header: 'From Akahu', cell: (account) => <AkahuDetails account={account} /> },
   ]
   if (me?.role === 'admin')
     columns.push({
@@ -93,6 +113,42 @@ function Accounts() {
           />
         </div>
       )}
+    </>
+  )
+}
+
+/** What Akahu says about the Account: the bank, Akahu's own name for it (a wrong link shows at a glance), its type and status, its balance and when each part was refreshed, in NZ time. */
+function AkahuDetails({ account }: { account: Account }) {
+  // A page that does not know the Account is linked (an older answer) reads the same as one that is not.
+  if (!account.akahuAccountId) return <span className="text-muted-foreground">Not linked to Akahu</span>
+  if (account.akahuName === null) return <span>Linked to Akahu. The next Sync will read its details.</span>
+  const { akahuBalanceCurrentCents: current, akahuBalanceAvailableCents: available, akahuBalanceCurrency: currency } = account
+  const balance =
+    current === null
+      ? 'Akahu did not give one'
+      : [formatBalance(current), currency, available !== null && available !== current ? `(${formatBalance(available)} available)` : null].filter(Boolean).join(' ')
+  const refreshed = [
+    ['Balance refreshed', account.akahuRefreshedBalanceAt],
+    ['Details refreshed', account.akahuRefreshedMetaAt],
+    ['Transactions refreshed', account.akahuRefreshedTransactionsAt],
+  ] as const
+  return (
+    <dl className="grid grid-cols-[max-content_1fr] gap-x-3">
+      <Fact term="Bank">{account.akahuConnectionName}</Fact>
+      <Fact term="Akahu's name">{account.akahuName}</Fact>
+      <Fact term="Type">{account.akahuType && akahuWords(account.akahuType)}</Fact>
+      <Fact term="Status">{account.akahuStatus && akahuWords(account.akahuStatus)}</Fact>
+      <Fact term="Balance">{balance}</Fact>
+      {refreshed.map(([term, at]) => at !== null && <Fact key={term} term={term}>{formatDateTime(at)}</Fact>)}
+    </dl>
+  )
+}
+
+function Fact({ term, children }: { term: string; children: ReactNode }) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{term}</dt>
+      <dd>{children}</dd>
     </>
   )
 }

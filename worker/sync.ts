@@ -249,10 +249,16 @@ export function toDetails(account: AkahuAccount): AccountDetails {
     akahuBalanceCurrency: balance?.currency ?? null,
     akahuBalanceCurrentCents: balance === undefined ? null : toCents(balance.current),
     akahuBalanceAvailableCents: balance?.available === undefined ? null : toCents(balance.available),
-    akahuRefreshedBalanceAt: refreshed?.balance ?? null,
-    akahuRefreshedMetaAt: refreshed?.meta ?? null,
-    akahuRefreshedTransactionsAt: refreshed?.transactions ?? null,
+    akahuRefreshedBalanceAt: instant(refreshed?.balance),
+    akahuRefreshedMetaAt: instant(refreshed?.meta),
+    akahuRefreshedTransactionsAt: instant(refreshed?.transactions),
   }
+}
+
+// An instant written as `toISOString` does, or nothing for one that is missing or is not a moment (the Accounts screen writes it as a time).
+const instant = (value: string | undefined): string | null => {
+  const at = new Date(value ?? NaN)
+  return Number.isNaN(at.getTime()) ? null : at.toISOString()
 }
 
 /** The NZ date `days` before `date`, both `YYYY-MM-DD`. */
