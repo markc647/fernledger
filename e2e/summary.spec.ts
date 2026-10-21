@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
-import { BALANCES, CHECKS, difference, FEATURES, latestCheck, stubBalances } from './balances-helpers'
+import { BALANCES, CHECKS, difference, FEATURES, latestCheck, stubAccount, stubBalances } from './balances-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { chooseTextSize, navLink, openNavGroup } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
@@ -204,6 +204,31 @@ test.describe('the Balances table: Checked and Sync', () => {
     }
     const [good, bad] = [cell(balances, 'Example everyday', 'Sync').locator('svg'), cell(balances, 'Example savings', 'Sync').locator('svg')]
     expect(await good.innerHTML()).not.toBe(await bad.innerHTML())
+  })
+
+  // An Account waiting on its bank link puts a long line in the Balance column, which squeezes the rest. The page's `overflow-wrap: anywhere` (index.css) then split the
+  // short columns' words down the middle ("Accou/nt", "Checke/d", "Synce/d"), so those columns keep their words whole. One line box per heading means nothing was split.
+  test('keeps the short columns\' words whole while an Account waits on the bank link for its balance', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await stubBalances(page, {
+      syncSetUp: true,
+      checks: { differences: [], accounts: [] },
+      balances: [stubAccount(1, 'Hnry', 70_717, true), { ...stubAccount(2, 'Mark', 0, true), balanceCents: null, cutoverDate: '2026-10-01' }, stubAccount(3, 'On Call', 50_184, true)],
+    })
+    await page.goto('/')
+    const balances = page.getByRole('region', { name: 'Balances' })
+    await expect(balances.getByText('come from the bank link')).toBeVisible() // the long line that squeezes the other columns
+
+    const lineBoxes = (locator: Locator) =>
+      locator.evaluate((element) => {
+        const range = document.createRange()
+        range.selectNodeContents(element)
+        return range.getClientRects().length
+      })
+    for (const header of ['Account', 'Checked', 'Sync']) {
+      expect(await lineBoxes(balances.getByRole('columnheader', { name: header, exact: true })), `the ${header} heading is on one line`).toBe(1)
+    }
+    expect(await lineBoxes(balances.getByText('Synced', { exact: true }).first()), 'Synced is on one line').toBe(1)
   })
 
   test('shows both as labelled rows of the Account\'s card on a phone', async ({ page, context }) => {
