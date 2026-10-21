@@ -22,6 +22,7 @@ const none = {
   akahuRefreshedBalanceAt: null,
   akahuRefreshedMetaAt: null,
   akahuRefreshedTransactionsAt: null,
+  akahuSyncedAt: null,
 }
 
 const ACCOUNTS = [
@@ -44,6 +45,7 @@ const ACCOUNTS = [
     akahuRefreshedBalanceAt: '2026-10-21T02:46:00.000Z',
     akahuRefreshedMetaAt: '2026-10-21T02:47:00.000Z',
     akahuRefreshedTransactionsAt: '2026-10-20T18:05:00.000Z',
+    akahuSyncedAt: '2026-10-20T18:00:00.000Z',
   },
   // Not linked.
   { ...none, id: 2, name: 'Example savings', accountNumber: '99-9999-9999999-28', cutoverDate: null },
@@ -71,7 +73,7 @@ async function open(page: Page, context: Parameters<typeof signInAs>[0], role: '
   return page.getByRole('table', { name: 'Accounts' }).getByRole('row')
 }
 
-test('a linked Account shows the bank, Akahu\'s name beside Fernledger\'s, its type and status, the balance with its currency and when Akahu refreshed it, in NZ time', async ({ page, context }) => {
+test('a linked Account shows the bank, Akahu\'s name beside Fernledger\'s, its type and status, the balance with its currency, when Akahu last read the bank and when Fernledger last Synced it, in NZ time', async ({ page, context }) => {
   const row = (await open(page, context)).filter({ hasText: 'Example everyday' })
   await expect(row.getByRole('cell', { name: 'Example everyday', exact: true })).toBeVisible()
   const akahu = row.getByRole('term').locator('xpath=ancestor::dl[1]')
@@ -82,9 +84,10 @@ test('a linked Account shows the bank, Akahu\'s name beside Fernledger\'s, its t
   expect(await fact('Status')).toBe('Active')
   expect(await fact('Balance')).toBe('$707.17 NZD ($700.10 available)')
   // 02:46 UTC on 21 October is 3:46 pm that day in NZ (UTC+13), and 18:05 UTC on the 20th is 7:05 am on the 21st.
-  expect(await fact('Balance refreshed')).toBe('Wed 21 Oct 2026, 3:46 pm')
-  expect(await fact('Details refreshed')).toBe('Wed 21 Oct 2026, 3:47 pm')
-  expect(await fact('Transactions refreshed')).toBe('Wed 21 Oct 2026, 7:05 am')
+  expect((await fact('Akahu last read the bank')).split('\n')).toEqual(['balance: Wed 21 Oct 2026, 3:46 pm', 'details: Wed 21 Oct 2026, 3:47 pm', 'Transactions: Wed 21 Oct 2026, 7:05 am'])
+  // Fernledger's own last Sync is a different time from those, and the screen keeps the two apart: 18:00 UTC on the 20th is 7:00 am on the 21st.
+  expect(await fact('Last Sync')).toBe('Wed 21 Oct 2026, 7:00 am')
+  await expect(row).not.toContainText('refreshed')
 })
 
 test('an Account with no Akahu link shows none of it, and says it is not linked', async ({ page, context }) => {
@@ -101,7 +104,9 @@ test('a linked Account whose balance and optional fields are missing shows what 
   await expect(row.locator('dt:text-is("Type") + dd')).toHaveText('Credit card')
   await expect(row.locator('dt:text-is("Status") + dd')).toHaveText('Inactive')
   await expect(row.locator('dt:text-is("Balance") + dd')).toHaveText('Akahu did not give one')
-  await expect(row.getByText('refreshed')).toHaveCount(0)
+  await expect(row.getByText('Akahu last read the bank')).toHaveCount(0)
+  // Nothing has Synced it, and it says so rather than leaving a blank.
+  await expect(row.locator('dt:text-is("Last Sync") + dd')).toHaveText('Never synced')
   await expect(row).not.toContainText(/null|undefined|NaN|Invalid/)
 })
 
@@ -111,7 +116,7 @@ test('a linked Account Akahu gave no status, type or bank for shows the lines it
   await page.goto('/accounts')
   const row = page.getByRole('table', { name: 'Accounts' }).getByRole('row').filter({ hasText: 'Example card' })
   await expect(row.locator("dt:text-is(\"Akahu's name\") + dd")).toHaveText('EXAMPLE CARD')
-  await expect(row.getByRole('term')).toHaveText(["Akahu's name", 'Balance'])
+  await expect(row.getByRole('term')).toHaveText(["Akahu's name", 'Balance', 'Last Sync'])
 })
 
 test('a linked Account that Sync has not read yet says so', async ({ page, context }) => {

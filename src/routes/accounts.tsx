@@ -24,6 +24,8 @@ type Account = {
   name: string
   accountNumber: string
   akahuAccountId: string | null
+  /** When Fernledger last finished a Sync of the Account; Akahu's own `refreshed` times below are when Akahu last read the bank. */
+  akahuSyncedAt: string | null
   akahuName: string | null
   akahuStatus: string | null
   akahuType: string | null
@@ -117,7 +119,7 @@ function Accounts() {
   )
 }
 
-/** What Akahu says about the Account: the bank, Akahu's own name for it (a wrong link shows at a glance), its type and status, its balance and when each part was refreshed, in NZ time. */
+/** What Akahu says about the Account: the bank, Akahu's own name for it (a wrong link shows at a glance), its type and status, its balance, when Akahu last read the bank for each part and when Fernledger last Synced it, in NZ time. */
 function AkahuDetails({ account }: { account: Account }) {
   // A page that does not know the Account is linked (an older answer) reads the same as one that is not.
   if (!account.akahuAccountId) return <span className="text-muted-foreground">Not linked to Akahu</span>
@@ -127,11 +129,14 @@ function AkahuDetails({ account }: { account: Account }) {
     current === null
       ? 'Akahu did not give one'
       : [formatBalance(current), currency, available !== null && available !== current ? `(${formatBalance(available)} available)` : null].filter(Boolean).join(' ')
-  const refreshed = [
-    ['Balance refreshed', account.akahuRefreshedBalanceAt],
-    ['Details refreshed', account.akahuRefreshedMetaAt],
-    ['Transactions refreshed', account.akahuRefreshedTransactionsAt],
-  ] as const
+  // Akahu's own `refreshed` times: when Akahu last read the bank, which is not when Fernledger last Synced, and does not move until Akahu reads it again.
+  const read = (
+    [
+      ['balance', account.akahuRefreshedBalanceAt],
+      ['details', account.akahuRefreshedMetaAt],
+      ['Transactions', account.akahuRefreshedTransactionsAt],
+    ] as const
+  ).filter(([, at]) => at !== null)
   return (
     <dl className="grid grid-cols-[max-content_1fr] gap-x-3">
       <DetailLine term="Bank">{account.akahuConnectionName}</DetailLine>
@@ -139,7 +144,15 @@ function AkahuDetails({ account }: { account: Account }) {
       <DetailLine term="Type">{account.akahuType && akahuWords(account.akahuType)}</DetailLine>
       <DetailLine term="Status">{account.akahuStatus && akahuWords(account.akahuStatus)}</DetailLine>
       <DetailLine term="Balance">{balance}</DetailLine>
-      {refreshed.map(([term, at]) => at !== null && <DetailLine key={term} term={term}>{formatDateTime(at)}</DetailLine>)}
+      <DetailLine term="Last Sync">{account.akahuSyncedAt === null ? 'Never synced' : formatDateTime(account.akahuSyncedAt)}</DetailLine>
+      <DetailLine term="Akahu last read the bank">
+        {read.length > 0 &&
+          read.map(([what, at]) => (
+            <div key={what}>
+              {what}: {formatDateTime(at!)}
+            </div>
+          ))}
+      </DetailLine>
     </dl>
   )
 }

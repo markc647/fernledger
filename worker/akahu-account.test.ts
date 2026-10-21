@@ -170,7 +170,8 @@ describe('the routes that carry it', () => {
     await env.DB.prepare(
       `UPDATE accounts SET akahu_name = 'EXAMPLE EVERYDAY', akahu_status = 'ACTIVE', akahu_type = 'CHECKING', akahu_connection_name = 'Example Bank',
          akahu_connection_logo = 'https://cdn.akahu.nz/logos/connections/conn_example0000000000001', akahu_balance_currency = 'NZD',
-         akahu_balance_current_cents = 70717, akahu_balance_available_cents = 70010, akahu_refreshed_balance_at = '2026-10-21T02:46:00.000Z' WHERE id = ?`,
+         akahu_balance_current_cents = 70717, akahu_balance_available_cents = 70010, akahu_refreshed_balance_at = '2026-10-21T02:46:00.000Z',
+         akahu_synced_at = '2026-10-20T18:00:00.000Z' WHERE id = ?`,
     )
       .bind(id)
       .run()
@@ -190,6 +191,7 @@ describe('the routes that carry it', () => {
         akahuRefreshedBalanceAt: '2026-10-21T02:46:00.000Z',
         akahuRefreshedMetaAt: null,
         akahuRefreshedTransactionsAt: null,
+        akahuSyncedAt: '2026-10-20T18:00:00.000Z',
       }),
     ])
   })
@@ -197,6 +199,6 @@ describe('the routes that carry it', () => {
   it('lists an Account that is not linked with none of it', async () => {
     await env.DB.prepare("INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-02', 'Savings')").run()
     const [account] = (await (await list('member')).json()) as Record<string, unknown>[]
-    expect(account).toMatchObject({ akahuAccountId: null, akahuName: null, akahuBalanceCurrentCents: null, akahuRefreshedBalanceAt: null })
+    expect(account).toMatchObject({ akahuAccountId: null, akahuName: null, akahuBalanceCurrentCents: null, akahuRefreshedBalanceAt: null, akahuSyncedAt: null })
   })
 })
