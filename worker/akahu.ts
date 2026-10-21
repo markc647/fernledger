@@ -45,7 +45,11 @@ const EVENTS: Record<AkahuFailure, string> = {
   unreadable: 'akahu.unreadable',
 }
 
-/** What Akahu gives for one Transaction, narrowed to the fields Fernledger stores. Anything else in the object is ignored. */
+/**
+ * What Akahu gives for one Transaction (developers.akahu.nz, "The Transaction Model"), all of it kept (ticket 43). Anything else in the object is ignored.
+ * Only the first seven are required. A row with no category, merchant, balance or meta is ordinary, and a strict parse of the optional ones would
+ * make a page unreadable, and the Account with it, over a field Fernledger only keeps.
+ */
 export const akahuTransaction = z.object({
   _id: z.string(),
   _account: z.string(),
@@ -58,6 +62,22 @@ export const akahuTransaction = z.object({
   amount: z.number(),
   type: z.string(),
   merchant: z.optional(z.object({ name: z.string() })),
+  // Card Transactions only. The NZFCC category and the personal-finance group above it. Shown as Akahu's, and used for nothing else.
+  category: z.optional(
+    z.object({
+      _id: z.optional(z.string()),
+      name: z.optional(z.string()),
+      groups: z.optional(z.object({ personal_finance: z.optional(z.object({ _id: z.optional(z.string()), name: z.optional(z.string()) })) })),
+    }),
+  ),
+  // Dollars: the running balance after this row, where the bank supplies it.
+  balance: z.optional(z.number()),
+  // Content hash, scoped to the account.
+  hash: z.optional(z.string()),
+  // ISO 8601 instants, kept as Akahu wrote them.
+  updated_at: z.optional(z.string()),
+  posted_date: z.optional(z.string()),
+  _connection: z.optional(z.string()),
   meta: z.optional(
     z.object({
       particulars: z.optional(z.string()),

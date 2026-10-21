@@ -1,8 +1,9 @@
 // Layout reference: docs/bank-formats/kiwibank.md
 //
-// Kiwibank writes the time of an EFTPOS purchase at the end of its description (`POS W/D Example Store-12:07`), because it gives Akahu
-// a date and nothing else. This file reads it. It is apart from kiwibank.ts so the Worker can use it without the CSV parser's imports,
-// and it is Kiwibank's alone: another bank's description is never read this way (worker/sync.ts asks isKiwibank first).
+// Kiwibank writes the time of an EFTPOS purchase at the end of its description (`POS W/D Example Store-12:07`), because it gives Akahu a date and
+// nothing else. This file reads it. It is Kiwibank's alone, kept out of worker/sync.ts so no other bank's description is read this way: Sync asks
+// isKiwibank first. It sits here and not in src/lib/bank-csv with the CSV adapters because the API's declarations are built from worker/ alone
+// (tsconfig.api-types.json: rootDir), so a Worker file cannot import from src/lib.
 
 /** `-HH:MM` at the very end, a 24-hour time: hours 00-23 and minutes 00-59. */
 const EFTPOS_TIME = /-([01]\d|2[0-3]):([0-5]\d)$/

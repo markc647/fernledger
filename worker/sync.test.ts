@@ -667,3 +667,172 @@ describe('the Account details Sync keeps', () => {
     })
   })
 })
+
+// Ticket 43: every other field Akahu sends for a Transaction is kept. All of it is made up (conn_example…, nzfcc_example…).
+describe('the rest of an Akahu Transaction', () => {
+  const full = {
+    category: { _id: 'nzfcc_example0000000001', name: 'Example category', groups: { personal_finance: { _id: 'group_example00000001', name: 'Example group' } } },
+    balance: 707.17,
+    hash: 'acc_example0000000000001-0123456789abcdef',
+    updated_at: '2026-10-16T01:02:03.000Z',
+    posted_date: '2026-10-15T11:00:00.000Z',
+    _connection: 'conn_example0000000000001',
+  }
+  const kept = async () =>
+    (
+      await env.DB.prepare(
+        `SELECT akahu_category_id, akahu_category_name, akahu_category_group_id, akahu_category_group_name, akahu_balance_cents, akahu_hash,
+                akahu_updated_at, akahu_posted_date, akahu_connection_id, bank_time_from_memo FROM transactions`,
+      ).all()
+    ).results
+  const NOTHING = {
+    akahu_category_id: null,
+    akahu_category_name: null,
+    akahu_category_group_id: null,
+    akahu_category_group_name: null,
+    akahu_balance_cents: null,
+    akahu_hash: null,
+    akahu_updated_at: null,
+    akahu_posted_date: null,
+    akahu_connection_id: null,
+    bank_time_from_memo: null,
+  }
+  const connection = (name: string | null) => {
+    accountsAnswer = () => asJson({ items: [{ _id: LINKED, name: 'EVERYDAY EXAMPLE', ...(name === null ? {} : { connection: { name } }) }] })
+  }
+
+  it('stores the category, balance, hash, update and posted dates and connection, and the balance as integer cents', async () => {
+    stubAkahu(() => onePage([transaction(full)]))
+    await runSync()
+    expect(await kept()).toEqual([
+      {
+        ...NOTHING,
+        akahu_category_id: 'nzfcc_example0000000001',
+        akahu_category_name: 'Example category',
+        akahu_category_group_id: 'group_example00000001',
+        akahu_category_group_name: 'Example group',
+        akahu_balance_cents: 70717,
+        akahu_hash: 'acc_example0000000000001-0123456789abcdef',
+        akahu_updated_at: '2026-10-16T01:02:03.000Z',
+        akahu_posted_date: '2026-10-15T11:00:00.000Z',
+        akahu_connection_id: 'conn_example0000000000001',
+      },
+    ])
+  })
+
+  it('takes a row with none of the optional fields as ordinary, and keeps them as not known', async () => {
+    stubAkahu(() => onePage([transaction()]))
+    await runSync()
+    expect(await kept()).toEqual([NOTHING])
+    expect(logged.join(' ')).toContain('sync.done')
+  })
+
+  // A strict parse would fail the whole page, and the Account with it (as ticket 42's picker found).
+  it.each([
+    ['a category with no group', { category: { _id: 'nzfcc_example0000000001', name: 'Example category' } }],
+    ['a category with a group that is empty', { category: { _id: 'nzfcc_example0000000001', name: 'Example category', groups: {} } }],
+    ['a category with only an ID', { category: { _id: 'nzfcc_example0000000001' } }],
+    ['an empty category', { category: {} }],
+    ['a field Fernledger does not know', { somethingNew: { nested: true } }],
+  ])('still stores the page when a row has %s', async (_, over) => {
+    stubAkahu(() => onePage([transaction(over), transaction({ _id: 'trans_0000000000000000002' })]))
+    await runSync()
+    expect(await rows()).toHaveLength(2)
+    expect(logged.join(' ')).toContain('sync.done')
+  })
+
+  it('stores a balance of zero, which is a balance and not an absent one', async () => {
+    stubAkahu(() => onePage([transaction({ balance: 0 })]))
+    await runSync()
+    expect((await kept())[0]).toMatchObject({ akahu_balance_cents: 0 })
+  })
+
+  it('updates all of them when Akahu has since changed the row, and clears what it stops sending', async () => {
+    stubAkahu(() => onePage([transaction(full)]))
+    await runSync()
+    stubAkahu(() =>
+      onePage([
+        transaction({
+          category: { _id: 'nzfcc_example0000000002', name: 'Another category' },
+          balance: 650.5,
+          hash: 'acc_example0000000000001-fedcba9876543210',
+          updated_at: '2026-10-17T00:00:00.000Z',
+          _connection: 'conn_example0000000000002',
+        }),
+      ]),
+    )
+    await runSync()
+    expect(await kept()).toEqual([
+      {
+        ...NOTHING,
+        akahu_category_id: 'nzfcc_example0000000002',
+        akahu_category_name: 'Another category',
+        akahu_balance_cents: 65050,
+        akahu_hash: 'acc_example0000000000001-fedcba9876543210',
+        akahu_updated_at: '2026-10-17T00:00:00.000Z',
+        akahu_connection_id: 'conn_example0000000000002',
+      },
+    ])
+  })
+
+  describe('the EFTPOS time in a Kiwibank description', () => {
+    const eftpos = (description: string, over: Record<string, unknown> = {}) => transaction({ description, date: '2026-10-15T11:00:00.000Z', ...over })
+    const bankTime = async () => (await kept())[0]!.bank_time_from_memo
+
+    it('is read as an NZ time, and the description and memo stay as the bank wrote them', async () => {
+      connection('Kiwibank')
+      stubAkahu(() => onePage([eftpos('POS W/D Example Store-12:07')]))
+      await runSync()
+      // 11:00 UTC is NZ midnight at the start of the 16th, on summer time (UTC+13), so 12:07 is 23:07 UTC the day before.
+      expect(await bankTime()).toBe('2026-10-15T23:07:00.000Z')
+      expect((await rows())[0]).toMatchObject({ description: 'POS W/D Example Store-12:07', bank_memo: 'POS W/D Example Store-12:07', has_bank_time: 0, akahu_date_raw: '2026-10-15T11:00:00.000Z' })
+    })
+
+    it.each([
+      ['has no time', 'DIRECT DEBIT Example Energy'],
+      ['has an impossible one', 'POS W/D Example Store-25:99'],
+      ['has no colon', 'POS W/D Example Store-1207'],
+      ['has no dash', 'POS W/D Example Store 12:07'],
+      ['has one mid-string', 'POS W/D Example-12:07 Store'],
+    ])('is not read when the description %s', async (_, description) => {
+      connection('Kiwibank')
+      stubAkahu(() => onePage([eftpos(description)]))
+      await runSync()
+      expect(await bankTime()).toBeNull()
+      expect((await rows())[0]).toMatchObject({ bank_memo: description })
+    })
+
+    it('is not read from another bank, even in the same words', async () => {
+      connection('Example Bank')
+      stubAkahu(() => onePage([eftpos('POS W/D Example Store-12:07')]))
+      await runSync()
+      expect(await bankTime()).toBeNull()
+    })
+
+    it('is not read when the bank is not known', async () => {
+      connection(null)
+      stubAkahu(() => onePage([eftpos('POS W/D Example Store-12:07')]))
+      await runSync()
+      expect(await bankTime()).toBeNull()
+    })
+
+    it('uses the bank an earlier Sync learned when this one cannot say', async () => {
+      connection('Kiwibank')
+      stubAkahu(() => onePage([]))
+      await runSync()
+      accountsAnswer = () => asJson({}, 500)
+      stubAkahu(() => onePage([eftpos('POS W/D Example Store-12:07')]))
+      await env.DB.prepare('UPDATE accounts SET akahu_synced_at = NULL WHERE id = ?').bind(accountId).run()
+      await runSync()
+      expect(await bankTime()).toBe('2026-10-15T23:07:00.000Z')
+    })
+
+    it('reads a clock time NZ never had as no time at all', async () => {
+      connection('Kiwibank')
+      // 2026-09-27 is the day clocks went forward: 02:30 never happened.
+      stubAkahu(() => onePage([eftpos('POS W/D Example Store-02:30', { date: '2026-09-26T12:00:00.000Z' })]))
+      await runSync()
+      expect(await bankTime()).toBeNull()
+    })
+  })
+})
