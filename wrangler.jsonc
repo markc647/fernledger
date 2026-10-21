@@ -20,7 +20,7 @@
   "d1_databases": [{ "binding": "DB", "database_name": "fernledger", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "fernledger-backups" }],
   "triggers": {
-    // UTC. Daily Sync ~06:00-07:00 NZ, Sync retry ~10:00-11:00 NZ, weekly backup Sunday.
+    // UTC. Daily Sync ~01:30-02:30 NZ; backup and Rules re-run carry-on ~03:00-04:00 NZ; weekly backup start Monday ~04:00-05:00 NZ.
     "crons": ["30 13 * * *", "0 15 * * *", "0 16 * * SUN"]
   }
 }
