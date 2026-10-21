@@ -76,6 +76,15 @@ test.describe('About your data', () => {
     await expect(held).not.toContainText(/Admin's email address, outside the database/)
   })
 
+  test('says what Akahu says about a linked Account is held, and that the logo address is kept and never fetched', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/about-your-data')
+    const accounts = section(page, 'What is held').getByRole('listitem').filter({ hasText: 'Accounts:' })
+    await expect(accounts).toContainText('If this Fernledger uses Akahu Sync')
+    await expect(accounts).toContainText("its own name for the account, its status and type, the bank's name, the balance it reports (with the currency) and when it last refreshed each part")
+    await expect(accounts).toContainText("Fernledger keeps the address and nothing else: it never fetches or shows the logo, so nobody's browser contacts Akahu for it. Unlinking an Account clears all of this.")
+  })
+
   test('says what the weekly backup holds, and that earlier backups keep what was later removed', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/about-your-data')

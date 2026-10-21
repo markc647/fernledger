@@ -16,12 +16,19 @@
 // manual run exists to give: [ADR 0013](../docs/adr/0013-no-sync-lock.md) has the argument, including what the last-success
 // mark and the page cap do when two runs overlap.
 //
+// The Account's own details (ticket 42): the run also asks Akahu for GET /accounts once, matches each linked Account's `_id` in the
+// answer and stores what Akahu says about it (worker/akahu-details.ts). That is one request for the whole run, whatever the number of
+// Accounts, and it comes out of the same MAX_PAGES as the Transactions' pages, so a run still makes at most MAX_PAGES requests to
+// Akahu. If it fails, or does not list an Account, nothing is stored or cleared for that Account and Sync goes on as it did without it.
+//
 // D1 and subrequest budget (ADR 0004: 50 subrequests and 50 queries an invocation). One Account costs one page request for each
-// 100 Transactions (akahu.ts caps the run at MAX_PAGES) and one batch of 4 statements. A household's daily Sync is a page or two
-// an Account. A run that reaches the page cap, or that any Account fails in, is not a success and does not move that Account's
+// 100 Transactions (akahu.ts caps the run, the details request included, at MAX_PAGES) and one batch of up to 7 statements. A household's
+// daily Sync is a page or two an Account. A run that reaches the page cap, or that any Account fails in, is not a success and does not move that Account's
 // `akahu_synced_at`, so the next run asks for the same window again (spec 47).
-import { akahuTokens, fetchAkahuTransactions, MAX_PAGES } from './akahu'
-import type { AkahuFailure, AkahuTransaction } from './akahu'
+import { STORE_DETAILS, toCents, toDetails } from './akahu-details'
+import type { AccountDetails } from './akahu-details'
+import { akahuTokens, fetchAkahuTransactions, listAkahuAccounts, MAX_PAGES } from './akahu'
+import type { AkahuAccount, AkahuFailure, AkahuResult, AkahuTransaction } from './akahu'
 import { logEvent } from './log'
 import { nzDate, nzDayStart } from './nz-time'
 import { applyRulesStatement, lastTransactionId } from './rule-apply'
@@ -53,12 +60,12 @@ export const RECHECK_DAYS = 14
  * steps the Rules re-run (worker/index.ts), which have their own share. Sync takes this much of what is left.
  *
  * An Account costs one read for the highest Transaction ID and then its batch — the upsert, letting go of the partners of what
- * was withdrawn, the delete, the Rules, the pairing, and the mark — which is 7, and 8 leaves one in hand. Sync stops starting
+ * was withdrawn, the delete, the Rules, the pairing, the mark, and the Account's details — which is 8, and 9 leaves one in hand. Sync stops starting
  * Accounts when fewer than that remain, rather than being cut off inside a batch; the Accounts it did not reach keep their old
  * last-success mark and come first in the next run (LINKED_ACCOUNTS).
  */
 export const MAX_QUERIES = 24
-export const QUERIES_PER_ACCOUNT = 8
+export const QUERIES_PER_ACCOUNT = 9
 
 /** A linked Account, as Sync reads it. */
 type LinkedAccount = {
@@ -197,9 +204,6 @@ export function hasBankTime(dateRaw: string): boolean {
   }
 }
 
-/** Akahu's dollars as integer NZD cents. Rounded, because JSON numbers are binary floats and 12.34 is not exact. */
-export const toCents = (amount: number): number => Math.round(amount * 100)
-
 /** One Akahu Transaction as a row. `description` is the merchant Akahu recognised, or the bank's own description when there is none. */
 export function toRow(transaction: AkahuTransaction): SyncRow {
   const meta = transaction.meta ?? {}
@@ -283,6 +287,8 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
   let queriesLeft = MAX_QUERIES - 1
   const end = now.toISOString()
   const outcomes: AccountOutcome[] = []
+  // Asked for once, when the first Account is about to be read, so a run that reads none asks for nothing.
+  let listed: AkahuResult<AkahuAccount[]> | undefined
 
   for (const account of results) {
     const window = windowStart(account)
@@ -301,8 +307,19 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     // Akahu's `start` is exclusive, so the instant asked for is the millisecond before NZ midnight on the window's first date: a
     // Transaction stamped at exactly that midnight is inside the window, not just outside it.
     const start = new Date(Date.parse(nzDayStart(window.date)) - 1).toISOString()
+    if (listed === undefined) {
+      budget.pagesLeft -= 1
+      listed = await listAkahuAccounts(tokens)
+    }
+    const akahuAccount = listed.ok ? listed.value.find((candidate) => candidate._id === account.akahu_account_id) : undefined
+    const details = akahuAccount === undefined ? null : toDetails(akahuAccount)
     const answer = await fetchAkahuTransactions(tokens, account.akahu_account_id, { start, end }, budget)
     if (!answer.ok) {
+      // What Akahu said about the Account is still true, so it is kept: one query, which the Account's share (QUERIES_PER_ACCOUNT) already holds.
+      if (details !== null) {
+        await storeDetails(env.DB, account, details)
+        queriesLeft -= 1
+      }
       logEvent('sync.account.failed', { id: account.id })
       outcomes.push({ accountId: account.id, written: 0, removed: 0, complete: false, failure: answer.reason })
       continue
@@ -312,7 +329,7 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     const { written, removed } = await writeAccount(env.DB, account, transactions.map(toRow), {
       syncedAt: complete ? now : null,
       from: complete ? window.date : null,
-    })
+    }, details)
     logEvent(complete ? 'sync.account.done' : 'sync.account.partial', { id: account.id, count: written })
     if (removed > 0) logEvent('sync.account.withdrawn', { id: account.id, count: removed })
     outcomes.push({ accountId: account.id, written, removed, complete })
@@ -323,22 +340,30 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
   return { ran: true, success, accounts: outcomes }
 }
 
+// Only while the Account is still linked to the Akahu account the details came from (STORE_DETAILS).
+const detailsStatement = (db: D1Database, account: LinkedAccount, details: AccountDetails) =>
+  db.prepare(STORE_DETAILS).bind(account.id, account.akahu_account_id, JSON.stringify(details))
+
+const storeDetails = (db: D1Database, account: LinkedAccount, details: AccountDetails) => detailsStatement(db, account, details).run()
+
 /**
  * Write one Account's Transactions, give them their Rules and pair their Transfers, and — only when the Account finished
- * (`syncedAt` is the run's moment, or null when it did not) — record that Sync reached it.
+ * (`syncedAt` is the run's moment, or null when it did not) — record that Sync reached it. `details` is what Akahu says about
+ * the Account, written whole so that a field it stopped sending is cleared; null when Akahu did not say this time, which leaves
+ * what is stored alone.
  *
- * The four statements go in one batch, so an Account's rows and what follows from them commit together or not at all. That is
+ * The statements go in one batch, so an Account's rows and what follows from them commit together or not at all. That is
  * the same reason an Import batches its own (worker/imports.ts), and it is why the Rules are applied from the highest
  * Transaction ID read just before the batch: a failure part way would otherwise leave rows that no retry gives Rules to.
  *
  * No Change Log entry: the Change Log records what an Admin did, and every entry carries the actor's email (worker/changelog.ts).
  * A Sync is the app's own daily work with no one behind it, and the Sync status (ticket 29, #30) is where a Member sees it.
  */
-export async function writeAccount(db: D1Database, account: LinkedAccount, rows: SyncRow[], window: WriteWindow): Promise<AccountWrite> {
+export async function writeAccount(db: D1Database, account: LinkedAccount, rows: SyncRow[], window: WriteWindow, details: AccountDetails | null): Promise<AccountWrite> {
   const { syncedAt, from } = window
   // Only a finished fetch has seen the whole window, so only a finished fetch may say what is no longer in it.
   const withdrawable = syncedAt !== null && from !== null
-  if (rows.length === 0 && !withdrawable) return { written: 0, removed: 0 }
+  if (rows.length === 0 && !withdrawable && details === null) return { written: 0, removed: 0 }
 
   const ids = JSON.stringify(rows.map((row) => row.akahuId))
   const afterId = await lastTransactionId(db)
@@ -349,6 +374,7 @@ export async function writeAccount(db: D1Database, account: LinkedAccount, rows:
     applyRulesStatement(db, { accountNumber: account.account_number, afterId }),
     pairTransfersStatement(db, { accountNumber: account.account_number, afterId }),
     ...(syncedAt === null ? [] : [db.prepare(MARK_SYNCED).bind(account.id, syncedAt.toISOString())]),
+    ...(details === null ? [] : [detailsStatement(db, account, details)]),
   ]
   const results = await db.batch(statements)
   const written = rows.length === 0 ? 0 : results[0]!.meta.changes

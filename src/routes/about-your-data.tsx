@@ -41,7 +41,9 @@ function AboutYourData() {
       <Section id="held" title="What is held">
         <ul className="list-disc space-y-2 ps-6">
           <li>
-            <strong className="font-semibold">Accounts:</strong> each tracked bank Account's name and number.
+            <strong className="font-semibold">Accounts:</strong> each tracked bank Account's name and number. If this Fernledger uses Akahu Sync, an Account linked to Akahu also holds what Akahu says about it: its own name for the
+            account, its status and type, the bank's name, the balance it reports (with the currency) and when it last refreshed each part. Akahu also gives a web address for the bank's logo. Fernledger keeps the address and nothing else:
+            it never fetches or shows the logo, so nobody's browser contacts Akahu for it. Unlinking an Account clears all of this.
           </li>
           <li>
             <strong className="font-semibold">Transactions:</strong> the date, amount and description of each one, and the bank's own type, memo and reference. Whatever the bank puts in those, such as another person's name or account number, is kept exactly as the bank gave it.

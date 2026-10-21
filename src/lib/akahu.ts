@@ -43,3 +43,9 @@ export function describeAkahuFailure(reason: unknown): string {
 /** One Akahu account as the Admin sees it in the list: its name, and the account number Akahu formats, when it gives one. */
 export const akahuAccountLabel = (account: { name: string; formatted_account?: string }) =>
   account.formatted_account ? `${account.name} (${account.formatted_account})` : account.name
+
+/** Akahu's status and type are shouted with underscores (`CREDIT_CARD`); on the Accounts screen they read as words ("Credit card"). */
+export const akahuWords = (word: string) => {
+  const words = word.replaceAll('_', ' ').toLowerCase()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
