@@ -57,7 +57,7 @@ The daily pull of new Transactions and Pending Transactions from Akahu. An Accou
 _Avoid_: Refresh, update, fetch
 
 **Account Link**:
-The association between an Account and its account in Akahu; it can break when a bank reconnects or migrates, and is then re-linked by the Admin.
+The association between an Account and its account in Akahu; it can break when a bank reconnects or migrates, and is then re-linked by the Admin. While it holds, each Sync keeps what Akahu says about the account (the bank's name, Akahu's own name for it, its type and status, its balance and currency, when Akahu last refreshed it, and the bank's logo address, which is never fetched or shown); unlinking or re-linking clears it.
 _Avoid_: Mapping, connection
 
 **Balance Check**:
