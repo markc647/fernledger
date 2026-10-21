@@ -332,7 +332,7 @@ describe('the daily Sync', () => {
 
   it('runs on the Sync cron and not on the others', async () => {
     stubAkahu(() => onePage([transaction()]))
-    await runSync(SECRETS, '0 15 * * SUN')
+    await runSync(SECRETS, '0 16 * * SUN')
     expect(calls).toEqual([])
   })
 
@@ -499,7 +499,7 @@ describe('the daily Sync', () => {
     expect(sync.ops.d1).toBe(0) // no tokens, so Sync reads nothing, and neither the backup nor the re-run looks
 
     const carryOn = countedDb()
-    await runSync({ DB: carryOn.DB } as Partial<Env>, '0 22 * * *')
+    await runSync({ DB: carryOn.DB } as Partial<Env>, '0 15 * * *')
     expect(carryOn.ops.d1).toBeGreaterThanOrEqual(1) // at least the look for a running Rules re-run (backup.test.ts carries a backup on from this cron)
   })
 })

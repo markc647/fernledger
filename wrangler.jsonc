@@ -21,6 +21,6 @@
   "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "fernledger-backups" }],
   "triggers": {
     // UTC. Daily Sync ~06:00-07:00 NZ, Sync retry ~10:00-11:00 NZ, weekly backup Sunday.
-    "crons": ["0 18 * * *", "0 22 * * *", "0 15 * * SUN"]
+    "crons": ["30 13 * * *", "0 15 * * *", "0 16 * * SUN"]
   }
 }

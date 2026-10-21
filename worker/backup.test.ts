@@ -7,9 +7,9 @@ import worker from './index'
 import { BACKUP_CHUNKS, CRON_CHUNKS, cronQueries } from './rule-rerun'
 
 // Seam 1: a scheduled event into the Worker, with the real local D1 and R2 from wrangler.jsonc.
-const sunday = new Date('2026-10-11T15:00:00Z') // 04:00 Monday 12 Oct in NZ (NZDT)
-const nextSunday = new Date('2026-10-18T15:00:00Z') // Monday 19 Oct in NZ
-const daily = '0 22 * * *' // the cron that carries a backup on (the 18:00 one is Sync's alone)
+const sunday = new Date('2026-10-11T16:00:00Z') // 05:00 Monday 12 Oct in NZ (NZDT)
+const nextSunday = new Date('2026-10-18T16:00:00Z') // Monday 19 Oct in NZ
+const daily = '0 15 * * *' // the cron that carries a backup on (the 13:30 one is Sync's alone)
 const restoreTarget = (env as unknown as { RESTORE_TARGET: D1Database }).RESTORE_TARGET
 
 async function runCron(cron: string, scheduledTime: Date, bindings: Env = env) {
@@ -19,7 +19,7 @@ async function runCron(cron: string, scheduledTime: Date, bindings: Env = env) {
 // Runs the daily cron on successive days (each its own invocation) until the backup under `prefix` has a manifest.
 async function finishRun(prefix: string, bindings: Env = env, maxInvocations = 14) {
   for (let day = 0; day < maxInvocations && !(await env.BACKUPS.head(`${prefix}/manifest.json`)); day++) {
-    await runCron(daily, new Date(Date.UTC(2026, 9, 12 + day, 22)), bindings)
+    await runCron(daily, new Date(Date.UTC(2026, 9, 12 + day, 15)), bindings)
   }
 }
 
@@ -206,7 +206,7 @@ describe('weekly backup', () => {
   })
 
   it('does nothing on another cron when no backup is unfinished', async () => {
-    await runCron(daily, new Date('2026-10-13T22:00:00Z'))
+    await runCron(daily, new Date('2026-10-13T15:00:00Z'))
 
     expect((await env.BACKUPS.list()).objects).toEqual([])
   })
@@ -235,11 +235,11 @@ describe('free-plan limits', () => {
     expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).toBeNull()
 
     const next = counted()
-    await runCron(daily, new Date('2026-10-12T22:00:00Z'), next.bindings)
+    await runCron(daily, new Date('2026-10-12T15:00:00Z'), next.bindings)
     // D1: 5 for the backup and 1 more, which the Rules re-run spends to look for a job to carry on (the weekly cron does not).
     expect(next.ops).toMatchObject({ d1: 5 + 1, r2: 1 + 5 * 2 })
 
-    // The 50-query and 50-subrequest limits leave room: Sync has the 18:00 cron to itself. A running re-run adds at most cronQueries(CRON_CHUNKS) queries to the 22:00 cron,
+    // The 50-query and 50-subrequest limits leave room: Sync has the 13:30 cron to itself. A running re-run adds at most cronQueries(CRON_CHUNKS) queries to the 15:00 cron,
     // or cronQueries(BACKUP_CHUNKS) to one that is also carrying a backup on (worker/rule-rerun.ts; rule-rerun.test.ts pins them), so the backup's 20 and the re-run's
     // share are well inside 50.
     expect(weekly.ops.d1 + weekly.ops.r2).toBeLessThanOrEqual(40)
@@ -283,7 +283,7 @@ describe('free-plan limits', () => {
     expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json'), 'one invocation cannot finish 30,000 rows').toBeNull()
     for (let day = 0; day < 14 && !(await env.BACKUPS.head('backups/2026-10-12/manifest.json')); day++) {
       const next = counted()
-      await runCron(daily, new Date(Date.UTC(2026, 9, 12 + day, 22)), next.bindings)
+      await runCron(daily, new Date(Date.UTC(2026, 9, 12 + day, 15)), next.bindings)
       invocations.push(next.ops)
     }
 
@@ -375,7 +375,7 @@ describe('runs and dates', () => {
     await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('app_title', 'Fern')").run()
     await env.BACKUPS.put(BACKUP_STATE_KEY, JSON.stringify({ status: 'running', prefix: 5, tables: 'nope' }))
 
-    await runCron(daily, new Date('2026-10-13T22:00:00Z')) // a continuation finds nothing it can use
+    await runCron(daily, new Date('2026-10-13T15:00:00Z')) // a continuation finds nothing it can use
     expect(await env.BACKUPS.head('backups/2026-10-12/manifest.json')).toBeNull()
     await runCron(BACKUP_CRON, sunday)
 

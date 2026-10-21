@@ -35,10 +35,10 @@ import { applyRulesStatement, lastTransactionId } from './rule-apply'
 import { pairTransfersStatement } from './transfers'
 
 /**
- * The cron Sync runs on: 18:00 UTC, which is 6 or 7 in the morning in NZ, after Akahu's own overnight refresh (spec 45).
+ * The cron Sync runs on: 13:30 UTC, which is 2:30 in the morning in NZDT and 1:30 in NZST, after Akahu's own overnight refresh (spec 45).
  * It is one of the crons in wrangler.jsonc; scripts/wrangler-config.test.mjs fails if the two differ.
  */
-export const SYNC_CRON = '0 18 * * *'
+export const SYNC_CRON = '30 13 * * *'
 
 /**
  * How many days before the last successful Sync are asked for again (spec 49).

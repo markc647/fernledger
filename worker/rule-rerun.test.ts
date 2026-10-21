@@ -190,8 +190,8 @@ function metered(db: D1Database = env.DB, hooks: { beforeBatch?: () => Promise<v
   return { db: binding, usage }
 }
 
-const cron = async (bindings: Env = env, at = new Date('2026-10-12T22:00:00Z')) =>
-  worker.scheduled(createScheduledController({ cron: '0 22 * * *', scheduledTime: at }), bindings)
+const cron = async (bindings: Env = env, at = new Date('2026-10-12T15:00:00Z')) =>
+  worker.scheduled(createScheduledController({ cron: '0 15 * * *', scheduledTime: at }), bindings)
 
 describe('a big history', () => {
   // 20,000 Transactions is 20 chunks. Built once; each test starts from no Rules, no Overrides and no results.
@@ -417,7 +417,7 @@ describe('a big history', () => {
       await saveRules()
       await startOk()
       try {
-        await worker.scheduled(createScheduledController({ cron: BACKUP_CRON, scheduledTime: new Date('2026-10-11T15:00:00Z') }), env) // starts a backup of 20,000 Transactions, which is more than one run writes
+        await worker.scheduled(createScheduledController({ cron: BACKUP_CRON, scheduledTime: new Date('2026-10-11T16:00:00Z') }), env) // starts a backup of 20,000 Transactions, which is more than one run writes
         expect((await latest())!.doneRows).toBe(0) // the weekly cron leaves the re-run alone
         const { db, usage } = metered()
 
@@ -432,17 +432,17 @@ describe('a big history', () => {
       }
     })
 
-    // Sync has the 18:00 cron to itself (worker/index.ts); the 22:00 cron is the one that carries a backup and a Rules re-run on.
-    it('leaves an unfinished backup and a running re-run alone on the Sync cron, and carries them on at 22:00', LONG, async () => {
+    // Sync has the 13:30 cron to itself (worker/index.ts); the 15:00 cron is the one that carries a backup and a Rules re-run on.
+    it('leaves an unfinished backup and a running re-run alone on the Sync cron, and carries them on at 15:00', LONG, async () => {
       await saveRules()
       await startOk()
       try {
-        await worker.scheduled(createScheduledController({ cron: BACKUP_CRON, scheduledTime: new Date('2026-10-11T15:00:00Z') }), env)
+        await worker.scheduled(createScheduledController({ cron: BACKUP_CRON, scheduledTime: new Date('2026-10-11T16:00:00Z') }), env)
         const state = async () => (await (await env.BACKUPS.get(BACKUP_STATE_KEY))!.text())
         const started = await state()
         expect(JSON.parse(started).status).toBe('running')
 
-        await worker.scheduled(createScheduledController({ cron: SYNC_CRON, scheduledTime: new Date('2026-10-12T18:00:00Z') }), env)
+        await worker.scheduled(createScheduledController({ cron: SYNC_CRON, scheduledTime: new Date('2026-10-12T13:30:00Z') }), env)
         expect(await state()).toBe(started)
         expect((await latest())!.doneRows).toBe(0)
 
@@ -1240,7 +1240,7 @@ describe('a small history', () => {
       }
       expect(await latest()).toMatchObject({ status: 'running', doneRows: 0 })
 
-      await cron(env, new Date('2026-10-13T22:00:00Z'))
+      await cron(env, new Date('2026-10-13T15:00:00Z'))
       expect((await latest())!.doneRows).toBeGreaterThan(0)
     })
   })

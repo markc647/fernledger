@@ -11,7 +11,7 @@ export default {
     logEvent('cron.run')
     // Akahu Sync has the morning cron to itself: its Accounts can spend most of the invocation's 50 D1 queries (MAX_QUERIES), so
     // nothing else runs beside it. It does nothing at all unless both Akahu tokens are set and an Account is linked (ADR 0008), so
-    // a deployment that imports CSVs costs no query here. A Sync retry, if #30 keeps one, would share the 22:00
+    // a deployment that imports CSVs costs no query here. A Sync retry, if #30 keeps one, would share the 15:00
     // invocation, and its budget would be decided then; until then a failed Sync waits for tomorrow.
     if (controller.cron === SYNC_CRON) {
       await syncAll(env, new Date(controller.scheduledTime))

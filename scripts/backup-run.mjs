@@ -12,7 +12,7 @@ import { BackupFormatError, checkPart, parseManifest, quote } from '../worker/ba
 import { backupPrefix, continueBackup, startBackup } from '../worker/backup.ts'
 import { ScriptError } from './wrangler-cli.mjs'
 
-// One round is one Worker invocation's worth (about 1 MB). The weekly cron and the seven 22:00 crons after it give a week about 8 MB, so 8 or so rounds.
+// One round is one Worker invocation's worth (about 1 MB). The weekly cron and the seven 15:00 crons after it give a week about 8 MB, so 8 or so rounds.
 const MAX_ROUNDS = 400
 
 // Wrangler's message when an R2 object isn't there (code 10007). Anything else is a real failure, never "no such backup".

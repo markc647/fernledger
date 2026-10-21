@@ -27,7 +27,7 @@ const AKAHU_HOST = 'api.akahu.io'
 const AKAHU_SECRETS = { AKAHU_APP_TOKEN: 'app_token_SECRET_VALUE_3', AKAHU_USER_TOKEN: 'user_token_SECRET_VALUE_4' }
 
 // Same as `triggers.crons` in wrangler.jsonc; scripts/wrangler-config.test.mjs fails if the two differ.
-const CRONS = ['0 18 * * *', '0 22 * * *', BACKUP_CRON]
+const CRONS = ['30 13 * * *', '0 15 * * *', BACKUP_CRON]
 
 const origin = 'http://localhost:5173'
 const attempts: string[] = []
