@@ -1,5 +1,5 @@
 // What Akahu says about a linked Account, kept in `accounts` (migration 4201; ticket 42). Sync writes every column from Akahu's answer,
-// so a field Akahu stops sending is cleared and not left stale (worker/sync.ts: toDetails). Unlinking or relinking an Account clears them
+// so a field Akahu stops sending is cleared and not left stale (toDetails, below). Unlinking or relinking an Account clears them
 // all, because they describe the old link (worker/accounts.ts). The Accounts screen shows the DISPLAYED ones.
 //
 import type { AkahuAccount } from './akahu'
