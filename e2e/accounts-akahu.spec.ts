@@ -105,6 +105,15 @@ test('a linked Account whose balance and optional fields are missing shows what 
   await expect(row).not.toContainText(/null|undefined|NaN|Invalid/)
 })
 
+test('a linked Account Akahu gave no status, type or bank for shows the lines it has and no empty ones', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ ...ACCOUNTS[2], akahuStatus: null, akahuType: null, akahuConnectionName: null }] }))
+  await page.goto('/accounts')
+  const row = page.getByRole('table', { name: 'Accounts' }).getByRole('row').filter({ hasText: 'Example card' })
+  await expect(row.locator("dt:text-is(\"Akahu's name\") + dd")).toHaveText('EXAMPLE CARD')
+  await expect(row.getByRole('term')).toHaveText(["Akahu's name", 'Balance'])
+})
+
 test('a linked Account that Sync has not read yet says so', async ({ page, context }) => {
   const row = (await open(page, context)).filter({ hasText: 'Example new link' })
   await expect(row).toContainText('Linked to Akahu. The next Sync will read its details.')

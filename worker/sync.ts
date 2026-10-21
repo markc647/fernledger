@@ -25,7 +25,7 @@
 // 100 Transactions (akahu.ts caps the run, the details request included, at MAX_PAGES) and one batch of up to 7 statements. A household's
 // daily Sync is a page or two an Account. A run that reaches the page cap, or that any Account fails in, is not a success and does not move that Account's
 // `akahu_synced_at`, so the next run asks for the same window again (spec 47).
-import { STORE_DETAILS } from './akahu-details'
+import { STORE_DETAILS, toCents, toDetails } from './akahu-details'
 import type { AccountDetails } from './akahu-details'
 import { akahuTokens, fetchAkahuTransactions, listAkahuAccounts, MAX_PAGES } from './akahu'
 import type { AkahuAccount, AkahuFailure, AkahuResult, AkahuTransaction } from './akahu'
@@ -204,9 +204,6 @@ export function hasBankTime(dateRaw: string): boolean {
   }
 }
 
-/** Akahu's dollars as integer NZD cents. Rounded, because JSON numbers are binary floats and 12.34 is not exact. */
-export const toCents = (amount: number): number => Math.round(amount * 100)
-
 /** One Akahu Transaction as a row. `description` is the merchant Akahu recognised, or the bank's own description when there is none. */
 export function toRow(transaction: AkahuTransaction): SyncRow {
   const meta = transaction.meta ?? {}
@@ -228,37 +225,6 @@ export function toRow(transaction: AkahuTransaction): SyncRow {
     hasBankTime: hasBankTime(transaction.date) ? 1 : 0,
     firstSeenAt: transaction.created_at,
   }
-}
-
-/**
- * What Akahu says about one account, as the Account's columns want it. Every column is written on every Sync, so what Akahu has
- * stopped sending is null here and clears the column. Balances are cents of the currency Akahu names, which is kept beside them.
- */
-export function toDetails(account: AkahuAccount): AccountDetails {
-  const { balance, refreshed, connection } = account
-  return {
-    akahuName: account.name,
-    akahuFormattedAccount: account.formatted_account ?? null,
-    akahuStatus: account.status,
-    akahuType: account.type,
-    akahuAttributes: account.attributes === undefined ? null : JSON.stringify(account.attributes),
-    akahuConnectionId: connection._id,
-    akahuConnectionName: connection.name,
-    akahuConnectionLogo: connection.logo ?? null,
-    akahuConnectionType: connection.connection_type ?? null,
-    akahuBalanceCurrency: balance?.currency ?? null,
-    akahuBalanceCurrentCents: balance === undefined ? null : toCents(balance.current),
-    akahuBalanceAvailableCents: balance?.available === undefined ? null : toCents(balance.available),
-    akahuRefreshedBalanceAt: instant(refreshed?.balance),
-    akahuRefreshedMetaAt: instant(refreshed?.meta),
-    akahuRefreshedTransactionsAt: instant(refreshed?.transactions),
-  }
-}
-
-// An instant written as `toISOString` does, or nothing for one that is missing or is not a moment (the Accounts screen writes it as a time).
-const instant = (value: string | undefined): string | null => {
-  const at = new Date(value ?? NaN)
-  return Number.isNaN(at.getTime()) ? null : at.toISOString()
 }
 
 /** The NZ date `days` before `date`, both `YYYY-MM-DD`. */
@@ -349,6 +315,11 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     const details = akahuAccount === undefined ? null : toDetails(akahuAccount)
     const answer = await fetchAkahuTransactions(tokens, account.akahu_account_id, { start, end }, budget)
     if (!answer.ok) {
+      // What Akahu said about the Account is still true, so it is kept: one query, which the Account's share (QUERIES_PER_ACCOUNT) already holds.
+      if (details !== null) {
+        await storeDetails(env.DB, account, details)
+        queriesLeft -= 1
+      }
       logEvent('sync.account.failed', { id: account.id })
       outcomes.push({ accountId: account.id, written: 0, removed: 0, complete: false, failure: answer.reason })
       continue
@@ -369,6 +340,12 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
   return { ran: true, success, accounts: outcomes }
 }
 
+// Only while the Account is still linked to the Akahu account the details came from (STORE_DETAILS).
+const detailsStatement = (db: D1Database, account: LinkedAccount, details: AccountDetails) =>
+  db.prepare(STORE_DETAILS).bind(account.id, account.akahu_account_id, JSON.stringify(details))
+
+const storeDetails = (db: D1Database, account: LinkedAccount, details: AccountDetails) => detailsStatement(db, account, details).run()
+
 /**
  * Write one Account's Transactions, give them their Rules and pair their Transfers, and — only when the Account finished
  * (`syncedAt` is the run's moment, or null when it did not) — record that Sync reached it. `details` is what Akahu says about
@@ -382,7 +359,7 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
  * No Change Log entry: the Change Log records what an Admin did, and every entry carries the actor's email (worker/changelog.ts).
  * A Sync is the app's own daily work with no one behind it, and the Sync status (ticket 29, #30) is where a Member sees it.
  */
-export async function writeAccount(db: D1Database, account: LinkedAccount, rows: SyncRow[], window: WriteWindow, details: AccountDetails | null = null): Promise<AccountWrite> {
+export async function writeAccount(db: D1Database, account: LinkedAccount, rows: SyncRow[], window: WriteWindow, details: AccountDetails | null): Promise<AccountWrite> {
   const { syncedAt, from } = window
   // Only a finished fetch has seen the whole window, so only a finished fetch may say what is no longer in it.
   const withdrawable = syncedAt !== null && from !== null
@@ -397,7 +374,7 @@ export async function writeAccount(db: D1Database, account: LinkedAccount, rows:
     applyRulesStatement(db, { accountNumber: account.account_number, afterId }),
     pairTransfersStatement(db, { accountNumber: account.account_number, afterId }),
     ...(syncedAt === null ? [] : [db.prepare(MARK_SYNCED).bind(account.id, syncedAt.toISOString())]),
-    ...(details === null ? [] : [db.prepare(STORE_DETAILS).bind(account.id, account.akahu_account_id, JSON.stringify(details))]),
+    ...(details === null ? [] : [detailsStatement(db, account, details)]),
   ]
   const results = await db.batch(statements)
   const written = rows.length === 0 ? 0 : results[0]!.meta.changes

@@ -134,17 +134,19 @@ function AkahuDetails({ account }: { account: Account }) {
   ] as const
   return (
     <dl className="grid grid-cols-[max-content_1fr] gap-x-3">
-      <Fact term="Bank">{account.akahuConnectionName}</Fact>
-      <Fact term="Akahu's name">{account.akahuName}</Fact>
-      <Fact term="Type">{account.akahuType && akahuWords(account.akahuType)}</Fact>
-      <Fact term="Status">{account.akahuStatus && akahuWords(account.akahuStatus)}</Fact>
-      <Fact term="Balance">{balance}</Fact>
-      {refreshed.map(([term, at]) => at !== null && <Fact key={term} term={term}>{formatDateTime(at)}</Fact>)}
+      <DetailLine term="Bank">{account.akahuConnectionName}</DetailLine>
+      <DetailLine term="Akahu's name">{account.akahuName}</DetailLine>
+      <DetailLine term="Type">{account.akahuType && akahuWords(account.akahuType)}</DetailLine>
+      <DetailLine term="Status">{account.akahuStatus && akahuWords(account.akahuStatus)}</DetailLine>
+      <DetailLine term="Balance">{balance}</DetailLine>
+      {refreshed.map(([term, at]) => at !== null && <DetailLine key={term} term={term}>{formatDateTime(at)}</DetailLine>)}
     </dl>
   )
 }
 
-function Fact({ term, children }: { term: string; children: ReactNode }) {
+/** One line of the details; a thing Akahu did not give has no line. */
+function DetailLine({ term, children }: { term: string; children: ReactNode }) {
+  if (!children) return null
   return (
     <>
       <dt className="text-muted-foreground">{term}</dt>

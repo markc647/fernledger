@@ -933,8 +933,32 @@ test.describe('zoom', () => {
             },
       }),
     )
+  // One Account linked to Akahu with everything it says, long values included, so the "From Akahu" column is drawn at every width and text size; one not linked.
   const stubLongAccounts = (page: Page) =>
-    page.route('**/api/accounts', (route) => route.fulfill({ json: [{ id: 1, name: 'Example account with a long name'.padEnd(60, 'y'), accountNumber: '99-9999-9999999-97', cutoverDate: null }] }))
+    page.route('**/api/accounts', (route) =>
+      route.fulfill({
+        json: [
+          {
+            id: 1,
+            name: 'Example account with a long name'.padEnd(60, 'y'),
+            accountNumber: '99-9999-9999999-97',
+            cutoverDate: null,
+            akahuAccountId: 'acc_example000000000000001',
+            akahuName: 'EXAMPLE ACCOUNT WITH A LONG NAME'.padEnd(60, 'Y'),
+            akahuStatus: 'ACTIVE',
+            akahuType: 'CREDIT_CARD_WITH_A_LONG_TYPE_NAME',
+            akahuConnectionName: 'Example Bank with a long name'.padEnd(60, 'k'),
+            akahuBalanceCurrency: 'NZD',
+            akahuBalanceCurrentCents: -123_456_789,
+            akahuBalanceAvailableCents: 987_654_321,
+            akahuRefreshedBalanceAt: '2026-10-21T02:46:00.000Z',
+            akahuRefreshedMetaAt: '2026-10-21T02:47:00.000Z',
+            akahuRefreshedTransactionsAt: '2026-10-20T18:05:00.000Z',
+          },
+          { id: 2, name: 'Example not linked', accountNumber: '99-9999-9999999-97', cutoverDate: null, akahuAccountId: null },
+        ],
+      }),
+    )
   const TABLE_AT_768 = {
     '/rules': { table: 'Rules, in the order they are checked', stub: stubRulesAndCategories },
     '/categories': { table: 'Categories', stub: stubRulesAndCategories },

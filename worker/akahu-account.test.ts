@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as z from 'zod/mini'
 import { akahuAccount } from './akahu'
 import worker from './index'
-import { toDetails } from './sync'
+import { toDetails } from './akahu-details'
 
 // Seam 1 for what Akahu sends about one account (ticket 42): the shape that reads it, what Sync makes of it, and the two routes that
 // carry it, the Admin's picker (which must still work with the wider shape) and the Accounts list (which must not carry the logo URL).
@@ -46,8 +46,14 @@ describe('reading an Akahu account', () => {
     expect(parse({ ...full(), balance: { currency: 'NZD', current: 1 }, refreshed: { balance: '2026-10-21T02:46:00.000Z' } }).success).toBe(true)
   })
 
-  it('refuses what Akahu always gives when it is missing', () => {
-    for (const field of ['_id', 'name', 'status', 'type', 'connection'] as const) {
+  it('does not mind a missing status, type or connection, so one odd account cannot make the whole list unreadable', () => {
+    const { status: _status, type: _type, connection: _connection, ...rest } = full()
+    expect(parse(rest).success).toBe(true)
+    expect(parse({ ...full(), connection: { logo: 'https://cdn.akahu.nz/logos/connections/conn_example0000000000001' } }).success).toBe(true)
+  })
+
+  it('refuses an account with no ID or name', () => {
+    for (const field of ['_id', 'name'] as const) {
       const { [field]: _gone, ...rest } = full()
       expect(parse(rest).success, field).toBe(false)
     }
@@ -105,6 +111,19 @@ describe('what Sync keeps of an Akahu account', () => {
     expect(details).toMatchObject({ akahuRefreshedBalanceAt: '2026-10-21T02:46:00.000Z', akahuRefreshedMetaAt: null, akahuRefreshedTransactionsAt: null })
   })
 
+  it('keeps nothing for a status, type or connection that is missing', () => {
+    const { status: _status, type: _type, connection: _connection, ...rest } = full()
+    expect(toDetails(parse(rest).data!)).toMatchObject({
+      akahuName: 'EXAMPLE EVERYDAY',
+      akahuStatus: null,
+      akahuType: null,
+      akahuConnectionId: null,
+      akahuConnectionName: null,
+      akahuConnectionLogo: null,
+      akahuConnectionType: null,
+    })
+  })
+
   it('keeps a balance with no available figure as a current balance alone', () => {
     const details = toDetails(parse({ ...full(), balance: { currency: 'NZD', current: -12.34 } }).data!)
     expect(details).toMatchObject({ akahuBalanceCurrency: 'NZD', akahuBalanceCurrentCents: -1234, akahuBalanceAvailableCents: null })
@@ -133,6 +152,17 @@ describe('the routes that carry it', () => {
       { _id: 'acc_example000000000000001', name: 'EXAMPLE EVERYDAY', formatted_account: '99-9999-9999999-01' },
       { _id: 'acc_example000000000000001', name: 'EXAMPLE EVERYDAY' },
     ])
+  })
+
+  it('still lists the Akahu accounts when one has no status, type or connection', async () => {
+    const { status: _status, type: _type, connection: _connection, ...odd } = full()
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ items: [full(), { ...odd, _id: 'acc_example000000000000009', name: 'ODD' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const ctx = createExecutionContext()
+    const request = new Request('http://localhost:5173/api/akahu/accounts', { headers: { Cookie: 'fernledger_dev_as=admin' } })
+    const res = await worker.fetch!(request as never, { ...env, ...SECRETS }, ctx)
+    await waitOnExecutionContext(ctx)
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { _id: string }[]).map((account) => account._id)).toEqual(['acc_example000000000000001', 'acc_example000000000000009'])
   })
 
   it('lists the details the Accounts screen shows, and never the logo URL', async () => {

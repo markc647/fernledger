@@ -13,7 +13,7 @@ ALTER TABLE accounts ADD COLUMN akahu_connection_name TEXT;
 -- The bank's logo URL on Akahu's CDN. Stored, never drawn or fetched (ADR 0010): the page makes no request to it.
 ALTER TABLE accounts ADD COLUMN akahu_connection_logo TEXT;
 ALTER TABLE accounts ADD COLUMN akahu_connection_type TEXT;
--- The balance Akahu reports, with its currency, in integer cents of that currency.
+-- The balance Akahu reports, with its currency, in integer cents of that currency. A record of what Akahu said, never converted or summed (ADR 0006).
 ALTER TABLE accounts ADD COLUMN akahu_balance_currency TEXT;
 ALTER TABLE accounts ADD COLUMN akahu_balance_current_cents INTEGER;
 ALTER TABLE accounts ADD COLUMN akahu_balance_available_cents INTEGER;

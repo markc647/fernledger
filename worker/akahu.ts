@@ -77,23 +77,25 @@ const page = z.object({
   cursor: z.optional(z.nullable(z.object({ next: z.nullable(z.string()) }))),
 })
 
-// Everything Akahu sends for one account (developers.akahu.nz, "The Account Model"), which Sync keeps (worker/akahu-details.ts). Required are
-// what Akahu always gives: the ID, the name, the status, the type and the connection's ID and name. The rest may be absent, and
-// absent is not an error: a missing balance (an account with none to report) or logo must not stop the Admin's list from reading.
+// Everything Akahu sends for one account (developers.akahu.nz, "The Account Model"), which Sync keeps (worker/akahu-details.ts). Only the ID
+// and the name are required, because the Admin's picker needs them. Everything else may be absent, and absent is not an error: one account
+// with no balance, status or logo must not make the whole list unreadable. What is missing is kept as nothing.
 export const akahuAccount = z.object({
   _id: z.string(),
   name: z.string(),
   formatted_account: z.optional(z.string()),
-  status: z.string(),
-  type: z.string(),
+  status: z.optional(z.string()),
+  type: z.optional(z.string()),
   attributes: z.optional(z.array(z.string())),
-  connection: z.object({
-    _id: z.string(),
-    name: z.string(),
-    // A URL on Akahu's CDN. Kept as text and never fetched or drawn (ADR 0010).
-    logo: z.optional(z.string()),
-    connection_type: z.optional(z.string()),
-  }),
+  connection: z.optional(
+    z.object({
+      _id: z.optional(z.string()),
+      name: z.optional(z.string()),
+      // A URL on Akahu's CDN. Kept as text and never fetched or drawn (ADR 0010).
+      logo: z.optional(z.string()),
+      connection_type: z.optional(z.string()),
+    }),
+  ),
   // Dollars, as Transactions are: Fernledger stores integer cents.
   balance: z.optional(z.object({ currency: z.string(), current: z.number(), available: z.optional(z.number()) })),
   // ISO 8601 instants, when Akahu last refreshed each part.

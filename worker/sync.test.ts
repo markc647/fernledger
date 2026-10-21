@@ -3,7 +3,8 @@ import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AKAHU_API, MAX_PAGES } from './akahu'
 import worker from './index'
-import { hasBankTime, MAX_QUERIES, QUERIES_PER_ACCOUNT, RECHECK_DAYS, SYNC_CRON, toCents, windowStart } from './sync'
+import { toCents } from './akahu-details'
+import { hasBankTime, MAX_QUERIES, QUERIES_PER_ACCOUNT, RECHECK_DAYS, SYNC_CRON, windowStart } from './sync'
 
 // Seam 1: the daily Sync cron through the Worker's exported handler, with Akahu faked at `fetch`, so nothing here reaches
 // Akahu. What is checked is what the ticket promises: only linked Accounts are stored, a re-run never duplicates, the window
@@ -530,6 +531,32 @@ describe('the Account details Sync keeps', () => {
     stubAkahu(() => onePage([]))
     await runSync()
     expect(accountCalls).toEqual([])
+  })
+
+  it('stores what Akahu has when the account lacks a status, type and connection', async () => {
+    stubAkahu(() => onePage([]))
+    const { status: _status, type: _type, connection: _connection, ...odd } = akahuAccountBody()
+    listing(odd)
+    await runSync()
+    expect(stored(await details(accountId))).toMatchObject({ akahu_name: 'EVERYDAY EXAMPLE', akahu_status: null, akahu_type: null, akahu_connection_name: null, akahu_balance_current_cents: 70717 })
+  })
+
+  it('stores them even when the Transactions failed, and the Account stays unfinished', async () => {
+    stubAkahu(() => asJson({}, 500))
+    listing(akahuAccountBody())
+    await runSync()
+    expect(await syncedAt(accountId)).toBeNull()
+    expect((await details(accountId)).akahu_name).toBe('EVERYDAY EXAMPLE')
+  })
+
+  it('does not store them for a failed Account whose link changed meanwhile', async () => {
+    stubAkahu(async () => {
+      await env.DB.prepare('UPDATE accounts SET akahu_account_id = ? WHERE id = ?').bind(OTHER, accountId).run()
+      return asJson({}, 500)
+    })
+    listing(akahuAccountBody())
+    await runSync()
+    expect((await details(accountId)).akahu_name).toBeNull()
   })
 
   it('does not give an Account the details of an Akahu account it was linked to when the run began', async () => {

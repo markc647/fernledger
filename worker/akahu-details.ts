@@ -2,6 +2,8 @@
 // so a field Akahu stops sending is cleared and not left stale (worker/sync.ts: toDetails). Unlinking or relinking an Account clears them
 // all, because they describe the old link (worker/accounts.ts). The Accounts screen shows the DISPLAYED ones.
 //
+import type { AkahuAccount } from './akahu'
+
 // Never fetched, drawn or sent to the browser: `akahuConnectionLogo`, a URL on Akahu's CDN. Storing the string asks no one anything;
 // drawing it would make the reader's browser contact Akahu, which ADR 0010 does not allow.
 
@@ -9,12 +11,12 @@
 export type AccountDetails = {
   akahuName: string
   akahuFormattedAccount: string | null
-  akahuStatus: string
-  akahuType: string
+  akahuStatus: string | null
+  akahuType: string | null
   /** Akahu's attributes, as a JSON array of words. */
   akahuAttributes: string | null
-  akahuConnectionId: string
-  akahuConnectionName: string
+  akahuConnectionId: string | null
+  akahuConnectionName: string | null
   akahuConnectionLogo: string | null
   akahuConnectionType: string | null
   akahuBalanceCurrency: string | null
@@ -70,3 +72,37 @@ const DISPLAYED = [
 export type DisplayedDetails = Pick<AccountDetails, (typeof DISPLAYED)[number]>
 
 export const SELECT_DISPLAYED = DISPLAYED.map((key) => `${COLUMNS[key]} AS ${key}`).join(', ')
+
+/** Akahu's dollars as integer NZD cents. Rounded, because JSON numbers are binary floats and 12.34 is not exact. */
+export const toCents = (amount: number): number => Math.round(amount * 100)
+
+// An instant written as `toISOString` does, or nothing for one that is missing or is not a moment (the Accounts screen writes it as a time).
+const isoInstantOrNull = (value: string | undefined): string | null => {
+  const at = new Date(value ?? NaN)
+  return Number.isNaN(at.getTime()) ? null : at.toISOString()
+}
+
+/**
+ * What Akahu says about one account, as the Account's columns want it. Every column is written on every Sync, so what Akahu has
+ * stopped sending is null here and clears the column. Balances are cents of the currency Akahu names, which is kept beside them.
+ */
+export function toDetails(account: AkahuAccount): AccountDetails {
+  const { balance, refreshed, connection } = account
+  return {
+    akahuName: account.name,
+    akahuFormattedAccount: account.formatted_account ?? null,
+    akahuStatus: account.status ?? null,
+    akahuType: account.type ?? null,
+    akahuAttributes: account.attributes === undefined ? null : JSON.stringify(account.attributes),
+    akahuConnectionId: connection?._id ?? null,
+    akahuConnectionName: connection?.name ?? null,
+    akahuConnectionLogo: connection?.logo ?? null,
+    akahuConnectionType: connection?.connection_type ?? null,
+    akahuBalanceCurrency: balance?.currency ?? null,
+    akahuBalanceCurrentCents: balance === undefined ? null : toCents(balance.current),
+    akahuBalanceAvailableCents: balance?.available === undefined ? null : toCents(balance.available),
+    akahuRefreshedBalanceAt: isoInstantOrNull(refreshed?.balance),
+    akahuRefreshedMetaAt: isoInstantOrNull(refreshed?.meta),
+    akahuRefreshedTransactionsAt: isoInstantOrNull(refreshed?.transactions),
+  }
+}
