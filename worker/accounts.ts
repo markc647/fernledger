@@ -1,11 +1,16 @@
 import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import { accountName, isoDate } from './account-fields'
+import { CLEAR_DETAILS, SELECT_DISPLAYED } from './akahu-details'
+import type { DisplayedDetails } from './akahu-details'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
 import { CHANGED_MEANWHILE, pathId, validate } from './validate'
 
-type AccountRow = { id: number; name: string; accountNumber: string; cutoverDate: string | null; akahuAccountId: string | null }
+// What Akahu said about a linked Account is null for one that is not linked, and until a Sync has read it (worker/akahu-details.ts).
+type AccountRow = { id: number; name: string; accountNumber: string; cutoverDate: string | null; akahuAccountId: string | null } & {
+  [K in keyof DisplayedDetails]: DisplayedDetails[K] | null
+}
 
 const rename = z.object({ name: accountName })
 const cutover = z.object({ cutoverDate: z.nullable(isoDate) })
@@ -16,7 +21,8 @@ const link = z.object({ akahuAccountId: z.nullable(z.string().check(z.regex(/^ac
 export const accounts = new Hono<AppEnv>()
   .get('/', async (c) => {
     const { results } = await c.env.DB.prepare(
-      'SELECT id, name, account_number AS accountNumber, cutover_date AS cutoverDate, akahu_account_id AS akahuAccountId FROM accounts ORDER BY name COLLATE NOCASE, id',
+      `SELECT id, name, account_number AS accountNumber, cutover_date AS cutoverDate, akahu_account_id AS akahuAccountId, ${SELECT_DISPLAYED}
+       FROM accounts ORDER BY name COLLATE NOCASE, id`,
     ).all<AccountRow>()
     return c.json(results)
   })
@@ -73,7 +79,8 @@ export const accounts = new Hono<AppEnv>()
     return c.json({ id, cutoverDate })
   })
   // The Account Link (spec 29): which Akahu account this Account receives Sync from, or null to stop syncing it. Only linked
-  // Accounts are ever synced (ADR 0008), and unlinking deletes no Transaction: what Sync already brought in stays.
+  // Accounts are ever synced (ADR 0008), and unlinking deletes no Transaction: what Sync already brought in stays. What Akahu said about
+  // the old link (the bank, the balance, ...) goes in the same write, because it describes an account this one no longer takes from.
   .put('/:id/akahu-link', validate('json', link), async (c) => {
     const id = pathId(c.req.param('id'))
     if (id === null) return c.json({ error: 'Not found' }, 404)
@@ -90,7 +97,7 @@ export const accounts = new Hono<AppEnv>()
     }
 
     // As the Cutover Date is: only over the link that was read (`IS` is `=` that also matches NULL), and an entry only if it changed something.
-    const [update] = await recordChange(db, db.prepare('UPDATE accounts SET akahu_account_id = ?1 WHERE id = ?2 AND akahu_account_id IS ?3').bind(akahuAccountId, id, account.akahu_account_id), {
+    const [update] = await recordChange(db, db.prepare(`UPDATE accounts SET akahu_account_id = ?1, ${CLEAR_DETAILS} WHERE id = ?2 AND akahu_account_id IS ?3`).bind(akahuAccountId, id, account.akahu_account_id), {
       actor: c.var.member,
       type: 'account',
       // Akahu's ID is not in the summary: the Change Log is read by Members, and which Akahu account it is says nothing to them.

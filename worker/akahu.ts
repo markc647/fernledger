@@ -77,7 +77,28 @@ const page = z.object({
   cursor: z.optional(z.nullable(z.object({ next: z.nullable(z.string()) }))),
 })
 
-export const akahuAccount = z.object({ _id: z.string(), name: z.string(), formatted_account: z.optional(z.string()) })
+// Everything Akahu sends for one account (developers.akahu.nz, "The Account Model"), which Sync keeps (worker/akahu-details.ts). Required are
+// what Akahu always gives: the ID, the name, the status, the type and the connection's ID and name. The rest may be absent, and
+// absent is not an error: a missing balance (an account with none to report) or logo must not stop the Admin's list from reading.
+export const akahuAccount = z.object({
+  _id: z.string(),
+  name: z.string(),
+  formatted_account: z.optional(z.string()),
+  status: z.string(),
+  type: z.string(),
+  attributes: z.optional(z.array(z.string())),
+  connection: z.object({
+    _id: z.string(),
+    name: z.string(),
+    // A URL on Akahu's CDN. Kept as text and never fetched or drawn (ADR 0010).
+    logo: z.optional(z.string()),
+    connection_type: z.optional(z.string()),
+  }),
+  // Dollars, as Transactions are: Fernledger stores integer cents.
+  balance: z.optional(z.object({ currency: z.string(), current: z.number(), available: z.optional(z.number()) })),
+  // ISO 8601 instants, when Akahu last refreshed each part.
+  refreshed: z.optional(z.object({ balance: z.optional(z.string()), meta: z.optional(z.string()), transactions: z.optional(z.string()) })),
+})
 export type AkahuAccount = z.infer<typeof akahuAccount>
 
 const accountsAnswer = z.object({ items: z.array(akahuAccount) })

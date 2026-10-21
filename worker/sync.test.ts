@@ -19,7 +19,11 @@ const LINKED = 'acc_linked000000000000001'
 const OTHER = 'acc_other0000000000000002'
 
 type Call = { url: string; headers: Headers }
+// The Transactions requests, which most tests count; the one request for the Accounts' own details is `accountCalls`.
 let calls: Call[] = []
+let accountCalls: Call[] = []
+/** What Akahu answers to GET /accounts. Nothing, unless a test says: most only look at Transactions. */
+let accountsAnswer: () => Response = () => asJson({ items: [] })
 let logged: string[] = []
 
 const asJson = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -28,6 +32,10 @@ const stubAkahu = (respond: (call: Call) => Response | Promise<Response>) =>
   vi.stubGlobal('fetch', async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const request = new Request(input, init)
     const call = { url: request.url, headers: request.headers }
+    if (new URL(request.url).pathname === '/v1/accounts') {
+      accountCalls.push(call)
+      return accountsAnswer()
+    }
     calls.push(call)
     return respond(call)
   })
@@ -75,6 +83,8 @@ async function runSync(secrets: Partial<Env> = SECRETS, cron = SYNC_CRON) {
 
 beforeEach(async () => {
   calls = []
+  accountCalls = []
+  accountsAnswer = () => asJson({ items: [] })
   logged = []
   for (const level of ['log', 'info', 'warn', 'error'] as const) vi.spyOn(console, level).mockImplementation((...args) => void logged.push(args.map(String).join(' ')))
   await env.DB.prepare('DELETE FROM transactions').run()
@@ -312,7 +322,9 @@ describe('the daily Sync', () => {
     // Every page offers another, so only the cap ends it.
     stubAkahu((call) => asJson({ items: [transaction({ _id: `trans_${new URL(call.url).searchParams.get('cursor') ?? 'first'}` })], cursor: { next: `p${calls.length}` } }))
     await runSync()
-    expect(calls).toHaveLength(MAX_PAGES)
+    // The run's one request for the Accounts' details comes out of the same budget.
+    expect(calls).toHaveLength(MAX_PAGES - 1)
+    expect(calls.length + accountCalls.length).toBe(MAX_PAGES)
     expect(await syncedAt(accountId)).toBeNull()
     expect(logged.join('\n')).toContain('sync.account.partial')
   })
@@ -425,5 +437,143 @@ describe('the daily Sync', () => {
     expect(text).not.toContain(APP_TOKEN)
     expect(text).not.toContain(USER_TOKEN)
     expect(text).toContain('akahu.unreadable')
+  })
+})
+
+// Ticket 42: everything Akahu says about the Account itself is kept on each Sync, and shown on the Accounts screen.
+describe('the Account details Sync keeps', () => {
+  const akahuAccountBody = (over: Record<string, unknown> = {}) => ({
+    _id: LINKED,
+    connection: { _id: 'conn_example0000000000001', name: 'Example Bank', logo: 'https://cdn.akahu.nz/logos/connections/conn_example0000000000001', connection_type: 'official' },
+    name: 'EVERYDAY EXAMPLE',
+    formatted_account: '99-9999-9999999-01',
+    status: 'ACTIVE',
+    type: 'CHECKING',
+    attributes: ['PAYMENT_TO', 'TRANSACTIONS'],
+    balance: { currency: 'NZD', current: 707.17, available: 700.1 },
+    refreshed: { balance: '2026-10-21T02:46:00.000Z', meta: '2026-10-21T02:47:00.000Z', transactions: '2026-10-21T02:48:00.000Z' },
+    ...over,
+  })
+  const listing = (...items: unknown[]) => {
+    accountsAnswer = () => asJson({ items })
+  }
+  const details = async (id: number) => (await env.DB.prepare('SELECT * FROM accounts WHERE id = ?').bind(id).first<Record<string, unknown>>())!
+  const stored = (row: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(row).filter(([key]) => key.startsWith('akahu_') && key !== 'akahu_account_id' && key !== 'akahu_synced_at'))
+
+  it('stores every field on the linked Account, and the balance as integer cents', async () => {
+    stubAkahu(() => onePage([]))
+    listing(akahuAccountBody(), akahuAccountBody({ _id: OTHER, name: 'NOT LINKED' }))
+    await runSync()
+    expect(stored(await details(accountId))).toEqual({
+      akahu_name: 'EVERYDAY EXAMPLE',
+      akahu_formatted_account: '99-9999-9999999-01',
+      akahu_status: 'ACTIVE',
+      akahu_type: 'CHECKING',
+      akahu_attributes: '["PAYMENT_TO","TRANSACTIONS"]',
+      akahu_connection_id: 'conn_example0000000000001',
+      akahu_connection_name: 'Example Bank',
+      akahu_connection_logo: 'https://cdn.akahu.nz/logos/connections/conn_example0000000000001',
+      akahu_connection_type: 'official',
+      akahu_balance_currency: 'NZD',
+      akahu_balance_current_cents: 70717,
+      akahu_balance_available_cents: 70010,
+      akahu_refreshed_balance_at: '2026-10-21T02:46:00.000Z',
+      akahu_refreshed_meta_at: '2026-10-21T02:47:00.000Z',
+      akahu_refreshed_transactions_at: '2026-10-21T02:48:00.000Z',
+    })
+  })
+
+  it('stores nothing on an Account that is not linked, whatever else Akahu lists', async () => {
+    stubAkahu(() => onePage([]))
+    listing(akahuAccountBody(), akahuAccountBody({ _id: OTHER, name: 'NOT LINKED' }))
+    await runSync()
+    expect(Object.values(stored(await details(otherAccountId))).every((value) => value === null)).toBe(true)
+  })
+
+  it('clears a field Akahu stops sending, rather than leaving it stale', async () => {
+    stubAkahu(() => onePage([]))
+    listing(akahuAccountBody())
+    await runSync()
+    const { balance: _balance, refreshed: _refreshed, ...fewer } = akahuAccountBody()
+    listing({ ...fewer, connection: { _id: 'conn_example0000000000001', name: 'Example Bank' }, name: 'RENAMED' })
+    await runSync()
+    expect(stored(await details(accountId))).toMatchObject({
+      akahu_name: 'RENAMED',
+      akahu_connection_logo: null,
+      akahu_connection_type: null,
+      akahu_balance_currency: null,
+      akahu_balance_current_cents: null,
+      akahu_balance_available_cents: null,
+      akahu_refreshed_balance_at: null,
+      akahu_refreshed_meta_at: null,
+      akahu_refreshed_transactions_at: null,
+    })
+  })
+
+  it('asks for the Akahu accounts once for the whole run, whatever the number of Accounts', async () => {
+    await env.DB.prepare('UPDATE accounts SET akahu_account_id = ?, cutover_date = ? WHERE id = ?').bind(OTHER, '2026-10-01', otherAccountId).run()
+    stubAkahu(() => onePage([]))
+    listing(akahuAccountBody(), akahuAccountBody({ _id: OTHER, name: 'SAVINGS EXAMPLE' }))
+    await runSync()
+    expect(accountCalls).toHaveLength(1)
+    const url = new URL(accountCalls[0]!.url)
+    expect(`${url.origin}${url.pathname}`).toBe(`${AKAHU_API}/accounts`)
+    expect(accountCalls[0]!.headers.get('Authorization')).toBe(`Bearer ${USER_TOKEN}`)
+    expect(calls).toHaveLength(2)
+    expect((await details(accountId)).akahu_name).toBe('EVERYDAY EXAMPLE')
+    expect((await details(otherAccountId)).akahu_name).toBe('SAVINGS EXAMPLE')
+  })
+
+  it('does not ask for them when it has no Account to sync', async () => {
+    await env.DB.prepare('UPDATE accounts SET cutover_date = NULL').run()
+    stubAkahu(() => onePage([]))
+    await runSync()
+    expect(accountCalls).toEqual([])
+  })
+
+  it('does not give an Account the details of an Akahu account it was linked to when the run began', async () => {
+    // The Admin relinks the Account while Sync is reading its Transactions, after the details were read.
+    stubAkahu(async () => {
+      await env.DB.prepare('UPDATE accounts SET akahu_account_id = ? WHERE id = ?').bind(OTHER, accountId).run()
+      return onePage([])
+    })
+    listing(akahuAccountBody())
+    await runSync()
+    expect((await details(accountId)).akahu_name).toBeNull()
+  })
+
+  describe('when Akahu cannot say', () => {
+    const first = async () => {
+      stubAkahu(() => onePage([]))
+      listing(akahuAccountBody())
+      await runSync()
+      return stored(await details(accountId))
+    }
+
+    for (const [what, answer] of [
+      ['refuses', () => asJson({}, 401)],
+      ['fails', () => asJson({}, 500)],
+      ['answers with something unreadable', () => asJson({ items: [{ _id: LINKED }] })],
+    ] as const) {
+      it(`syncs the Transactions as ever, and keeps what it had, when Akahu ${what} the details`, async () => {
+        const before = await first()
+        expect(before.akahu_name).toBe('EVERYDAY EXAMPLE')
+        stubAkahu(() => onePage([transaction()]))
+        accountsAnswer = answer
+        await env.DB.prepare('UPDATE accounts SET akahu_synced_at = NULL WHERE id = ?').bind(accountId).run()
+        await runSync()
+        expect(await rows()).toHaveLength(1)
+        expect(await syncedAt(accountId)).toBe('2026-10-20T18:00:00.000Z')
+        expect(stored(await details(accountId))).toEqual(before)
+      })
+    }
+
+    it('keeps what it had when the answer has no such account', async () => {
+      const before = await first()
+      listing(akahuAccountBody({ _id: OTHER }))
+      await runSync()
+      expect(stored(await details(accountId))).toEqual(before)
+    })
   })
 })

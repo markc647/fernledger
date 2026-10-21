@@ -66,6 +66,55 @@ describe('setting the Account Link', () => {
     expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE account_id = ?').bind(everyday).first<{ n: number }>()).toEqual({ n: 1 })
   })
 
+  // What Akahu said about the old link (ticket 42) describes an account this Account no longer takes from: it is cleared in the same
+  // write as the link, so no one reads a bank name or balance that belongs to another account.
+  describe('what Akahu said about the Account', () => {
+    const say = (id: number) =>
+      env.DB.prepare(
+        `UPDATE accounts SET akahu_name = 'EXAMPLE', akahu_formatted_account = '99-9999-9999999-01', akahu_status = 'ACTIVE', akahu_type = 'CHECKING', akahu_attributes = '["TRANSACTIONS"]',
+           akahu_connection_id = 'conn_example0000000000001', akahu_connection_name = 'Example Bank', akahu_connection_logo = 'https://cdn.akahu.nz/logos/connections/conn_example0000000000001',
+           akahu_connection_type = 'official', akahu_balance_currency = 'NZD', akahu_balance_current_cents = 100, akahu_balance_available_cents = 100,
+           akahu_refreshed_balance_at = '2026-10-21T02:46:00.000Z', akahu_refreshed_meta_at = '2026-10-21T02:46:00.000Z', akahu_refreshed_transactions_at = '2026-10-21T02:46:00.000Z' WHERE id = ?`,
+      )
+        .bind(id)
+        .run()
+    const kept = async (id: number) => {
+      const row = (await env.DB.prepare('SELECT * FROM accounts WHERE id = ?').bind(id).first<Record<string, unknown>>())!
+      return Object.entries(row).filter(([key, value]) => key.startsWith('akahu_') && !['akahu_account_id', 'akahu_synced_at'].includes(key) && value !== null)
+    }
+
+    it('is cleared when the Account is unlinked', async () => {
+      await link(everyday, LINKED)
+      await say(everyday)
+      expect(await kept(everyday)).toHaveLength(15)
+      await link(everyday, null)
+      expect(await kept(everyday)).toEqual([])
+    })
+
+    it('is cleared when the Account is linked to a different Akahu account', async () => {
+      await link(everyday, LINKED)
+      await say(everyday)
+      await link(everyday, OTHER)
+      expect(await kept(everyday)).toEqual([])
+      expect(await linkOf(everyday)).toBe(OTHER)
+    })
+
+    it('is kept when the link is set to what it already is, which changes nothing', async () => {
+      await link(everyday, LINKED)
+      await say(everyday)
+      await link(everyday, LINKED)
+      expect(await kept(everyday)).toHaveLength(15)
+    })
+
+    it('is left alone on the other Accounts', async () => {
+      await link(everyday, LINKED)
+      await link(savings, OTHER)
+      await say(savings)
+      await link(everyday, null)
+      expect(await kept(savings)).toHaveLength(15)
+    })
+  })
+
   // One Akahu account feeds at most one Account: syncing it into two would double every Transaction it has.
   it('refuses an Akahu account another Account already has, and names that Account', async () => {
     await link(everyday, LINKED)

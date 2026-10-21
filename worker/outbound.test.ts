@@ -250,9 +250,10 @@ describe('outbound calls', () => {
     await exerciseEveryRoute(AKAHU_SECRETS)
 
     expect(hostsContacted()).toEqual([AKAHU_HOST])
-    // Exactly two: listing the Akahu accounts, and one page of Transactions for the Account linked by the exercises, which
-    // "Run a Sync now" asks for. A third would be a route that reaches Akahu without ADR 0010's reason to.
-    expect(attempts).toHaveLength(2)
+    // Exactly three: the Admin's list of Akahu accounts, and what "Run a Sync now" asks for: the list again, for the details of the
+    // Account it syncs (ticket 42), and one page of Transactions for the Account linked by the exercises. A fourth would be a
+    // route that reaches Akahu without ADR 0010's reason to.
+    expect(attempts).toHaveLength(3)
     expect(attempts.filter((url) => url.includes('/transactions'))).toHaveLength(1)
   })
 
