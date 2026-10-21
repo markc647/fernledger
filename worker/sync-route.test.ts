@@ -78,6 +78,23 @@ describe('POST /api/sync/runs', () => {
     expect(await rowCount()).toBe(1)
   })
 
+  // A manual run is its own invocation with the whole 50 queries, so it takes the five Accounts a cron run does (worker/sync.ts: MAX_QUERIES).
+  it('syncs five linked Accounts in one request', async () => {
+    stubAkahu((url) => asJson({ items: [{ ...transaction(`trans_${new URL(url).pathname.split('/')[3]}`), _account: new URL(url).pathname.split('/')[3] }], cursor: { next: null } }))
+    for (let i = 0; i < 4; i++) {
+      await env.DB.prepare("INSERT INTO accounts (account_number, name, akahu_account_id, cutover_date) VALUES (?, ?, ?, '2026-10-01')")
+        .bind(`99-9999-9999999-1${i}`, `Spare ${i}`, `acc_spare00000000000000${i}`)
+        .run()
+    }
+
+    const res = await runNow({ secrets: SECRETS })
+
+    const body = (await res.json()) as { success: boolean; accounts: { complete: boolean }[] }
+    expect(body.accounts).toHaveLength(5)
+    expect(body.accounts.every((outcome) => outcome.complete)).toBe(true)
+    expect(body.success).toBe(true)
+  })
+
   it('names the reason an Account failed, and does not call the run a success', async () => {
     stubAkahu(() => asJson({ message: 'Unauthorized' }, 401))
 

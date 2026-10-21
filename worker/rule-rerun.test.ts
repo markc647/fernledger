@@ -189,8 +189,8 @@ function metered(db: D1Database = env.DB, hooks: { beforeBatch?: () => Promise<v
   return { db: binding, usage }
 }
 
-const cron = async (bindings: Env = env, at = new Date('2026-10-12T18:00:00Z')) =>
-  worker.scheduled(createScheduledController({ cron: '0 18 * * *', scheduledTime: at }), bindings)
+const cron = async (bindings: Env = env, at = new Date('2026-10-12T22:00:00Z')) =>
+  worker.scheduled(createScheduledController({ cron: '0 22 * * *', scheduledTime: at }), bindings)
 
 describe('a big history', () => {
   // 20,000 Transactions is 20 chunks. Built once; each test starts from no Rules, no Overrides and no results.
@@ -1217,7 +1217,7 @@ describe('a small history', () => {
       }
       expect(await latest()).toMatchObject({ status: 'running', doneRows: 0 })
 
-      await cron(env, new Date('2026-10-13T18:00:00Z'))
+      await cron(env, new Date('2026-10-13T22:00:00Z'))
       expect((await latest())!.doneRows).toBeGreaterThan(0)
     })
   })

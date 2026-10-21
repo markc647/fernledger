@@ -6,7 +6,7 @@ import { nothing, validate } from './validate'
 
 // "Run a Sync now": the Admin starts the daily pull from Akahu without waiting for tomorrow's cron (worker/sync.ts). It is the
 // same call the cron makes, with `now` being this moment instead of the cron's scheduled time, so a manual run is one Workers
-// invocation with the same 50 subrequests, 50 D1 queries and MAX_PAGES as any other (ADR 0004). Nothing here loops or retries.
+// invocation with the same 50 subrequests, 50 D1 queries (MAX_QUERIES, which nothing else in the request spends against) and MAX_PAGES as any other (ADR 0004). Nothing here loops or retries.
 //
 // A write, so app.ts's own guard has already required the Admin, the matching Origin and a JSON content type: a Member is
 // refused there, before this file is reached, and so before the feature check. Then the feature check, so a Deployer who has
