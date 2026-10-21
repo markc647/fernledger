@@ -55,8 +55,10 @@ export function BalancesWidget() {
   // Not known to be set up while the answer cannot be read: the column is a convenience, and is better left out than shown for a feature that may not be there.
   const syncSetUp = features.data?.some((feature) => feature.id === 'akahu-sync' && feature.enabled) ?? false
 
+  // The page's `overflow-wrap: anywhere` would let a squeezed column shrink to a character wide and split "Account" or "Synced" mid-word, so the short columns keep
+  // their words whole and the Balance column, which holds the long "will come from the bank link" line, is the one that gives way.
   const columns: Column<CurrentBalance>[] = [
-    { key: 'account', header: 'Account', cell: (row) => row.accountName },
+    { key: 'account', header: 'Account', className: '[overflow-wrap:break-word]', cell: (row) => row.accountName },
     {
       key: 'balance',
       header: 'Balance',
@@ -72,9 +74,16 @@ export function BalancesWidget() {
         ),
     },
     { key: 'asOf', header: 'As of', cell: (row) => (row.asOfDate === null ? noBalanceReason(row.latestStatus) : formatDate(row.asOfDate)) },
-    ...(checkedOf ? [{ key: 'checked', header: 'Checked', cell: (row: CurrentBalance) => <CheckedCell checked={checkedOf(row.accountId)} /> }] : []),
+    ...(checkedOf ? [{ key: 'checked', header: 'Checked', className: '[overflow-wrap:normal]', cell: (row: CurrentBalance) => <CheckedCell checked={checkedOf(row.accountId)} /> }] : []),
     ...(syncSetUp
-      ? [{ key: 'sync', header: 'Sync', cell: (row: CurrentBalance) => (row.syncedInLast24Hours ? <Status tone="success">Synced</Status> : <Status tone="danger">Not Synced</Status>) }]
+      ? [
+          {
+            key: 'sync',
+            header: 'Sync',
+            className: '[overflow-wrap:normal]',
+            cell: (row: CurrentBalance) => (row.syncedInLast24Hours ? <Status tone="success">Synced</Status> : <Status tone="danger">Not Synced</Status>),
+          },
+        ]
       : []),
   ]
 

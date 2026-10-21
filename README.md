@@ -231,7 +231,7 @@ Fernledger aims to keep your data **correct, current and recoverable**.
   - A transaction backfilled with the same date as an older balance (from a file that was missing it) isn't counted by that balance until that date's file is imported again.
   - A balance is checked only when it is dated before the account's Cutover Date. Taking the offer when importing sets the Cutover Date to the day after the file's last date, so the file's own balance is dated before it and is checked. Setting a Cutover Date by hand that falls on or before the file's last date leaves that balance unchecked; choose a later one, or import a file that runs past it.
   - "Since" is the date of the earlier balance the difference was checked against, not the date it was first seen ([ADR 0011](docs/adr/0011-balance-check-since-date.md)).
-- **Syncs will be safe to repeat.** Transactions will be matched by Akahu's ID. Each sync will also re-check the last 30 days, because banks sometimes delete and re-issue a transaction.
+- **Syncs are safe to repeat.** Transactions are matched by Akahu's ID. Each sync also re-checks the last 14 days, and anything the bank has withdrawn in that time is removed. An NZ bank closes its transactions off daily and corrects a mistake with an adjustment transaction rather than by editing one, so the re-check is margin: what really changes in that window is a credit card's pending transaction becoming a real one.
 - **Transactions are never deleted because a bank link changed.** If your bank reconnects or changes systems and Akahu issues a new account ID, Fernledger will flag "Account link broken". The Admin will re-link it in one step.
 
 ### Current

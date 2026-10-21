@@ -6,7 +6,7 @@ trigger). Two runs can therefore overlap — the Admin clicking twice, a second 
 costs duplicated work rather than wrong data.
 
 It is safe because every write Sync makes is already repeatable, which it had to be anyway: the cron's window deliberately
-overlaps the last run's by 30 days (ADR 0003, spec 49), so Sync writes rows it has already written on every ordinary day.
+overlaps the last run's by RECHECK_DAYS (worker/sync.ts; ADR 0003, spec 49), so Sync writes rows it has already written on every ordinary day.
 
 - **Transactions.** Each row carries Akahu's own ID and is written `ON CONFLICT (akahu_id) DO UPDATE` (spec 48), so a second
   run updates the same row and never adds a second copy. An Account's rows, its Rules and its Transfer pairings go in one
