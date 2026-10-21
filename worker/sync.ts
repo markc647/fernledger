@@ -56,17 +56,15 @@ export const RECHECK_DAYS = 14
 /**
  * The D1 queries one Sync may spend, and what one Account costs at most.
  *
- * An invocation gets 50 (ADR 0004). Sync has it to itself: the cron it runs on does nothing else, and "Run a Sync now" is a request of
- * its own that spends nothing beside it (the sign-in check reads no D1 row), so the backup and the Rules re-run, which the other crons
- * carry on (worker/index.ts), take none of it. The cap is one query for reading the Accounts and five Accounts at QUERIES_PER_ACCOUNT
- * each, 46, which leaves 4 of the 50 in hand. Five is a household's Accounts with room to grow; a sixth waits for the next run, and the
- * stalest first order (LINKED_ACCOUNTS) means it is not the same one each time.
+ * An invocation gets 50 (ADR 0004). Sync has it to itself, on its own cron and in "Run a Sync now" (the other crons carry on the
+ * backup and the Rules re-run, worker/index.ts). The cap is 1 query to read the Accounts and 5 Accounts at QUERIES_PER_ACCOUNT each,
+ * 46, which leaves 4 in hand.
  *
- * An Account costs one read for the highest Transaction ID and then its batch — the upsert, letting go of the partners of what
- * was withdrawn, the delete, the Rules, the pairing, the mark, and the Account's details — which is 8 (the test pins it), and 9 leaves one in hand. Sync stops starting
- * Accounts when fewer than that remain, rather than being cut off inside a batch; the Accounts it did not reach keep their old
- * last-success mark and come first in the next run (LINKED_ACCOUNTS). The one in hand stays: D1's own count of a batch can't be seen
- * from a test here, and an Account cut off inside its batch is the one failure this cap exists to prevent.
+ * An Account costs one read for the highest Transaction ID and a batch of up to 7 statements (the upsert, the two for what was
+ * withdrawn, the Rules, the pairing, the mark and the details): 8, which a test pins. 9 leaves one in hand, because D1's own count
+ * of a batch can't be seen from a test. Sync stops starting Accounts when fewer than QUERIES_PER_ACCOUNT remain, rather than being
+ * cut off inside a batch, so a sixth linked Account waits; those not reached keep their old last-success mark and come first in
+ * the next run (LINKED_ACCOUNTS).
  */
 export const MAX_QUERIES = 46
 export const QUERIES_PER_ACCOUNT = 9

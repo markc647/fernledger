@@ -132,8 +132,8 @@ function AkahuDetails({ account }: { account: Account }) {
   // Akahu's own `refreshed` times: when Akahu last read the bank, which is not when Fernledger last Synced, and does not move until Akahu reads it again.
   const read = (
     [
-      ['balance', account.akahuRefreshedBalanceAt],
-      ['details', account.akahuRefreshedMetaAt],
+      ['Balance', account.akahuRefreshedBalanceAt],
+      ['Account details', account.akahuRefreshedMetaAt],
       ['Transactions', account.akahuRefreshedTransactionsAt],
     ] as const
   ).filter(([, at]) => at !== null)
@@ -145,14 +145,7 @@ function AkahuDetails({ account }: { account: Account }) {
       <DetailLine term="Status">{account.akahuStatus && akahuWords(account.akahuStatus)}</DetailLine>
       <DetailLine term="Balance">{balance}</DetailLine>
       <DetailLine term="Last Sync">{account.akahuSyncedAt === null ? 'Never synced' : formatDateTime(account.akahuSyncedAt)}</DetailLine>
-      <DetailLine term="Akahu last read the bank">
-        {read.length > 0 &&
-          read.map(([what, at]) => (
-            <div key={what}>
-              {what}: {formatDateTime(at!)}
-            </div>
-          ))}
-      </DetailLine>
+      <DetailLine term="Akahu last read the bank">{read.map(([what, at]) => `${what}: ${formatDateTime(at!)}`).join('; ')}</DetailLine>
     </dl>
   )
 }

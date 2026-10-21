@@ -3,8 +3,9 @@ import { env, exports } from 'cloudflare:workers'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import worker from './index'
 import { applyRulesStatement } from './rule-apply'
-import { BACKUP_CRON } from './backup'
+import { BACKUP_CRON, BACKUP_STATE_KEY } from './backup'
 import { MAX_RULES } from './rule-criteria'
+import { SYNC_CRON } from './sync'
 import { BACKUP_CHUNKS, chunkFor, continueRerun, CRON_CHUNKS, cronQueries, DAILY_READ_BUDGET, DAILY_WRITE_BUDGET, ESTIMATED_STEP_READS, ESTIMATED_WRITES_PER_ROW, MIN_CHUNK, QUERIES_PER_CHUNK, QUERIES_TO_FINISH, READS_PER_ROW, restartRerun, RERUN_CHUNK, startRerun, STEP_READS, stepRerun, stopRerun, utcDay } from './rule-rerun'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member (the dev identity
@@ -426,6 +427,28 @@ describe('a big history', () => {
         // The backup's continuation makes D1 queries too (up to 20 operations with R2's), so the invocation's share is both.
         expect(usage.queries).toBeLessThanOrEqual(cronQueries(BACKUP_CHUNKS) + 20)
         expect(cronQueries(BACKUP_CHUNKS) + 20).toBeLessThan(50)
+      } finally {
+        for (const object of (await env.BACKUPS.list()).objects) await env.BACKUPS.delete(object.key)
+      }
+    })
+
+    // Sync has the 18:00 cron to itself (worker/index.ts); the 22:00 cron is the one that carries a backup and a Rules re-run on.
+    it('leaves an unfinished backup and a running re-run alone on the Sync cron, and carries them on at 22:00', LONG, async () => {
+      await saveRules()
+      await startOk()
+      try {
+        await worker.scheduled(createScheduledController({ cron: BACKUP_CRON, scheduledTime: new Date('2026-10-11T15:00:00Z') }), env)
+        const state = async () => (await (await env.BACKUPS.get(BACKUP_STATE_KEY))!.text())
+        const started = await state()
+        expect(JSON.parse(started).status).toBe('running')
+
+        await worker.scheduled(createScheduledController({ cron: SYNC_CRON, scheduledTime: new Date('2026-10-12T18:00:00Z') }), env)
+        expect(await state()).toBe(started)
+        expect((await latest())!.doneRows).toBe(0)
+
+        await cron()
+        expect(await state()).not.toBe(started)
+        expect((await latest())!.doneRows).toBeGreaterThan(0)
       } finally {
         for (const object of (await env.BACKUPS.list()).objects) await env.BACKUPS.delete(object.key)
       }

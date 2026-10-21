@@ -84,7 +84,7 @@ test('a linked Account shows the bank, Akahu\'s name beside Fernledger\'s, its t
   expect(await fact('Status')).toBe('Active')
   expect(await fact('Balance')).toBe('$707.17 NZD ($700.10 available)')
   // 02:46 UTC on 21 October is 3:46 pm that day in NZ (UTC+13), and 18:05 UTC on the 20th is 7:05 am on the 21st.
-  expect((await fact('Akahu last read the bank')).split('\n')).toEqual(['balance: Wed 21 Oct 2026, 3:46 pm', 'details: Wed 21 Oct 2026, 3:47 pm', 'Transactions: Wed 21 Oct 2026, 7:05 am'])
+  expect(await fact('Akahu last read the bank')).toBe('Balance: Wed 21 Oct 2026, 3:46 pm; Account details: Wed 21 Oct 2026, 3:47 pm; Transactions: Wed 21 Oct 2026, 7:05 am')
   // Fernledger's own last Sync is a different time from those, and the screen keeps the two apart: 18:00 UTC on the 20th is 7:00 am on the 21st.
   expect(await fact('Last Sync')).toBe('Wed 21 Oct 2026, 7:00 am')
   await expect(row).not.toContainText('refreshed')
