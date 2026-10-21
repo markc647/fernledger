@@ -2,7 +2,7 @@
 
 Sync can now be started two ways: the daily cron, and the Admin's "Run a Sync now" on the Settings screen (ticket 27's manual
 trigger). Two runs can therefore overlap — the Admin clicking twice, a second browser tab, or a manual run started as the
-18:00 UTC cron fires. Fernledger takes no lock and keeps no "a Sync is running" mark. An overlap is allowed to happen, and
+13:30 UTC cron fires. Fernledger takes no lock and keeps no "a Sync is running" mark. An overlap is allowed to happen, and
 costs duplicated work rather than wrong data.
 
 It is safe because every write Sync makes is already repeatable, which it had to be anyway: the cron's window deliberately

@@ -68,7 +68,7 @@ With `CI=true` (which the scripts set) Wrangler answers its own yes/no prompts i
 
 ## Backups and restore
 
-The Worker backs up every table to your R2 bucket (`BACKUPS` in `wrangler.jsonc`) on the weekly cron (Sunday 15:00 UTC), under `backups/<NZ date>/`. README ("Recoverable") says what that protects. Nothing deletes a backup; to remove old ones, delete them in the R2 dashboard.
+The Worker backs up every table to your R2 bucket (`BACKUPS` in `wrangler.jsonc`) on the weekly cron (Sunday 16:00 UTC), under `backups/<NZ date>/`. README ("Recoverable") says what that protects. Nothing deletes a backup; to remove old ones, delete them in the R2 dashboard.
 
 - `manifest.json` lists each table with its row count and CREATE statement, and each part's object key, size and SHA-256 checksum. **A backup exists only once its manifest does**; the restore script and you should ignore a folder without one.
 - Each table is split into `<table>.<n>.ndjson` parts of up to 1000 rows and 256 KB, one JSON object per row.
@@ -76,7 +76,7 @@ The Worker backs up every table to your R2 bucket (`BACKUPS` in `wrangler.jsonc`
 - A backup refuses (and logs `backup.failed` with `BackupFormatError`) a number JSON can't hold exactly: a whole number above 2^53 or infinity. Money is whole cents, far below that.
 - A run on a date that already has a manifest is skipped, never overwritten.
 
-**How a run fits the Free plan (ADR 0004).** One invocation gets 10 ms of CPU and 50 subrequests, so it can write only about 1 MB of backup (and at most 40 D1 and R2 operations on the weekly cron, 20 on a continuation). A run saves its place after every part and carries on in the Worker's other cron invocations (the two daily ones) until it finishes. That gives roughly 15 MB of backup a week, about **40,000 to 50,000 Transactions** at around 300 bytes each, with the rest of the database counted in. A database that size or smaller finishes within the week, usually within a few days.
+**How a run fits the Free plan (ADR 0004).** One invocation gets 10 ms of CPU and 50 subrequests, so it can write only about 1 MB of backup (and at most 40 D1 and R2 operations on the weekly cron, 20 on a continuation). A run saves its place after every part and carries on in the Worker's 15:00 UTC cron invocations (the 13:30 one is Sync's alone) until it finishes. That gives roughly 8 MB of backup a week, about **20,000 to 25,000 Transactions** at around 300 bytes each, with the rest of the database counted in. A database that size or smaller finishes within the week, usually within a few days.
 
 Past that, a run can't finish before the next Sunday. The next Sunday then marks it abandoned (`incomplete.json` in its folder, a `backup.abandoned` log line with the row count, and a note in the next manifest) and starts again, so backups stop completing. Watch the Worker logs for `backup.abandoned`. If you get there, take a manual copy instead: `npx wrangler d1 export <database> --remote --output backup.sql`. D1's own restore point (above) covers the last 7 days.
 

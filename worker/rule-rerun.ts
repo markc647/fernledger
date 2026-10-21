@@ -81,8 +81,8 @@ export const ESTIMATED_WRITES_PER_ROW = 3
 /**
  * Chunks one cron run does. The queries of a run are 1 to find the job, 5 for each chunk at most (the end of the chunk, the batch of 2, the
  * day's tally, and for a chunk another request took, the job read again) and 3 more to end the job, which is `cronQueries` at most. The
- * backup's continuation spends up to 20 of the same 50 (backup.ts), and Sync shares the daily crons, so a cron run that is also carrying a
- * backup on does one chunk (`BACKUP_CHUNKS`). Not done on the weekly cron: the backup starts there and spends 40.
+ * backup's continuation spends up to 20 of the same 50 (backup.ts), so a cron run that is also carrying a
+ * backup on does one chunk (`BACKUP_CHUNKS`). Not done on the weekly cron: the backup starts there and spends 40. Nor on the Sync cron, which Sync has to itself (worker/sync.ts).
  */
 export const CRON_CHUNKS = 3
 export const BACKUP_CHUNKS = 1

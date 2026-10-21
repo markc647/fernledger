@@ -954,6 +954,7 @@ test.describe('zoom', () => {
             akahuRefreshedBalanceAt: '2026-10-21T02:46:00.000Z',
             akahuRefreshedMetaAt: '2026-10-21T02:47:00.000Z',
             akahuRefreshedTransactionsAt: '2026-10-20T18:05:00.000Z',
+            akahuSyncedAt: '2026-10-20T18:00:00.000Z',
           },
           { id: 2, name: 'Example not linked', accountNumber: '99-9999-9999999-97', cutoverDate: null, akahuAccountId: null },
         ],

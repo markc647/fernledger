@@ -8,7 +8,8 @@ import { recordChange } from './changelog'
 import { CHANGED_MEANWHILE, pathId, validate } from './validate'
 
 // What Akahu said about a linked Account is null for one that is not linked, and until a Sync has read it (worker/akahu-details.ts).
-type AccountRow = { id: number; name: string; accountNumber: string; cutoverDate: string | null; akahuAccountId: string | null } & {
+// `akahuSyncedAt` is when Sync last finished the Account (an instant in UTC), or null until it has.
+type AccountRow = { id: number; name: string; accountNumber: string; cutoverDate: string | null; akahuAccountId: string | null; akahuSyncedAt: string | null } & {
   [K in keyof DisplayedDetails]: DisplayedDetails[K] | null
 }
 
@@ -21,7 +22,7 @@ const link = z.object({ akahuAccountId: z.nullable(z.string().check(z.regex(/^ac
 export const accounts = new Hono<AppEnv>()
   .get('/', async (c) => {
     const { results } = await c.env.DB.prepare(
-      `SELECT id, name, account_number AS accountNumber, cutover_date AS cutoverDate, akahu_account_id AS akahuAccountId, ${SELECT_DISPLAYED}
+      `SELECT id, name, account_number AS accountNumber, cutover_date AS cutoverDate, akahu_account_id AS akahuAccountId, akahu_synced_at AS akahuSyncedAt, ${SELECT_DISPLAYED}
        FROM accounts ORDER BY name COLLATE NOCASE, id`,
     ).all<AccountRow>()
     return c.json(results)

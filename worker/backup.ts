@@ -16,7 +16,7 @@ import { logEvent } from './log.ts'
 import { nzDate } from './nz-time.ts'
 
 /** Must match the weekly entry in wrangler.jsonc (scripts/wrangler-config.test.mjs checks). */
-export const BACKUP_CRON = '0 15 * * SUN'
+export const BACKUP_CRON = '0 16 * * SUN'
 
 export const CHUNK_ROWS = 1000
 /** Kept far under the 2 MB D1 allows in one string, so a run of long Notes can't fail a read. */
@@ -24,11 +24,11 @@ export const CHUNK_BYTES = 262_144
 /**
  * About 1 MB of NDJSON per invocation (it stops once it has written this much, so it can overshoot by one chunk).
  * Per MB the Worker does a UTF-8 encode, a SHA-256 and a put: roughly a millisecond each on native code, which
- * leaves most of the 10 ms CPU limit for everything else, Sync included on the daily crons. This is an estimate,
+ * leaves most of the 10 ms CPU limit for everything else, such as the Rules re-run that shares the 15:00 cron. This is an estimate,
  * not a measurement: CPU time can't be observed from inside a test. Lower it if real invocations show CPU errors.
  */
 export const INVOCATION_BYTES = 1_000_000
-/** D1 queries plus R2 calls per invocation; the limit is 50 of each, and Sync shares the daily crons. */
+/** D1 queries plus R2 calls per invocation; the limit is 50 of each. Sync has the 13:30 cron to itself, so the 15:00 one and the weekly one are the backup's. */
 export const WEEKLY_OPS = 40
 export const CONTINUE_OPS = 20
 /** A chunk costs one D1 read, one R2 put for the part and one R2 put for the cursor. */

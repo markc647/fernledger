@@ -332,7 +332,7 @@ describe('the daily Sync', () => {
 
   it('runs on the Sync cron and not on the others', async () => {
     stubAkahu(() => onePage([transaction()]))
-    await runSync(SECRETS, '0 15 * * SUN')
+    await runSync(SECRETS, '0 16 * * SUN')
     expect(calls).toEqual([])
   })
 
@@ -438,6 +438,69 @@ describe('the daily Sync', () => {
     expect(text).not.toContain(APP_TOKEN)
     expect(text).not.toContain(USER_TOKEN)
     expect(text).toContain('akahu.unreadable')
+  })
+
+  /** The D1 binding with every query counted: a statement run alone is one, and each statement of a batch is one (D1 bills them so). */
+  const countedDb = () => {
+    const ops = { d1: 0 }
+    const statement = (s: D1PreparedStatement): D1PreparedStatement =>
+      new Proxy(s, {
+        get(target, prop) {
+          const value = Reflect.get(target, prop) as (...args: unknown[]) => unknown
+          if (prop === 'bind') return (...args: unknown[]) => statement(value.apply(target, args) as D1PreparedStatement)
+          if (prop === 'all' || prop === 'first' || prop === 'run' || prop === 'raw') return (...args: unknown[]) => (ops.d1++, value.apply(target, args))
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
+    const DB = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop === 'prepare') return (query: string) => statement(target.prepare(query))
+        if (prop === 'batch') return (statements: D1PreparedStatement[]) => ((ops.d1 += statements.length), target.batch(statements))
+        const value = Reflect.get(target, prop)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    return { ops, DB }
+  }
+
+  // A household of five linked Accounts is one Sync, in the 50 queries one invocation gets (ADR 0004), with the worst case for each
+  // Account: Transactions to write, the withdrawn ones to remove, and the details Akahu lists.
+  it('syncs five linked Accounts in one run, inside the invocation’s 50 queries', async () => {
+    await env.DB.prepare('UPDATE accounts SET akahu_account_id = ?, cutover_date = ? WHERE id = ?').bind(OTHER, '2026-10-01', otherAccountId).run()
+    const linked = [LINKED, OTHER]
+    for (let i = 0; i < 3; i++) {
+      linked.push(`acc_spare00000000000000${i}`)
+      await account(`Spare ${i}`, `99-9999-9999999-1${i}`, { akahu: linked[linked.length - 1], cutover: '2026-10-01' })
+    }
+    accountsAnswer = () => asJson({ items: linked.map((_id) => ({ _id, name: 'EXAMPLE' })) })
+    stubAkahu((call) => {
+      const _account = new URL(call.url).pathname.split('/')[3]
+      return onePage([transaction({ _id: `trans_${_account}`, _account })])
+    })
+    const { ops, DB } = countedDb()
+
+    await runSync({ ...SECRETS, DB })
+
+    expect(calls).toHaveLength(5)
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM accounts WHERE akahu_synced_at IS NOT NULL').first<{ n: number }>())!.n).toBe(5)
+    expect(logged.join(' ')).toContain('sync.done')
+    expect(logged.join(' ')).not.toContain('sync.account.no-budget')
+    // The Accounts read, then 8 for each Account: the Transaction ID read and the 7 statements of its batch.
+    expect(ops.d1).toBe(1 + 5 * (QUERIES_PER_ACCOUNT - 1))
+    expect(ops.d1).toBeLessThanOrEqual(MAX_QUERIES)
+    expect(MAX_QUERIES).toBeLessThan(50)
+  })
+
+  // Sync has the invocation to itself on its own cron. The backup and the Rules re-run are carried on by the other daily cron,
+  // which is why the two crons never both spend the 50 queries.
+  it('on the Sync cron does nothing but Sync, and the other daily cron carries the backup and the Rules re-run on', async () => {
+    const sync = countedDb()
+    await runSync({ DB: sync.DB } as Partial<Env>, SYNC_CRON)
+    expect(sync.ops.d1).toBe(0) // no tokens, so Sync reads nothing, and neither the backup nor the re-run looks
+
+    const carryOn = countedDb()
+    await runSync({ DB: carryOn.DB } as Partial<Env>, '0 15 * * *')
+    expect(carryOn.ops.d1).toBeGreaterThanOrEqual(1) // at least the look for a running Rules re-run (backup.test.ts carries a backup on from this cron)
   })
 })
 

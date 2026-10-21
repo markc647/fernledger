@@ -35,10 +35,10 @@ import { applyRulesStatement, lastTransactionId } from './rule-apply'
 import { pairTransfersStatement } from './transfers'
 
 /**
- * The cron Sync runs on: 18:00 UTC, which is 6 or 7 in the morning in NZ, after Akahu's own overnight refresh (spec 45).
+ * The cron Sync runs on: 13:30 UTC, which is 2:30 in the morning in NZDT and 1:30 in NZST, after Akahu's own overnight refresh (spec 45).
  * It is one of the crons in wrangler.jsonc; scripts/wrangler-config.test.mjs fails if the two differ.
  */
-export const SYNC_CRON = '0 18 * * *'
+export const SYNC_CRON = '30 13 * * *'
 
 /**
  * How many days before the last successful Sync are asked for again (spec 49).
@@ -56,15 +56,17 @@ export const RECHECK_DAYS = 14
 /**
  * The D1 queries one Sync may spend, and what one Account costs at most.
  *
- * An invocation gets 50 (ADR 0004), and the daily cron does not belong to Sync alone: it carries an unfinished backup on and
- * steps the Rules re-run (worker/index.ts), which have their own share. Sync takes this much of what is left.
+ * An invocation gets 50 (ADR 0004). Sync has it to itself, on its own cron and in "Run a Sync now" (the other crons carry on the
+ * backup and the Rules re-run, worker/index.ts). The cap is 1 query to read the Accounts and 5 Accounts at QUERIES_PER_ACCOUNT each,
+ * 46, which leaves 4 in hand.
  *
- * An Account costs one read for the highest Transaction ID and then its batch — the upsert, letting go of the partners of what
- * was withdrawn, the delete, the Rules, the pairing, the mark, and the Account's details — which is 8, and 9 leaves one in hand. Sync stops starting
- * Accounts when fewer than that remain, rather than being cut off inside a batch; the Accounts it did not reach keep their old
- * last-success mark and come first in the next run (LINKED_ACCOUNTS).
+ * An Account costs one read for the highest Transaction ID and a batch of up to 7 statements (the upsert, the two for what was
+ * withdrawn, the Rules, the pairing, the mark and the details): 8, which a test pins. 9 leaves one in hand, because D1's own count
+ * of a batch can't be seen from a test. Sync stops starting Accounts when fewer than QUERIES_PER_ACCOUNT remain, rather than being
+ * cut off inside a batch, so a sixth linked Account waits; those not reached keep their old last-success mark and come first in
+ * the next run (LINKED_ACCOUNTS).
  */
-export const MAX_QUERIES = 24
+export const MAX_QUERIES = 46
 export const QUERIES_PER_ACCOUNT = 9
 
 /** A linked Account, as Sync reads it. */
