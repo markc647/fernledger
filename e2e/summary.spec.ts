@@ -213,7 +213,7 @@ test.describe('the Balances table: Checked and Sync', () => {
     await stubBalances(page, {
       syncSetUp: true,
       checks: { differences: [], accounts: [] },
-      balances: [stubAccount(1, 'Hnry', 70_717, true), { ...stubAccount(2, 'Mark', 0, true), balanceCents: null, cutoverDate: '2026-10-01' }, stubAccount(3, 'On Call', 50_184, true)],
+      balances: [stubAccount(1, 'Hnry', 70_717, true), { ...stubAccount(2, 'Mark', 0, true), balanceCents: null, cutoverDate: '2026-10-01', linked: false }, stubAccount(3, 'On Call', 50_184, true)],
     })
     await page.goto('/')
     const balances = page.getByRole('region', { name: 'Balances' })
@@ -229,6 +229,33 @@ test.describe('the Balances table: Checked and Sync', () => {
       expect(await lineBoxes(balances.getByRole('columnheader', { name: header, exact: true })), `the ${header} heading is on one line`).toBe(1)
     }
     expect(await lineBoxes(balances.getByText('Synced', { exact: true }).first()), 'Synced is on one line').toBe(1)
+  })
+
+  // An Account whose only file balance was dated on its Cutover Date had none until Akahu's arrived with the first Sync that finished: then it has a balance, As of the day Akahu
+  // read the bank, and Checked comes from the Balance Check of Akahu's balances.
+  test("shows an Account with Akahu's balance as a balance, not as 'Not known yet', and its Checked result", async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    const akahu = { ...stubAccount(2, 'Example savings', 70_717, true), asOfDate: '2026-10-21', cutoverDate: '2026-09-17', latestStatus: 'matched' }
+    const region = await open(page, {
+      syncSetUp: true,
+      balances: [stubAccount(1, 'Example everyday', 123_400, true), akahu, stubAccount(3, 'Example card', -45_000)],
+      checks: { differences: [], accounts: [latestCheck(1, 'Example everyday', 'matched'), latestCheck(2, 'Example savings', 'matched'), latestCheck(3, 'Example card', 'differs')] },
+    })
+    await expect(region.getByText('Not known yet')).toHaveCount(0)
+    await expect(region.getByText('come from the bank link')).toHaveCount(0)
+    await expect(row(region, 'Example savings')).toContainText('$707.17')
+    await expect(row(region, 'Example savings')).toContainText('21 Oct 2026')
+    await expect(cell(region, 'Example savings', 'Checked')).toHaveText('OK: agrees with the bank')
+  })
+
+  test('does not promise a balance from the bank link to an Account that is linked to Akahu, and says what it waits for', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    const waiting = { ...stubAccount(2, 'Example savings', 0, true), balanceCents: null, asOfDate: null, cutoverDate: '2026-09-17', latestStatus: 'after-cutover' }
+    const region = await open(page, { syncSetUp: true, balances: [stubAccount(1, 'Example everyday', 123_400, true), waiting], checks: { differences: [], accounts: [] } })
+    // Mark's Account is linked, so it is not waiting for syncing to start; and one that is not linked still is.
+    await expect(row(region, 'Example savings')).toContainText('Not known yet')
+    await expect(row(region, 'Example savings')).toContainText('Waiting for a balance from Akahu.')
+    await expect(region.getByText('come from the bank link')).toHaveCount(0)
   })
 
   test('shows both as labelled rows of the Account\'s card on a phone', async ({ page, context }) => {

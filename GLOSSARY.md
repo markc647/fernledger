@@ -64,8 +64,12 @@ _Avoid_: Refresh, update, fetch
 The association between an Account and its account in Akahu; it can break when a bank reconnects or migrates, and is then re-linked by the Admin. While it holds, each Sync keeps what Akahu says about the account (the bank's name, Akahu's own name for it, its type and status, its balance and currency, when Akahu last read the bank for it, when Fernledger last Synced it (its Last Sync), and the bank's logo address, which is never fetched or shown); unlinking or re-linking clears it.
 _Avoid_: Mapping, connection
 
+**Bank balance**:
+What the bank says an Account held on a date: the ledger balance in an Import's file, or the balance Akahu reports, recorded after a Sync that finished and dated the NZ day Akahu read the bank. An Account's balance is its latest bank balance the Transactions reach, plus the Transactions after it.
+_Avoid_: Statement balance
+
 **Balance Check**:
-The comparison, after each Import, between an Account's balance as reported by the bank and the balance calculated from its Transactions; it will also run after each Sync. README [What it does](README.md#what-it-does) says where the result shows.
+The comparison, after each Import and after each Sync that finished, between an Account's balance as reported by the bank (the one in the file, or the one Akahu reports) and the balance calculated from its Transactions. A bank balance is as at a date; Akahu's is dated the NZ day Akahu read the bank. README [What it does](README.md#what-it-does) says where the result shows.
 The rules are in README [Correct](README.md#correct).
 _Avoid_: Reconciliation, audit
 

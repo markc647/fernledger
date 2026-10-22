@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AKAHU_API, MAX_PAGES } from './akahu'
 import worker from './index'
 import { toCents } from './akahu-details'
-import { hasBankTime, MAX_QUERIES, QUERIES_PER_ACCOUNT, RECHECK_DAYS, SYNC_CRON, windowStart } from './sync'
+import { ACCOUNTS_PER_RUN, hasBankTime, MAX_QUERIES, QUERIES_PER_ACCOUNT, RUN_QUERIES, RECHECK_DAYS, SYNC_CRON, windowStart } from './sync'
 
 // Seam 1: the daily Sync cron through the Worker's exported handler, with Akahu faked at `fetch`, so nothing here reaches
 // Akahu. What is checked is what the ticket promises: only linked Accounts are stored, a re-run never duplicates, the window
@@ -394,8 +394,7 @@ describe('the daily Sync', () => {
   })
 
   // A batch cut off part way would leave an Account's rows written with no Rules, no pairing and no mark, so Sync stops before
-  // an Account instead. Reading the Accounts costs one query, so this many fit in a run:
-  const ACCOUNTS_PER_RUN = Math.floor((MAX_QUERIES - 1) / QUERIES_PER_ACCOUNT)
+  // an Account instead. ACCOUNTS_PER_RUN is what fits after the run's own queries (worker/sync.ts).
 
   it('stops before an Account it has no database budget left for, and does not call the run a success', async () => {
     // One more linked Account than a run can take.
@@ -463,16 +462,17 @@ describe('the daily Sync', () => {
     return { ops, DB }
   }
 
-  // A household of five linked Accounts is one Sync, in the 50 queries one invocation gets (ADR 0004), with the worst case for each
-  // Account: Transactions to write, the withdrawn ones to remove, and the details Akahu lists.
-  it('syncs five linked Accounts in one run, inside the invocation’s 50 queries', async () => {
+  // A household of four linked Accounts is one Sync, in the 50 queries one invocation gets (ADR 0004), with the worst case for each
+  // Account: Transactions to write, the withdrawn ones to remove, the details Akahu lists and a balance to record and check.
+  it('syncs four linked Accounts in one run, inside the invocation’s 50 queries', async () => {
     await env.DB.prepare('UPDATE accounts SET akahu_account_id = ?, cutover_date = ? WHERE id = ?').bind(OTHER, '2026-10-01', otherAccountId).run()
     const linked = [LINKED, OTHER]
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       linked.push(`acc_spare00000000000000${i}`)
       await account(`Spare ${i}`, `99-9999-9999999-1${i}`, { akahu: linked[linked.length - 1], cutover: '2026-10-01' })
     }
-    accountsAnswer = () => asJson({ items: linked.map((_id) => ({ _id, name: 'EXAMPLE' })) })
+    const refreshed = '2026-10-21T02:46:00.000Z'
+    accountsAnswer = () => asJson({ items: linked.map((_id) => ({ _id, name: 'EXAMPLE', balance: { currency: 'NZD', current: 707.17 }, refreshed: { balance: refreshed, transactions: refreshed } })) })
     stubAkahu((call) => {
       const _account = new URL(call.url).pathname.split('/')[3]
       return onePage([transaction({ _id: `trans_${_account}`, _account })])
@@ -481,13 +481,16 @@ describe('the daily Sync', () => {
 
     await runSync({ ...SECRETS, DB })
 
-    expect(calls).toHaveLength(5)
-    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM accounts WHERE akahu_synced_at IS NOT NULL').first<{ n: number }>())!.n).toBe(5)
+    expect(calls).toHaveLength(4)
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM accounts WHERE akahu_synced_at IS NOT NULL').first<{ n: number }>())!.n).toBe(4)
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM balance_checks WHERE source = 'sync'").first<{ n: number }>())!.n).toBe(4)
     expect(logged.join(' ')).toContain('sync.done')
     expect(logged.join(' ')).not.toContain('sync.account.no-budget')
-    // The Accounts read, then 8 for each Account: the Transaction ID read and the 7 statements of its batch.
-    expect(ops.d1).toBe(1 + 5 * (QUERIES_PER_ACCOUNT - 1))
-    expect(ops.d1).toBeLessThanOrEqual(MAX_QUERIES)
+    // The Accounts read, then for each Account its Transaction ID read, the 8 statements of its batch and the Balance Check's read and
+    // write (11, the worst case this fakes): exactly what MAX_QUERIES counts.
+    expect(calls).toHaveLength(ACCOUNTS_PER_RUN)
+    expect(ops.d1).toBe(RUN_QUERIES + ACCOUNTS_PER_RUN * QUERIES_PER_ACCOUNT)
+    expect(ops.d1).toBe(MAX_QUERIES)
     expect(MAX_QUERIES).toBeLessThan(50)
   })
 
@@ -834,5 +837,147 @@ describe('the rest of an Akahu Transaction', () => {
       await runSync()
       expect(await bankTime()).toBeNull()
     })
+  })
+})
+
+// Ticket 30, spec 61: after a Sync that finished, Akahu's balance is recorded as the Account's bank balance and checked.
+describe('the Balance Check after a Sync', () => {
+  const READ = '2026-10-21T02:46:00.000Z' // 15:46 on 21 October in NZ
+  const reading = (over: Record<string, unknown> = {}) => ({
+    _id: LINKED,
+    name: 'EVERYDAY EXAMPLE',
+    balance: { currency: 'NZD', current: 707.17 },
+    refreshed: { balance: READ, meta: READ, transactions: READ },
+    ...over,
+  })
+  const listing = (...items: unknown[]) => {
+    accountsAnswer = () => asJson({ items })
+  }
+  type Balance = { date: string; cents: number; source: string; status: string; since: string | null; difference: number | null }
+  const bankBalances = async () =>
+    (
+      await env.DB.prepare(
+        'SELECT as_of_date AS date, bank_cents AS cents, source, status, checked_against AS since, difference_cents AS difference FROM balance_checks ORDER BY as_of_date, source',
+      ).all<Balance>()
+    ).results
+  const spent = (id: string, date: string, amount: number) => transaction({ _id: id, date, amount })
+
+  it("records Akahu's balance as of the NZ day Akahu read the bank, alone at first because nothing is before it", async () => {
+    stubAkahu(() => onePage([transaction({ amount: -42.5 })]))
+    listing(reading())
+    await runSync()
+    expect(await bankBalances()).toEqual([{ date: '2026-10-21', cents: 70_717, source: 'sync', status: 'alone', since: null, difference: null }])
+  })
+
+  it('counts the Transactions the Sync saved, so one dated that day is in the balance', async () => {
+    stubAkahu(() => onePage([spent('trans_a', '2026-10-21T00:00:00.000Z', -42.5)]))
+    listing(reading())
+    await runSync()
+    const row = await env.DB.prepare('SELECT through_transaction_id AS id FROM balance_checks').first<{ id: number }>()
+    expect(row!.id).toBe((await env.DB.prepare('SELECT MAX(id) AS id FROM transactions').first<{ id: number }>())!.id)
+  })
+
+  it('checks the next balance against the one before: matched when the Transactions since explain the change', async () => {
+    const first = spent('trans_a', '2026-10-15T00:00:00.000Z', -42.5)
+    stubAkahu(() => onePage([first]))
+    listing(reading())
+    await runSync()
+    // The next day: $10.00 spent, and Akahu's balance is $10.00 lower.
+    const next = '2026-10-22T02:46:00.000Z'
+    stubAkahu(() => onePage([first, spent('trans_b', '2026-10-21T20:00:00.000Z', -10)]))
+    listing(reading({ balance: { currency: 'NZD', current: 697.17 }, refreshed: { balance: next, transactions: next } }))
+    await runSync()
+    expect(await bankBalances()).toMatchObject([
+      { date: '2026-10-21', status: 'alone' },
+      { date: '2026-10-22', cents: 69_717, status: 'matched', since: '2026-10-21', difference: 0 },
+    ])
+  })
+
+  it('reports a difference, dated from the balance before, when a Transaction is missing', async () => {
+    stubAkahu(() => onePage([spent('trans_a', '2026-10-15T00:00:00.000Z', -42.5)]))
+    listing(reading())
+    await runSync()
+    // Akahu's balance is $25.00 lower, but no Transaction came with it.
+    const next = '2026-10-22T02:46:00.000Z'
+    listing(reading({ balance: { currency: 'NZD', current: 682.17 }, refreshed: { balance: next, transactions: next } }))
+    await runSync()
+    expect(await bankBalances()).toMatchObject([{ status: 'alone' }, { date: '2026-10-22', status: 'differs', since: '2026-10-21', difference: -2_500 }])
+  })
+
+  it('is not made uncounted by the Cutover Date, which every Akahu balance is after, and sets aside a file balance dated on it', async () => {
+    await env.DB.prepare("INSERT INTO balance_checks (account_id, as_of_date, bank_cents, source, through_transaction_id, status) VALUES (?, '2026-10-01', 50000, 'import', 0, 'after-cutover')")
+      .bind(accountId)
+      .run()
+    stubAkahu(() => onePage([transaction()]))
+    listing(reading())
+    await runSync()
+    expect(await bankBalances()).toMatchObject([
+      { date: '2026-10-01', source: 'import', status: 'after-cutover' },
+      { date: '2026-10-21', source: 'sync', status: 'alone' },
+    ])
+  })
+
+  it("records one balance for one reading, however many Syncs see it, and replaces the day's own", async () => {
+    stubAkahu(() => onePage([transaction()]))
+    listing(reading())
+    await runSync()
+    await runSync()
+    expect(await bankBalances()).toHaveLength(1)
+    // Akahu reads the bank again later the same NZ day: the day's balance is replaced.
+    const later = '2026-10-21T08:00:00.000Z'
+    listing(reading({ balance: { currency: 'NZD', current: 600 }, refreshed: { balance: later, transactions: later } }))
+    await runSync()
+    expect(await bankBalances()).toMatchObject([{ date: '2026-10-21', cents: 60_000 }])
+  })
+
+  it('records nothing when Akahu sent no balance, or did not list the Account', async () => {
+    stubAkahu(() => onePage([transaction()]))
+    listing(reading({ balance: undefined }))
+    await runSync()
+    expect(logged.join('\n')).toContain('sync.balance.no-balance')
+    listing(reading({ _id: OTHER }))
+    await runSync()
+    expect(await bankBalances()).toEqual([])
+  })
+
+  it('records nothing when Akahu read the balance and the Transactions at different times', async () => {
+    stubAkahu(() => onePage([transaction()]))
+    listing(reading({ refreshed: { balance: READ, transactions: '2026-10-21T02:47:00.000Z' } }))
+    await runSync()
+    expect(await bankBalances()).toEqual([])
+    expect(logged.join('\n')).toContain('sync.balance.refreshed-apart')
+    expect(await syncedAt(accountId)).not.toBeNull() // the Sync itself is unaffected
+  })
+
+  it('records nothing when the Sync did not finish', async () => {
+    stubAkahu((call) => asJson({ items: [transaction({ _id: `trans_${new URL(call.url).searchParams.get('cursor') ?? 'first'}` })], cursor: { next: `p${calls.length}` } }))
+    listing(reading())
+    await runSync()
+    expect(await syncedAt(accountId)).toBeNull()
+    expect(await bankBalances()).toEqual([])
+    expect(logged.join('\n')).toContain('sync.balance.incomplete')
+  })
+
+  it('records nothing for an Account whose Transactions Akahu refused', async () => {
+    stubAkahu(() => new Response('{}', { status: 401 }))
+    listing(reading())
+    await runSync()
+    expect(await bankBalances()).toEqual([])
+  })
+
+  it('does not fail the Sync when the check cannot run', async () => {
+    stubAkahu(() => onePage([transaction()]))
+    listing(reading())
+    const failing = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop === 'prepare') return (query: string) => target.prepare(query.includes('WITH daily') ? 'SELECT * FROM no_such_table' : query)
+        const value = Reflect.get(target, prop)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    await runSync({ ...SECRETS, DB: failing })
+    expect(await syncedAt(accountId)).not.toBeNull()
+    expect(logged.join('\n')).toContain('sync.balance.check-failed')
+    expect(await bankBalances()).toHaveLength(1)
   })
 })

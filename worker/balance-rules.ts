@@ -7,8 +7,14 @@
 // Transaction between their dates. That difference is the Balance Check, and the same opening balance is what
 // balance history is computed from (worker/balances.ts).
 //
+// The bank balance of an Account that is Synced is Akahu's (syncBalance, below): Sync records it after each run that finished,
+// and it is checked like any other. It is dated after the Cutover Date by nature, so the rule that uncounts a file's balance
+// there (statusOnRecord) is never applied to it.
+//
 // Pending Transactions are stored apart from Transactions and never counted. A balance that cannot be counted
 // (see statusOnRecord) is kept but takes no part.
+import type { AccountDetails } from './akahu-details'
+import { nzDate } from './nz-time'
 
 export type BalanceStatus = 'matched' | 'differs' | 'alone' | 'after-cutover' | 'file-ends-early'
 
@@ -27,6 +33,31 @@ export function statusOnRecord(balance: { asOfDate: string; fileTo: string; cuto
   if (balance.cutoverDate !== null && balance.asOfDate >= balance.cutoverDate) return 'after-cutover'
   if (balance.fileTo < balance.asOfDate) return 'file-ends-early'
   return 'alone'
+}
+
+export type SyncBalance = { asOfDate: string; bankCents: number }
+export type SyncBalanceSkipped = 'no-balance' | 'incomplete' | 'refreshed-apart' | 'currency'
+
+/** What Akahu said of an Account's balance, as Sync stores it (worker/akahu-details.ts). Null where Akahu did not say. */
+export type ReportedBalance = Pick<AccountDetails, 'akahuBalanceCurrency' | 'akahuBalanceCurrentCents' | 'akahuRefreshedBalanceAt' | 'akahuRefreshedTransactionsAt'>
+
+/**
+ * The bank balance to record after a Sync of an Account, or why there is none. Akahu's `balance.current` is the balance when Akahu last
+ * read the bank (`refreshed.balance`), and a finished Sync holds every Transaction Akahu had read by `refreshed.transactions`. The two
+ * cover the same Transactions only if they are the same moment, so a balance is recorded only then:
+ * - It is dated the NZ day Akahu read the bank, not the day of the Sync, so a stale connection, or a second Sync of the same reading,
+ *   records the same balance again and adds no day. Transactions dated that day and saved by the Sync count (`through_transaction_id`).
+ * - If Akahu read the two apart, either could hold a Transaction the other lacks, and a Balance Check would report a difference that
+ *   is only the gap between them: nothing is recorded.
+ * - A Sync that did not finish has not read the whole window, so nothing is recorded.
+ * - Anything Akahu left out, or a currency that is not NZD (money here is NZD cents), is not a balance to check.
+ */
+export function syncBalance(reported: ReportedBalance, complete: boolean): { balance: SyncBalance } | { skipped: SyncBalanceSkipped } {
+  if (reported.akahuBalanceCurrentCents === null || reported.akahuRefreshedBalanceAt === null) return { skipped: 'no-balance' }
+  if (reported.akahuBalanceCurrency !== null && reported.akahuBalanceCurrency !== 'NZD') return { skipped: 'currency' }
+  if (!complete) return { skipped: 'incomplete' }
+  if (reported.akahuRefreshedTransactionsAt !== reported.akahuRefreshedBalanceAt) return { skipped: 'refreshed-apart' }
+  return { balance: { asOfDate: nzDate(new Date(reported.akahuRefreshedBalanceAt)), bankCents: reported.akahuBalanceCurrentCents } }
 }
 
 export type BalanceRow = {

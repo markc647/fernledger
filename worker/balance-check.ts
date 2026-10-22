@@ -1,6 +1,6 @@
 // Recording a bank balance and running the Balance Check. The rules are in balance-rules.ts; this is the SQL around them.
-// Akahu Sync will call the same two functions with its own balance (source 'sync'); nothing here is Import-specific
-// except the name of the source.
+// Akahu Sync calls the same two functions with its own balance (source 'sync', worker/sync.ts); nothing here is
+// Import-specific except the name of the source.
 import { checkBalances, importOutcome, UNCOUNTED_STATUSES, type BalanceRow, type BalanceStatus, type CheckResult, type ImportOutcome } from './balance-rules'
 
 /** `'after-cutover', 'file-ends-early'` for SQL. Built from constants, never from a request. */

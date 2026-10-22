@@ -1,7 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { OPENINGS, recordBalance } from './balance-check'
+import { OPENINGS, recordBalance, refreshBalanceChecks } from './balance-check'
 import { CURRENT, HISTORY } from './balances'
 import worker from './index'
 
@@ -72,7 +72,7 @@ const OCT_7: [string, number] = ['2026-10-07', OPENING + 800]
 type Outcome = { status: string; asOfDate: string; since: string | null; differenceCents: number | null }
 const outcomeOf = async (res: Response): Promise<Outcome | null> => ((await res.json()) as { balanceCheck?: Outcome | null }).balanceCheck ?? null
 
-type BalanceRow = { accountId: number; accountName: string; balanceCents: number | null; asOfDate: string | null; syncedInLast24Hours: boolean }
+type BalanceRow = { accountId: number; accountName: string; balanceCents: number | null; asOfDate: string | null; syncedInLast24Hours: boolean; linked: boolean }
 const balances = async (who: Who = 'admin'): Promise<BalanceRow[]> => ((await (await call('/api/balances', { who })).json()) as { accounts: BalanceRow[] }).accounts
 type Difference = { accountId: number; accountName: string; asOfDate: string; since: string; differenceCents: number }
 type Checks = { differences: Difference[]; accounts: { accountId: number; asOfDate: string | null; status: string | null }[] }
@@ -188,8 +188,8 @@ describe('current balances', () => {
     await importFile([tx('S4', '2026-10-02', -250)], { ledger: SEPT_30, to: '2026-10-02' })
 
     expect(await balances()).toEqual([
-      { accountId: await accountId(current), accountName: current, balanceCents: 4000, asOfDate: '2026-09-30', cutoverDate: null, latestStatus: 'alone', syncedInLast24Hours: false },
-      { accountId: await accountId(), accountName: savings, balanceCents: 10_250, asOfDate: '2026-10-02', cutoverDate: null, latestStatus: 'alone', syncedInLast24Hours: false },
+      { accountId: await accountId(current), accountName: current, balanceCents: 4000, asOfDate: '2026-09-30', cutoverDate: null, latestStatus: 'alone', syncedInLast24Hours: false, linked: false },
+      { accountId: await accountId(), accountName: savings, balanceCents: 10_250, asOfDate: '2026-10-02', cutoverDate: null, latestStatus: 'alone', syncedInLast24Hours: false, linked: false },
     ])
   })
 
@@ -633,5 +633,56 @@ describe('why an Account has no balance', () => {
     await env.DB.prepare('DELETE FROM balance_checks').run()
 
     expect((await balances())[0]).toMatchObject({ balanceCents: null, cutoverDate: null, latestStatus: null })
+  })
+})
+
+// The live case: an Account whose only file balance is dated on its Cutover Date (so it is uncounted and the Account has no
+// balance) gets one from Akahu, which Sync records and checks like any other.
+describe("an Account's balance from Akahu", () => {
+  const MARK = ['2026-09-30', OPENING + 500] as [string, number]
+  const akahu = async (asOfDate: string, bankCents: number) => {
+    await recordBalance(env.DB, { accountNumber: savings, asOfDate, bankCents, source: 'sync', status: 'alone' }).run()
+    await refreshBalanceChecks(env.DB, await accountId())
+  }
+
+  it('gives an Account with only an uncounted file balance a balance, and moves its As of date up to the day Akahu read the bank', async () => {
+    await importFile(september, { ledger: MARK, cutoverDate: '2026-09-30' })
+    expect((await balances())[0]).toMatchObject({ balanceCents: null, asOfDate: null, latestStatus: 'after-cutover' })
+
+    await akahu('2026-10-21', 10_400)
+
+    expect((await balances())[0]).toMatchObject({ balanceCents: 10_400, asOfDate: '2026-10-21', latestStatus: 'alone' })
+    expect((await history()).anchor).toEqual({ asOfDate: '2026-10-21', balanceCents: 10_400 })
+    // The first has nothing before it to be checked against; the file's balance stays uncounted.
+    expect((await checks()).differences).toEqual([])
+  })
+
+  it('adds the Transactions saved after the Akahu balance, and the As of date follows the newest', async () => {
+    await importFile(september, { ledger: MARK, cutoverDate: '2026-09-30' })
+    await akahu('2026-10-21', 10_400)
+    await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source) VALUES (?, '2026-10-22', -150, 'EXAMPLE SHOP', 'sync')").bind(await accountId()).run()
+
+    expect((await balances())[0]).toMatchObject({ balanceCents: 10_250, asOfDate: '2026-10-22' })
+  })
+
+  it("is checked by the next day's: OK when the Transactions explain it, a difference since the day before when they do not", async () => {
+    await importFile(september, { ledger: MARK, cutoverDate: '2026-09-30' })
+    await akahu('2026-10-21', 10_400)
+
+    await akahu('2026-10-22', 10_400)
+    expect((await checks()).accounts).toMatchObject([{ status: 'matched', asOfDate: '2026-10-22' }])
+    expect((await checks()).differences).toEqual([])
+
+    await akahu('2026-10-23', 9_900)
+    expect((await checks()).differences).toMatchObject([{ asOfDate: '2026-10-23', since: '2026-10-22', differenceCents: -500 }])
+  })
+
+  it('says whether the Account is linked to Akahu, for the Summary to word a missing balance', async () => {
+    await importFile(september, { ledger: SEPT_30 })
+    expect((await balances())[0]).toMatchObject({ linked: false })
+
+    await env.DB.prepare("UPDATE accounts SET akahu_account_id = 'acc_example00000000000001'").run()
+
+    expect((await balances())[0]).toMatchObject({ linked: true })
   })
 })

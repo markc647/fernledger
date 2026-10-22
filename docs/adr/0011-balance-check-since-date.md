@@ -4,5 +4,6 @@ The spec for a Balance Check warning (issue #1) dates it from when the differenc
 
 ## Consequences
 
+- The previous bank balance may be Akahu's, recorded after a Sync ([ADR 0014](0014-akahu-balance-is-a-bank-balance.md)): daily ones make the date as exact as a day.
 - The date is `checked_against` in `balance_checks`; no first-seen date is stored.
 - A difference clears when a later Import fills the gap, and its "since" date moves with the balances; README [Correct](../../README.md#correct) has the rest of the rules.
