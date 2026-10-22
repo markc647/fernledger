@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkBalances, importOutcome, statusOnRecord, type BalanceRow } from './balance-rules'
+import { checkBalances, importOutcome, statusOnRecord, syncBalance, type BalanceRow } from './balance-rules'
 
 const balance = (asOfDate: string, bankCents: number, openingCents: number, status: BalanceRow['status'] = 'alone'): BalanceRow => ({ asOfDate, bankCents, openingCents, status })
 
@@ -103,5 +103,67 @@ describe('importOutcome', () => {
 
   it('is null for a balance that is not in the list', () => {
     expect(importOutcome(results, '2026-01-01')).toBeNull()
+  })
+})
+
+describe('syncBalance', () => {
+  // Akahu read the bank at 02:46 UTC on 21 October, which is 15:46 that day in NZ.
+  const reported = { currency: 'NZD', currentCents: 70_717, refreshedBalanceAt: '2026-10-21T02:46:00.000Z', refreshedTransactionsAt: '2026-10-21T02:46:00.000Z' }
+
+  it("takes Akahu's balance as of the NZ date it was read, in cents", () => {
+    expect(syncBalance(reported, true)).toEqual({ balance: { asOfDate: '2026-10-21', bankCents: 70_717 } })
+  })
+
+  it('dates it by the NZ day and not the UTC day', () => {
+    const lateUtc = '2026-10-20T20:30:00.000Z' // 09:30 on the 21st in NZ
+    expect(syncBalance({ ...reported, refreshedBalanceAt: lateUtc, refreshedTransactionsAt: lateUtc }, true)).toEqual({ balance: { asOfDate: '2026-10-21', bankCents: 70_717 } })
+  })
+
+  it('takes an overdrawn or zero balance, which are balances', () => {
+    expect(syncBalance({ ...reported, currentCents: -1_250 }, true)).toMatchObject({ balance: { bankCents: -1_250 } })
+    expect(syncBalance({ ...reported, currentCents: 0 }, true)).toMatchObject({ balance: { bankCents: 0 } })
+  })
+
+  it('records nothing when Akahu sent no balance', () => {
+    expect(syncBalance({ ...reported, currentCents: null }, true)).toEqual({ skipped: 'no-balance' })
+    expect(syncBalance({ ...reported, refreshedBalanceAt: null }, true)).toEqual({ skipped: 'no-balance' })
+  })
+
+  it('records nothing when the Sync did not finish, because the Transactions held are not all of those Akahu has', () => {
+    expect(syncBalance(reported, false)).toEqual({ skipped: 'incomplete' })
+  })
+
+  it('records nothing when Akahu read the balance and the Transactions at different times, because they would not cover the same Transactions', () => {
+    expect(syncBalance({ ...reported, refreshedTransactionsAt: '2026-10-21T02:47:00.000Z' }, true)).toEqual({ skipped: 'refreshed-apart' })
+    expect(syncBalance({ ...reported, refreshedTransactionsAt: null }, true)).toEqual({ skipped: 'refreshed-apart' })
+  })
+
+  it('records nothing in a currency other than NZD, and takes a balance with no currency named', () => {
+    expect(syncBalance({ ...reported, currency: 'AUD' }, true)).toEqual({ skipped: 'currency' })
+    expect(syncBalance({ ...reported, currency: null }, true)).toMatchObject({ balance: { asOfDate: '2026-10-21' } })
+  })
+})
+
+describe("checkBalances with Akahu's balance", () => {
+  it('leaves the first Akahu balance alone, and counts it although it is after the Cutover Date', () => {
+    // A file balance dated on the Cutover Date is after-cutover and uncounted; Akahu's own, dated later, is counted and anchors.
+    const results = checkBalances([balance('2026-09-17', 5000, 0, 'after-cutover'), balance('2026-10-21', 70_717, 1000)])
+    expect(results.map((r) => r.status)).toEqual(['after-cutover', 'alone'])
+  })
+
+  it("matches the next Akahu balance when the Transactions since explain the change", () => {
+    const [, first, second] = checkBalances([balance('2026-09-17', 5000, 0, 'after-cutover'), balance('2026-10-21', 70_717, 1000), balance('2026-10-22', 69_717, 1000)])
+    expect(first!.status).toBe('alone')
+    expect(second).toEqual({ asOfDate: '2026-10-22', status: 'matched', checkedAgainst: '2026-10-21', calculatedCents: 69_717, differenceCents: 0 })
+  })
+
+  it('differs when a Transaction is missing, dated after the previous Akahu balance', () => {
+    const [, , second] = checkBalances([balance('2026-09-17', 5000, 0, 'after-cutover'), balance('2026-10-21', 70_717, 1000), balance('2026-10-22', 60_717, 11_000)])
+    expect(second).toEqual({ asOfDate: '2026-10-22', status: 'differs', checkedAgainst: '2026-10-21', calculatedCents: 50_717, differenceCents: 10_000 })
+  })
+
+  it('compares the first Akahu balance with an earlier file balance that is counted', () => {
+    const results = checkBalances([balance('2026-09-16', 5000, 1000), balance('2026-10-21', 70_717, 1000)])
+    expect(results[1]).toMatchObject({ status: 'matched', checkedAgainst: '2026-09-16' })
   })
 })

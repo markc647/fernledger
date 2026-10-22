@@ -21,14 +21,21 @@
 // Accounts, and it comes out of the same MAX_PAGES as the Transactions' pages, so a run still makes at most MAX_PAGES requests to
 // Akahu. If it fails, or does not list an Account, nothing is stored or cleared for that Account and Sync goes on as it did without it.
 //
+// The Balance Check (ticket 30, spec 61): when an Account finished and Akahu read its balance and its Transactions at the same moment,
+// the balance is recorded as the Account's bank balance (source 'sync') and the Account's Balance Check is run again (balance-rules.ts
+// syncBalance has the rules, ADR 0014 the reasoning). Nothing about it can fail the Sync: the Account's Transactions and mark are
+// already committed, and a check that fails is logged and runs again at the next Sync.
+//
 // D1 and subrequest budget (ADR 0004: 50 subrequests and 50 queries an invocation). One Account costs one page request for each
-// 100 Transactions (akahu.ts caps the run, the details request included, at MAX_PAGES) and one batch of up to 7 statements. A household's
+// 100 Transactions (akahu.ts caps the run, the details request included, at MAX_PAGES) and one batch of up to 8 statements. A household's
 // daily Sync is a page or two an Account. A run that reaches the page cap, or that any Account fails in, is not a success and does not move that Account's
 // `akahu_synced_at`, so the next run asks for the same window again (spec 47).
 import { STORE_DETAILS, toCents, toDetails } from './akahu-details'
 import type { AccountDetails } from './akahu-details'
 import { akahuTokens, fetchAkahuTransactions, listAkahuAccounts, MAX_PAGES } from './akahu'
 import type { AkahuAccount, AkahuFailure, AkahuResult, AkahuTransaction } from './akahu'
+import { PRUNE_SYNC_BALANCES, recordBalance, refreshBalanceChecks, SYNC_BALANCE_KEEP_DAYS } from './balance-check'
+import { syncBalance, type SyncBalance } from './balance-rules'
 import { eftposTime, isKiwibank } from './kiwibank-time'
 import { logEvent } from './log'
 import { nzClockTime, nzDate, nzDayStart } from './nz-time'
@@ -58,17 +65,18 @@ export const RECHECK_DAYS = 14
  * The D1 queries one Sync may spend, and what one Account costs at most.
  *
  * An invocation gets 50 (ADR 0004). Sync has it to itself, on its own cron and in "Run a Sync now" (the other crons carry on the
- * backup and the Rules re-run, worker/index.ts). The cap is 1 query to read the Accounts and 5 Accounts at QUERIES_PER_ACCOUNT each,
- * 46, which leaves 4 in hand.
+ * backup and the Rules re-run, worker/index.ts). The cap is 1 query to read the Accounts, 4 Accounts at QUERIES_PER_ACCOUNT each and
+ * 1 to drop old Sync balances at the end (PRUNE_SYNC_BALANCES), 46, which leaves 4 in hand because D1's own count of a batch can't
+ * be seen from a test.
  *
- * An Account costs one read for the highest Transaction ID and a batch of up to 7 statements (the upsert, the two for what was
- * withdrawn, the Rules, the pairing, the mark and the details): 8, which a test pins. 9 leaves one in hand, because D1's own count
- * of a batch can't be seen from a test. Sync stops starting Accounts when fewer than QUERIES_PER_ACCOUNT remain, rather than being
- * cut off inside a batch, so a sixth linked Account waits; those not reached keep their old last-success mark and come first in
- * the next run (LINKED_ACCOUNTS).
+ * An Account costs one read for the highest Transaction ID, a batch of up to 8 statements (the upsert, the two for what was
+ * withdrawn, the Rules, the pairing, the mark, the details and the bank balance) and the Balance Check's two (one read, one write):
+ * 11, which a test pins. Sync stops starting Accounts when fewer than QUERIES_PER_ACCOUNT remain, rather than being cut off inside
+ * a batch, so a fifth linked Account waits (it was a sixth before the Balance Check); those not reached keep their old last-success
+ * mark and come first in the next run (LINKED_ACCOUNTS).
  */
 export const MAX_QUERIES = 46
-export const QUERIES_PER_ACCOUNT = 9
+export const QUERIES_PER_ACCOUNT = 11
 
 /** A linked Account, as Sync reads it. */
 type LinkedAccount = {
@@ -336,8 +344,9 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
 
   logEvent('sync.start', { count: results.length })
   const budget = { pagesLeft: MAX_PAGES }
-  // One query has already gone on reading the Accounts.
-  let queriesLeft = MAX_QUERIES - 1
+  // One query has already gone on reading the Accounts, and one is kept for dropping old Sync balances.
+  let queriesLeft = MAX_QUERIES - 2
+  let recordedBalance = false
   const end = now.toISOString()
   const outcomes: AccountOutcome[] = []
   // Asked for once, when the first Account is about to be read, so a run that reads none asks for nothing.
@@ -381,15 +390,27 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     queriesLeft -= QUERIES_PER_ACCOUNT
     // This run's word for the bank, or the one an earlier run stored when Akahu did not list the Account this time.
     const connectionName = details?.akahuConnectionName ?? account.akahu_connection_name
+    // Only what Akahu said in this run: a balance stored by an earlier run is not new, and the Account may not have been listed.
+    const decision = details === null ? { skipped: 'no-balance' as const } : syncBalance(toReported(details), complete)
+    if ('skipped' in decision) logEvent(`sync.balance.${decision.skipped}`, { id: account.id })
+    const balance = 'balance' in decision ? decision.balance : null
     const { written, removed } = await writeAccount(env.DB, account, transactions.map((transaction) => toRow(transaction, connectionName)), {
       syncedAt: complete ? now : null,
       from: complete ? window.date : null,
-    }, details)
+    }, details, balance)
+    recordedBalance ||= balance !== null
     logEvent(complete ? 'sync.account.done' : 'sync.account.partial', { id: account.id, count: written })
     if (removed > 0) logEvent('sync.account.withdrawn', { id: account.id, count: removed })
     outcomes.push({ accountId: account.id, written, removed, complete })
   }
 
+  if (recordedBalance) {
+    try {
+      await env.DB.prepare(PRUNE_SYNC_BALANCES).bind(daysBefore(nzDate(now), SYNC_BALANCE_KEEP_DAYS)).run()
+    } catch (error) {
+      logEvent('sync.balance.prune-failed', { error })
+    }
+  }
   const success = outcomes.every((outcome) => outcome.complete)
   logEvent(success ? 'sync.done' : 'sync.incomplete', { count: outcomes.reduce((total, outcome) => total + outcome.written, 0) })
   return { ran: true, success, accounts: outcomes }
@@ -399,13 +420,21 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
 const detailsStatement = (db: D1Database, account: LinkedAccount, details: AccountDetails) =>
   db.prepare(STORE_DETAILS).bind(account.id, account.akahu_account_id, JSON.stringify(details))
 
+const toReported = (details: AccountDetails) => ({
+  currency: details.akahuBalanceCurrency,
+  currentCents: details.akahuBalanceCurrentCents,
+  refreshedBalanceAt: details.akahuRefreshedBalanceAt,
+  refreshedTransactionsAt: details.akahuRefreshedTransactionsAt,
+})
+
 const storeDetails = (db: D1Database, account: LinkedAccount, details: AccountDetails) => detailsStatement(db, account, details).run()
 
 /**
  * Write one Account's Transactions, give them their Rules and pair their Transfers, and — only when the Account finished
  * (`syncedAt` is the run's moment, or null when it did not) — record that Sync reached it. `details` is what Akahu says about
  * the Account, written whole so that a field it stopped sending is cleared; null when Akahu did not say this time, which leaves
- * what is stored alone.
+ * what is stored alone. `balance` is Akahu's balance to record as the Account's bank balance (syncBalance), or null; it is recorded in the
+ * same batch, after the rows it counts, and the Account's Balance Check is run again when the batch has committed.
  *
  * The statements go in one batch, so an Account's rows and what follows from them commit together or not at all. That is
  * the same reason an Import batches its own (worker/imports.ts), and it is why the Rules are applied from the highest
@@ -414,11 +443,11 @@ const storeDetails = (db: D1Database, account: LinkedAccount, details: AccountDe
  * No Change Log entry: the Change Log records what an Admin did, and every entry carries the actor's email (worker/changelog.ts).
  * A Sync is the app's own daily work with no one behind it, and the Sync status (ticket 29, #30) is where a Member sees it.
  */
-export async function writeAccount(db: D1Database, account: LinkedAccount, rows: SyncRow[], window: WriteWindow, details: AccountDetails | null): Promise<AccountWrite> {
+export async function writeAccount(db: D1Database, account: LinkedAccount, rows: SyncRow[], window: WriteWindow, details: AccountDetails | null, balance: SyncBalance | null = null): Promise<AccountWrite> {
   const { syncedAt, from } = window
   // Only a finished fetch has seen the whole window, so only a finished fetch may say what is no longer in it.
   const withdrawable = syncedAt !== null && from !== null
-  if (rows.length === 0 && !withdrawable && details === null) return { written: 0, removed: 0 }
+  if (rows.length === 0 && !withdrawable && details === null && balance === null) return { written: 0, removed: 0 }
 
   const ids = JSON.stringify(rows.map((row) => row.akahuId))
   const afterId = await lastTransactionId(db)
@@ -430,8 +459,17 @@ export async function writeAccount(db: D1Database, account: LinkedAccount, rows:
     pairTransfersStatement(db, { accountNumber: account.account_number, afterId }),
     ...(syncedAt === null ? [] : [db.prepare(MARK_SYNCED).bind(account.id, syncedAt.toISOString())]),
     ...(details === null ? [] : [detailsStatement(db, account, details)]),
+    // Last, so it counts the rows above. A balance that Akahu read on a day this Account already has one for replaces it.
+    ...(balance === null ? [] : [recordBalance(db, { accountNumber: account.account_number, ...balance, source: 'sync', status: 'alone' })]),
   ]
   const results = await db.batch(statements)
+  if (balance !== null) {
+    try {
+      await refreshBalanceChecks(db, account.id)
+    } catch (error) {
+      logEvent('sync.balance.check-failed', { id: account.id, error })
+    }
+  }
   const written = rows.length === 0 ? 0 : results[0]!.meta.changes
   // The delete is the second of the withdrawn pair, after the upsert when there was one.
   const removed = withdrawable ? results[(rows.length === 0 ? 0 : 1) + 1]!.meta.changes : 0
