@@ -49,11 +49,19 @@ const entries = Object.entries(COLUMNS)
 
 // ?1 is the Account, ?2 the Akahu account it is linked to and ?3 the details as JSON. Only while the Account is still linked to that
 // Akahu account: a link changed while a Sync was running must not get the old account's details back.
-export const STORE_DETAILS = `UPDATE accounts SET ${entries.map(([key, column]) => `${column} = json_extract(?3, '$.${key}')`).join(', ')}
+//
+// Writing these details means Akahu listed the Account, which is the one thing that says its Link is not broken, so the same
+// statement clears `akahu_missing_since` and the status stops saying so (worker/sync.ts: MARK_MISSING, ticket 29).
+export const STORE_DETAILS = `UPDATE accounts SET ${entries.map(([key, column]) => `${column} = json_extract(?3, '$.${key}')`).join(', ')},
+    akahu_missing_since = NULL
   WHERE id = ?1 AND akahu_account_id = ?2`
 
-/** The SET list that clears them all, for the statement that unlinks or relinks an Account. */
-export const CLEAR_DETAILS = entries.map(([, column]) => `${column} = NULL`).join(', ')
+/**
+ * The SET list that clears them all, for the statement that unlinks or relinks an Account. `akahu_missing_since` and
+ * `akahu_last_failure` (migration 2901) go with them: a broken Link and a failed Sync were the old link's, and the new one has
+ * neither until a Sync says so.
+ */
+export const CLEAR_DETAILS = [...entries.map(([, column]) => column), 'akahu_missing_since', 'akahu_last_failure'].map((column) => `${column} = NULL`).join(', ')
 
 /** The part of the details the Accounts screen shows, as the Accounts list reads them. The logo URL is not among them. */
 const DISPLAYED = [

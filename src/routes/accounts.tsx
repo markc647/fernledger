@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState, type ReactNode } from 'react'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { RowButton, useFocusBack } from '@/components/row-actions'
+import { Status } from '@/components/status'
 import { focusPanel, RowPanel, useDrafts, type Drafts } from '@/components/row-panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,6 +28,10 @@ type Account = {
   /** When Fernledger last finished a Sync of the Account; Akahu's own `refreshed` times below are when Akahu last read the bank. */
   akahuSyncedAt: string | null
   akahuName: string | null
+  /** When Akahu first stopped listing the Account, which is a broken Account Link, or null while it still lists it. */
+  akahuMissingSince: string | null
+  /** Why the last Sync of it did not finish ('refused', 'unreachable', 'unreadable'), or null when the last one did. */
+  akahuLastFailure: string | null
   akahuStatus: string | null
   akahuType: string | null
   akahuConnectionName: string | null
@@ -119,10 +124,17 @@ function Accounts() {
   )
 }
 
-/** What Akahu says about the Account: the bank, Akahu's own name for it (a wrong link shows at a glance), its type and status, its balance, when Akahu last read the bank for each part and when Fernledger last Synced it, in NZ time. */
+/**
+ * What Akahu says about the Account: whether its Link is broken, the bank, Akahu's own name for it (a wrong link shows at a glance), its type and status, its balance,
+ * when Akahu last read the bank for each part and when Fernledger last Synced it, in NZ time.
+ *
+ * A broken Link is first, because nothing below it is current (spec 32): Akahu has stopped listing the account, so what is shown
+ * is what the last Sync that found it stored. Nothing of the Account's is deleted for it, and re-linking is on the Settings page.
+ */
 function AkahuDetails({ account }: { account: Account }) {
   // A page that does not know the Account is linked (an older answer) reads the same as one that is not.
   if (!account.akahuAccountId) return <span className="text-muted-foreground">Not linked to Akahu</span>
+  if (account.akahuMissingSince !== null) return <BrokenLink account={account} />
   if (account.akahuName === null) return <span>Linked to Akahu. The next Sync will read its details.</span>
   const { akahuBalanceCurrentCents: current, akahuBalanceAvailableCents: available, akahuBalanceCurrency: currency } = account
   const balance =
@@ -147,6 +159,32 @@ function AkahuDetails({ account }: { account: Account }) {
       <DetailLine term="Last Sync">{account.akahuSyncedAt === null ? 'Never synced' : formatDateTime(account.akahuSyncedAt)}</DetailLine>
       <DetailLine term="Akahu last read the bank">{read.map(([what, at]) => `${what}: ${formatDateTime(at!)}`).join('; ')}</DetailLine>
     </dl>
+  )
+}
+
+/**
+ * An Account Akahu has stopped listing: since when, and what to do about it. Only the Admin is told what to do (spec 60); the
+ * Account's own details are left out, because they are from the last Sync that still found it and saying them here would read
+ * as current.
+ */
+function BrokenLink({ account }: { account: Account }) {
+  const { data: me } = useQuery(meQuery)
+  return (
+    <div>
+      <Status tone="danger">Account Link broken</Status>
+      <p className="mt-1 text-muted-foreground">
+        Akahu has stopped listing this account since {formatDateTime(account.akahuMissingSince!)}. No Transaction has been removed, and the Transactions already held are still here.
+      </p>
+      {me?.role === 'admin' && (
+        <p className="mt-1">
+          Reconnect the bank in Akahu, then{' '}
+          <Link to="/settings" className="underline underline-offset-4">
+            link this Account again in Settings
+          </Link>
+          .
+        </p>
+      )}
+    </div>
   )
 }
 

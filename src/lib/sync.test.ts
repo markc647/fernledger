@@ -4,7 +4,7 @@ import { accountNote, runSummary, totalWritten, type AccountOutcome, type SyncRu
 // What the Admin reads after "Run a Sync now". The two things worth pinning: nothing new is a success and never reads as a
 // failure, and every failure names a cause and something to do (the Admin runs a Sync by hand precisely to find that out).
 const done = (accountId: number, written: number, removed = 0): AccountOutcome => ({ accountId, written, removed, complete: true })
-const run = (accounts: AccountOutcome[], success = accounts.every((a) => a.complete)): SyncRunOutcome => ({ ran: true, success, accounts })
+const run = (accounts: AccountOutcome[], success = accounts.every((a) => a.complete)): SyncRunOutcome => ({ ran: true, success, pending: 0, accounts })
 
 describe('runSummary', () => {
   it('calls a quiet day a success, without a count that reads as a failure', () => {
@@ -24,7 +24,7 @@ describe('runSummary', () => {
   })
 
   it('says there was nothing to sync when no Account is linked', () => {
-    expect(runSummary({ ran: false, success: false, accounts: [] })).toEqual({ tone: 'neutral', text: 'No Account is linked to Akahu, so there was nothing to sync.' })
+    expect(runSummary({ ran: false, success: false, pending: null, accounts: [] })).toEqual({ tone: 'neutral', text: 'No Account is linked to Akahu, so there was nothing to sync.' })
   })
 })
 

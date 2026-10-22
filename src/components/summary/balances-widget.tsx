@@ -4,6 +4,7 @@ import { Amount } from '@/components/amount'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Status } from '@/components/status'
 import { DashboardCard } from '@/components/summary/dashboard-card'
+import { SyncStatusLine } from '@/components/summary/sync-status-line'
 import { checkedAmount, checkedBy, noBalanceReason, type Checked } from '@/lib/balance-check'
 import { featuresQuery } from '@/lib/features'
 import { formatDate } from '@/lib/format'
@@ -43,7 +44,8 @@ export const BALANCES_ABOUT =
   'Balance as of the last Transaction we hold, worked out from the latest bank balance: the one in your latest Import, or the one Akahu reported at the last Sync. It is not a live figure from the bank. The Balances over time Report lists each difference and when it began.'
 
 /**
- * Summary card: the balance of each Account, from its latest bank balance, with a Checked column and, only when Akahu Sync is set up (ADR 0008), a Sync column (README, What it does,
+ * Summary card: how current the bank data is (the Sync status, only where Akahu Sync is set up), then the balance of each Account, from its latest bank balance, with a Checked column
+ * and, again only when Sync is set up (ADR 0008), a Sync column (README, What it does,
  * says what each shows). The table waits for the Balance Checks and for whether Sync is set up as well as for the balances, so the columns do not appear after the rows. If the checks cannot be read the
  * Checked column is left out and the card says so: a dash would claim that nothing was compared.
  */
@@ -104,6 +106,7 @@ export function BalancesWidget() {
               Fernledger couldn't check the balances against the bank. Reload the page to try again.
             </p>
           )}
+          {syncSetUp && <SyncStatusLine />}
           <ResponsiveTable
             caption="Balance of each Account, calculated from the Transactions held"
             rows={accounts}

@@ -9,6 +9,8 @@
 //   GET /v1/accounts/{_id}/transactions    one account's Transactions, which is what Sync asks for: a linked Account
 //                                          receives only its own, so Akahu seeing more accounts than you linked
 //                                          cannot put them in the app (spec 31)
+//   GET /v1/transactions/pending           the Pending Transactions of every account it can see, in one call; the rows of
+//                                          accounts that were not linked are dropped here, for the same reason (ticket 29)
 //   headers: Authorization: Bearer <user token>, X-Akahu-Id: <app token>
 //   query:   start (EXCLUSIVE), end (inclusive), cursor; up to 100 items a page, `cursor.next` null on the last
 //
@@ -125,6 +127,26 @@ export type AkahuAccount = z.infer<typeof akahuAccount>
 
 const accountsAnswer = z.object({ items: z.array(akahuAccount) })
 
+/**
+ * One Pending Transaction (developers.akahu.nz, "The Transaction Model", Pending Transactions): money the bank has reported and
+ * not settled. It carries no `_id` and no `created_at`: a pending row is not a thing Akahu keeps, it is what the bank is showing
+ * at the moment of asking, so there is nothing to match one against between Syncs (worker/pending.ts replaces them all).
+ *
+ * `_account` says which account it belongs to, because the one call covers every account the user token can see.
+ */
+export const akahuPending = z.object({
+  _account: z.string(),
+  date: z.string(),
+  description: z.string(),
+  // Dollars, negative for money out, as a settled Transaction's is.
+  amount: z.number(),
+  type: z.optional(z.string()),
+  updated_at: z.optional(z.string()),
+})
+export type AkahuPending = z.infer<typeof akahuPending>
+
+const pendingAnswer = z.object({ items: z.array(akahuPending) })
+
 export type AkahuResult<T> = { ok: true; value: T } | { ok: false; reason: AkahuFailure }
 
 /**
@@ -175,6 +197,18 @@ async function get<T>(path: string, tokens: AkahuTokens, shape: z.ZodMiniType<T>
 /** The Akahu accounts the user token can see, for the Admin to pick from when linking an Account. Nothing is stored by asking. */
 export const listAkahuAccounts = async (tokens: AkahuTokens): Promise<AkahuResult<AkahuAccount[]>> => {
   const answer = await get('/accounts', tokens, accountsAnswer)
+  return answer.ok ? { ok: true, value: answer.value.items } : answer
+}
+
+/**
+ * Every Pending Transaction the user token can see, in one call, and so one request for a whole Sync however many Accounts are
+ * linked. There is no window to ask for and no cursor: pending money is small and what the bank is showing right now is all of it.
+ *
+ * Akahu answers for every account it can see, which may be more than were linked (spec 31); the caller keeps only the Accounts' own,
+ * as fetchAkahuTransactions does.
+ */
+export const fetchPendingTransactions = async (tokens: AkahuTokens): Promise<AkahuResult<AkahuPending[]>> => {
+  const answer = await get('/transactions/pending', tokens, pendingAnswer)
   return answer.ok ? { ok: true, value: answer.value.items } : answer
 }
 

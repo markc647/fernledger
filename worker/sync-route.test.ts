@@ -20,11 +20,13 @@ let accountId = 0
 
 const asJson = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
+// The pending-money call a run makes (worker/pending.ts) is answered with nothing pending unless a test's own `respond` is
+// given the path: these tests are about the Transactions and what the Admin is told, and pending rows would only be noise.
 const stubAkahu = (respond: (url: string) => Response) =>
   vi.stubGlobal('fetch', async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = new Request(input, init).url
     calls.push(url)
-    return respond(url)
+    return new URL(url).pathname === '/v1/transactions/pending' ? asJson({ items: [] }) : respond(url)
   })
 
 const transaction = (id: string) => ({
@@ -74,7 +76,7 @@ describe('POST /api/sync/runs', () => {
     const res = await runNow({ secrets: SECRETS })
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ran: true, success: true, accounts: [{ accountId, written: 1, removed: 0, complete: true }] })
+    expect(await res.json()).toEqual({ ran: true, success: true, pending: 0, accounts: [{ accountId, written: 1, removed: 0, complete: true }] })
     expect(await rowCount()).toBe(1)
   })
 
@@ -101,7 +103,7 @@ describe('POST /api/sync/runs', () => {
     const res = await runNow({ secrets: SECRETS })
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ran: true, success: false, accounts: [{ accountId, written: 0, removed: 0, complete: false, failure: 'refused' }] })
+    expect(await res.json()).toEqual({ ran: true, success: false, pending: 0, accounts: [{ accountId, written: 0, removed: 0, complete: false, failure: 'refused' }] })
     // The reason is one of Akahu's three fixed words, never Akahu's own message, which can echo a token.
     expect(JSON.stringify(logged)).not.toContain('Unauthorized')
     for (const token of Object.values(SECRETS)) expect(JSON.stringify(logged)).not.toContain(token)
@@ -113,7 +115,7 @@ describe('POST /api/sync/runs', () => {
 
     const res = await runNow({ secrets: SECRETS })
 
-    expect(await res.json()).toEqual({ ran: false, success: false, accounts: [] })
+    expect(await res.json()).toEqual({ ran: false, success: false, pending: null, accounts: [] })
     expect(calls).toEqual([])
   })
 

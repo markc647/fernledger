@@ -23,6 +23,8 @@ const none = {
   akahuRefreshedMetaAt: null,
   akahuRefreshedTransactionsAt: null,
   akahuSyncedAt: null,
+  akahuMissingSince: null,
+  akahuLastFailure: null,
 }
 
 const ACCOUNTS = [
@@ -64,6 +66,19 @@ const ACCOUNTS = [
   },
   // Linked, and no Sync has read it yet.
   { ...none, id: 4, name: 'Example new link', accountNumber: '99-9999-9999999-32', cutoverDate: null, akahuAccountId: 'acc_example000000000000004' },
+  // Linked, Synced before, and Akahu has since stopped listing it: its Account Link is broken (ticket 29, spec 32).
+  {
+    ...none,
+    id: 5,
+    name: 'Example gone',
+    accountNumber: '99-9999-9999999-34',
+    cutoverDate: null,
+    akahuAccountId: 'acc_example000000000000005',
+    akahuName: 'EXAMPLE GONE',
+    akahuConnectionName: 'Example Bank',
+    akahuSyncedAt: '2026-10-18T18:00:00.000Z',
+    akahuMissingSince: '2026-10-19T18:00:00.000Z',
+  },
 ]
 
 async function open(page: Page, context: Parameters<typeof signInAs>[0], role: 'admin' | 'member' = 'member') {
@@ -142,5 +157,24 @@ test('the page never draws or fetches the logo, even when it is given the URL', 
 test('the Accounts screen with Akahu\'s details passes the accessibility scan, for the Admin too', async ({ page, context }) => {
   await open(page, context, 'admin')
   await expect(page.getByText('EXAMPLE EVERYDAY', { exact: true })).toBeVisible()
+  await noAxeViolations(page)
+})
+
+test('an Account Akahu has stopped listing says its Link is broken, since when, and that nothing was removed', async ({ page, context }) => {
+  const row = (await open(page, context)).filter({ hasText: 'Example gone' })
+  await expect(row).toContainText('Account Link broken')
+  // 18:00 UTC on 19 October is 7:00 am on the 20th in NZ.
+  await expect(row).toContainText('Akahu has stopped listing this account since Tue 20 Oct 2026, 7:00 am.')
+  await expect(row).toContainText('No Transaction has been removed')
+  // The details the last Sync stored are not read out as though they were current.
+  await expect(row.getByRole('term')).toHaveCount(0)
+  // A Member is not asked to do what only the Admin can (spec 60).
+  await expect(row).not.toContainText('Reconnect the bank in Akahu')
+})
+
+test('the Admin is sent to Settings to link an Account whose Link is broken again', async ({ page, context }) => {
+  const row = (await open(page, context, 'admin')).filter({ hasText: 'Example gone' })
+  await expect(row).toContainText('Reconnect the bank in Akahu, then')
+  await expect(row.getByRole('link', { name: 'link this Account again in Settings' })).toHaveAttribute('href', '/settings')
   await noAxeViolations(page)
 })

@@ -15,8 +15,11 @@ export type AccountOutcome = {
   failure?: 'refused' | 'unreachable' | 'unreadable' | 'no-window' | 'no-budget'
 }
 
-/** A whole run (worker/sync.ts: SyncOutcome). `ran` is false when no Account is linked to Akahu, so there was nothing to do. */
-export type SyncRunOutcome = { ran: boolean; success: boolean; accounts: AccountOutcome[] }
+/**
+ * A whole run (worker/sync.ts: SyncOutcome). `ran` is false when no Account is linked to Akahu, so there was nothing to do.
+ * `pending` is how many Pending Transactions it wrote, or null when Akahu could not be asked and what was held was kept.
+ */
+export type SyncRunOutcome = { ran: boolean; success: boolean; pending: number | null; accounts: AccountOutcome[] }
 
 export type Tone = 'success' | 'warning' | 'danger' | 'neutral'
 
