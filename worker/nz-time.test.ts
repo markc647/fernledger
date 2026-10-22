@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nextDay, nzDayStart } from './nz-time'
+import { nextDay, nzClockTime, nzDayStart } from './nz-time'
 
 describe('nzDayStart', () => {
   it.each([
@@ -24,5 +24,26 @@ describe('nextDay', () => {
     ['2028-02-28', '2028-02-29'],
   ])('%s is followed by %s', (date, next) => {
     expect(nextDay(date)).toBe(next)
+  })
+})
+
+describe('nzClockTime', () => {
+  it.each([
+    ['2026-10-08', '12:07', '2026-10-07T23:07:00.000Z'], // summer time, UTC+13
+    ['2026-07-01', '12:07', '2026-07-01T00:07:00.000Z'], // winter time, UTC+12
+    ['2026-10-08', '00:00', '2026-10-07T11:00:00.000Z'],
+    ['2026-10-08', '23:59', '2026-10-08T10:59:00.000Z'],
+  ])('puts %s %s in NZ at %s', (date, time, utc) => {
+    expect(nzClockTime(date, time)).toBe(utc)
+  })
+
+  // Nothing is invented for a clock reading that cannot be placed.
+  it('gives nothing for a time clocks skipped when they went forward (2026-09-27, 2:00 to 3:00)', () => {
+    expect(nzClockTime('2026-09-27', '02:30')).toBeNull()
+  })
+
+  it('gives nothing for a time that happened twice when clocks went back (2026-04-05, 3:00 to 2:00)', () => {
+    expect(nzClockTime('2026-04-05', '02:30')).toBeNull()
+    expect(nzClockTime('2026-04-05', '03:30')).toBe('2026-04-04T15:30:00.000Z')
   })
 })

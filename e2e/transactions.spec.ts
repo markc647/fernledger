@@ -372,7 +372,7 @@ test('the filters have Search and Clear filters but no Download CSV or count of 
 test('Back from a Transaction opened on the Uncategorised page returns to the Uncategorised page, in the same order', async ({ page, context }) => {
   await signInAs(context, 'admin')
   const row = { id: 4242, accountId: 1, accountName: 'Example savings', date: '2026-10-08', description: 'EXAMPLE CAFE TOWN', bankType: 'EFTPOS', amountCents: -2345, categoryId: null, categoryName: null, categorySource: null, note: null }
-  const detail = { ...row, bankMemo: '', bankReference: null, bankCounterpartyAccount: null, bankCardSuffix: null, bankParticulars: null, bankPaymentCode: null, source: 'import', bankTime: null, firstSeenAt: null }
+  const detail = { ...row, bankMemo: '', bankReference: null, bankCounterpartyAccount: null, bankCardSuffix: null, bankParticulars: null, bankPaymentCode: null, source: 'import', bankTime: null, firstSeenAt: null, akahuCategoryName: null, akahuCategoryGroupName: null }
   await page.route(/\/api\/transactions\?/, (route) => {
     const countOnly = new URL(route.request().url()).searchParams.get('count') === 'only'
     return route.fulfill({ json: countOnly ? { total: 1, transactions: [] } : { total: null, transactions: [row] } })
@@ -526,6 +526,8 @@ test('the details show what Sync supplies, and a Bank Time only when the bank ga
     note: 'Lunch with Sam',
     bankTime: '2026-10-07T20:15:00.000Z', // 9:15 am on the 8th in NZ
     firstSeenAt: '2026-10-08T06:30:00.000Z', // 7:30 pm
+    akahuCategoryName: null,
+    akahuCategoryGroupName: null,
   }
   await page.route('**/api/transactions/4242', (route) => route.fulfill({ json: detail }))
   await page.goto('/transactions/4242')
@@ -551,6 +553,69 @@ test('the details show what Sync supplies, and a Bank Time only when the bank ga
   await page.reload()
   await expect(page.getByRole('region', { name: 'From the bank' })).toContainText('First seen by Akahu')
   await expect(page.getByRole('region', { name: 'From the bank' }).getByText('Bank Time')).toHaveCount(0)
+})
+
+// Ticket 43: Akahu's category and the EFTPOS time read from a Kiwibank description. The Transaction is stubbed, so this needs nothing in the database.
+test("the details show Akahu's category, labelled as Akahu's, and an EFTPOS time as a Bank Time, and neither when there is none", async ({ page, context }) => {
+  await signInAs(context, 'member')
+  const detail = {
+    id: 4243,
+    accountId: 1,
+    accountName: 'Example cheque',
+    date: '2026-10-16',
+    amountCents: -1840,
+    description: 'Example Store',
+    bankMemo: 'POS W/D Example Store-12:07',
+    bankType: 'EFTPOS',
+    bankReference: null,
+    bankCounterpartyAccount: null,
+    bankCardSuffix: null,
+    bankParticulars: null,
+    bankPaymentCode: null,
+    source: 'sync',
+    categoryId: null,
+    categoryName: null,
+    categorySource: null,
+    categoryKind: null,
+    note: null,
+    transfer: null,
+    transferAccountName: null,
+    transferTransactionId: null,
+    transferPartnerOverridden: false,
+    canMarkNotTransfer: false,
+    notTransfer: false,
+    bankTime: '2026-10-15T23:07:00.000Z', // 12:07 pm on the 16th in NZ, read from the description
+    firstSeenAt: '2026-10-16T06:30:00.000Z',
+    akahuCategoryName: 'Example category',
+    akahuCategoryGroupName: 'Example group',
+  }
+  await page.route('**/api/transactions/4243', (route) => route.fulfill({ json: detail }))
+  await page.goto('/transactions/4243')
+
+  const bank = page.getByRole('region', { name: 'From the bank' })
+  await expect(bank).toContainText('Bank memo')
+  await expect(bank).toContainText('POS W/D Example Store-12:07') // as the bank wrote it
+  await expect(bank).toContainText('Bank Time')
+  await expect(bank).toContainText('Fri 16 Oct 2026, 12:07 pm')
+  await expect(bank).toContainText("Akahu's category")
+  await expect(bank).toContainText('Example category')
+  await expect(bank).toContainText("In Akahu's group Example group")
+  // It is Akahu's and nothing more: the Transaction is still Uncategorised.
+  await expect(page.getByRole('region', { name: 'Summary' })).toContainText('Uncategorised')
+  await expect(page.getByRole('region', { name: 'Summary' })).not.toContainText('Example category')
+  await noAxeViolations(page)
+
+  // One with neither says nothing of them, rather than "none".
+  await page.unroute('**/api/transactions/4243')
+  await page.route('**/api/transactions/4243', (route) =>
+    route.fulfill({ json: { ...detail, bankMemo: 'DIRECT DEBIT Example Energy', bankTime: null, akahuCategoryName: null, akahuCategoryGroupName: null } }),
+  )
+  await page.reload()
+  await expect(bank).toContainText('DIRECT DEBIT Example Energy')
+  await expect(bank.getByText('Bank Time')).toHaveCount(0)
+  await expect(bank.getByText("Akahu's category")).toHaveCount(0)
+  await expect(bank).not.toContainText("Akahu's group")
+  await noAxeViolations(page)
 })
 
 test.describe('a Transaction that does not exist', () => {

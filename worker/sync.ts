@@ -29,8 +29,9 @@ import { STORE_DETAILS, toCents, toDetails } from './akahu-details'
 import type { AccountDetails } from './akahu-details'
 import { akahuTokens, fetchAkahuTransactions, listAkahuAccounts, MAX_PAGES } from './akahu'
 import type { AkahuAccount, AkahuFailure, AkahuResult, AkahuTransaction } from './akahu'
+import { eftposTime, isKiwibank } from './kiwibank-time'
 import { logEvent } from './log'
-import { nzDate, nzDayStart } from './nz-time'
+import { nzClockTime, nzDate, nzDayStart } from './nz-time'
 import { applyRulesStatement, lastTransactionId } from './rule-apply'
 import { pairTransfersStatement } from './transfers'
 
@@ -76,6 +77,7 @@ type LinkedAccount = {
   akahu_account_id: string
   cutover_date: string | null
   akahu_synced_at: string | null
+  akahu_connection_name: string | null
 }
 
 // Least recently synced first, and an Account that has never synced before any that has. That ordering is what makes a run
@@ -83,12 +85,12 @@ type LinkedAccount = {
 // next run. Taking them in `id` order instead would let the first Account spend the whole budget every morning and the last
 // never sync at all. `id` only breaks ties, so the order is stable.
 export const LINKED_ACCOUNTS = `
-  SELECT id, account_number, akahu_account_id, cutover_date, akahu_synced_at
+  SELECT id, account_number, akahu_account_id, cutover_date, akahu_synced_at, akahu_connection_name
   FROM accounts WHERE akahu_account_id IS NOT NULL
   ORDER BY akahu_synced_at IS NOT NULL, akahu_synced_at, id`
 
 // One statement for the whole Account's Transactions: the rows ride as a single JSON parameter and are unpacked with json_each,
-// because D1 allows 100 bound parameters a statement and these rows have 17 columns (worker/imports.ts says the same of an Import).
+// because D1 allows 100 bound parameters a statement and these rows have 26 columns (worker/imports.ts says the same of an Import).
 //
 // ON CONFLICT targets the unique index on `akahu_id` (migration 2701). The Account is not updated on conflict: a Transaction that
 // somehow arrived under another Account stays where it is rather than moving silently, and ticket 29 (#30) is where a broken or
@@ -98,7 +100,9 @@ export const LINKED_ACCOUNTS = `
 export const UPSERT_SYNCED = `
   INSERT INTO transactions (
     account_id, date, amount_cents, description, bank_memo, bank_type, bank_reference, source, akahu_id, merchant,
-    bank_counterparty_account, bank_card_suffix, bank_particulars, bank_payment_code, akahu_date_raw, has_bank_time, akahu_first_seen_at)
+    bank_counterparty_account, bank_card_suffix, bank_particulars, bank_payment_code, akahu_date_raw, has_bank_time, akahu_first_seen_at,
+    akahu_category_id, akahu_category_name, akahu_category_group_id, akahu_category_group_name, akahu_balance_cents, akahu_hash,
+    akahu_updated_at, akahu_posted_date, akahu_connection_id, bank_time_from_memo)
   SELECT ?1,
          json_extract(value, '$.date'),
          json_extract(value, '$.amountCents'),
@@ -115,7 +119,17 @@ export const UPSERT_SYNCED = `
          json_extract(value, '$.paymentCode'),
          json_extract(value, '$.dateRaw'),
          json_extract(value, '$.hasBankTime'),
-         json_extract(value, '$.firstSeenAt')
+         json_extract(value, '$.firstSeenAt'),
+         json_extract(value, '$.categoryId'),
+         json_extract(value, '$.categoryName'),
+         json_extract(value, '$.categoryGroupId'),
+         json_extract(value, '$.categoryGroupName'),
+         json_extract(value, '$.balanceCents'),
+         json_extract(value, '$.hash'),
+         json_extract(value, '$.updatedAt'),
+         json_extract(value, '$.postedDate'),
+         json_extract(value, '$.connectionId'),
+         json_extract(value, '$.bankTimeFromMemo')
   FROM json_each(?2)
   -- Required, not decoration: after an INSERT … SELECT … FROM, SQLite reads a bare ON CONFLICT as a JOIN's ON and refuses the
   -- statement ("a JOIN clause is required before ON"), so the upsert clause must follow a WHERE. This one also says the rule the
@@ -134,7 +148,17 @@ export const UPSERT_SYNCED = `
     bank_particulars = excluded.bank_particulars,
     bank_payment_code = excluded.bank_payment_code,
     akahu_date_raw = excluded.akahu_date_raw,
-    has_bank_time = excluded.has_bank_time`
+    has_bank_time = excluded.has_bank_time,
+    akahu_category_id = excluded.akahu_category_id,
+    akahu_category_name = excluded.akahu_category_name,
+    akahu_category_group_id = excluded.akahu_category_group_id,
+    akahu_category_group_name = excluded.akahu_category_group_name,
+    akahu_balance_cents = excluded.akahu_balance_cents,
+    akahu_hash = excluded.akahu_hash,
+    akahu_updated_at = excluded.akahu_updated_at,
+    akahu_posted_date = excluded.akahu_posted_date,
+    akahu_connection_id = excluded.akahu_connection_id,
+    bank_time_from_memo = excluded.bank_time_from_memo`
 
 export const MARK_SYNCED = 'UPDATE accounts SET akahu_synced_at = ?2 WHERE id = ?1'
 
@@ -178,6 +202,17 @@ export type SyncRow = {
   dateRaw: string
   hasBankTime: number
   firstSeenAt: string
+  categoryId: string | null
+  categoryName: string | null
+  categoryGroupId: string | null
+  categoryGroupName: string | null
+  balanceCents: number | null
+  hash: string | null
+  updatedAt: string | null
+  postedDate: string | null
+  connectionId: string | null
+  /** The Bank Time read from the end of the description (Kiwibank's EFTPOS time), as a UTC instant. */
+  bankTimeFromMemo: string | null
 }
 
 /**
@@ -206,10 +241,16 @@ export function hasBankTime(dateRaw: string): boolean {
   }
 }
 
-/** One Akahu Transaction as a row. `description` is the merchant Akahu recognised, or the bank's own description when there is none. */
-export function toRow(transaction: AkahuTransaction): SyncRow {
+/**
+ * One Akahu Transaction as a row. `description` is the merchant Akahu recognised, or the bank's own description when there is none.
+ * `connectionName` is Akahu's name for the Account's bank connection, which decides whether the description is read for a time: only
+ * Kiwibank's is (worker/kiwibank-time.ts), and a bank that is not known is not Kiwibank. The category, balance and the rest
+ * are kept as Akahu sent them, or as not known.
+ */
+export function toRow(transaction: AkahuTransaction, connectionName: string | null): SyncRow {
   const meta = transaction.meta ?? {}
   const merchant = transaction.merchant?.name ?? null
+  const time = isKiwibank(connectionName) ? eftposTime(transaction.description) : null
   return {
     akahuId: transaction._id,
     date: nzDate(new Date(transaction.date)),
@@ -226,6 +267,16 @@ export function toRow(transaction: AkahuTransaction): SyncRow {
     dateRaw: transaction.date,
     hasBankTime: hasBankTime(transaction.date) ? 1 : 0,
     firstSeenAt: transaction.created_at,
+    categoryId: transaction.category?._id ?? null,
+    categoryName: transaction.category?.name ?? null,
+    categoryGroupId: transaction.category?.groups?.personal_finance?._id ?? null,
+    categoryGroupName: transaction.category?.groups?.personal_finance?.name ?? null,
+    balanceCents: transaction.balance === undefined ? null : toCents(transaction.balance),
+    hash: transaction.hash ?? null,
+    updatedAt: transaction.updated_at ?? null,
+    postedDate: transaction.posted_date ?? null,
+    connectionId: transaction._connection ?? null,
+    bankTimeFromMemo: time === null ? null : nzClockTime(nzDate(new Date(transaction.date)), time),
   }
 }
 
@@ -328,7 +379,9 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     }
     const { transactions, complete } = answer.value
     queriesLeft -= QUERIES_PER_ACCOUNT
-    const { written, removed } = await writeAccount(env.DB, account, transactions.map(toRow), {
+    // This run's word for the bank, or the one an earlier run stored when Akahu did not list the Account this time.
+    const connectionName = details?.akahuConnectionName ?? account.akahu_connection_name
+    const { written, removed } = await writeAccount(env.DB, account, transactions.map((transaction) => toRow(transaction, connectionName)), {
       syncedAt: complete ? now : null,
       from: complete ? window.date : null,
     }, details)

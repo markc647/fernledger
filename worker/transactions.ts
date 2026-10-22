@@ -41,7 +41,11 @@ type TransactionListRow = {
 /**
  * One Transaction in full. The `bank…` fields are the bank's own words, as the bank or Akahu gave them; the ones Sync supplies
  * are null for an Import. `bankTime` is the bank's time of day, as a UTC instant, and is null unless the bank actually supplied
- * one (Bank Time), however the raw date looks. `firstSeenAt` is when Akahu first reported the Transaction, as a UTC instant.
+ * one (Bank Time), however the raw date looks: Akahu's own when it supplied one, else the time at the end of a Kiwibank description
+ * (worker/kiwibank-time.ts). `firstSeenAt` is when Akahu first reported the Transaction, as a UTC instant.
+ *
+ * `akahuCategoryName` and `akahuCategoryGroupName` are Akahu's category for the Transaction, which only Sync supplies and only a card
+ * Transaction has. They are for showing, as Akahu's, and nothing reads them: they are not the Category (`categoryName`). Null is not known.
  */
 type TransactionDetail = {
   id: number
@@ -74,6 +78,8 @@ type TransactionDetail = {
   notTransfer: boolean
   bankTime: string | null
   firstSeenAt: string | null
+  akahuCategoryName: string | null
+  akahuCategoryGroupName: string | null
 }
 
 /** Describes a Transaction in a Change Log summary: enough to find it, from its ID, date and description. */
@@ -168,7 +174,8 @@ export const transactions = new Hono<AppEnv>()
               ${category.transfer} AS transfer, partner_account.name AS transferAccountName, partner.id AS transferTransactionId,
               EXISTS (SELECT 1 FROM categories partner_override WHERE partner_override.id = partner.override_category AND partner_override.removed_at IS NULL) AS transferPartnerOverridden,
               ${category.markable} AS canMarkNotTransfer, t.not_transfer_with IS NOT NULL AS notTransfer,
-              CASE WHEN t.has_bank_time = 1 THEN t.akahu_date_raw END AS bankTime, t.akahu_first_seen_at AS firstSeenAt
+              COALESCE(CASE WHEN t.has_bank_time = 1 THEN t.akahu_date_raw END, t.bank_time_from_memo) AS bankTime, t.akahu_first_seen_at AS firstSeenAt,
+              t.akahu_category_name AS akahuCategoryName, t.akahu_category_group_name AS akahuCategoryGroupName
        FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
        ${PARTNER_JOIN}
        WHERE t.id = ?`,

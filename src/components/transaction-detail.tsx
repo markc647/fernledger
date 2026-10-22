@@ -202,6 +202,13 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
           <Fact label="Source">{t.source === 'sync' ? 'Synced from Akahu' : 'Imported from a bank file'}</Fact>
           {present(t.bankType) && <Fact label="Type">{t.bankType}</Fact>}
           {present(t.bankMemo) && <Fact label="Bank memo">{t.bankMemo}</Fact>}
+          {present(t.akahuCategoryName) && (
+            <Fact label="Akahu's category">
+              {t.akahuCategoryName}
+              {present(t.akahuCategoryGroupName) && <span className="block text-muted-foreground">In Akahu's group {t.akahuCategoryGroupName}</span>}
+              <span className="block text-muted-foreground">Akahu's own label. It does not set this Transaction's Category.</span>
+            </Fact>
+          )}
           {present(t.bankCounterpartyAccount) && <Fact label="Counterparty account">{t.bankCounterpartyAccount}</Fact>}
           {present(t.bankCardSuffix) && <Fact label="Card">Ending {t.bankCardSuffix}</Fact>}
           {present(t.bankParticulars) && <Fact label="Particulars">{t.bankParticulars}</Fact>}

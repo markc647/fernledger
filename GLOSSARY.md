@@ -45,8 +45,12 @@ A load of Transactions from bank-exported files; used for history older than Aka
 _Avoid_: Upload, migration
 
 **Bank Time**:
-The time of day of a Transaction, shown only when the bank actually supplied one; most Transactions have a date only.
+The time of day of a Transaction, shown only when the bank actually supplied one; most Transactions have a date only. Akahu's own time counts, and so does the `-HH:MM` Kiwibank writes at the end of an EFTPOS description (`POS W/D Example Store-12:07`), read for Kiwibank Accounts alone. A description with no such ending, or with something that only looks like one, gives none.
 _Avoid_: Timestamp, posted time
+
+**Akahu category**:
+Akahu's own label for a card Transaction (an NZFCC category and the personal-finance group above it), kept by Sync and shown on the Transaction's details as Akahu's. It is not a Category: it is never a Transaction's Category, and no Rule, Override, Uncategorised count or Report reads it. Absent means Akahu didn't say, not that there is none.
+_Avoid_: Suggested Category, auto-category
 
 **First-seen time**:
 When Akahu first reported a Transaction to Sync, shown in its details as "First seen by Akahu". Only Transactions that come through Sync have one: an Import's details say Akahu hasn't reported it. Not Bank Time, which is the time of day the bank supplied, and not the Transaction's date.

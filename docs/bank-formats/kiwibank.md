@@ -79,3 +79,7 @@ Date,Description,Card,Amount
 - **There is no balance**, so the Balance Check cannot run for a credit card Account imported from CSV.
 
 Both need the decision about what identifies an Account when the bank prints no durable number. Until that is made, a credit card's Transactions can only reach Fernledger through Akahu Sync, which has a stable account ID of its own.
+
+## The EFTPOS time in Akahu's description
+
+Not part of either CSV. Through Akahu, Kiwibank's `date` is a date only, but the description of an EFTPOS purchase ends in the time it was made, such as `POS W/D Example Store-12:07`. `worker/kiwibank-time.ts` reads a `-HH:MM` at the very end (hours 00-23, minutes 00-59) and Sync keeps it as the Transaction's Bank Time, only for an Account whose Akahu connection is named Kiwibank. Anything else gives no time: `-25:99`, `-1207`, `12:07` without the dash, a time mid-string. The description and bank memo are kept as the bank wrote them. The time is taken as an NZ time on the Transaction's NZ date, and a clock reading NZ skipped or repeated when clocks changed is not guessed at.
