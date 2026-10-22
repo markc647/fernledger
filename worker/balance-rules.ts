@@ -35,6 +35,9 @@ export function statusOnRecord(balance: { asOfDate: string; fileTo: string; cuto
   return 'alone'
 }
 
+/** How far apart Akahu's `refreshed.balance` and `refreshed.transactions` may be for its balance to be checked (syncBalance). */
+export const REFRESH_GAP_MS = 5 * 60_000
+
 export type SyncBalance = { asOfDate: string; bankCents: number }
 export type SyncBalanceSkipped = 'no-balance' | 'incomplete' | 'refreshed-apart' | 'currency'
 
@@ -44,11 +47,12 @@ export type ReportedBalance = Pick<AccountDetails, 'akahuBalanceCurrency' | 'aka
 /**
  * The bank balance to record after a Sync of an Account, or why there is none. Akahu's `balance.current` is the balance when Akahu last
  * read the bank (`refreshed.balance`), and a finished Sync holds every Transaction Akahu had read by `refreshed.transactions`. The two
- * cover the same Transactions only if they are the same moment, so a balance is recorded only then:
+ * cover the same Transactions only if they are read together, so a balance is recorded only when they are at most REFRESH_GAP_MS apart:
  * - It is dated the NZ day Akahu read the bank, not the day of the Sync, so a stale connection, or a second Sync of the same reading,
  *   records the same balance again and adds no day. Transactions dated that day and saved by the Sync count (`through_transaction_id`).
- * - If Akahu read the two apart, either could hold a Transaction the other lacks, and a Balance Check would report a difference that
- *   is only the gap between them: nothing is recorded.
+ * - If Akahu read the two further apart, either could hold a Transaction the other lacks, and a Balance Check would report a difference
+ *   that is only the gap between them: nothing is recorded. Akahu reads them seconds apart in one refresh (6 s on the test site), so
+ *   the same moment cannot be asked for; a bank posting inside that gap is the risk the allowance takes.
  * - A Sync that did not finish has not read the whole window, so nothing is recorded.
  * - Anything Akahu left out, or a currency that is not NZD (money here is NZD cents), is not a balance to check.
  */
@@ -56,7 +60,8 @@ export function syncBalance(reported: ReportedBalance, complete: boolean): { bal
   if (reported.akahuBalanceCurrentCents === null || reported.akahuRefreshedBalanceAt === null) return { skipped: 'no-balance' }
   if (reported.akahuBalanceCurrency !== null && reported.akahuBalanceCurrency !== 'NZD') return { skipped: 'currency' }
   if (!complete) return { skipped: 'incomplete' }
-  if (reported.akahuRefreshedTransactionsAt !== reported.akahuRefreshedBalanceAt) return { skipped: 'refreshed-apart' }
+  const gap = Math.abs(Date.parse(reported.akahuRefreshedTransactionsAt ?? '') - Date.parse(reported.akahuRefreshedBalanceAt))
+  if (!(gap <= REFRESH_GAP_MS)) return { skipped: 'refreshed-apart' }
   return { balance: { asOfDate: nzDate(new Date(reported.akahuRefreshedBalanceAt)), bankCents: reported.akahuBalanceCurrentCents } }
 }
 
