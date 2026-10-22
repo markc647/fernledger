@@ -67,7 +67,16 @@ test.describe('About your data', () => {
     await signInAs(context, 'member')
     await page.goto('/about-your-data')
     const held = section(page, 'What is held')
-    await expect(held.getByRole('listitem').locator('strong')).toHaveText(['Accounts:', 'Transactions:', 'Balances:', 'Categories:', 'The Change Log:', 'Who may sign in:', 'Settings:'])
+    await expect(held.getByRole('listitem').locator('strong')).toHaveText([
+      'Accounts:',
+      'Transactions:',
+      'Pending Transactions:',
+      'Balances:',
+      'Categories:',
+      'The Change Log:',
+      'Who may sign in:',
+      'Settings:',
+    ])
     await expect(held.getByRole('listitem').filter({ hasText: 'Balances:' })).toContainText('balance a bank reported')
     // The Change Log keeps values, Notes included, and is where the Admin's email address is held.
     await expect(held.getByRole('listitem').filter({ hasText: 'The Change Log:' })).toContainText('often with the values from before and after')
@@ -79,7 +88,7 @@ test.describe('About your data', () => {
   test('says what Akahu says about a linked Account is held, and that the logo address is kept and never fetched', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/about-your-data')
-    const accounts = section(page, 'What is held').getByRole('listitem').filter({ hasText: 'Accounts:' })
+    const accounts = section(page, 'What is held').getByRole('listitem').filter({ has: page.getByText('Accounts:', { exact: true }) })
     await expect(accounts).toContainText('If this Fernledger uses Akahu Sync')
     await expect(accounts).toContainText("its own name for the account, its status and type, the bank's name, the balance it reports (with the currency) and when Akahu last read the bank for each part, and when Fernledger last Synced the Account (its Last Sync)")
     await expect(accounts).toContainText("Fernledger keeps the address and nothing else: it never fetches or shows the logo, so nobody's browser contacts Akahu for it. Unlinking an Account clears all of this.")
@@ -88,10 +97,27 @@ test.describe('About your data', () => {
   test("says what Akahu says about a Synced Transaction is held, and that Akahu's category is only shown", async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/about-your-data')
-    const transactions = section(page, 'What is held').getByRole('listitem').filter({ hasText: 'Transactions:' })
+    // By its own heading: "Pending Transactions:" is a list item of its own and holds that text too.
+    const transactions = section(page, 'What is held').getByRole('listitem').filter({ has: page.getByText('Transactions:', { exact: true }) })
     await expect(transactions).toContainText('If this Fernledger uses Akahu Sync')
     await expect(transactions).toContainText("its category and the group above it (card Transactions only), the Account's balance after it, Akahu's content hash for it, when Akahu updated it and its posted date, and the bank connection it came from")
     await expect(transactions).toContainText("Akahu's category is only shown, and never sets a Transaction's Category.")
+  })
+
+  test('says the Pending Transactions are held, replaced by every Sync and counted in no total', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/about-your-data')
+    const pending = section(page, 'What is held').getByRole('listitem').filter({ has: page.getByText('Pending Transactions:', { exact: true }) })
+    await expect(pending).toContainText('if this Fernledger uses Akahu Sync')
+    await expect(pending).toContainText('Every Sync replaces them all, so nothing older than the last Sync is kept, and they are counted in no Budget, Report or total.')
+  })
+
+  test('says a linked Account holds why a Sync of it did not finish and since when Akahu has stopped listing it', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/about-your-data')
+    const accounts = section(page, 'What is held').getByRole('listitem').filter({ has: page.getByText('Accounts:', { exact: true }) })
+    await expect(accounts).toContainText('why the last Sync of it did not finish, and since when Akahu has stopped listing it (its Account Link broken)')
+    await expect(accounts).toContainText('no Transaction is ever removed because of them')
   })
 
   test('says what the weekly backup holds, and that earlier backups keep what was later removed', async ({ page, context }) => {
