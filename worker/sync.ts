@@ -34,8 +34,8 @@ import { STORE_DETAILS, toCents, toDetails } from './akahu-details'
 import type { AccountDetails } from './akahu-details'
 import { akahuTokens, fetchAkahuTransactions, listAkahuAccounts, MAX_PAGES } from './akahu'
 import type { AkahuAccount, AkahuFailure, AkahuResult, AkahuTransaction } from './akahu'
-import { PRUNE_SYNC_BALANCES, recordBalance, refreshBalanceChecks, SYNC_BALANCE_KEEP_DAYS } from './balance-check'
-import { syncBalance, type SyncBalance } from './balance-rules'
+import { recordBalance, refreshBalanceChecks } from './balance-check'
+import { syncBalance, type SyncBalance, type SyncBalanceSkipped } from './balance-rules'
 import { eftposTime, isKiwibank } from './kiwibank-time'
 import { logEvent } from './log'
 import { nzClockTime, nzDate, nzDayStart } from './nz-time'
@@ -65,9 +65,8 @@ export const RECHECK_DAYS = 14
  * The D1 queries one Sync may spend, and what one Account costs at most.
  *
  * An invocation gets 50 (ADR 0004). Sync has it to itself, on its own cron and in "Run a Sync now" (the other crons carry on the
- * backup and the Rules re-run, worker/index.ts). The cap is 1 query to read the Accounts, 4 Accounts at QUERIES_PER_ACCOUNT each and
- * 1 to drop old Sync balances at the end (PRUNE_SYNC_BALANCES), 46, which leaves 4 in hand because D1's own count of a batch can't
- * be seen from a test.
+ * backup and the Rules re-run, worker/index.ts). The cap is RUN_QUERIES (1, to read the Accounts) and ACCOUNTS_PER_RUN (4) Accounts at
+ * QUERIES_PER_ACCOUNT each, 45, which leaves 5 in hand because D1's own count of a batch can't be seen from a test.
  *
  * An Account costs one read for the highest Transaction ID, a batch of up to 8 statements (the upsert, the two for what was
  * withdrawn, the Rules, the pairing, the mark, the details and the bank balance) and the Balance Check's two (one read, one write):
@@ -75,8 +74,18 @@ export const RECHECK_DAYS = 14
  * a batch, so a fifth linked Account waits (it was a sixth before the Balance Check); those not reached keep their old last-success
  * mark and come first in the next run (LINKED_ACCOUNTS).
  */
-export const MAX_QUERIES = 46
 export const QUERIES_PER_ACCOUNT = 11
+export const ACCOUNTS_PER_RUN = 4
+export const RUN_QUERIES = 1
+export const MAX_QUERIES = RUN_QUERIES + ACCOUNTS_PER_RUN * QUERIES_PER_ACCOUNT
+
+// Why Sync recorded no balance for an Account (syncBalance), as the log names it.
+const BALANCE_SKIPPED_EVENT = {
+  'no-balance': 'sync.balance.no-balance',
+  incomplete: 'sync.balance.incomplete',
+  'refreshed-apart': 'sync.balance.refreshed-apart',
+  currency: 'sync.balance.currency',
+} as const satisfies Record<SyncBalanceSkipped, string>
 
 /** A linked Account, as Sync reads it. */
 type LinkedAccount = {
@@ -344,9 +353,8 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
 
   logEvent('sync.start', { count: results.length })
   const budget = { pagesLeft: MAX_PAGES }
-  // One query has already gone on reading the Accounts, and one is kept for dropping old Sync balances.
-  let queriesLeft = MAX_QUERIES - 2
-  let recordedBalance = false
+  // One query has already gone on reading the Accounts.
+  let queriesLeft = MAX_QUERIES - RUN_QUERIES
   const end = now.toISOString()
   const outcomes: AccountOutcome[] = []
   // Asked for once, when the first Account is about to be read, so a run that reads none asks for nothing.
@@ -391,26 +399,18 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     // This run's word for the bank, or the one an earlier run stored when Akahu did not list the Account this time.
     const connectionName = details?.akahuConnectionName ?? account.akahu_connection_name
     // Only what Akahu said in this run: a balance stored by an earlier run is not new, and the Account may not have been listed.
-    const decision = details === null ? { skipped: 'no-balance' as const } : syncBalance(toReported(details), complete)
-    if ('skipped' in decision) logEvent(`sync.balance.${decision.skipped}`, { id: account.id })
+    const decision = details === null ? { skipped: 'no-balance' as const } : syncBalance(details, complete)
+    if ('skipped' in decision) logEvent(BALANCE_SKIPPED_EVENT[decision.skipped], { id: account.id })
     const balance = 'balance' in decision ? decision.balance : null
     const { written, removed } = await writeAccount(env.DB, account, transactions.map((transaction) => toRow(transaction, connectionName)), {
       syncedAt: complete ? now : null,
       from: complete ? window.date : null,
     }, details, balance)
-    recordedBalance ||= balance !== null
     logEvent(complete ? 'sync.account.done' : 'sync.account.partial', { id: account.id, count: written })
     if (removed > 0) logEvent('sync.account.withdrawn', { id: account.id, count: removed })
     outcomes.push({ accountId: account.id, written, removed, complete })
   }
 
-  if (recordedBalance) {
-    try {
-      await env.DB.prepare(PRUNE_SYNC_BALANCES).bind(daysBefore(nzDate(now), SYNC_BALANCE_KEEP_DAYS)).run()
-    } catch (error) {
-      logEvent('sync.balance.prune-failed', { error })
-    }
-  }
   const success = outcomes.every((outcome) => outcome.complete)
   logEvent(success ? 'sync.done' : 'sync.incomplete', { count: outcomes.reduce((total, outcome) => total + outcome.written, 0) })
   return { ran: true, success, accounts: outcomes }
@@ -419,13 +419,6 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
 // Only while the Account is still linked to the Akahu account the details came from (STORE_DETAILS).
 const detailsStatement = (db: D1Database, account: LinkedAccount, details: AccountDetails) =>
   db.prepare(STORE_DETAILS).bind(account.id, account.akahu_account_id, JSON.stringify(details))
-
-const toReported = (details: AccountDetails) => ({
-  currency: details.akahuBalanceCurrency,
-  currentCents: details.akahuBalanceCurrentCents,
-  refreshedBalanceAt: details.akahuRefreshedBalanceAt,
-  refreshedTransactionsAt: details.akahuRefreshedTransactionsAt,
-})
 
 const storeDetails = (db: D1Database, account: LinkedAccount, details: AccountDetails) => detailsStatement(db, account, details).run()
 

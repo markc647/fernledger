@@ -108,7 +108,7 @@ describe('importOutcome', () => {
 
 describe('syncBalance', () => {
   // Akahu read the bank at 02:46 UTC on 21 October, which is 15:46 that day in NZ.
-  const reported = { currency: 'NZD', currentCents: 70_717, refreshedBalanceAt: '2026-10-21T02:46:00.000Z', refreshedTransactionsAt: '2026-10-21T02:46:00.000Z' }
+  const reported = { akahuBalanceCurrency: 'NZD', akahuBalanceCurrentCents: 70_717, akahuRefreshedBalanceAt: '2026-10-21T02:46:00.000Z', akahuRefreshedTransactionsAt: '2026-10-21T02:46:00.000Z' }
 
   it("takes Akahu's balance as of the NZ date it was read, in cents", () => {
     expect(syncBalance(reported, true)).toEqual({ balance: { asOfDate: '2026-10-21', bankCents: 70_717 } })
@@ -116,17 +116,17 @@ describe('syncBalance', () => {
 
   it('dates it by the NZ day and not the UTC day', () => {
     const lateUtc = '2026-10-20T20:30:00.000Z' // 09:30 on the 21st in NZ
-    expect(syncBalance({ ...reported, refreshedBalanceAt: lateUtc, refreshedTransactionsAt: lateUtc }, true)).toEqual({ balance: { asOfDate: '2026-10-21', bankCents: 70_717 } })
+    expect(syncBalance({ ...reported, akahuRefreshedBalanceAt: lateUtc, akahuRefreshedTransactionsAt: lateUtc }, true)).toEqual({ balance: { asOfDate: '2026-10-21', bankCents: 70_717 } })
   })
 
   it('takes an overdrawn or zero balance, which are balances', () => {
-    expect(syncBalance({ ...reported, currentCents: -1_250 }, true)).toMatchObject({ balance: { bankCents: -1_250 } })
-    expect(syncBalance({ ...reported, currentCents: 0 }, true)).toMatchObject({ balance: { bankCents: 0 } })
+    expect(syncBalance({ ...reported, akahuBalanceCurrentCents: -1_250 }, true)).toMatchObject({ balance: { bankCents: -1_250 } })
+    expect(syncBalance({ ...reported, akahuBalanceCurrentCents: 0 }, true)).toMatchObject({ balance: { bankCents: 0 } })
   })
 
   it('records nothing when Akahu sent no balance', () => {
-    expect(syncBalance({ ...reported, currentCents: null }, true)).toEqual({ skipped: 'no-balance' })
-    expect(syncBalance({ ...reported, refreshedBalanceAt: null }, true)).toEqual({ skipped: 'no-balance' })
+    expect(syncBalance({ ...reported, akahuBalanceCurrentCents: null }, true)).toEqual({ skipped: 'no-balance' })
+    expect(syncBalance({ ...reported, akahuRefreshedBalanceAt: null }, true)).toEqual({ skipped: 'no-balance' })
   })
 
   it('records nothing when the Sync did not finish, because the Transactions held are not all of those Akahu has', () => {
@@ -134,13 +134,13 @@ describe('syncBalance', () => {
   })
 
   it('records nothing when Akahu read the balance and the Transactions at different times, because they would not cover the same Transactions', () => {
-    expect(syncBalance({ ...reported, refreshedTransactionsAt: '2026-10-21T02:47:00.000Z' }, true)).toEqual({ skipped: 'refreshed-apart' })
-    expect(syncBalance({ ...reported, refreshedTransactionsAt: null }, true)).toEqual({ skipped: 'refreshed-apart' })
+    expect(syncBalance({ ...reported, akahuRefreshedTransactionsAt: '2026-10-21T02:47:00.000Z' }, true)).toEqual({ skipped: 'refreshed-apart' })
+    expect(syncBalance({ ...reported, akahuRefreshedTransactionsAt: null }, true)).toEqual({ skipped: 'refreshed-apart' })
   })
 
   it('records nothing in a currency other than NZD, and takes a balance with no currency named', () => {
-    expect(syncBalance({ ...reported, currency: 'AUD' }, true)).toEqual({ skipped: 'currency' })
-    expect(syncBalance({ ...reported, currency: null }, true)).toMatchObject({ balance: { asOfDate: '2026-10-21' } })
+    expect(syncBalance({ ...reported, akahuBalanceCurrency: 'AUD' }, true)).toEqual({ skipped: 'currency' })
+    expect(syncBalance({ ...reported, akahuBalanceCurrency: null }, true)).toMatchObject({ balance: { asOfDate: '2026-10-21' } })
   })
 })
 

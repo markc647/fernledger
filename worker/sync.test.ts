@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AKAHU_API, MAX_PAGES } from './akahu'
 import worker from './index'
 import { toCents } from './akahu-details'
-import { hasBankTime, MAX_QUERIES, QUERIES_PER_ACCOUNT, RECHECK_DAYS, SYNC_CRON, windowStart } from './sync'
+import { ACCOUNTS_PER_RUN, hasBankTime, MAX_QUERIES, QUERIES_PER_ACCOUNT, RUN_QUERIES, RECHECK_DAYS, SYNC_CRON, windowStart } from './sync'
 
 // Seam 1: the daily Sync cron through the Worker's exported handler, with Akahu faked at `fetch`, so nothing here reaches
 // Akahu. What is checked is what the ticket promises: only linked Accounts are stored, a re-run never duplicates, the window
@@ -394,8 +394,7 @@ describe('the daily Sync', () => {
   })
 
   // A batch cut off part way would leave an Account's rows written with no Rules, no pairing and no mark, so Sync stops before
-  // an Account instead. Reading the Accounts costs one query and dropping old Sync balances another, so this many fit in a run:
-  const ACCOUNTS_PER_RUN = Math.floor((MAX_QUERIES - 2) / QUERIES_PER_ACCOUNT)
+  // an Account instead. ACCOUNTS_PER_RUN is what fits after the run's own queries (worker/sync.ts).
 
   it('stops before an Account it has no database budget left for, and does not call the run a success', async () => {
     // One more linked Account than a run can take.
@@ -487,9 +486,10 @@ describe('the daily Sync', () => {
     expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM balance_checks WHERE source = 'sync'").first<{ n: number }>())!.n).toBe(4)
     expect(logged.join(' ')).toContain('sync.done')
     expect(logged.join(' ')).not.toContain('sync.account.no-budget')
-    // The Accounts read, then 11 for each Account: the Transaction ID read, the 8 statements of its batch and the Balance Check's read
-    // and write; then the one that drops old Sync balances.
-    expect(ops.d1).toBe(1 + 4 * QUERIES_PER_ACCOUNT + 1)
+    // The Accounts read, then for each Account its Transaction ID read, the 8 statements of its batch and the Balance Check's read and
+    // write (11, the worst case this fakes): exactly what MAX_QUERIES counts.
+    expect(calls).toHaveLength(ACCOUNTS_PER_RUN)
+    expect(ops.d1).toBe(RUN_QUERIES + ACCOUNTS_PER_RUN * QUERIES_PER_ACCOUNT)
     expect(ops.d1).toBe(MAX_QUERIES)
     expect(MAX_QUERIES).toBeLessThan(50)
   })
@@ -963,25 +963,6 @@ describe('the Balance Check after a Sync', () => {
     listing(reading())
     await runSync()
     expect(await bankBalances()).toEqual([])
-  })
-
-  it("drops Sync balances older than 60 days, but never an Account's newest or a file balance", async () => {
-    const insert = env.DB.prepare("INSERT INTO balance_checks (account_id, as_of_date, bank_cents, source, through_transaction_id, status) VALUES (?, ?, 1, ?, 0, 'alone')")
-    await env.DB.batch([
-      insert.bind(accountId, '2026-06-01', 'import'),
-      insert.bind(accountId, '2026-08-01', 'sync'), // 80 days before the run
-      insert.bind(accountId, '2026-09-01', 'sync'),
-      insert.bind(otherAccountId, '2026-06-01', 'sync'), // the only one of an Account that is not synced: kept
-    ])
-    stubAkahu(() => onePage([transaction()]))
-    listing(reading())
-    await runSync()
-    expect((await bankBalances()).map((row) => [row.date, row.source])).toEqual([
-      ['2026-06-01', 'import'],
-      ['2026-06-01', 'sync'],
-      ['2026-09-01', 'sync'],
-      ['2026-10-21', 'sync'],
-    ])
   })
 
   it('does not fail the Sync when the check cannot run', async () => {

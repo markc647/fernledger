@@ -6,17 +6,6 @@ import { checkBalances, importOutcome, UNCOUNTED_STATUSES, type BalanceRow, type
 /** `'after-cutover', 'file-ends-early'` for SQL. Built from constants, never from a request. */
 export const UNCOUNTED_SQL = UNCOUNTED_STATUSES.map((status) => `'${status}'`).join(', ')
 
-/** How long Sync keeps a balance of its own: one a day makes a difference's date exact, and an older one only costs reads. */
-export const SYNC_BALANCE_KEEP_DAYS = 60
-
-// Drops Sync's balances older than ?1 (a date), but never an Account's newest, which may be its only anchor if its link stops
-// syncing. Pruning never hides a difference: the next balance is then compared with the one before the dropped one, so the
-// difference shows with an earlier "since" date.
-export const PRUNE_SYNC_BALANCES = `
-  DELETE FROM balance_checks
-  WHERE source = 'sync' AND as_of_date < ?1
-    AND as_of_date < (SELECT MAX(s.as_of_date) FROM balance_checks s WHERE s.account_id = balance_checks.account_id AND s.source = 'sync')`
-
 /** Removes an Account's balances that came from Imports (?1 = the Account's ID), as its imported history is replaced. */
 export const DELETE_IMPORT_BALANCES = "DELETE FROM balance_checks WHERE account_id = ? AND source = 'import'"
 

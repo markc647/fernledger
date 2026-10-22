@@ -13,6 +13,7 @@
 //
 // Pending Transactions are stored apart from Transactions and never counted. A balance that cannot be counted
 // (see statusOnRecord) is kept but takes no part.
+import type { AccountDetails } from './akahu-details'
 import { nzDate } from './nz-time'
 
 export type BalanceStatus = 'matched' | 'differs' | 'alone' | 'after-cutover' | 'file-ends-early'
@@ -38,12 +39,7 @@ export type SyncBalance = { asOfDate: string; bankCents: number }
 export type SyncBalanceSkipped = 'no-balance' | 'incomplete' | 'refreshed-apart' | 'currency'
 
 /** What Akahu said of an Account's balance, as Sync stores it (worker/akahu-details.ts). Null where Akahu did not say. */
-export type ReportedBalance = {
-  currency: string | null
-  currentCents: number | null
-  refreshedBalanceAt: string | null
-  refreshedTransactionsAt: string | null
-}
+export type ReportedBalance = Pick<AccountDetails, 'akahuBalanceCurrency' | 'akahuBalanceCurrentCents' | 'akahuRefreshedBalanceAt' | 'akahuRefreshedTransactionsAt'>
 
 /**
  * The bank balance to record after a Sync of an Account, or why there is none. Akahu's `balance.current` is the balance when Akahu last
@@ -57,11 +53,11 @@ export type ReportedBalance = {
  * - Anything Akahu left out, or a currency that is not NZD (money here is NZD cents), is not a balance to check.
  */
 export function syncBalance(reported: ReportedBalance, complete: boolean): { balance: SyncBalance } | { skipped: SyncBalanceSkipped } {
-  if (reported.currentCents === null || reported.refreshedBalanceAt === null) return { skipped: 'no-balance' }
-  if (reported.currency !== null && reported.currency !== 'NZD') return { skipped: 'currency' }
+  if (reported.akahuBalanceCurrentCents === null || reported.akahuRefreshedBalanceAt === null) return { skipped: 'no-balance' }
+  if (reported.akahuBalanceCurrency !== null && reported.akahuBalanceCurrency !== 'NZD') return { skipped: 'currency' }
   if (!complete) return { skipped: 'incomplete' }
-  if (reported.refreshedTransactionsAt !== reported.refreshedBalanceAt) return { skipped: 'refreshed-apart' }
-  return { balance: { asOfDate: nzDate(new Date(reported.refreshedBalanceAt)), bankCents: reported.currentCents } }
+  if (reported.akahuRefreshedTransactionsAt !== reported.akahuRefreshedBalanceAt) return { skipped: 'refreshed-apart' }
+  return { balance: { asOfDate: nzDate(new Date(reported.akahuRefreshedBalanceAt)), bankCents: reported.akahuBalanceCurrentCents } }
 }
 
 export type BalanceRow = {
