@@ -1,4 +1,4 @@
-const midnightCheck = new Intl.DateTimeFormat('en-CA', {
+const clockFormat = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Pacific/Auckland',
   year: 'numeric',
   month: '2-digit',
@@ -19,15 +19,23 @@ export function nextDay(date: string): string {
 }
 
 /**
+ * The UTC instants at which the Pacific/Auckland clock reads `HH:MM` on an NZ date. NZ is UTC+12 or UTC+13, so those are the two to try:
+ * none when the clocks skipped that time, one usually, and two when they went back over it.
+ */
+function instantsAt(date: string, time: string): Date[] {
+  return [12, 13]
+    .map((offsetHours) => new Date(Date.parse(`${date}T${time}:00Z`) - offsetHours * 3_600_000))
+    .filter((instant) => clockFormat.format(instant).replace(',', '') === `${date} ${time}`)
+}
+
+/**
  * The UTC instant (ISO 8601, as stored in the Change Log) at which an NZ date begins in Pacific/Auckland.
- * NZ is UTC+12 or UTC+13 and clocks change at 2 am or 3 am, so midnight always exists with one of those two offsets.
+ * Clocks change at 2 am or 3 am, so midnight always exists, and once.
  */
 export function nzDayStart(date: string): string {
-  for (const offsetHours of [12, 13]) {
-    const instant = new Date(Date.parse(`${date}T00:00:00Z`) - offsetHours * 3_600_000)
-    if (midnightCheck.format(instant).replace(',', '') === `${date} 00:00`) return instant.toISOString()
-  }
-  throw new Error('No NZ midnight for that date')
+  const [start] = instantsAt(date, '00:00')
+  if (!start) throw new Error('No NZ midnight for that date')
+  return start.toISOString()
 }
 
 /**
@@ -35,8 +43,6 @@ export function nzDayStart(date: string): string {
  * past it) or had it twice (clocks went back), because then the instant is a guess and Fernledger does not guess.
  */
 export function nzClockTime(date: string, time: string): string | null {
-  const instants = [12, 13]
-    .map((offsetHours) => new Date(Date.parse(`${date}T${time}:00Z`) - offsetHours * 3_600_000))
-    .filter((instant) => midnightCheck.format(instant).replace(',', '') === `${date} ${time}`)
+  const instants = instantsAt(date, time)
   return instants.length === 1 ? instants[0]!.toISOString() : null
 }

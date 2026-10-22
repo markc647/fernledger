@@ -244,7 +244,7 @@ export function hasBankTime(dateRaw: string): boolean {
 /**
  * One Akahu Transaction as a row. `description` is the merchant Akahu recognised, or the bank's own description when there is none.
  * `connectionName` is Akahu's name for the Account's bank connection, which decides whether the description is read for a time: only
- * Kiwibank's is (src/lib/bank-csv/kiwibank-time.ts), and a bank that is not known is not Kiwibank. The category, balance and the rest
+ * Kiwibank's is (worker/kiwibank-time.ts), and a bank that is not known is not Kiwibank. The category, balance and the rest
  * are kept as Akahu sent them, or as not known.
  */
 export function toRow(transaction: AkahuTransaction, connectionName: string | null): SyncRow {
