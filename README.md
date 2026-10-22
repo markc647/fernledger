@@ -226,9 +226,10 @@ Fernledger aims to keep your data **correct, current and recoverable**.
 
 ### Correct
 
-- **Balance check after every import.** Each bank CSV export states the account's balance at the top. Fernledger compares it with the balance it calculates from its own transactions since the previous export. If they differ, a warning reads, for example, "Balance differs from bank by $5.00 since Wed 30 Sept 2026": the amount, and the date of the previous bank balance it was compared with (that balance may itself have differed). Missing or duplicated transactions can't go unnoticed: the Summary and the Dashboard show the result in the Checked column of the balances table ([What it does](#what-it-does)). The same check will run after every sync, against the balance Akahu reports.
-  - The first balance an account has is not checked, because there is nothing to compare it with. The next import is checked against it.
-  - A balance dated on or after the account's Cutover Date is not checked, because those days are meant to come from sync. Neither is a balance in a file that ends before that balance's date.
+- **Balance check after every import.** Each bank CSV export states the account's balance at the top. Fernledger compares it with the balance it calculates from its own transactions since the previous export. If they differ, a warning reads, for example, "Balance differs from bank by $5.00 since Wed 30 Sept 2026": the amount, and the date of the previous bank balance it was compared with (that balance may itself have differed). Missing or duplicated transactions can't go unnoticed: the Summary and the Dashboard show the result in the Checked column of the balances table ([What it does](#what-it-does)). The same check runs after every sync that finishes, against the balance Akahu reports ([ADR 0014](docs/adr/0014-akahu-balance-is-a-bank-balance.md)).
+  - The first balance an account has is not checked, because there is nothing to compare it with. The next import, or the next sync, is checked against it.
+  - After a sync that finished, the balance Akahu reports is recorded as the account's bank balance, as of the day Akahu read the bank, and checked against the one before it: a difference reads "since" that earlier day. It is recorded only when Akahu read the balance and the transactions at the same moment, so no balance is recorded, and none checked, when it did not (or sent none). It counts although it is after the Cutover Date, so an account whose only file balance is dated on its Cutover Date still gets a balance, and the Summary's "as of" date is the day Akahu read the bank. One is kept for each day, and those older than 60 days are dropped, except the newest.
+  - A balance in a file dated on or after the account's Cutover Date is not checked, because those days come from sync. Neither is a balance in a file that ends before that balance's date.
   - A transaction the bank adds late to the last day of an earlier export doesn't raise a false alarm. Pending transactions are never counted.
   - A transaction backfilled with the same date as an older balance (from a file that was missing it) isn't counted by that balance until that date's file is imported again.
   - A balance is checked only when it is dated before the account's Cutover Date. Taking the offer when importing sets the Cutover Date to the day after the file's last date, so the file's own balance is dated before it and is checked. Setting a Cutover Date by hand that falls on or before the file's last date leaves that balance unchecked; choose a later one, or import a file that runs past it.
@@ -238,8 +239,8 @@ Fernledger aims to keep your data **correct, current and recoverable**.
 
 ### Current
 
-- **Sync will run daily, with an automatic retry** a few hours later if it failed. A sync will only count as successful when every account has finished.
-- **The status banner will say what's wrong and what to do.** For example: "ASB needs reconnecting in Akahu (Admin)", "Akahu unavailable — retrying" or "Akahu token invalid (Admin)". Members will see the status, and the Admin will see the action. It will be shown only when Akahu Sync is set up, and will turn red after 2 days without a successful sync.
+- **Sync will run daily**, and the Admin can run it again at once if it failed. A sync will only count as successful when every account has finished.
+- **The status banner will say what's wrong and what to do.** For example: "ASB needs reconnecting in Akahu (Admin)", "Akahu unavailable" or "Akahu token invalid (Admin)". Members will see the status, and the Admin will see the action. It will be shown only when Akahu Sync is set up, and will turn red after 2 days without a successful sync.
 
 ### Recoverable
 

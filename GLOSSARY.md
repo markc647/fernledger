@@ -65,7 +65,7 @@ The association between an Account and its account in Akahu; it can break when a
 _Avoid_: Mapping, connection
 
 **Balance Check**:
-The comparison, after each Import, between an Account's balance as reported by the bank and the balance calculated from its Transactions; it will also run after each Sync. README [What it does](README.md#what-it-does) says where the result shows.
+The comparison, after each Import and after each Sync that finished, between an Account's balance as reported by the bank (the one in the file, or the one Akahu reports) and the balance calculated from its Transactions. A bank balance is as at a date; Akahu's is dated the NZ day Akahu read the bank. README [What it does](README.md#what-it-does) says where the result shows.
 The rules are in README [Correct](README.md#correct).
 _Avoid_: Reconciliation, audit
 
