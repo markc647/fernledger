@@ -5,11 +5,23 @@ import { CLEAR_DETAILS, SELECT_DISPLAYED } from './akahu-details'
 import type { DisplayedDetails } from './akahu-details'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
+import { DELETE_PENDING } from './pending'
 import { CHANGED_MEANWHILE, pathId, validate } from './validate'
 
 // What Akahu said about a linked Account is null for one that is not linked, and until a Sync has read it (worker/akahu-details.ts).
 // `akahuSyncedAt` is when Sync last finished the Account (an instant in UTC), or null until it has.
-type AccountRow = { id: number; name: string; accountNumber: string; cutoverDate: string | null; akahuAccountId: string | null; akahuSyncedAt: string | null } & {
+// `akahuMissingSince` is when Akahu first stopped listing the Account ("Account Link broken"), and `akahuLastFailure` why the last
+// Sync of it did not finish; both are null when there is nothing wrong. The Sync status is written from them (src/lib/sync-status.ts).
+type AccountRow = {
+  id: number
+  name: string
+  accountNumber: string
+  cutoverDate: string | null
+  akahuAccountId: string | null
+  akahuSyncedAt: string | null
+  akahuMissingSince: string | null
+  akahuLastFailure: string | null
+} & {
   [K in keyof DisplayedDetails]: DisplayedDetails[K] | null
 }
 
@@ -22,7 +34,8 @@ const link = z.object({ akahuAccountId: z.nullable(z.string().check(z.regex(/^ac
 export const accounts = new Hono<AppEnv>()
   .get('/', async (c) => {
     const { results } = await c.env.DB.prepare(
-      `SELECT id, name, account_number AS accountNumber, cutover_date AS cutoverDate, akahu_account_id AS akahuAccountId, akahu_synced_at AS akahuSyncedAt, ${SELECT_DISPLAYED}
+      `SELECT id, name, account_number AS accountNumber, cutover_date AS cutoverDate, akahu_account_id AS akahuAccountId, akahu_synced_at AS akahuSyncedAt,
+              akahu_missing_since AS akahuMissingSince, akahu_last_failure AS akahuLastFailure, ${SELECT_DISPLAYED}
        FROM accounts ORDER BY name COLLATE NOCASE, id`,
     ).all<AccountRow>()
     return c.json(results)
@@ -112,5 +125,8 @@ export const accounts = new Hono<AppEnv>()
       if (!now) return c.json({ error: 'Not found' }, 404)
       return now.akahu_account_id === akahuAccountId ? c.json({ id, akahuAccountId }) : c.json(CHANGED_MEANWHILE, 409)
     }
+    // The Pending Transactions came from the old link and say nothing about the new one, so they go with it. A Sync replaces the
+    // pending rows of the Accounts that are linked (worker/pending.ts), which would never reach an Account that has just been unlinked.
+    await db.prepare(DELETE_PENDING).bind(JSON.stringify([id])).run()
     return c.json({ id, akahuAccountId })
   })

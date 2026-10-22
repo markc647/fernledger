@@ -4,6 +4,7 @@ import type { AppEnv } from './app-env'
 import type { CategoryKind } from './category-kinds'
 import { recordChange } from './changelog'
 import { effectiveCategory, type CategorySource, type TransferSource } from './effective-category'
+import { SELECT_PENDING, type PendingTransaction } from './pending'
 import { exportQuery, exportResponse } from './transaction-export'
 import { buildSearch, categoryProbe, isFewInCategory, needsCategoryProbe, searchQuery, toFilters, toSearch, type Statement } from './transaction-search'
 import { clearHeldNotTransferStatement, clearNotTransferStatement, markNotTransferStatement, pairOneStatement, PARTNER_JOIN } from './transfers'
@@ -162,6 +163,12 @@ export const transactions = new Hono<AppEnv>()
   })
   // The same filters as the list, as a CSV file (transaction-export.ts). Ahead of '/:id', which would take "export.csv" for an ID.
   .get('/export.csv', validate('query', exportQuery), (c) => exportResponse(c.env.DB, toFilters(c.req.valid('query'))))
+  // The Pending Transactions, which the list shows above the settled rows (spec 54). All of them, unfiltered and unpaged: a
+  // household's pending money is a handful of rows that the last Sync replaced whole (worker/pending.ts). Also ahead of '/:id'.
+  .get('/pending', async (c) => {
+    const { results } = await c.env.DB.prepare(SELECT_PENDING).all<PendingTransaction>()
+    return c.json(results)
+  })
   .get('/:id', async (c) => {
     const id = pathId(c.req.param('id'))
     if (id === null) return c.json({ error: 'Not found' }, 404)

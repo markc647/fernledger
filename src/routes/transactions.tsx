@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useCallback } from 'react'
 import { PageHeading } from '@/components/help-sheet'
+import { PendingTransactions } from '@/components/pending-transactions'
 import { TransactionList } from '@/components/transaction-list'
 import { meQuery } from '@/lib/me'
 import { parseTransactionSearch, type TransactionSearch } from '@/lib/transaction-search'
@@ -25,6 +26,8 @@ function Transactions() {
         help={
           <>
             <p>Search and filter every Transaction, and open one to see all of its details.</p>
+            {/* Pending money sits above the table and is not part of it: it cannot be searched, filtered or opened, because the bank has not settled it and the app holds nothing more about it. */}
+            <p>Pending Transactions, which the bank has reported and not settled, are listed above the table. They may still change or disappear, so they count towards no Budget, Report or total, and every Sync replaces them.</p>
             {/* The Report lists the whole Account and dates, whatever the other filters say, so it carries only those. It opens in a new window, so the table, filtered as it is, is still where it was.
                 Only the Admin makes Reports, so only the Admin is offered it; a Member opens the ones the Admin has made from the Reports page. */}
             {me?.role === 'admin' && (
@@ -54,6 +57,7 @@ function Transactions() {
       >
         Transactions
       </PageHeading>
+      <PendingTransactions />
       <TransactionList
         search={search}
         onSearch={onSearch}

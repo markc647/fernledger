@@ -23,8 +23,12 @@ type Call = { url: string; headers: Headers }
 // The Transactions requests, which most tests count; the one request for the Accounts' own details is `accountCalls`.
 let calls: Call[] = []
 let accountCalls: Call[] = []
+// The one request a run makes for the Pending Transactions of every Account (worker/pending.ts).
+let pendingCalls: Call[] = []
 /** What Akahu answers to GET /accounts. Nothing, unless a test says: most only look at Transactions. */
 let accountsAnswer: () => Response = () => asJson({ items: [] })
+/** What Akahu answers to GET /transactions/pending. Nothing pending, unless a test says. */
+let pendingAnswer: () => Response = () => asJson({ items: [] })
 let logged: string[] = []
 
 const asJson = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -36,6 +40,10 @@ const stubAkahu = (respond: (call: Call) => Response | Promise<Response>) =>
     if (new URL(request.url).pathname === '/v1/accounts') {
       accountCalls.push(call)
       return accountsAnswer()
+    }
+    if (new URL(request.url).pathname === '/v1/transactions/pending') {
+      pendingCalls.push(call)
+      return pendingAnswer()
     }
     calls.push(call)
     return respond(call)
@@ -85,9 +93,12 @@ async function runSync(secrets: Partial<Env> = SECRETS, cron = SYNC_CRON) {
 beforeEach(async () => {
   calls = []
   accountCalls = []
+  pendingCalls = []
   accountsAnswer = () => asJson({ items: [] })
+  pendingAnswer = () => asJson({ items: [] })
   logged = []
   for (const level of ['log', 'info', 'warn', 'error'] as const) vi.spyOn(console, level).mockImplementation((...args) => void logged.push(args.map(String).join(' ')))
+  await env.DB.prepare('DELETE FROM pending_transactions').run()
   await env.DB.prepare('DELETE FROM transactions').run()
   await env.DB.prepare('DELETE FROM accounts').run()
   accountId = await account('Everyday', '99-9999-9999999-01', { akahu: LINKED, cutover: '2026-10-01' })
@@ -473,6 +484,8 @@ describe('the daily Sync', () => {
     }
     const refreshed = '2026-10-21T02:46:00.000Z'
     accountsAnswer = () => asJson({ items: linked.map((_id) => ({ _id, name: 'EXAMPLE', balance: { currency: 'NZD', current: 707.17 }, refreshed: { balance: refreshed, transactions: refreshed } })) })
+    // Pending money to write as well, which is the run's own worst case: the delete and the insert both run (RUN_QUERIES).
+    pendingAnswer = () => asJson({ items: linked.map((_account) => ({ _account, date: '2026-10-20T11:00:00.000Z', description: 'PENDING CAFE', amount: -4.5 })) })
     stubAkahu((call) => {
       const _account = new URL(call.url).pathname.split('/')[3]
       return onePage([transaction({ _id: `trans_${_account}`, _account })])
@@ -533,6 +546,9 @@ describe('the Account details Sync keeps', () => {
     listing(akahuAccountBody(), akahuAccountBody({ _id: OTHER, name: 'NOT LINKED' }))
     await runSync()
     expect(stored(await details(accountId))).toEqual({
+      // Akahu listed the Account, so its Link is not broken and the last Sync of it did not fail (ticket 29).
+      akahu_missing_since: null,
+      akahu_last_failure: null,
       akahu_name: 'EVERYDAY EXAMPLE',
       akahu_formatted_account: '99-9999-9999999-01',
       akahu_status: 'ACTIVE',
@@ -662,11 +678,13 @@ describe('the Account details Sync keeps', () => {
       })
     }
 
-    it('keeps what it had when the answer has no such account', async () => {
+    // Akahu answered and did not name the Account, which is the one case that says the Link is broken: the details it stored
+    // when Akahu still listed it are kept and nothing of the Account's is cleared (ticket 29, spec 32).
+    it('keeps what it had when the answer has no such account, and marks the Link broken', async () => {
       const before = await first()
       listing(akahuAccountBody({ _id: OTHER }))
       await runSync()
-      expect(stored(await details(accountId))).toEqual(before)
+      expect(stored(await details(accountId))).toEqual({ ...before, akahu_missing_since: '2026-10-20T18:00:00.000Z' })
     })
   })
 })
@@ -979,5 +997,160 @@ describe('the Balance Check after a Sync', () => {
     expect(await syncedAt(accountId)).not.toBeNull()
     expect(logged.join('\n')).toContain('sync.balance.check-failed')
     expect(await bankBalances()).toHaveLength(1)
+  })
+})
+
+// Pending Transactions, the Account Link Akahu stops returning, and the cause the Sync status names (ticket 29, spec 32, 54, 55, 56, 59).
+describe('pending money, a broken Link and why a Sync failed', () => {
+  const pending = (over: Record<string, unknown> = {}) => ({
+    _account: LINKED,
+    date: '2026-10-20T11:00:00.000Z',
+    description: 'PENDING CAFE',
+    amount: -4.5,
+    type: 'EFTPOS',
+    updated_at: '2026-10-20T20:00:00.000Z',
+    ...over,
+  })
+
+  const pendingRows = async () =>
+    (await env.DB.prepare('SELECT account_id, date, amount_cents, description, bank_type, akahu_updated_at, synced_at FROM pending_transactions ORDER BY id').all()).results
+
+  const accountState = async (id: number) =>
+    (await env.DB.prepare('SELECT akahu_missing_since, akahu_last_failure FROM accounts WHERE id = ?').bind(id).first<{ akahu_missing_since: string | null; akahu_last_failure: string | null }>())!
+
+  it('asks Akahu for the pending money once a run, whatever the number of Accounts, and keeps it as cents on the NZ date', async () => {
+    await env.DB.prepare('UPDATE accounts SET akahu_account_id = ?, cutover_date = ? WHERE id = ?').bind(OTHER, '2026-10-01', otherAccountId).run()
+    stubAkahu(() => onePage([]))
+    pendingAnswer = () => asJson({ items: [pending()] })
+
+    await runSync()
+
+    expect(pendingCalls).toHaveLength(1)
+    expect(await pendingRows()).toEqual([
+      {
+        account_id: accountId,
+        // NZ 21 October: 11:00 UTC on the 20th is midnight the next day in NZDT, as a settled Transaction's date is read.
+        date: '2026-10-21',
+        amount_cents: -450,
+        description: 'PENDING CAFE',
+        bank_type: 'EFTPOS',
+        akahu_updated_at: '2026-10-20T20:00:00.000Z',
+        synced_at: '2026-10-20T18:00:00.000Z',
+      },
+    ])
+  })
+
+  it('replaces the pending money on every Sync, so one that has settled or gone does not linger', async () => {
+    stubAkahu(() => onePage([]))
+    pendingAnswer = () => asJson({ items: [pending(), pending({ description: 'PENDING FUEL', amount: -80 })] })
+    await runSync()
+    expect(await pendingRows()).toHaveLength(2)
+
+    pendingAnswer = () => asJson({ items: [pending({ description: 'PENDING FUEL', amount: -80 })] })
+    await runSync()
+
+    expect((await pendingRows()).map((row) => row.description)).toEqual(['PENDING FUEL'])
+  })
+
+  it('never keeps pending money for an account that was not linked', async () => {
+    stubAkahu(() => onePage([]))
+    pendingAnswer = () => asJson({ items: [pending({ _account: 'acc_notlinked00000000001' })] })
+
+    await runSync()
+
+    expect(await pendingRows()).toEqual([])
+  })
+
+  it('keeps what it holds when Akahu cannot be asked for the pending money, rather than emptying the list', async () => {
+    stubAkahu(() => onePage([]))
+    pendingAnswer = () => asJson({ items: [pending()] })
+    await runSync()
+    expect(await pendingRows()).toHaveLength(1)
+
+    pendingAnswer = () => asJson({ message: 'Service unavailable' }, 503)
+    await runSync()
+
+    expect(await pendingRows()).toHaveLength(1)
+    expect(logged.join('\n')).toContain('sync.pending.failed')
+  })
+
+  it('pending money does not reach the Transactions, so no total can count it', async () => {
+    stubAkahu(() => onePage([]))
+    pendingAnswer = () => asJson({ items: [pending()] })
+
+    await runSync()
+
+    expect(await rows()).toEqual([])
+  })
+
+  it('marks the Account Link broken when Akahu stops listing the Account, and removes no Transaction', async () => {
+    stubAkahu(() => onePage([transaction()]))
+    accountsAnswer = () => asJson({ items: [{ _id: LINKED, name: 'EXAMPLE' }] })
+    await runSync()
+    expect(await rows()).toHaveLength(1)
+    expect((await accountState(accountId)).akahu_missing_since).toBeNull()
+
+    // The second run: Akahu answers the list and no longer names the Account.
+    accountsAnswer = () => asJson({ items: [] })
+    await runSync()
+
+    expect((await accountState(accountId)).akahu_missing_since).toBe('2026-10-20T18:00:00.000Z')
+    expect(await rows()).toHaveLength(1)
+    expect(logged.join('\n')).toContain('sync.account.link-broken')
+  })
+
+  it('keeps the first run that missed the Account, and clears the mark when Akahu lists it again', async () => {
+    stubAkahu(() => onePage([transaction()]))
+    accountsAnswer = () => asJson({ items: [] })
+    await runSync()
+    const first = (await accountState(accountId)).akahu_missing_since
+    expect(first).not.toBeNull()
+    await runSync()
+    expect((await accountState(accountId)).akahu_missing_since).toBe(first)
+
+    accountsAnswer = () => asJson({ items: [{ _id: LINKED, name: 'EXAMPLE' }] })
+    await runSync()
+
+    expect((await accountState(accountId)).akahu_missing_since).toBeNull()
+  })
+
+  it('says nothing about the Link when the account list itself failed', async () => {
+    stubAkahu(() => onePage([transaction()]))
+    accountsAnswer = () => asJson({ message: 'Service unavailable' }, 503)
+
+    await runSync()
+
+    expect((await accountState(accountId)).akahu_missing_since).toBeNull()
+  })
+
+  it.each([
+    ['refused', 401],
+    ['unreachable', 503],
+  ] as const)('records "%s" as the cause when Akahu answers %i, for the status to name', async (reason, status) => {
+    stubAkahu(() => asJson({ message: 'No' }, status))
+
+    await runSync()
+
+    expect((await accountState(accountId)).akahu_last_failure).toBe(reason)
+  })
+
+  it('records "unreadable" when Akahu answers with something that is not Transactions', async () => {
+    stubAkahu(() => asJson({ items: [{ nothing: 'like a Transaction' }] }))
+
+    await runSync()
+
+    expect((await accountState(accountId)).akahu_last_failure).toBe('unreadable')
+  })
+
+  it('clears the cause when a Sync of the Account finishes, so the status stops naming it', async () => {
+    stubAkahu(() => asJson({ message: 'No' }, 401))
+    await runSync()
+    expect((await accountState(accountId)).akahu_last_failure).toBe('refused')
+
+    stubAkahu(() => onePage([transaction()]))
+    await runSync()
+
+    expect((await accountState(accountId)).akahu_last_failure).toBeNull()
+    expect(await syncedAt(accountId)).not.toBeNull()
   })
 })

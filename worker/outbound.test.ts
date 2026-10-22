@@ -149,6 +149,7 @@ const EXERCISES: Exercise[] = [
   { route: 'GET /api/change-log', path: () => '/api/change-log' },
   { route: 'GET /api/transactions', path: () => '/api/transactions?text=example&from=2026-01-01&sort=amount&dir=asc&transfers=exclude' },
   { route: 'GET /api/transactions/export.csv', path: () => '/api/transactions/export.csv?text=example&from=2026-01-01&transfers=exclude' },
+  { route: 'GET /api/transactions/pending', path: () => '/api/transactions/pending' },
   { route: 'GET /api/transactions/:id', path: () => `/api/transactions/${made.transactionId}` },
   { route: 'GET /api/reports/transactions', path: (id) => `/api/reports/transactions?accountId=${id}&from=2026-10-01&to=2026-10-31` },
   { route: 'GET /api/reports/balances', path: (id) => `/api/reports/balances?accountId=${id}&from=2026-10-01&to=2026-10-31` },
@@ -250,11 +251,11 @@ describe('outbound calls', () => {
     await exerciseEveryRoute(AKAHU_SECRETS)
 
     expect(hostsContacted()).toEqual([AKAHU_HOST])
-    // Exactly three: the Admin's list of Akahu accounts, and what "Run a Sync now" asks for: the list again, for the details of the
-    // Account it syncs (ticket 42), and one page of Transactions for the Account linked by the exercises. A fourth would be a
-    // route that reaches Akahu without ADR 0010's reason to.
-    expect(attempts).toHaveLength(3)
-    expect(attempts.filter((url) => url.includes('/transactions'))).toHaveLength(1)
+    // Exactly four: the Admin's list of Akahu accounts, and what "Run a Sync now" asks for: the list again, for the details of the
+    // Account it syncs (ticket 42), one page of Transactions for the Account linked by the exercises, and the pending money of the
+    // whole run (ticket 29). A fifth would be a route that reaches Akahu without ADR 0010's reason to.
+    expect(attempts).toHaveLength(4)
+    expect(attempts.filter((url) => url.includes('/transactions?') || url.includes('/transactions/pending'))).toHaveLength(2)
   })
 
   // And on the cron: a linked Account is what makes Sync ask at all, so this is the one place the scheduled handler calls out.

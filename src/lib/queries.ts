@@ -60,6 +60,19 @@ export const transactionsQuery = (search: TransactionSearch) =>
     },
   })
 
+/**
+ * The Pending Transactions: all of them, newest first, as the last Sync left them (worker/pending.ts). Not searched, filtered or
+ * paged, because pending money is a handful of rows and is replaced whole on every Sync.
+ */
+export const pendingTransactionsQuery = queryOptions({
+  queryKey: ['transactions', 'pending'],
+  queryFn: async () => {
+    const res = await api.transactions.pending.$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
 /** How many Transactions a search matches. Only its filters count, so paging and sorting reuse the answer instead of asking again. */
 export const transactionCountQuery = (search: TransactionSearch) => {
   const filters = filtersOf(search)

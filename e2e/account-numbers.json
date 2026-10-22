@@ -1,6 +1,6 @@
 {
   "specs": {
-    "accounts-akahu.spec.ts": [27, 28, 29, 32],
+    "accounts-akahu.spec.ts": [27, 28, 29, 32, 34],
     "budgets.spec.ts": [57, 58],
     "categories.spec.ts": [88, 89],
     "change-log.spec.ts": [90, 91],
@@ -10,6 +10,7 @@
     "export.spec.ts": [24, 25],
     "import.spec.ts": [94, 95, 96, 97, 99],
     "kept-reports.spec.ts": [30, 31],
+    "pending-sync-status.spec.ts": [33],
     "report-balances.spec.ts": [51, 52, 53, 54, 55, 56],
     "report-budget.spec.ts": [80, 81, 82, 83],
     "report-income-vs-spending.spec.ts": [39, 50, 59, 98],

@@ -21,6 +21,15 @@
 // Accounts, and it comes out of the same MAX_PAGES as the Transactions' pages, so a run still makes at most MAX_PAGES requests to
 // Akahu. If it fails, or does not list an Account, nothing is stored or cleared for that Account and Sync goes on as it did without it.
 //
+// Pending Transactions (ticket 29, spec 54-56): one call for the whole run asks Akahu what the banks are showing as not yet settled, and
+// the linked Accounts' pending rows are replaced with it (worker/pending.ts). They are kept in a table of their own, so no total
+// includes them. Nothing about them can fail a Sync, and a call that fails keeps what was already held rather than emptying the list.
+//
+// The Account Link (ticket 29, spec 32): a linked Account that Akahu answers the account list without naming has a broken Link, and
+// `akahu_missing_since` records when that was first seen. Nothing of the Account's is deleted for it; the Admin re-links it from the
+// Accounts screen, and Akahu listing it again clears the mark. Why a Sync of an Account failed is kept in `akahu_last_failure`, which
+// is what the Sync status names as the cause (src/lib/sync-status.ts).
+//
 // The Balance Check (ticket 30, spec 61): when an Account finished and Akahu read its balance and its Transactions at the same moment,
 // the balance is recorded as the Account's bank balance (source 'sync') and the Account's Balance Check is run again (balance-rules.ts
 // syncBalance has the rules, ADR 0014 the reasoning). Nothing about it can fail the Sync: the Account's Transactions and mark are
@@ -32,13 +41,14 @@
 // `akahu_synced_at`, so the next run asks for the same window again (spec 47).
 import { STORE_DETAILS, toCents, toDetails } from './akahu-details'
 import type { AccountDetails } from './akahu-details'
-import { akahuTokens, fetchAkahuTransactions, listAkahuAccounts, MAX_PAGES } from './akahu'
-import type { AkahuAccount, AkahuFailure, AkahuResult, AkahuTransaction } from './akahu'
+import { akahuTokens, fetchAkahuTransactions, fetchPendingTransactions, listAkahuAccounts, MAX_PAGES } from './akahu'
+import type { AkahuAccount, AkahuFailure, AkahuResult, AkahuTokens, AkahuTransaction } from './akahu'
 import { recordBalance, refreshBalanceChecks } from './balance-check'
 import { syncBalance, type SyncBalance, type SyncBalanceSkipped } from './balance-rules'
 import { eftposTime, isKiwibank } from './kiwibank-time'
 import { logEvent } from './log'
 import { nzClockTime, nzDate, nzDayStart } from './nz-time'
+import { DELETE_PENDING, INSERT_PENDING, toPendingRows } from './pending'
 import { applyRulesStatement, lastTransactionId } from './rule-apply'
 import { pairTransfersStatement } from './transfers'
 
@@ -65,8 +75,9 @@ export const RECHECK_DAYS = 14
  * The D1 queries one Sync may spend, and what one Account costs at most.
  *
  * An invocation gets 50 (ADR 0004). Sync has it to itself, on its own cron and in "Run a Sync now" (the other crons carry on the
- * backup and the Rules re-run, worker/index.ts). The cap is RUN_QUERIES (1, to read the Accounts) and ACCOUNTS_PER_RUN (4) Accounts at
- * QUERIES_PER_ACCOUNT each, 45, which leaves 5 in hand because D1's own count of a batch can't be seen from a test.
+ * backup and the Rules re-run, worker/index.ts). The cap is RUN_QUERIES (3: one to read the Accounts, and the delete and insert that
+ * replace the Pending Transactions of the whole run) and ACCOUNTS_PER_RUN (4) Accounts at QUERIES_PER_ACCOUNT each, 47, which leaves
+ * 3 in hand because D1's own count of a batch can't be seen from a test.
  *
  * An Account costs one read for the highest Transaction ID, a batch of up to 8 statements (the upsert, the two for what was
  * withdrawn, the Rules, the pairing, the mark, the details and the bank balance) and the Balance Check's two (one read, one write):
@@ -76,7 +87,7 @@ export const RECHECK_DAYS = 14
  */
 export const QUERIES_PER_ACCOUNT = 11
 export const ACCOUNTS_PER_RUN = 4
-export const RUN_QUERIES = 1
+export const RUN_QUERIES = 3
 export const MAX_QUERIES = RUN_QUERIES + ACCOUNTS_PER_RUN * QUERIES_PER_ACCOUNT
 
 // Why Sync recorded no balance for an Account (syncBalance), as the log names it.
@@ -177,7 +188,18 @@ export const UPSERT_SYNCED = `
     akahu_connection_id = excluded.akahu_connection_id,
     bank_time_from_memo = excluded.bank_time_from_memo`
 
-export const MARK_SYNCED = 'UPDATE accounts SET akahu_synced_at = ?2 WHERE id = ?1'
+// The last-success mark. It clears the last failure in the same statement and so for no extra query: an Account that has just
+// finished has nothing wrong with it, and the Sync status reads that column for the cause it names (spec 59).
+export const MARK_SYNCED = 'UPDATE accounts SET akahu_synced_at = ?2, akahu_last_failure = NULL WHERE id = ?1'
+
+/** Why the last Sync of this Account did not finish, for the status to name. ?2 is one of worker/akahu.ts's AkahuFailure words. */
+export const MARK_FAILURE = 'UPDATE accounts SET akahu_last_failure = ?2 WHERE id = ?1'
+
+// Akahu stopped listing a linked Account, which is "Account Link broken" (spec 32). COALESCE keeps the first run that missed it, so
+// the status can say since when; only while the Account is still linked to that Akahu account, as the details statement is.
+// Nothing of the Account's is deleted for it: its Transactions stay, and the Admin re-links it from the Accounts screen.
+export const MARK_MISSING = `UPDATE accounts SET akahu_missing_since = COALESCE(akahu_missing_since, ?3)
+  WHERE id = ?1 AND akahu_account_id = ?2`
 
 // The Transactions Akahu no longer returns (spec 49). Banks sometimes withdraw a Transaction and re-issue it with a new ID, so
 // a settled day can change: each Sync re-checks the last RECHECK_DAYS and anything in the window that Akahu has stopped
@@ -336,7 +358,41 @@ export type AccountWrite = { written: number; removed: number }
  */
 export type WriteWindow = { syncedAt: Date | null; from: string | null }
 
-export type SyncOutcome = { ran: boolean; success: boolean; accounts: AccountOutcome[] }
+/** `pending` is how many Pending Transactions the run wrote, or null when Akahu could not be asked for them and what was held was kept. */
+export type SyncOutcome = { ran: boolean; success: boolean; pending: number | null; accounts: AccountOutcome[] }
+
+/**
+ * Replace every linked Account's Pending Transactions with what Akahu is showing now (spec 55; worker/pending.ts).
+ *
+ * One call and one batch of two statements for the whole run. A call that fails changes nothing: pending money the bank has
+ * stopped showing is wrong, but so is deleting money that is still pending because Akahu was down for a minute, and the next
+ * Sync replaces the lot. Nothing here can fail the run: the Accounts' Transactions are already written, and the status a Member
+ * reads is about Transactions, not about pending (spec 57).
+ */
+async function replacePending(db: D1Database, tokens: AkahuTokens, accounts: LinkedAccount[], now: Date, budget: { pagesLeft: number }): Promise<number | null> {
+  if (budget.pagesLeft <= 0) {
+    logEvent('sync.pending.no-budget', {})
+    return null
+  }
+  budget.pagesLeft -= 1
+  const answer = await fetchPendingTransactions(tokens)
+  if (!answer.ok) {
+    logEvent('sync.pending.failed', {})
+    return null
+  }
+  const rows = toPendingRows(answer.value, new Map(accounts.map((account) => [account.akahu_account_id, account.id])))
+  try {
+    await db.batch([
+      db.prepare(DELETE_PENDING).bind(JSON.stringify(accounts.map((account) => account.id))),
+      ...(rows.length === 0 ? [] : [db.prepare(INSERT_PENDING).bind(JSON.stringify(rows), now.toISOString())]),
+    ])
+  } catch (error) {
+    logEvent('sync.pending.write-failed', { error })
+    return null
+  }
+  logEvent('sync.pending.done', { count: rows.length })
+  return rows.length
+}
 
 /**
  * Sync every linked Account. `now` is the moment the run belongs to (the cron's scheduled time, or when the Admin asked for a
@@ -347,9 +403,9 @@ export type SyncOutcome = { ran: boolean; success: boolean; accounts: AccountOut
  */
 export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
   const tokens = akahuTokens(env)
-  if (tokens === null) return { ran: false, success: false, accounts: [] }
+  if (tokens === null) return { ran: false, success: false, pending: null, accounts: [] }
   const { results } = await env.DB.prepare(LINKED_ACCOUNTS).all<LinkedAccount>()
-  if (results.length === 0) return { ran: false, success: false, accounts: [] }
+  if (results.length === 0) return { ran: false, success: false, pending: null, accounts: [] }
 
   logEvent('sync.start', { count: results.length })
   const budget = { pagesLeft: MAX_PAGES }
@@ -383,6 +439,14 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     }
     const akahuAccount = listed.ok ? listed.value.find((candidate) => candidate._id === account.akahu_account_id) : undefined
     const details = akahuAccount === undefined ? null : toDetails(akahuAccount)
+    // Akahu answered the list and did not name this Account: its Link is broken (spec 32). Only then — a list that failed says
+    // nothing about the Link, and a Link that is fine is cleared by the details statement itself (worker/akahu-details.ts).
+    if (listed.ok && akahuAccount === undefined) {
+      logEvent('sync.account.link-broken', { id: account.id })
+      // Not taken off the budget: an Account Akahu did not list has no details to store and no balance to record or check, so this
+      // one query sits inside the share (QUERIES_PER_ACCOUNT) that those would have spent.
+      await env.DB.prepare(MARK_MISSING).bind(account.id, account.akahu_account_id, now.toISOString()).run()
+    }
     const answer = await fetchAkahuTransactions(tokens, account.akahu_account_id, { start, end }, budget)
     if (!answer.ok) {
       // What Akahu said about the Account is still true, so it is kept: one query, which the Account's share (QUERIES_PER_ACCOUNT) already holds.
@@ -391,6 +455,10 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
         queriesLeft -= 1
       }
       logEvent('sync.account.failed', { id: account.id })
+      // The cause, for the status to name and the Admin to act on (spec 59). Its own statement, because an Account that failed
+      // writes nothing else; the Account's share holds it, and a failed Account has spent little of that share.
+      await env.DB.prepare(MARK_FAILURE).bind(account.id, answer.reason).run()
+      queriesLeft -= 1
       outcomes.push({ accountId: account.id, written: 0, removed: 0, complete: false, failure: answer.reason })
       continue
     }
@@ -411,9 +479,11 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     outcomes.push({ accountId: account.id, written, removed, complete })
   }
 
+  const pending = await replacePending(env.DB, tokens, results, now, budget)
+
   const success = outcomes.every((outcome) => outcome.complete)
   logEvent(success ? 'sync.done' : 'sync.incomplete', { count: outcomes.reduce((total, outcome) => total + outcome.written, 0) })
-  return { ran: true, success, accounts: outcomes }
+  return { ran: true, success, pending, accounts: outcomes }
 }
 
 // Only while the Account is still linked to the Akahu account the details came from (STORE_DETAILS).
