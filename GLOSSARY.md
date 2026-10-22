@@ -27,8 +27,16 @@ A settled movement of money in or out of an Account.
 _Avoid_: Record, entry, line
 
 **Pending Transaction**:
-A Transaction the bank has reported but not yet settled; it may still change or disappear.
+A Transaction the bank has reported but not yet settled; it may still change or disappear. Every Sync replaces them all, they are listed above the Transactions table, and they count towards no Budget, Report or total ([ADR 0015](docs/adr/0015-pending-in-its-own-table.md)).
 _Avoid_: Unsettled, provisional
+
+**Sync status**:
+How current the bank data is, above the Balances on the Summary and the Dashboard: when the slowest linked Account was last Synced, red after two days, and the cause when something is wrong. The Admin is also told what to do about it; a Member sees the state and the cause.
+_Avoid_: Sync health, connection status
+
+**Account Link broken**:
+What a linked Account is called once Akahu stops listing the Akahu account it is linked to. No Transaction is removed for it, and the Admin reconnects the bank in Akahu and links the Account again.
+_Avoid_: Disconnected, dead link
 
 **Transfer**:
 A Transaction moving money between two tracked Accounts, found as one of a pair in different Accounts or marked by a Rule; it is not spending and is excluded from Budgets. The other Transaction of a pair is its matching Transaction. How pairs are found is in README [How it works](README.md#how-it-works).

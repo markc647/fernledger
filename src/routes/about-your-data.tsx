@@ -49,6 +49,14 @@ function AboutYourData() {
             <strong className="font-semibold">Transactions:</strong> the date, amount and description of each one, and the bank's own type, memo and reference. If this Fernledger uses Akahu Sync, a Synced Transaction also holds what Akahu says about it: its category and the group above it (card Transactions only), the Account's balance after it, Akahu's content hash for it, when Akahu updated it and its posted date, and the bank connection it came from, and for Kiwibank the time at the end of an EFTPOS description. Akahu's category is only shown, and never sets a Transaction's Category. Whatever the bank puts in those, such as another person's name or account number, is kept exactly as the bank gave it.
           </li>
           <li>
+            <strong className="font-semibold">Pending Transactions:</strong> if this Fernledger uses Akahu Sync, the date, amount and description of each one the bank has reported and not settled, the bank's own type for it, when Akahu last
+            changed it, and when the Sync that read it ran. Every Sync replaces them all, so nothing older than the last Sync is kept, and they are counted in no Budget, Report or total. Unlinking an Account clears its own.
+          </li>
+          <li>
+            <strong className="font-semibold">Accounts (when Sync has trouble):</strong> if this Fernledger uses Akahu Sync, a linked Account also holds why the last Sync of it did not finish, and since when Akahu has stopped listing it
+            (its Account Link broken). Both are cleared once a Sync of it finishes or Akahu lists it again, and no Transaction is ever removed because of them.
+          </li>
+          <li>
             <strong className="font-semibold">Balances:</strong> the balance a bank reported for an Account on a date (in an Import's file, or, if this Fernledger uses Akahu Sync, from Akahu after a Sync, one for each day, all kept), the balance worked out from the Transactions, and the difference between them.
           </li>
           <li>
