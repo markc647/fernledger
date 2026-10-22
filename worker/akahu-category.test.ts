@@ -245,5 +245,5 @@ describe("Akahu's category through the real paths", () => {
     const last = without[without.length - 1] as { list: ListRow[]; reports: { spending: { body: unknown } } }
     expect(last.list.filter((row) => row.categoryName !== null).length).toBeGreaterThanOrEqual(3)
     expect(JSON.stringify(last.reports.spending.body)).toContain('Groceries')
-  })
+  }, 30_000) // two whole scenarios of route calls: past the 5 s default when the full suite loads the machine
 })
