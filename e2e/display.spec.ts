@@ -1223,6 +1223,8 @@ test.describe('zoom', () => {
               note: `${long} note that goes on and on`,
               bankTime: '2026-10-07T20:15:00.000Z',
               firstSeenAt: '2026-10-08T06:30:00.000Z',
+              akahuCategoryName: long, // Akahu's category and its group, the longest text the From the bank section can hold
+              akahuCategoryGroupName: long,
             },
           }),
         )

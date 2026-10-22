@@ -483,6 +483,8 @@ describe('GET /api/transactions/:id', () => {
       notTransfer: false,
       bankTime: null,
       firstSeenAt: null,
+      akahuCategoryName: null,
+      akahuCategoryGroupName: null,
     })
   })
 
