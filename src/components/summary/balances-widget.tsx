@@ -40,7 +40,7 @@ function CheckedCell({ checked }: { checked: Checked<{ differenceCents: number }
 
 /** What the Balances card's figures are, in the page's help sheet (SummaryHelp): the card itself keeps only the table. */
 export const BALANCES_ABOUT =
-  'Balance as of the last Transaction we hold, worked out from the bank balance in your Imports. It is not a live figure from the bank. The Balances over time Report lists each difference and when it began.'
+  'Balance as of the last Transaction we hold, worked out from the latest bank balance: the one in your latest Import, or the one Akahu reported at the last Sync. It is not a live figure from the bank. The Balances over time Report lists each difference and when it began.'
 
 /**
  * Summary card: the balance of each Account, from its latest bank balance, with a Checked column and, only when Akahu Sync is set up (ADR 0008), a Sync column (README, What it does,
@@ -67,7 +67,11 @@ export function BalancesWidget() {
         row.balanceCents === null ? (
           <>
             <span>Not known yet</span>
-            {row.cutoverDate !== null && <span className="block text-muted-foreground">This Account's balance will come from the bank link once syncing starts.</span>}
+            {row.linked ? (
+              <span className="block text-muted-foreground">Waiting for a balance from Akahu.</span>
+            ) : (
+              row.cutoverDate !== null && <span className="block text-muted-foreground">This Account's balance will come from the bank link once syncing starts.</span>
+            )}
           </>
         ) : (
           <Amount cents={row.balanceCents} balance />

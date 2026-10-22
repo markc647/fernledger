@@ -8,7 +8,7 @@ import type { BalanceStatus } from './balance-rules'
 import { pathId, validate } from './validate'
 
 // Read-only, so every Member can use these; the guard in app.ts already refuses a change from anyone but the Admin.
-// A balance is the latest bank balance whose date the saved Transactions reach (balance-rules.ts), plus the
+// A balance is the latest bank balance (a file's, or Akahu's from Sync) whose date the saved Transactions reach (balance-rules.ts), plus the
 // Transactions after it. Each query reads the Account's Transactions from that balance's date on (the date index), or
 // once through for history, which is one window-function pass rather than a loop in the Worker (ADR 0004).
 
@@ -20,7 +20,7 @@ export const CURRENT = `
          b.bank_cents + COALESCE((SELECT SUM(t.amount_cents) FROM transactions t
                                   WHERE t.account_id = a.id AND t.date >= b.as_of_date AND (t.date > b.as_of_date OR t.id > b.through_transaction_id)), 0) AS balanceCents,
          MAX(b.as_of_date, COALESCE((SELECT MAX(t.date) FROM transactions t WHERE t.account_id = a.id AND t.date >= b.as_of_date), b.as_of_date)) AS asOfDate,
-         a.cutover_date AS cutoverDate, a.akahu_synced_at AS akahuSyncedAt,
+         a.cutover_date AS cutoverDate, a.akahu_synced_at AS akahuSyncedAt, a.akahu_account_id IS NOT NULL AS linkedToAkahu,
          (SELECT status FROM balance_checks WHERE account_id = a.id ORDER BY as_of_date DESC LIMIT 1) AS latestStatus
   FROM accounts a LEFT JOIN balance_checks b ON b.id = (${ANCHOR_ID})
   ORDER BY a.name COLLATE NOCASE, a.id`
@@ -63,11 +63,13 @@ type CurrentBalanceRow = {
   asOfDate: string | null
   cutoverDate: string | null
   latestStatus: BalanceStatus | null
-  /** When Akahu Sync last reached the Account (an instant in UTC), or null: Sync is not built yet, so every Account has null. It is read, and not sent: the answer says only whether it was in the last 24 hours. */
+  /** When Akahu Sync last reached the Account (an instant in UTC), or null. It is read, and not sent: the answer says only whether it was in the last 24 hours. */
   akahuSyncedAt: string | null
+  /** 1 when the Account is linked to Akahu (SQLite has no boolean). */
+  linkedToAkahu: number
 }
 /** One Account of GET /api/balances. */
-export type CurrentBalance = Omit<CurrentBalanceRow, 'akahuSyncedAt'> & { syncedInLast24Hours: boolean }
+export type CurrentBalance = Omit<CurrentBalanceRow, 'akahuSyncedAt' | 'linkedToAkahu'> & { syncedInLast24Hours: boolean; linked: boolean }
 type HistoryPoint = { date: string; balanceCents: number }
 
 export const balances = new Hono<AppEnv>()
@@ -76,7 +78,7 @@ export const balances = new Hono<AppEnv>()
     const { results } = await c.env.DB.prepare(CURRENT).all<CurrentBalanceRow>()
     // Whether that was in the last 24 hours is worked out here, on the Worker's clock (akahu-sync.ts), for the Sync column of the Summary and the Dashboard.
     const now = new Date()
-    const accounts: CurrentBalance[] = results.map(({ akahuSyncedAt, ...account }) => ({ ...account, syncedInLast24Hours: syncedInLast24Hours(akahuSyncedAt, now) }))
+    const accounts: CurrentBalance[] = results.map(({ akahuSyncedAt, linkedToAkahu, ...account }) => ({ ...account, syncedInLast24Hours: syncedInLast24Hours(akahuSyncedAt, now), linked: linkedToAkahu === 1 }))
     return c.json({ accounts })
   })
   // One Account's balance at the end of each day it had Transactions, oldest first, worked backwards from its latest

@@ -11,6 +11,7 @@ export const stubAccount = (accountId: number, accountName: string, balanceCents
   cutoverDate: null,
   latestStatus: 'matched',
   syncedInLast24Hours,
+  linked: syncedInLast24Hours,
 })
 /** Everyday was synced in the last 24 hours, and Savings and the card were not. */
 export const BALANCES = [stubAccount(1, 'Example everyday', 123_400, true), stubAccount(2, 'Example savings', 5_000_000), stubAccount(3, 'Example card', -45_000)]
