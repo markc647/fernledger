@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkBalances, importOutcome, statusOnRecord, syncBalance, type BalanceRow } from './balance-rules'
+import { checkBalances, importOutcome, REFRESH_GAP_MS, statusOnRecord, syncBalance, type BalanceRow } from './balance-rules'
 
 const balance = (asOfDate: string, bankCents: number, openingCents: number, status: BalanceRow['status'] = 'alone'): BalanceRow => ({ asOfDate, bankCents, openingCents, status })
 
@@ -133,8 +133,16 @@ describe('syncBalance', () => {
     expect(syncBalance(reported, false)).toEqual({ skipped: 'incomplete' })
   })
 
+  it('takes a balance read seconds apart from the Transactions in one refresh, as Akahu does', () => {
+    // As on the test site: the balance at 02:46:23.873, the Transactions at 02:46:30.086.
+    expect(syncBalance({ ...reported, akahuRefreshedBalanceAt: '2026-10-22T02:46:23.873Z', akahuRefreshedTransactionsAt: '2026-10-22T02:46:30.086Z' }, true)).toMatchObject({ balance: { asOfDate: '2026-10-22' } })
+    expect(syncBalance({ ...reported, akahuRefreshedTransactionsAt: new Date(Date.parse(reported.akahuRefreshedBalanceAt!) - REFRESH_GAP_MS).toISOString() }, true)).toMatchObject({ balance: {} })
+  })
+
   it('records nothing when Akahu read the balance and the Transactions at different times, because they would not cover the same Transactions', () => {
-    expect(syncBalance({ ...reported, akahuRefreshedTransactionsAt: '2026-10-21T02:47:00.000Z' }, true)).toEqual({ skipped: 'refreshed-apart' })
+    const apart = (ms: number) => new Date(Date.parse(reported.akahuRefreshedBalanceAt!) + ms).toISOString()
+    expect(syncBalance({ ...reported, akahuRefreshedTransactionsAt: apart(REFRESH_GAP_MS + 1) }, true)).toEqual({ skipped: 'refreshed-apart' })
+    expect(syncBalance({ ...reported, akahuRefreshedTransactionsAt: apart(-REFRESH_GAP_MS - 1) }, true)).toEqual({ skipped: 'refreshed-apart' })
     expect(syncBalance({ ...reported, akahuRefreshedTransactionsAt: null }, true)).toEqual({ skipped: 'refreshed-apart' })
   })
 

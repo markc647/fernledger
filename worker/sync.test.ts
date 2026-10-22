@@ -942,7 +942,7 @@ describe('the Balance Check after a Sync', () => {
 
   it('records nothing when Akahu read the balance and the Transactions at different times', async () => {
     stubAkahu(() => onePage([transaction()]))
-    listing(reading({ refreshed: { balance: READ, transactions: '2026-10-21T02:47:00.000Z' } }))
+    listing(reading({ refreshed: { balance: READ, transactions: '2026-10-21T03:46:00.000Z' } }))
     await runSync()
     expect(await bankBalances()).toEqual([])
     expect(logged.join('\n')).toContain('sync.balance.refreshed-apart')
