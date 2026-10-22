@@ -85,6 +85,15 @@ test.describe('About your data', () => {
     await expect(accounts).toContainText("Fernledger keeps the address and nothing else: it never fetches or shows the logo, so nobody's browser contacts Akahu for it. Unlinking an Account clears all of this.")
   })
 
+  test("says what Akahu says about a Synced Transaction is held, and that Akahu's category is only shown", async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.goto('/about-your-data')
+    const transactions = section(page, 'What is held').getByRole('listitem').filter({ hasText: 'Transactions:' })
+    await expect(transactions).toContainText('If this Fernledger uses Akahu Sync')
+    await expect(transactions).toContainText("its category and the group above it (card Transactions only), the Account's balance after it, Akahu's content hash for it, when Akahu updated it and its posted date, and the bank connection it came from")
+    await expect(transactions).toContainText("Akahu's category is only shown, and never sets a Transaction's Category.")
+  })
+
   test('says what the weekly backup holds, and that earlier backups keep what was later removed', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/about-your-data')

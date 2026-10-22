@@ -6,7 +6,7 @@ Fernledger's maintainers collect no one's data. Each deployment is run by whoeve
 
 ## What a deployment holds
 
-- **Transactions** for the tracked Accounts: date (time only where the bank supplies one, which is rare), amount, description, merchant, category, type, **the counterparty's account number**, card suffix, and payment particulars, code and reference. These often include other people's names.
+- **Transactions** for the tracked Accounts: date (time only where the bank supplies one, which is rare), amount, description, merchant, category, type, **Akahu's own category for it** (card transactions only), the account balance after it, Akahu's content hash for it, when Akahu updated it and its posted date, the Akahu bank connection it came from, **the counterparty's account number**, card suffix, and payment particulars, code and reference. These often include other people's names.
 - **Account balances.**
 - **Email addresses:** Members' in Cloudflare Access, and the Admin's in every Change Log entry, in the record of each time the Rules are applied to all Transactions, and in each kept Report (`kept_reports.made_by`, the Admin who last showed it, which no page or API shows).
 - **Notes** the Admin writes.
