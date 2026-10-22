@@ -212,19 +212,24 @@ describe("Akahu's category through the real paths", () => {
     seen.push(await json('/api/rules/preview', 'POST', { textContains: 'EXAMPLE STORE' }))
     seen.push(await json('/api/rules/preview', 'POST', { textContains: 'EXAMPLE STORE', uncategorised: true }))
     seen.push((await json('/api/rules/rerun', 'POST', {})).status)
-    for (let i = 0; i < 5; i++) {
+    let rerunStatus = 'running'
+    for (let i = 0; i < 5 && rerunStatus === 'running'; i++) {
       const job = ((await json('/api/rules/rerun/step', 'POST', {})).body as { job: { status: string; doneRows: number; changedRows: number; totalRows: number } }).job
       seen.push({ status: job.status, doneRows: job.doneRows, changedRows: job.changedRows, totalRows: job.totalRows })
-      if (job.status !== 'running') break
+      rerunStatus = job.status
     }
+    expect(rerunStatus).toBe('done')
     await step('after the re-run')
     // Create Rule from a Transaction, which gives its Category to the other Uncategorised Transactions it matches.
     seen.push(await json('/api/rules/from-transaction', 'POST', { transactionId: ids[0], textContains: 'EXAMPLE STORE', direction: 'out', categoryId: groceries }))
     await step('after Create Rule')
     // An Override, then cleared.
-    seen.push(await json(`/api/transactions/${ids[0]}/override`, 'PUT', { categoryId: fuel }))
-    await step('with an Override')
-    seen.push(await json(`/api/transactions/${ids[0]}/override`, 'PUT', { categoryId: null }))
+    for (const categoryId of [fuel, null]) {
+      const override = await json(`/api/transactions/${ids[0]}/override`, 'PUT', { categoryId })
+      expect(override.status).toBe(200)
+      seen.push(override)
+      await step(categoryId === null ? 'with the Override cleared' : 'with an Override')
+    }
     await step('with the Override cleared')
     return seen
   }
@@ -237,8 +242,6 @@ describe("Akahu's category through the real paths", () => {
     // The scenario did something: nothing was categorised as synced, and by the end some Transactions were and a Report has figures.
     const first = without[0] as { list: ListRow[] }
     expect(first.list.every((row) => row.categoryName === null)).toBe(true)
-    const rerunSteps = without.filter((entry) => (entry as { status?: string }).status !== undefined)
-    expect(rerunSteps.length).toBeGreaterThan(0)
     const last = without[without.length - 1] as { list: ListRow[]; reports: { spending: { body: unknown } } }
     expect(last.list.filter((row) => row.categoryName !== null).length).toBeGreaterThanOrEqual(3)
     expect(JSON.stringify(last.reports.spending.body)).toContain('Groceries')
