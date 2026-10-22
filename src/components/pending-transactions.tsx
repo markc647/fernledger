@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Amount } from '@/components/amount'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { Status } from '@/components/status'
-import { formatDate, formatDateAtTime } from '@/lib/format'
+import { formatDate, formatDateAtTime, isMoment } from '@/lib/format'
 import { pendingTransactionsQuery } from '@/lib/queries'
 
 type Pending = {
@@ -45,8 +45,9 @@ const columns: Column<Pending>[] = [
 export function PendingTransactions() {
   const { data: pending } = useQuery(pendingTransactionsQuery)
   if (!pending || pending.length === 0) return null
-  // Every row of one run carries the same instant; the newest is the run that wrote them.
-  const syncedAt = pending.map((row) => row.syncedAt).sort().at(-1)!
+  // Every row of one run carries the same instant; the newest is the run that wrote them. An answer that gives none is shown
+  // without the time rather than not at all.
+  const syncedAt = pending.map((row) => row.syncedAt).filter(isMoment).sort().at(-1)
 
   return (
     <section aria-labelledby="pending-heading" className="mb-6">
@@ -54,8 +55,8 @@ export function PendingTransactions() {
         <Status tone="pending">Pending</Status>
       </h2>
       <p className="mt-1 text-muted-foreground">
-        Reported by the bank and not settled yet, as at {formatDateAtTime(new Date(Date.parse(syncedAt)))}. These may still change or disappear, so they are in no Budget, Report or
-        total. The next Sync replaces them.
+        Reported by the bank and not settled yet{syncedAt === undefined ? '' : `, as at ${formatDateAtTime(new Date(Date.parse(syncedAt)))}`}. These may still change or disappear, so they are in no
+        Budget, Report or total. The next Sync replaces them.
       </p>
       <div className="mt-3">
         <ResponsiveTable caption="Pending Transactions, newest first" columns={columns} rows={pending} getRowKey={(row) => row.id} look="in-card" />

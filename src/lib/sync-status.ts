@@ -7,7 +7,7 @@
 // A Member sees the state and the cause; only the Admin is told what to do about it (spec 60), because reconnecting a bank in
 // Akahu and setting the tokens are the Admin's alone. Nothing here promises a retry: Sync runs once a day and when the Admin
 // asks for it, and nothing retries behind them (ADR 0013, and part 1 of this ticket dropped the retry cron).
-import { formatDateAtTime } from './format'
+import { formatDateAtTime, isMoment } from './format'
 
 /** How stale the data may be before the status turns red (spec 58). */
 export const STALE_DAYS = 2
@@ -52,7 +52,8 @@ export function syncStatus(accounts: SyncAccount[], now: Date, role: 'admin' | '
     .filter((account) => (account.akahuAccountId ?? null) !== null)
     .map((account) => ({
       ...account,
-      akahuSyncedAt: account.akahuSyncedAt ?? null,
+      // Only an instant that can be shown counts as a Sync that finished: a value that is not one would otherwise date the status.
+      akahuSyncedAt: isMoment(account.akahuSyncedAt) ? account.akahuSyncedAt : null,
       akahuMissingSince: account.akahuMissingSince ?? null,
       akahuLastFailure: account.akahuLastFailure ?? null,
       akahuConnectionName: account.akahuConnectionName ?? null,

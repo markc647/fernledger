@@ -120,6 +120,17 @@ describe('the Sync status', () => {
     }
   })
 
+  // An answer from before these fields were stored, or one written by hand, leaves them undefined. Nothing is wrong with such an
+  // Account, and an undefined time must never be shown as a date either (which threw on the Accounts screen once).
+  it('takes an answer without the new fields as an Account with nothing wrong', () => {
+    const older = { name: 'Everyday', akahuAccountId: 'acc_linked000000000000001', akahuSyncedAt: YESTERDAY } as unknown as SyncAccount
+    expect(asAdmin([older])).toEqual({ tone: 'success', text: 'Bank data last updated Tue 20 Oct 2026 at 7:00 am.' })
+  })
+
+  it('does not date the status from a value that is not a moment', () => {
+    expect(asAdmin([linked({ akahuSyncedAt: 'whenever' })])).toEqual({ tone: 'neutral', text: 'Waiting for the first Sync of this Account.' })
+  })
+
   it('ignores an Account that is not linked, whatever is stored against it', () => {
     expect(asAdmin([linked(), unlinked({ akahuLastFailure: 'refused', akahuMissingSince: '2026-10-01T00:00:00.000Z' })])).toEqual({
       tone: 'success',

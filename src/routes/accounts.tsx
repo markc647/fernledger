@@ -8,7 +8,7 @@ import { focusPanel, RowPanel, useDrafts, type Drafts } from '@/components/row-p
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { akahuWords } from '@/lib/akahu'
-import { formatBalance, formatDateTime } from '@/lib/format'
+import { formatBalance, formatDateTime, isMoment } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { accountsQuery } from '@/lib/queries'
 import { api } from '@/lib/api'
@@ -134,7 +134,7 @@ function Accounts() {
 function AkahuDetails({ account }: { account: Account }) {
   // A page that does not know the Account is linked (an older answer) reads the same as one that is not.
   if (!account.akahuAccountId) return <span className="text-muted-foreground">Not linked to Akahu</span>
-  if (account.akahuMissingSince !== null) return <BrokenLink account={account} />
+  if ((account.akahuMissingSince ?? null) !== null) return <BrokenLink account={account} />
   if (account.akahuName === null) return <span>Linked to Akahu. The next Sync will read its details.</span>
   const { akahuBalanceCurrentCents: current, akahuBalanceAvailableCents: available, akahuBalanceCurrency: currency } = account
   const balance =
@@ -173,7 +173,9 @@ function BrokenLink({ account }: { account: Account }) {
     <div>
       <Status tone="danger">Account Link broken</Status>
       <p className="mt-1 text-muted-foreground">
-        Akahu has stopped listing this account since {formatDateTime(account.akahuMissingSince!)}. No Transaction has been removed, and the Transactions already held are still here.
+        {/* Since when, where the time is known: an answer from before it was stored has none, and the sentence stands without it. */}
+        Akahu has stopped listing this account{isMoment(account.akahuMissingSince) ? ` since ${formatDateTime(account.akahuMissingSince)}` : ''}. No Transaction has been removed, and the Transactions
+        already held are still here.
       </p>
       {me?.role === 'admin' && (
         <p className="mt-1">

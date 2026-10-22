@@ -160,6 +160,19 @@ test('the Accounts screen with Akahu\'s details passes the accessibility scan, f
   await noAxeViolations(page)
 })
 
+// An answer from before the Link and failure fields were stored leaves them out. Such an Account has nothing wrong with it, and
+// showing its details must not fail on a date that is not one.
+test('an Account whose answer predates the Link fields shows its details and no broken Link', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  const { akahuMissingSince: _since, akahuLastFailure: _failure, ...older } = ACCOUNTS[0]!
+  await page.route('**/api/accounts', (route) => route.fulfill({ json: [older] }))
+  await page.goto('/accounts')
+  const row = page.getByRole('table', { name: 'Accounts' }).getByRole('row').filter({ hasText: 'Example everyday' })
+  await expect(row.locator("dt:text-is(\"Akahu's name\") + dd")).toHaveText('EXAMPLE EVERYDAY')
+  await expect(row).not.toContainText('Account Link broken')
+  await expect(row).not.toContainText(/null|undefined|NaN|Invalid/)
+})
+
 test('an Account Akahu has stopped listing says its Link is broken, since when, and that nothing was removed', async ({ page, context }) => {
   const row = (await open(page, context)).filter({ hasText: 'Example gone' })
   await expect(row).toContainText('Account Link broken')

@@ -102,6 +102,12 @@ const timeOfDay = (moment: Date) => {
   return `${part.hour}:${part.minute} ${part.dayPeriod.toLowerCase()}`
 }
 
+/**
+ * Whether a stored instant can be shown at all: text about something the app may hold no time for — or that an answer from before
+ * that time was stored leaves out — asks this and drops its clause, rather than failing the page on a date that is not one.
+ */
+export const isMoment = (instant: string | null | undefined): instant is string => instant !== null && instant !== undefined && !Number.isNaN(Date.parse(instant))
+
 /** A moment (ISO 8601, UTC) as NZ day and time: "Thu 8 Oct 2026, 3:42 pm". Always Pacific/Auckland, whatever the device's time zone. */
 export function formatDateTime(instant: string) {
   const moment = new Date(instant)
