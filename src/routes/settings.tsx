@@ -49,7 +49,7 @@ function SettingsHelp() {
       <p>
         A Cutover Date is the day an Account stops taking Transactions from imported files. Imports cover the dates before it, Sync (the daily pull from Akahu) covers it and later, and an Import skips
         every row dated on or after it. Setting or clearing it deletes nothing already saved: imported rows already saved on or after the date stay, to remove them, use "Replace imported history" on
-        the Import screen. Leave it blank if the Account is not synced with Akahu. When you import a file, Fernledger offers the file's last date as the Cutover Date.
+        the Import screen. Leave it blank if the Account is not synced with Akahu. When you import a file, Fernledger offers the day after the file's last date as the Cutover Date, so every row in the file is imported; it is never offered for an Account whose Cutover Date is already later.
       </p>
     </>
   )
