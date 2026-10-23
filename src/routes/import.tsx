@@ -8,6 +8,8 @@ import { ResponsiveTable } from '@/components/responsive-table'
 import { Status } from '@/components/status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { isGeneratedKey } from '@/lib/account-key'
 import { api } from '@/lib/api'
 import { describeBalanceCheck, type BalanceCheckOutcome } from '@/lib/balance-check'
 import { adapters, BankCsvError, parseBankCsv, type BankCsvResult } from '@/lib/bank-csv'
@@ -58,6 +60,8 @@ function ImportFlow() {
   const [step, setStep] = useState<Step>({ name: 'choose' })
   const [accountName, setAccountName] = useState('')
   const [setCutover, setSetCutover] = useState(false)
+  // Which Account a file that carries no account number is for: the Admin's choice, because the file cannot say (ADR 0017).
+  const [chosenAccount, setChosenAccount] = useState<number | null>(null)
   const [confirmingReplace, setConfirmingReplace] = useState(false)
   const { data: accounts } = useQuery(accountsQuery)
 
@@ -67,6 +71,7 @@ function ImportFlow() {
       setStep({ name: 'preview', file: parseBankCsv(await file.text()) })
       setAccountName('')
       setSetCutover(false)
+      setChosenAccount(null)
       setConfirmingReplace(false)
     } catch (error) {
       // Error messages name a line or field only, never a value from the file.
@@ -74,13 +79,13 @@ function ImportFlow() {
     }
   }
 
-  async function confirm(file: BankCsvResult, cutoverDate: string | undefined, replaceAccountId?: number) {
+  async function confirm(file: BankCsvResult, accountKey: string, cutoverDate: string | undefined, replaceAccountId?: number) {
     setStep({ name: 'sending', sent: 0, total: 1 })
     const replacing = replaceAccountId !== undefined
     try {
       const summary = await runImport(
         file,
-        { accountName: accountName.trim() || undefined, cutoverDate, replaceAccountId },
+        { accountKey, accountName: accountName.trim() || undefined, cutoverDate, replaceAccountId },
         (sent, total) => setStep({ name: 'sending', sent, total }),
       )
       setStep({ name: 'done', summary })
@@ -103,7 +108,16 @@ function ImportFlow() {
 
   if (step.name === 'choose' || step.name === 'preview') {
     const file = step.name === 'preview' ? step.file : undefined
-    const existing = file && accounts?.find((a) => a.accountNumber === file.accountNumber)
+    // The Accounts a numberless file may be for: those whose key Fernledger generated, which are the Accounts added as credit
+    // cards. Offering a bank-numbered Account would invite putting a card's Transactions into a cheque account (ADR 0017).
+    const choices = accounts?.filter((a) => isGeneratedKey(a.accountNumber)) ?? []
+    const existing = file
+      ? file.accountNumber === null
+        ? choices.find((a) => a.id === chosenAccount)
+        : accounts?.find((a) => a.accountNumber === file.accountNumber)
+      : undefined
+    // The key this Import is for: the file's own number, or the chosen Account's. Without one there is nothing to import into.
+    const accountKey = file?.accountNumber ?? existing?.accountNumber
     // The Cutover Date this file puts on offer, and whether the Account's own is already later (src/lib/import-chunks.ts). The
     // offer is the only Cutover Date an Import sets, so one that cannot be taken is never sent. The screen and the request read
     // this one answer, so what is shown is what is sent.
@@ -135,14 +149,18 @@ function ImportFlow() {
             offer={offer}
             cutoverToSet={cutoverToSet}
             existing={existing || undefined}
+            choices={choices}
+            chosen={chosenAccount}
+            onChoose={setChosenAccount}
+            accountKey={accountKey}
             accountName={accountName}
             onAccountName={setAccountName}
             setCutover={setCutover}
             onSetCutover={setSetCutover}
             confirmingReplace={confirmingReplace}
             onConfirmingReplace={setConfirmingReplace}
-            onConfirm={() => void confirm(file, cutoverToSet)}
-            onReplace={() => existing && void confirm(file, cutoverToSet, existing.id)}
+            onConfirm={() => accountKey !== undefined && void confirm(file, accountKey, cutoverToSet)}
+            onReplace={() => existing && accountKey !== undefined && void confirm(file, accountKey, cutoverToSet, existing.id)}
             onCancel={reset}
           />
         )}
@@ -381,6 +399,12 @@ function Preview(props: {
   /** The Cutover Date this Import will set, from `ImportFlow`, so the screen shows the one the request carries. */
   cutoverToSet: string | undefined
   existing: { id: number; name: string; cutoverDate: string | null } | undefined
+  /** The Accounts a file with no account number may be for (ADR 0017); empty when none has been added yet. */
+  choices: { id: number; name: string }[]
+  chosen: number | null
+  onChoose: (id: number | null) => void
+  /** The Account key this Import will use, or undefined while a numberless file has no Account chosen, when there is nothing to import into. */
+  accountKey: string | undefined
   accountName: string
   onAccountName: (name: string) => void
   setCutover: boolean
@@ -413,7 +437,7 @@ function Preview(props: {
         <dt>Bank</dt>
         <dd>{adapter?.name ?? file.adapterId}</dd>
         <dt>Account number</dt>
-        <dd className="tabular-nums">{file.accountNumber}</dd>
+        <dd className={file.accountNumber === null ? undefined : 'tabular-nums'}>{file.accountNumber ?? 'None in this file'}</dd>
         <dt>Dates</dt>
         <dd>
           {formatDate(file.dateRange.from)} to {formatDate(file.dateRange.to)}
@@ -422,11 +446,19 @@ function Preview(props: {
         <dd>{count} transactions to import</dd>
         <dt>Bank balance</dt>
         <dd>
-          <span className="tabular-nums">{formatBalance(file.ledgerBalance.cents)}</span> as of {formatDate(file.ledgerBalance.date)}
+          {file.ledgerBalance === null ? (
+            'None in this file, so this Import has no Balance Check'
+          ) : (
+            <>
+              <span className="tabular-nums">{formatBalance(file.ledgerBalance.cents)}</span> as of {formatDate(file.ledgerBalance.date)}
+            </>
+          )}
         </dd>
       </dl>
 
-      {existingName !== undefined ? (
+      {file.accountNumber === null ? (
+        <ChooseAccount choices={props.choices} chosen={props.chosen} onChoose={props.onChoose} existing={existing} />
+      ) : existingName !== undefined ? (
         <>
           <p>Existing Account: {existingName}. These transactions will be added to it.</p>
           <WaitingNotice accountId={existing!.id} />
@@ -480,7 +512,7 @@ function Preview(props: {
       )}
 
       <div className="flex flex-wrap gap-2">
-        <Button size="touch" disabled={count === 0 || tooMany} onClick={props.onConfirm}>
+        <Button size="touch" disabled={count === 0 || tooMany || props.accountKey === undefined} onClick={props.onConfirm}>
           Import {count} transactions
         </Button>
         {existing && (
@@ -603,6 +635,41 @@ function ReplaceDialog(props: {
         </Button>
       </div>
     </section>
+  )
+}
+
+/**
+ * Asks which Account a file with no account number is for. Nothing is matched, because the file says nothing to match on, and
+ * only Accounts whose key Fernledger generated are offered: such a file is a credit card export, and a bank-numbered Account
+ * would be a cheque account to put a card's Transactions into (ADR 0017).
+ */
+function ChooseAccount(props: { choices: { id: number; name: string }[]; chosen: number | null; onChoose: (id: number | null) => void; existing: { id: number } | undefined }) {
+  if (props.choices.length === 0)
+    return (
+      <p className="max-w-xl">
+        This file carries no account number, so it cannot say which Account it is for, and no Account has been added for a credit card yet. Add one on the{' '}
+        <Link to="/accounts" className="underline underline-offset-4">
+          Accounts
+        </Link>{' '}
+        screen, then choose this file again.
+      </p>
+    )
+  return (
+    <div className="max-w-sm">
+      <label htmlFor="for-account" className="block font-medium">
+        Which Account is this file for?
+      </label>
+      <Select id="for-account" className="mt-1" value={props.chosen === null ? '' : String(props.chosen)} onChange={(event) => props.onChoose(event.target.value === '' ? null : Number(event.target.value))}>
+        <option value="">Choose an Account</option>
+        {props.choices.map((account) => (
+          <option key={account.id} value={account.id}>
+            {account.name}
+          </option>
+        ))}
+      </Select>
+      <p className="mt-1 text-sm text-muted-foreground">This file carries no account number, so it cannot say. Only Accounts added for a credit card are offered.</p>
+      {props.existing && <WaitingNotice accountId={props.existing.id} />}
+    </div>
   )
 }
 

@@ -30,6 +30,21 @@ type AccountRow = {
 type Account = Omit<AccountRow, 'akahuAttributes'> & { akahuAttributes: string[] | null }
 
 const rename = z.object({ name: accountName })
+const addCardAccount = z.object({ name: accountName })
+
+/**
+ * A new Account for a credit card, whose bank prints no account number: Fernledger generates the key, `card-` and the highest
+ * card key held plus one, four digits (ADR 0017). The Admin types only the name and is never shown the key.
+ *
+ * The key is worked out inside the insert, so two requests cannot read the same highest number and then both write it: one
+ * statement reads and writes, and `account_number`'s UNIQUE constraint is left with nothing to decide. The aggregate returns a
+ * row even when no card Account is held yet, which is where `card-0001` comes from.
+ */
+const ADD_CARD_ACCOUNT = `
+  INSERT INTO accounts (account_number, name)
+  SELECT 'card-' || printf('%04d', COALESCE(MAX(CAST(SUBSTR(account_number, 6) AS INTEGER)), 0) + 1), ?1
+  FROM accounts WHERE account_number LIKE 'card-%'
+  RETURNING id, account_number AS accountNumber`
 const cutover = z.object({ cutoverDate: z.nullable(isoDate) })
 // Akahu's own account ID, which is opaque: its shape is all that can be checked, and the link is only as good as the Admin's choice
 // from /api/akahu/accounts. Null unlinks the Account.
@@ -43,6 +58,19 @@ export const accounts = new Hono<AppEnv>()
        FROM accounts ORDER BY name COLLATE NOCASE, id`,
     ).all<AccountRow>()
     return c.json(results.map(({ akahuAttributes, ...account }): Account => ({ ...account, akahuAttributes: toAttributeWords(akahuAttributes) })))
+  })
+  .post('/', validate('json', addCardAccount), async (c) => {
+    const { name } = c.req.valid('json')
+    const db = c.env.DB
+    const [added] = await recordChange(db, db.prepare(ADD_CARD_ACCOUNT).bind(name), {
+      actor: c.var.member,
+      type: 'account',
+      summary: `Added the credit card Account ${name}`,
+      onlyIfChanged: false,
+      after: { name },
+    })
+    const { id, accountNumber } = added!.results[0] as { id: number; accountNumber: string }
+    return c.json({ id, name, accountNumber }, 201)
   })
   .patch('/:id', validate('json', rename), async (c) => {
     const id = pathId(c.req.param('id'))

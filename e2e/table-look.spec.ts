@@ -72,23 +72,24 @@ test('a panel that opens under a row is a full-width row of the table, in its lo
   const columns = await table.getByRole('columnheader').count()
 
   await rowButton(page, 'Rename', name).click()
+  // This page has a second name field of its own, for adding a credit card Account, so the panel's own one is read through it.
   const panel = page.getByRole('region', { name: `Rename ${name}` })
   await expect(panel).toBeVisible()
   await expect(panel.locator('xpath=ancestor::td[1]')).toHaveAttribute('colspan', String(columns)) // across every column
   await expect(rowButton(page, 'Rename', name)).toHaveAttribute('aria-controls', (await panel.getAttribute('id'))!)
   await expectTableLook(table) // the open panel is a row of the table: the same box, text size and dividers
-  await page.getByLabel('Account name').fill(`${name} typed`)
+  await panel.getByLabel('Account name').fill(`${name} typed`)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByRole('table')).toHaveCount(0)
   await expect(panel).toBeVisible()
   await expect(panel.locator('xpath=ancestor::li[1]/preceding-sibling::li[1]').getByRole('button', { name: `Rename ${name}`, exact: true })).toBeVisible()
-  await expect(page.getByLabel('Account name')).toHaveValue(`${name} typed`) // the cards start the form again, with what was typed in it
+  await expect(panel.getByLabel('Account name')).toHaveValue(`${name} typed`) // the cards start the form again, with what was typed in it
   await page.setViewportSize({ width: 1280, height: 900 })
-  await expect(page.getByLabel('Account name')).toHaveValue(`${name} typed`)
+  await expect(panel.getByLabel('Account name')).toHaveValue(`${name} typed`)
   await panel.getByRole('button', { name: 'Cancel' }).click()
   await rowButton(page, 'Rename', name).click()
-  await expect(page.getByLabel('Account name')).toHaveValue(name) // Cancel throws it away
+  await expect(panel.getByLabel('Account name')).toHaveValue(name) // Cancel throws it away
 })
 
 // A panel that opens from a row of the Accounts or the Budgets (stubbed, with enough rows for the page to scroll) leaves the page where it was, and puts focus in its first field.
@@ -130,20 +131,22 @@ for (const { path, table, button, field, stub } of [
     expect(scrolled).toBeGreaterThan(100)
 
     await button(page, 6).click()
-    await expect(page.getByLabel(field)).toBeFocused()
+    await expect(page.getByLabel(field, { exact: true })).toBeFocused()
     expect(await page.evaluate(() => window.scrollY)).toBe(scrolled)
-    await expect(page.getByRole('region').filter({ has: page.getByLabel(field) })).toBeInViewport()
+    await expect(page.getByRole('region').filter({ has: page.getByLabel(field, { exact: true }) })).toBeInViewport()
 
     // What is typed in it is still there when the reader has been to another row and comes back; Cancel throws it away.
-    await page.getByLabel(field).fill('75')
+    await page.getByLabel(field, { exact: true }).fill('75')
     await button(page, 7).click()
-    await expect(page.getByRole('region')).toHaveCount(1)
-    await expect(page.getByLabel(field)).not.toHaveValue('75')
+    // One panel is open at a time. A row's panel is a RowPanel (a Card with role="region"), which is what is counted: a page may
+    // have sections of its own that are regions too, as /accounts has for adding a credit card Account.
+    await expect(page.locator('[data-slot="card"][role="region"]')).toHaveCount(1)
+    await expect(page.getByLabel(field, { exact: true })).not.toHaveValue('75')
     await button(page, 6).click()
-    await expect(page.getByLabel(field)).toHaveValue('75')
+    await expect(page.getByLabel(field, { exact: true })).toHaveValue('75')
     await page.getByRole('button', { name: 'Cancel' }).click()
     await button(page, 6).click()
-    await expect(page.getByLabel(field)).not.toHaveValue('75')
+    await expect(page.getByLabel(field, { exact: true })).not.toHaveValue('75')
   })
 }
 

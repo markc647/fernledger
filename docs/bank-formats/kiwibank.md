@@ -1,6 +1,6 @@
 # Kiwibank CSV exports
 
-Kiwibank has **two** CSV layouts: one for bank accounts, which the `kiwibank` adapter parses, and one for credit cards, which nothing parses yet. Every value below is made up and uses bank code 99. Never copy a real export into this repo. Kiwibank also offers JSON, OFX, QIF and PDF; Fernledger imports CSV only.
+Kiwibank has **two** CSV layouts: one for bank accounts, which the `kiwibank` adapter parses, and one for credit cards, which the `kiwibank-card` adapter parses. Every value below is made up and uses bank code 99. Never copy a real export into this repo. Kiwibank also offers JSON, OFX, QIF and PDF; Fernledger imports CSV only.
 
 ## Bank accounts
 
@@ -73,12 +73,25 @@ Date,Description,Card,Amount
 | Card | The last four digits of the card used |
 | Amount | Integer cents; negative is money out |
 
-**No adapter parses this yet, and one cannot be written against the current contract.** `BankCsvResult` requires an `accountNumber` and a `ledgerBalance`, and this export has neither:
+The `kiwibank-card` adapter parses it (`src/lib/bank-csv/kiwibank-card.ts`). It has neither of the two things every other export gives, and [ADR 0017](../adr/0017-account-number-is-the-accounts-key.md) is what made it writable:
 
-- **Nothing identifies the account.** The card number is not it: a card is reissued on fraud or expiry, and one sample file held three card numbers for one account over two years, so an Account keyed on a card number would split in two at the next reissue. The `Card` column belongs in `bank_card_suffix`, per Transaction, which is where it says which card was used — including across a reissue.
-- **There is no balance**, so the Balance Check cannot run for a credit card Account imported from CSV.
+- **Nothing identifies the account.** The card number is not it: a card is reissued on fraud or expiry, and one sample file held three card numbers for one account over two years, so an Account keyed on a card number would split in two at the next reissue. So the file carries no `accountNumber` at all, and the Import asks the Admin which Account it is for. The `Card` column goes to `bank_card_suffix`, per Transaction, which is where it says which card was used — including across a reissue.
+- **There is no balance**, so the file states no ledger balance and such an Account gets no Balance Check from a CSV. Through Akahu it is checked from Akahu's own balance like any other ([ADR 0014](../adr/0014-akahu-balance-is-a-bank-balance.md)).
 
-Both need the decision about what identifies an Account when the bank prints no durable number. Until that is made, a credit card's Transactions can only reach Fernledger through Akahu Sync, which has a stable account ID of its own.
+### The unique ID, without a balance to use
+
+The bank-account adapter's `<date>:<cents>:<balance>` cannot be used here, because there is no balance column. This adapter uses the date, the amount in cents, the card, and **which occurrence of those three the row is in the file**:
+
+```text
+<Date>:<amount in cents>:<Card>:<occurrence>
+2026-09-02:-820:9999:1
+```
+
+The first three are what the bank cannot restate without being wrong about the money. The occurrence separates a day's identical purchases, which a card really does have — two $4.50 coffees at the same shop — so both survive instead of one being taken for a duplicate of the other, and a re-import of an overlapping range still adds nothing twice. A later export that has gained a row of some other amount does not shift them, because only rows sharing all three are counted. As in the bank-account adapter, the description is left out: it is the part a bank is most likely to re-word between exports.
+
+It follows that a file whose rows are not in the bank's own order produces different IDs for a day's identical purchases, and therefore duplicates of them. The adapter does not re-sort rows, for the same reason as the other one: a file that is not as the bank wrote it is not one to trust.
+
+The export prints no transaction type, so `bank_type` holds `''` for these rows, as it does for any row a bank gives none for.
 
 ## The EFTPOS time in Akahu's description
 

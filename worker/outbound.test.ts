@@ -162,6 +162,8 @@ const EXERCISES: Exercise[] = [
   { route: 'DELETE /api/kept-reports/:id', path: () => `/api/kept-reports/${made.keptId}`, opts: { method: 'DELETE', body: {} } },
   { route: 'PATCH /api/settings', path: () => '/api/settings', opts: { method: 'PATCH', body: { app_title: 'Example family' } } },
   { route: 'PATCH /api/accounts/:id', path: (id) => `/api/accounts/${id}`, opts: { method: 'PATCH', body: { name: 'Example savings' } } },
+  // Adding an Account for a credit card contacts no one: the bank prints no number for it and Fernledger allocates its key itself (ADR 0017).
+  { route: 'POST /api/accounts', path: () => '/api/accounts', opts: { method: 'POST', body: { name: 'Example Visa' } } },
 ]
 // Not routes of their own: an unknown API path, and anything outside /api (the static assets).
 const OTHER_PATHS = ['/api/no-such-route', '/not-api']

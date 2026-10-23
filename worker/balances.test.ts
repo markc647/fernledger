@@ -509,7 +509,6 @@ describe('the ledger balance in an Import request', () => {
   })
 
   it.each([
-    ['missing', undefined],
     ['not a date', { cents: 1, date: 'yesterday' }],
     ['not a real date', { cents: 1, date: '2026-02-30' }],
     ['not whole cents', { cents: 1.5, date: '2026-09-30' }],
@@ -519,6 +518,16 @@ describe('the ledger balance in an Import request', () => {
 
     expect(res.status).toBe(400)
     expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions').first<{ n: number }>())!.n).toBe(0)
+  })
+
+  // A file may state no balance at all: a Kiwibank credit card export has no balance column, and such an Account simply gets no
+  // Balance Check from an Import (ADR 0017; worker/card-account.test.ts has the card Import itself).
+  it('accepts a file that states no balance, and records none for the Account', async () => {
+    const res = await call('/api/imports/chunks', { method: 'POST', body: body(undefined) })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ added: 1, balanceCheck: null })
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM balance_checks').first<{ n: number }>())!.n).toBe(0)
   })
 
   it('accepts a negative balance, as for an overdrawn Account', async () => {

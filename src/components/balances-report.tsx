@@ -17,6 +17,7 @@ import {
   type MonthBalance,
 } from '@/lib/report-balances'
 import { PAPER } from '@/lib/utils'
+import { AccountHeading } from './account-heading'
 
 // One row for each month. The date and the two amounts keep their words whole; the Source, which can be a sentence, is the column
 // that gives way.
@@ -88,9 +89,7 @@ function AccountSection({ section }: { section: AccountBalances }) {
   const what = outlook(report)
   return (
     <section aria-labelledby={headingId} className="mt-8 print:mt-6">
-      <h2 id={headingId} className="text-xl font-semibold print:text-[15pt]">
-        {section.accountName} <span className="font-normal">({section.accountNumber})</span>
-      </h2>
+      <AccountHeading id={headingId} name={section.accountName} accountNumber={section.accountNumber} />
       {what.kind === 'no-balance' && (
         <p className="mt-2 font-semibold">
           No balances can be worked out for this Account. {what.reason}.

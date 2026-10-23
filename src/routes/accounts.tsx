@@ -7,6 +7,7 @@ import { Status } from '@/components/status'
 import { focusPanel, RowPanel, useDrafts, type Drafts } from '@/components/row-panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { isGeneratedKey } from '@/lib/account-key'
 import { akahuWords } from '@/lib/akahu'
 import { formatBalance, formatDateTime, isMoment } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
@@ -46,7 +47,13 @@ function Accounts() {
 
   const columns: Column<Account>[] = [
     { key: 'name', header: 'Name', cell: (account) => account.name },
-    { key: 'number', header: 'Account number', cell: (account) => <span className="tabular-nums">{account.accountNumber}</span> },
+    {
+      key: 'number',
+      header: 'Account number',
+      // An Account whose bank prints no number has a key Fernledger generated, which is never shown as the bank's own (ADR 0017).
+      cell: (account) =>
+        isGeneratedKey(account.accountNumber) ? <span className="text-muted-foreground">None from the bank</span> : <span className="tabular-nums">{account.accountNumber}</span>,
+    },
   ]
   if (me?.role === 'admin')
     columns.push({
@@ -75,7 +82,7 @@ function Accounts() {
       ) : !accounts ? (
         <p role="status" className="mt-2">Loading…</p>
       ) : accounts.length === 0 ? (
-        <p className="mt-2">There are no Accounts yet. An Account is added the first time you import a file for it.</p>
+        <p className="mt-2">There are no Accounts yet. An Account is added the first time you import a file for it, or below for a credit card, whose bank prints no account number.</p>
       ) : (
         <div className="mt-4">
           <ResponsiveTable
@@ -109,7 +116,67 @@ function Accounts() {
           />
         </div>
       )}
+      {me?.role === 'admin' && <AddCardAccount />}
     </>
+  )
+}
+
+/**
+ * Adds an Account for a credit card. A card's bank prints no account number and its card number is not one (a reissue would
+ * split the Account in two), so Fernledger gives the Account a key of its own and the Admin types only the name (ADR 0017).
+ * Every other Account is still created by importing a file for it, which is where its number comes from.
+ */
+function AddCardAccount() {
+  const queryClient = useQueryClient()
+  const [name, setName] = useState('')
+  const [added, setAdded] = useState<string | null>(null)
+  const add = useMutation({
+    mutationFn: async () => {
+      const res = await api.accounts.$post({ json: { name: name.trim() } })
+      if (!res.ok) throw new HttpError(res.status)
+      return (await res.json()).name
+    },
+    onSuccess: async (addedName) => {
+      setName('')
+      setAdded(addedName)
+      await queryClient.invalidateQueries({ queryKey: ['accounts'] })
+    },
+  })
+
+  return (
+    <section aria-labelledby="add-card" className="mt-8 max-w-xl">
+      <h2 id="add-card" className="text-xl font-semibold">
+        Add a Credit Card Account
+      </h2>
+      <p className="mt-2">
+        A credit card has no account number from the bank, so Fernledger gives the Account a key of its own and you never have to type one. Import the card's CSV afterwards, or link the Account to Akahu
+        in Settings. The name is yours and can be changed later.
+      </p>
+      <form
+        className="mt-2 flex flex-wrap items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          add.mutate()
+        }}
+      >
+        <div>
+          {/* Not "Account name": the Rename panel on this page has one of those, and two fields of the same name on a page are two the same to a screen reader. */}
+          <label htmlFor="card-name" className="block font-medium">
+            Credit card Account name
+          </label>
+          <Input id="card-name" value={name} maxLength={60} required onChange={(event) => setName(event.target.value)} />
+        </div>
+        <Button type="submit" size="touch" disabled={add.isPending || !name.trim()}>
+          Add the Account
+        </Button>
+        {add.isError && <p role="alert" className="basis-full font-medium text-destructive">The Account could not be added. Try again.</p>}
+      </form>
+      {added !== null && (
+        <p role="status" className="mt-2">
+          Added {added}. Its Transactions come from the card's CSV or from Akahu.
+        </p>
+      )}
+    </section>
   )
 }
 

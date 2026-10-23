@@ -168,7 +168,7 @@ test('the Admin renames an Account and the new name shows on its Transactions', 
   const panel = page.getByRole('region', { name: `Rename ${before}` })
   await expect(panel.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[1]')).toHaveAttribute('data-slot', 'table-detail')
   await expect(panel.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[2]').getByRole('button', { name: `Rename ${before}`, exact: true })).toBeVisible()
-  await page.getByLabel('Account name').fill(after)
+  await panel.getByLabel('Account name').fill(after) // this page has a second name field, for adding a credit card Account
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save name' }).click()
 

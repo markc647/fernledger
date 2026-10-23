@@ -34,6 +34,11 @@ export type ImportSummary = {
 }
 
 export type ImportOptions = {
+  /**
+   * The Account this Import is for, by its key: the number in the file, or, where the bank prints none, the Account the Admin
+   * chose on the Import screen (ADR 0017). The file never decides it on its own, because a card export says nothing about it.
+   */
+  accountKey: string
   /** Used only when the Import creates the Account. */
   accountName?: string
   /** Set the Account's Cutover Date to this before importing. */
@@ -75,9 +80,17 @@ export async function runImport(file: BankCsvResult, options: ImportOptions, onP
   async function send(index: number, rows: (typeof chunks)[number]) {
     return api.imports.chunks.$post({
       json: {
-        account: { number: file.accountNumber, ...(options.accountName ? { name: options.accountName } : {}) },
+        account: { number: options.accountKey, ...(options.accountName ? { name: options.accountName } : {}) },
         chunk: { index, count: chunks.length },
-        file: { adapterId: file.adapterId, rowCount: file.rows.length, skipped: file.errors.length, from: file.dateRange.from, to: file.dateRange.to, ledgerBalance: file.ledgerBalance },
+        // A file that states no balance sends none, and the Account gets no Balance Check from this Import (ADR 0017).
+        file: {
+          adapterId: file.adapterId,
+          rowCount: file.rows.length,
+          skipped: file.errors.length,
+          from: file.dateRange.from,
+          to: file.dateRange.to,
+          ...(file.ledgerBalance ? { ledgerBalance: file.ledgerBalance } : {}),
+        },
         rows,
         // These apply to the whole Import, so they ride on the first chunk only.
         ...(index === 0 && options.cutoverDate ? { cutoverDate: options.cutoverDate } : {}),

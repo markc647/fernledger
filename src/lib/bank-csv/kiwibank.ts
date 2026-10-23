@@ -19,10 +19,11 @@ const ACCOUNT_NUMBER = /^\d{2}-\d{4}-\d{7}-\d{2,3}$/
 const AMOUNT = /^(-|\+)?(\d+)(?:\.(\d{1,2}))?$/
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 
-const splitLines = (text: string) => text.replace(/^﻿/, '').split(/\r\n|\n|\r/)
+// The four readers below are shared with the credit card adapter (kiwibank-card.ts), which is the same bank in a different layout.
+export const splitLines = (text: string) => text.replace(/^﻿/, '').split(/\r\n|\n|\r/)
 
 /** `YYYY-MM-DD` to itself, or null when it is not a real day (the 30th of February). The only date parser here. */
-function parseDate(text: string): string | null {
+export function parseDate(text: string): string | null {
   const parts = ISO_DATE.exec(text)
   if (!parts) return null
   const [, year, month, day] = parts as unknown as [string, string, string, string]
@@ -31,7 +32,7 @@ function parseDate(text: string): string | null {
   return real ? `${year}-${month}-${day}` : null
 }
 
-function parseCents(text: string): number | null {
+export function parseCents(text: string): number | null {
   const parts = AMOUNT.exec(text)
   if (!parts) return null
   const magnitude = Number(parts[2]) * 100 + Number((parts[3] ?? '').padEnd(2, '0'))
@@ -39,7 +40,7 @@ function parseCents(text: string): number | null {
 }
 
 /** Splits one CSV line. Returns null if a quote is left open or text follows a closing quote. (Same reader as the ASB adapter's.) */
-function splitFields(line: string): string[] | null {
+export function splitFields(line: string): string[] | null {
   const fields: string[] = []
   let i = 0
   while (i <= line.length) {

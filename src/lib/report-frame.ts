@@ -1,4 +1,5 @@
 import { formatDate, formatDateAtTime } from './format'
+import { isGeneratedKey } from './account-key'
 
 // The words a Report writes about itself (src/components/report-frame.tsx): its dates, when it was generated, the
 // one line that says what a page is, and the Account as the bank and the family know it.
@@ -10,8 +11,11 @@ export const describeRange = (from: string | null, to: string) =>
 /** "Generated Thu 8 Oct 2026 at 3:42 pm". The reader of a printout sees when the figures were worked out, not who asked for them. */
 export const generatedLine = (generatedAt: Date | number) => `Generated ${formatDateAtTime(generatedAt)}`
 
-/** An Account by its name and the bank's number: "Example savings (99-9999-9999999-99)". */
-export const accountLabel = ({ name, accountNumber }: { name: string; accountNumber: string }) => `${name} (${accountNumber})`
+/**
+ * An Account by its name and the bank's number: "Example savings (99-9999-9999999-99)". An Account whose key Fernledger
+ * generated, because its bank prints no number, is its name alone: the key is not a number the bank issued (ADR 0017).
+ */
+export const accountLabel = ({ name, accountNumber }: { name: string; accountNumber: string }) => (isGeneratedKey(accountNumber) ? name : `${name} (${accountNumber})`)
 
 /**
  * The line that says what a page is: the app title, the Report, the Account and the dates. It is the browser's page title

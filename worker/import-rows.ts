@@ -23,6 +23,8 @@ export type ImportRow = {
   paymentCode?: string | null
   /** The other party's account number, as the bank printed it. */
   counterpartyAccount?: string | null
+  /** The last four digits of the card used, where the bank prints it (a credit card export). It says which card, not which Account: a reissued card shows here and the Account is unchanged (ADR 0017). */
+  cardSuffix?: string | null
 }
 
 export const MAX_ROWS_PER_CHUNK = 500
@@ -117,7 +119,7 @@ export function badRowField(rows: unknown): string | null {
     if (!isText(row.bankMemo, 200)) return `rows.${i}.bankMemo`
     if (!Number.isSafeInteger(row.amountCents)) return `rows.${i}.amountCents`
     // Optional: a row from a bank that prints none of these leaves them out entirely, which is not a bad row.
-    for (const field of ['particulars', 'paymentCode', 'counterpartyAccount'] as const) {
+    for (const field of ['particulars', 'paymentCode', 'counterpartyAccount', 'cardSuffix'] as const) {
       const value = row[field]
       if (value !== undefined && value !== null && !isText(value, 100)) return `rows.${i}.${field}`
     }
@@ -128,7 +130,7 @@ export function badRowField(rows: unknown): string | null {
 /** The chunk's rows as JSON for the database, with only the known fields: anything extra a client sent is dropped. */
 export const serialiseRows = (rows: readonly ImportRow[]) =>
   JSON.stringify(
-    rows.map(({ date, uniqueId, tranType, chequeNumber, payee, bankMemo, amountCents, particulars, paymentCode, counterpartyAccount }) => ({
+    rows.map(({ date, uniqueId, tranType, chequeNumber, payee, bankMemo, amountCents, particulars, paymentCode, counterpartyAccount, cardSuffix }) => ({
       date,
       uniqueId,
       tranType,
@@ -140,6 +142,7 @@ export const serialiseRows = (rows: readonly ImportRow[]) =>
       particulars: particulars ?? null,
       paymentCode: paymentCode ?? null,
       counterpartyAccount: counterpartyAccount ?? null,
+      cardSuffix: cardSuffix ?? null,
     })),
   )
 

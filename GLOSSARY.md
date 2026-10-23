@@ -19,8 +19,12 @@ _Avoid_: Host, operator, owner
 ## Money
 
 **Account**:
-A bank account being tracked.
+A bank account being tracked. A credit card is one: the Admin adds it by name on the Accounts screen, because its bank prints no account number.
 _Avoid_: Bank account, wallet
+
+**Account number**:
+The Account's stable key, which is the bank's number (`BB-bbbb-AAAAAAA-SS`) when the bank prints one. Where the bank prints none, as for a credit card, Fernledger generates the key (`card-0001`): the Admin never types it and is never shown it as a number, and the Account's name is what identifies it ([ADR 0017](docs/adr/0017-account-number-is-the-accounts-key.md)). A card's own number is not an Account number, because a reissued card would split the Account in two; the card used is kept per Transaction instead.
+_Avoid_: Account ID, card number
 
 **Transaction**:
 A settled movement of money in or out of an Account.
