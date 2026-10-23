@@ -23,6 +23,10 @@ import {
   themeToggle,
 } from './shell-helpers'
 
+// A third of the whole suite is in this file, and none of its tests needs another's: let a shard take some of them
+// (ci.yml, scripts/e2e-shards.mjs) rather than all. Each shard still runs them one at a time (playwright.config.ts).
+test.describe.configure({ mode: 'parallel' })
+
 /** A box (null if the thing is not there) is wholly inside a window of this size: something fixed to the window, or drawn outside the page (a dialog, a popover), is not in the page's scrollWidth. */
 function expectInside(box: { x: number; y: number; width: number; height: number } | null, viewport: { width: number; height: number }) {
   expect(box, 'it is drawn').not.toBeNull()
@@ -340,7 +344,9 @@ test.describe('one size for all text', () => {
         await page.goto(path)
         await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
         await settle(page)
-        await expectOneSize(page, size)
+        // The Spending Report with no Transactions to report has fewer words than the others: a test must not lean on what
+        // an earlier spec file left in the database, because a shard (ci.yml) runs this one without them.
+        await expectOneSize(page, size, path === '/reports/spending' ? 5 : 10)
       })
     }
   }

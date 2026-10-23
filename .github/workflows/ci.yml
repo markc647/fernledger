@@ -40,8 +40,13 @@ jobs:
       - run: npm run check
 
   # Browser tests (Playwright + axe) are slower than `check`, so they run as their own job. All run in light; the ones tagged @theme run in dark too (playwright.config.ts).
+  # They run one at a time on one database, so the suite is split four ways, each part on its own runner with its own database.
   e2e:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,8 +56,10 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       # The inputs reach the shell as variables, never pasted into the script.
-      - run: npm run test:e2e -- $SPEC ${GREP:+--grep "$GREP"} --repeat-each="$REPEAT"
+      # A part can be empty when only some specs are asked for, which is not a failure.
+      - run: npm run test:e2e -- $SPEC ${GREP:+--grep "$GREP"} --repeat-each="$REPEAT" --shard="$SHARD/4" --pass-with-no-tests
         env:
+          SHARD: ${{ matrix.shard }}
           SPEC: ${{ inputs.spec }}
           GREP: ${{ inputs.grep }}
           REPEAT: ${{ inputs.repeat || '1' }}
@@ -60,7 +67,7 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-traces
+          name: e2e-traces-${{ matrix.shard }}
           path: test-results/
           retention-days: 7
 
