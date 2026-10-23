@@ -5,7 +5,8 @@ import { CLEAR_DETAILS, SELECT_DISPLAYED } from './akahu-details'
 import type { DisplayedDetails } from './akahu-details'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
-import { DELETE_PENDING } from './pending'
+import type { SyncFailure } from './sync'
+import { DELETE_PENDING_ON_RELINK } from './pending'
 import { CHANGED_MEANWHILE, pathId, validate } from './validate'
 
 // What Akahu said about a linked Account is null for one that is not linked, and until a Sync has read it (worker/akahu-details.ts).
@@ -20,7 +21,7 @@ type AccountRow = {
   akahuAccountId: string | null
   akahuSyncedAt: string | null
   akahuMissingSince: string | null
-  akahuLastFailure: string | null
+  akahuLastFailure: SyncFailure | null
 } & {
   [K in keyof DisplayedDetails]: DisplayedDetails[K] | null
 }
@@ -111,7 +112,17 @@ export const accounts = new Hono<AppEnv>()
     }
 
     // As the Cutover Date is: only over the link that was read (`IS` is `=` that also matches NULL), and an entry only if it changed something.
-    const [update] = await recordChange(db, db.prepare(`UPDATE accounts SET akahu_account_id = ?1, ${CLEAR_DETAILS} WHERE id = ?2 AND akahu_account_id IS ?3`).bind(akahuAccountId, id, account.akahu_account_id), {
+    // The Pending Transactions came from the old link and say nothing about the new one, so they go with it, in the same batch:
+    // an unlink that committed without them would leave pending money showing for an Account no Sync will ever replace it for.
+    // Two statements, the update second: the Change Log entry counts `changes()` of the statement just before it, and that has
+    // to be the update (worker/changelog.ts). `recordChange` hands the results back in the order given.
+    const [, update] = await recordChange(
+      db,
+      [
+        db.prepare(DELETE_PENDING_ON_RELINK).bind(id, account.akahu_account_id),
+        db.prepare(`UPDATE accounts SET akahu_account_id = ?1, ${CLEAR_DETAILS} WHERE id = ?2 AND akahu_account_id IS ?3`).bind(akahuAccountId, id, account.akahu_account_id),
+      ],
+      {
       actor: c.var.member,
       type: 'account',
       // Akahu's ID is not in the summary: the Change Log is read by Members, and which Akahu account it is says nothing to them.
@@ -119,14 +130,12 @@ export const accounts = new Hono<AppEnv>()
       before: { akahuAccountId: account.akahu_account_id },
       after: { akahuAccountId },
       onlyIfChanged: true,
-    })
+      },
+    )
     if (update!.meta.changes === 0) {
       const now = await db.prepare('SELECT akahu_account_id FROM accounts WHERE id = ?').bind(id).first<{ akahu_account_id: string | null }>()
       if (!now) return c.json({ error: 'Not found' }, 404)
       return now.akahu_account_id === akahuAccountId ? c.json({ id, akahuAccountId }) : c.json(CHANGED_MEANWHILE, 409)
     }
-    // The Pending Transactions came from the old link and say nothing about the new one, so they go with it. A Sync replaces the
-    // pending rows of the Accounts that are linked (worker/pending.ts), which would never reach an Account that has just been unlinked.
-    await db.prepare(DELETE_PENDING).bind(JSON.stringify([id])).run()
     return c.json({ id, akahuAccountId })
   })

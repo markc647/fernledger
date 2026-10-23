@@ -14,8 +14,6 @@ CREATE TABLE pending_transactions (
   amount_cents INTEGER NOT NULL,
   description TEXT NOT NULL,
   bank_type TEXT,
-  -- When Akahu last changed the row, if it said.
-  akahu_updated_at TEXT,
   -- When the Sync that wrote it ran, so the list can say how current the pending money is.
   synced_at TEXT NOT NULL
 );

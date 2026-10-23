@@ -162,6 +162,22 @@ test('the Accounts screen with Akahu\'s details passes the accessibility scan, f
 
 // An answer from before the Link and failure fields were stored leaves them out. Such an Account has nothing wrong with it, and
 // showing its details must not fail on a date that is not one.
+// The same guard, over an answer that holds no balance and no times at all: a field a stored answer never had is shown as not
+// given, and never fails the screen (the contrast sweep's stubbed Account caught this one).
+test('an Account whose answer holds no balance or times shows what it has and says the balance was not given', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  await page.route('**/api/accounts', (route) =>
+    route.fulfill({
+      json: [{ id: 1, name: 'Example sparse', accountNumber: '99-9999-9999999-34', cutoverDate: null, akahuAccountId: 'acc_example000000000000006', akahuName: 'EXAMPLE SPARSE' }],
+    }),
+  )
+  await page.goto('/accounts')
+  const row = page.getByRole('table', { name: 'Accounts' }).getByRole('row').filter({ hasText: 'Example sparse' })
+  await expect(row.locator('dt:text-is("Balance") + dd')).toHaveText('Akahu did not give one')
+  await expect(row.locator('dt:text-is("Last Sync") + dd')).toHaveText('Never synced')
+  await expect(row).not.toContainText(/null|undefined|NaN|Invalid/)
+})
+
 test('an Account whose answer predates the Link fields shows its details and no broken Link', async ({ page, context }) => {
   await signInAs(context, 'member')
   const { akahuMissingSince: _since, akahuLastFailure: _failure, ...older } = ACCOUNTS[0]!
@@ -179,8 +195,9 @@ test('an Account Akahu has stopped listing says its Link is broken, since when, 
   // 18:00 UTC on 19 October is 7:00 am on the 20th in NZ.
   await expect(row).toContainText('Akahu has stopped listing this account since Tue 20 Oct 2026, 7:00 am.')
   await expect(row).toContainText('No Transaction has been removed')
-  // The details the last Sync stored are not read out as though they were current.
-  await expect(row.getByRole('term')).toHaveCount(0)
+  // What the last Sync stored stays on show under it: Akahu's own name for the account is how the Admin tells which one it was.
+  await expect(row.locator("dt:text-is(\"Akahu's name\") + dd")).toHaveText('EXAMPLE GONE')
+  await expect(row.locator('dt:text-is("Bank") + dd')).toHaveText('Example Bank')
   // A Member is not asked to do what only the Admin can (spec 60).
   await expect(row).not.toContainText('Reconnect the bank in Akahu')
 })

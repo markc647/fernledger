@@ -28,6 +28,7 @@ let everyday = 0
 let savings = 0
 
 beforeEach(async () => {
+  await env.DB.prepare('DELETE FROM pending_transactions').run()
   await env.DB.prepare('DELETE FROM transactions').run()
   await env.DB.prepare('DELETE FROM accounts').run()
   await env.DB.prepare('DELETE FROM change_log').run()
@@ -178,5 +179,64 @@ describe('what the Account Link refuses', () => {
 
   it('answers 404 for an Account that is not there', async () => {
     expect((await link(999_999, LINKED)).status).toBe(404)
+  })
+})
+
+// The Pending Transactions are the old link's (ADR 0015): a Sync only ever replaces the pending rows of Accounts that are
+// linked, so rows left on an unlinked Account would be shown for good. The review of ticket 29 found the delete running after
+// the link's own batch had committed, where a failure would have left exactly that.
+describe('the Pending Transactions of a link that is changed', () => {
+  const pending = async (accountId: number, description = 'PENDING CAFE') =>
+    env.DB.prepare(
+      `INSERT INTO pending_transactions (account_id, date, amount_cents, description, synced_at)
+       VALUES (?1, '2026-10-21', -450, ?2, '2026-10-20T18:00:00.000Z')`,
+    )
+      .bind(accountId, description)
+      .run()
+
+  const pendingOf = async (accountId: number) =>
+    (await env.DB.prepare('SELECT COUNT(*) AS n FROM pending_transactions WHERE account_id = ?').bind(accountId).first<{ n: number }>())!.n
+
+  const listed = async () => ((await (await call('/api/transactions/pending')).json()) as { description: string }[]).map((row) => row.description)
+
+  it('go when the Account is unlinked', async () => {
+    await link(everyday, LINKED)
+    await pending(everyday)
+
+    await link(everyday, null)
+
+    expect(await pendingOf(everyday)).toBe(0)
+  })
+
+  it('go when the Account is linked to a different Akahu account, because they came from the old one', async () => {
+    await link(everyday, LINKED)
+    await pending(everyday)
+
+    await link(everyday, OTHER)
+
+    expect(await pendingOf(everyday)).toBe(0)
+  })
+
+  it('are left alone on the other Accounts', async () => {
+    await link(everyday, LINKED)
+    await link(savings, OTHER)
+    await pending(everyday)
+    await pending(savings, 'PENDING FUEL')
+
+    await link(everyday, null)
+
+    expect(await pendingOf(savings)).toBe(1)
+  })
+
+  it('are not listed for an Account that is no longer linked, whatever the table still holds', async () => {
+    await link(everyday, LINKED)
+    await pending(everyday)
+    expect(await listed()).toEqual(['PENDING CAFE'])
+
+    // Straight into the table, as a run that wrote them before the Account was unlinked would have left them.
+    await env.DB.prepare('UPDATE accounts SET akahu_account_id = NULL WHERE id = ?').bind(everyday).run()
+    await pending(everyday, 'PENDING LEFTOVER')
+
+    expect(await listed()).toEqual([])
   })
 })

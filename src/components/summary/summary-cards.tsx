@@ -2,10 +2,11 @@ import { HelpHeading } from '@/components/help-sheet'
 import { BALANCES_ABOUT, BalancesWidget } from '@/components/summary/balances-widget'
 import { BUDGET_ABOUT, BudgetVsActualWidget } from '@/components/summary/budget-vs-actual-widget'
 import { SummaryGrid } from '@/components/summary/dashboard-card'
+import { SYNC_STATUS_ABOUT } from '@/components/summary/sync-status-line'
 import { RecentTransactionsWidget } from '@/components/summary/recent-transactions-widget'
 
 /**
- * Everything the Summary shows, as a column of cards, in the order it is read: how the Accounts stand (with whether each agrees with the bank, and whether Sync reached it), the newest
+ * Everything the Summary shows, as a column of cards, in the order it is read: how current the bank data is and how the Accounts stand (with whether each agrees with the bank, and whether Sync reached it), the newest
  * Transactions, and last this month against Budget. The Member's Summary and the Admin's Dashboard are both this and nothing more, so they cannot disagree; the pages add only their heading.
  * The charts are not here: each reads every Transaction it covers, so each has a page where it waits to be asked for (ADR 0004).
  */
@@ -28,6 +29,8 @@ export function SummaryHelp() {
     <>
       <HelpHeading>Balances</HelpHeading>
       <p>{BALANCES_ABOUT}</p>
+      <HelpHeading>Sync status</HelpHeading>
+      <p>{SYNC_STATUS_ABOUT}</p>
       <HelpHeading>Budget vs actual</HelpHeading>
       <p>{BUDGET_ABOUT}</p>
     </>

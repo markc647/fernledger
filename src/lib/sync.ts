@@ -4,6 +4,7 @@
 // are trying to find out why Sync isn't working. Akahu's own error text is never shown: it can echo a token (worker/akahu.ts),
 // so the Worker sends one of four fixed words and the sentences for them are here. The Sync status banner a Member sees is
 // ticket 29 (#30) and has its own wording.
+import type { SyncFailure } from '@/generated/api/sync'
 
 /** One Account's part of a run, as `POST /api/sync/runs` reports it (worker/sync.ts: AccountOutcome). */
 export type AccountOutcome = {
@@ -12,7 +13,8 @@ export type AccountOutcome = {
   /** Transactions Akahu no longer returns, removed from the window (spec 49). */
   removed: number
   complete: boolean
-  failure?: 'refused' | 'unreachable' | 'unreadable' | 'no-window' | 'no-budget'
+  /** Why it did not finish, as the Worker names it: the one type, so a cause added there is a case missing here (worker/sync.ts). */
+  failure?: SyncFailure
 }
 
 /**
@@ -60,6 +62,13 @@ export function accountNote(account: AccountOutcome): { tone: Tone; text: string
     // the page cap below.
     case 'no-budget':
       return { tone: 'neutral', text: 'Sync ran out of its share of the database for this run before reaching this Account. It is first next time; run a Sync again to do it now.' }
+    // Akahu answered the account list and did not name this Account, so nothing it said about it can be trusted: the Transactions
+    // held are kept as they are, nothing was withdrawn, and the Account keeps its old last-success mark (spec 32).
+    case 'link-broken':
+      return {
+        tone: 'danger',
+        text: 'Akahu has stopped listing this Account, so its Account Link is broken. No Transaction was removed. Reconnect the bank in Akahu, then link the Account again in Settings.',
+      }
     default:
       // The page cap: MAX_PAGES is the most pages one Sync may ask for over all its Accounts (worker/akahu.ts), so running again
       // asks for the same window again and gets no further. Don't offer that as a fix.

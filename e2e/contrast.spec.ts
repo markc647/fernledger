@@ -157,13 +157,35 @@ const PAGES: {
     // says the column is not there.
     path: '/',
     phone: true,
-    setup: async ({ page }) => stubBalances(page, { syncSetUp: true }),
+    setup: async ({ page }) => {
+      await stubBalances(page, { syncSetUp: true })
+      // One linked Account that Akahu could not be reached for, so the Sync status is drawn in its warning colour above the table
+      // (ticket 29); the broken-Link danger colour is on /accounts below, where its own words are.
+      await page.route('**/api/accounts', (route) =>
+        route.fulfill({
+          json: [
+            {
+              id: 1,
+              name: 'Example everyday',
+              accountNumber: '99-9999-9999999-19',
+              cutoverDate: null,
+              akahuAccountId: 'acc_contrast00000000000001',
+              akahuSyncedAt: '2026-10-20T18:00:00.000Z',
+              akahuMissingSince: null,
+              akahuLastFailure: 'unreachable',
+              akahuConnectionName: 'Example Bank',
+            },
+          ],
+        }),
+      )
+    },
     visit: async ({ page, role, scan }) => {
       await page.goto('/')
       await heading(page, role === 'admin' ? 'Dashboard' : 'Summary')
       const balances = page.getByRole('region', { name: 'Balances' })
       for (const word of ['OK', 'Check', 'Synced', 'Not Synced']) await expect(balances.getByText(word, { exact: true }).first()).toBeVisible()
       await expect(balances.getByText('—').first()).toBeVisible()
+      await expect(balances.getByText('Akahu unavailable for Example Bank', { exact: false })).toBeVisible()
       await scan()
       // The page's help sheet, with its headings and its Close button (every page's is the same sheet).
       await helpButton(page).click()
@@ -276,6 +298,32 @@ const PAGES: {
       await heading(page, 'Accounts')
       await expect(page.getByText(data.everyday.name).first()).toBeVisible()
       await scan()
+      // "Account Link broken" in the danger colour, over the answer stubbed for it (ticket 29): no Account of the shared
+      // database has a broken Link, and this state is a colour the sweep has to measure.
+      await page.route('**/api/accounts', (route) =>
+        route.fulfill({
+          json: [
+            {
+              id: 1,
+              name: data.everyday.name,
+              accountNumber: data.everyday.number,
+              cutoverDate: null,
+              akahuAccountId: 'acc_contrast00000000000002',
+              akahuName: 'EXAMPLE EVERYDAY',
+              akahuConnectionName: 'Example Bank',
+              akahuSyncedAt: '2026-10-18T18:00:00.000Z',
+              akahuMissingSince: '2026-10-19T18:00:00.000Z',
+              akahuLastFailure: 'link-broken',
+            },
+          ],
+        }),
+      )
+      await page.reload()
+      await expect(page.getByText('Account Link broken')).toBeVisible()
+      await scan('with an Account Link broken')
+      await page.unroute('**/api/accounts')
+      await page.reload()
+      await expect(page.getByText(data.everyday.name).first()).toBeVisible()
       if (role === 'member') return
       await rowButton(page, 'Rename', data.everyday.name).click()
       await expect(page.getByRole('region', { name: `Rename ${data.everyday.name}` })).toBeVisible()

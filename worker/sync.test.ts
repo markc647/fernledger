@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AKAHU_API, MAX_PAGES } from './akahu'
 import worker from './index'
 import { toCents } from './akahu-details'
-import { ACCOUNTS_PER_RUN, hasBankTime, MAX_QUERIES, QUERIES_PER_ACCOUNT, RUN_QUERIES, RECHECK_DAYS, SYNC_CRON, windowStart } from './sync'
+import { ACCOUNTS_PER_RUN, hasBankTime, MAX_QUERIES, QUERIES_PER_ACCOUNT, RUN_QUERIES, RECHECK_DAYS, syncAll, SYNC_CRON, windowStart } from './sync'
 
 // Seam 1: the daily Sync cron through the Worker's exported handler, with Akahu faked at `fetch`, so nothing here reaches
 // Akahu. What is checked is what the ticket promises: only linked Accounts are stored, a re-run never duplicates, the window
@@ -25,8 +25,18 @@ let calls: Call[] = []
 let accountCalls: Call[] = []
 // The one request a run makes for the Pending Transactions of every Account (worker/pending.ts).
 let pendingCalls: Call[] = []
-/** What Akahu answers to GET /accounts. Nothing, unless a test says: most only look at Transactions. */
-let accountsAnswer: () => Response = () => asJson({ items: [] })
+/**
+ * What Akahu answers to GET /accounts. By default it lists every Account that is linked, which is what Akahu does for a healthy
+ * link: a test that answers with nothing is saying Akahu has stopped listing them, which is a broken Account Link (ticket 29) and
+ * no longer a Sync that finished. The tests that mean that say so themselves.
+ */
+let accountsAnswer: (() => Response | Promise<Response>) | null = null
+
+/** Akahu listing exactly the Accounts this database has linked, with no details beyond the name. */
+const listsWhatIsLinked = async () => {
+  const { results } = await env.DB.prepare('SELECT akahu_account_id FROM accounts WHERE akahu_account_id IS NOT NULL').all<{ akahu_account_id: string }>()
+  return asJson({ items: results.map((row) => ({ _id: row.akahu_account_id, name: 'EXAMPLE' })) })
+}
 /** What Akahu answers to GET /transactions/pending. Nothing pending, unless a test says. */
 let pendingAnswer: () => Response = () => asJson({ items: [] })
 let logged: string[] = []
@@ -39,7 +49,7 @@ const stubAkahu = (respond: (call: Call) => Response | Promise<Response>) =>
     const call = { url: request.url, headers: request.headers }
     if (new URL(request.url).pathname === '/v1/accounts') {
       accountCalls.push(call)
-      return accountsAnswer()
+      return accountsAnswer === null ? listsWhatIsLinked() : accountsAnswer()
     }
     if (new URL(request.url).pathname === '/v1/transactions/pending') {
       pendingCalls.push(call)
@@ -90,11 +100,15 @@ async function runSync(secrets: Partial<Env> = SECRETS, cron = SYNC_CRON) {
   await worker.scheduled!(controller, { ...env, AKAHU_APP_TOKEN: undefined, AKAHU_USER_TOKEN: undefined, ...secrets } as never)
 }
 
+/** The run's own outcome, which the cron handler does not hand back: the Admin's route is what returns it (worker/sync-route.ts). */
+const runSyncOutcome = (secrets: Partial<Env> = SECRETS) =>
+  syncAll({ ...env, AKAHU_APP_TOKEN: undefined, AKAHU_USER_TOKEN: undefined, ...secrets } as never, new Date('2026-10-20T18:00:00Z'))
+
 beforeEach(async () => {
   calls = []
   accountCalls = []
   pendingCalls = []
-  accountsAnswer = () => asJson({ items: [] })
+  accountsAnswer = null
   pendingAnswer = () => asJson({ items: [] })
   logged = []
   for (const level of ['log', 'info', 'warn', 'error'] as const) vi.spyOn(console, level).mockImplementation((...args) => void logged.push(args.map(String).join(' ')))
@@ -684,7 +698,8 @@ describe('the Account details Sync keeps', () => {
       const before = await first()
       listing(akahuAccountBody({ _id: OTHER }))
       await runSync()
-      expect(stored(await details(accountId))).toEqual({ ...before, akahu_missing_since: '2026-10-20T18:00:00.000Z' })
+      // The cause is recorded with the mark, for the Sync status to name (spec 59), and the details themselves are untouched.
+      expect(stored(await details(accountId))).toEqual({ ...before, akahu_missing_since: '2026-10-20T18:00:00.000Z', akahu_last_failure: 'link-broken' })
     })
   })
 })
@@ -1008,12 +1023,11 @@ describe('pending money, a broken Link and why a Sync failed', () => {
     description: 'PENDING CAFE',
     amount: -4.5,
     type: 'EFTPOS',
-    updated_at: '2026-10-20T20:00:00.000Z',
     ...over,
   })
 
   const pendingRows = async () =>
-    (await env.DB.prepare('SELECT account_id, date, amount_cents, description, bank_type, akahu_updated_at, synced_at FROM pending_transactions ORDER BY id').all()).results
+    (await env.DB.prepare('SELECT account_id, date, amount_cents, description, bank_type, synced_at FROM pending_transactions ORDER BY id').all()).results
 
   const accountState = async (id: number) =>
     (await env.DB.prepare('SELECT akahu_missing_since, akahu_last_failure FROM accounts WHERE id = ?').bind(id).first<{ akahu_missing_since: string | null; akahu_last_failure: string | null }>())!
@@ -1034,7 +1048,6 @@ describe('pending money, a broken Link and why a Sync failed', () => {
         amount_cents: -450,
         description: 'PENDING CAFE',
         bank_type: 'EFTPOS',
-        akahu_updated_at: '2026-10-20T20:00:00.000Z',
         synced_at: '2026-10-20T18:00:00.000Z',
       },
     ])
@@ -1152,5 +1165,87 @@ describe('pending money, a broken Link and why a Sync failed', () => {
 
     expect((await accountState(accountId)).akahu_last_failure).toBeNull()
     expect(await syncedAt(accountId)).not.toBeNull()
+  })
+})
+
+// The review of this ticket found that marking a Link broken was not enough: the run went on to treat Akahu's answer for that
+// Account as a finished window, which is what deletes Transactions Akahu no longer returns (spec 49). These pin the AC that a
+// broken Link removes no Transaction, against the answer that actually does the damage — HTTP 200 with nothing in it.
+describe('a broken Account Link is never a finished Sync', () => {
+  const synced = async (id: number, akahuId: string, date = '2026-10-15') =>
+    env.DB.prepare(
+      `INSERT INTO transactions (account_id, date, amount_cents, description, source, akahu_id)
+       VALUES (?1, ?2, -4250, 'COUNTDOWN ORMISTON', 'sync', ?3)`,
+    )
+      .bind(id, date, akahuId)
+      .run()
+
+  const failureOf = async (id: number) =>
+    (await env.DB.prepare('SELECT akahu_last_failure FROM accounts WHERE id = ?').bind(id).first<{ akahu_last_failure: string | null }>())!.akahu_last_failure
+
+  beforeEach(async () => {
+    await env.DB.prepare('UPDATE accounts SET akahu_synced_at = ? WHERE id = ?').bind('2026-10-19T18:00:00.000Z', accountId).run()
+    await synced(accountId, 'trans_0000000000000000001')
+  })
+
+  it('removes no Transaction when Akahu stops listing the Account and answers an empty page for it', async () => {
+    accountsAnswer = () => asJson({ items: [] })
+    stubAkahu(() => onePage([]))
+
+    await runSync()
+
+    expect(await rows()).toHaveLength(1)
+    expect(logged.join('\n')).toContain('sync.account.link-broken')
+  })
+
+  it('leaves the last-success mark where it was, so the Account does not read as current', async () => {
+    accountsAnswer = () => asJson({ items: [] })
+    stubAkahu(() => onePage([]))
+
+    await runSync()
+
+    expect(await syncedAt(accountId)).toBe('2026-10-19T18:00:00.000Z')
+  })
+
+  it('does not call the run a success, and names the broken Link as the cause', async () => {
+    accountsAnswer = () => asJson({ items: [] })
+    stubAkahu(() => onePage([]))
+
+    const outcome = await runSyncOutcome()
+
+    expect(outcome.success).toBe(false)
+    expect(outcome.accounts[0]).toMatchObject({ complete: false, failure: 'link-broken' })
+    expect(await failureOf(accountId)).toBe('link-broken')
+  })
+
+  it('still takes up the Transactions Akahu does return for it', async () => {
+    accountsAnswer = () => asJson({ items: [] })
+    stubAkahu(() => onePage([transaction({ _id: 'trans_0000000000000000002' })]))
+
+    await runSync()
+
+    expect(await rows()).toHaveLength(2)
+  })
+
+  it('withdraws again, and marks the Account synced, once Akahu lists it anew', async () => {
+    accountsAnswer = () => asJson({ items: [{ _id: LINKED, name: 'EXAMPLE' }] })
+    stubAkahu(() => onePage([]))
+
+    await runSync()
+
+    // Akahu lists the Account and returns nothing for the window: that is a finished Sync, and the withdrawal is right to run.
+    expect(await rows()).toHaveLength(0)
+    expect(await syncedAt(accountId)).toBe('2026-10-20T18:00:00.000Z')
+    expect(await failureOf(accountId)).toBeNull()
+  })
+
+  it('records why an Account the run could not start was left, so the status can say it', async () => {
+    // No Cutover Date, so there is no window to ask for (ADR 0003).
+    await env.DB.prepare('UPDATE accounts SET cutover_date = NULL, akahu_synced_at = NULL WHERE id = ?').bind(accountId).run()
+    stubAkahu(() => onePage([]))
+
+    await runSync()
+
+    expect(await failureOf(accountId)).toBe('no-window')
   })
 })

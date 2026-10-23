@@ -5,8 +5,9 @@
 // It sits above the Balances table on the Summary and the Dashboard, which both Members and the Admin read.
 //
 // A Member sees the state and the cause; only the Admin is told what to do about it (spec 60), because reconnecting a bank in
-// Akahu and setting the tokens are the Admin's alone. Nothing here promises a retry: Sync runs once a day and when the Admin
-// asks for it, and nothing retries behind them (ADR 0013, and part 1 of this ticket dropped the retry cron).
+// Akahu, importing a file and setting the tokens are the Admin's alone. Nothing here promises a retry: Sync runs once a day and
+// when the Admin asks for it, and nothing retries behind them (ADR 0013, and part 1 of this ticket dropped the retry cron).
+import type { SyncFailure } from '@/generated/api/sync'
 import { formatDateAtTime, isMoment } from './format'
 
 /** How stale the data may be before the status turns red (spec 58). */
@@ -18,7 +19,8 @@ export type SyncAccount = {
   akahuAccountId: string | null
   akahuSyncedAt: string | null
   akahuMissingSince: string | null
-  akahuLastFailure: string | null
+  /** Why the last Sync of it did not finish, as the Worker names it (worker/sync.ts: SyncFailure). */
+  akahuLastFailure: SyncFailure | null
   akahuConnectionName: string | null
 }
 
@@ -38,12 +40,69 @@ const bank = (account: SyncAccount) => account.akahuConnectionName ?? account.na
 /** Whole days between two instants, rounded down. */
 const daysBetween = (from: string, to: Date) => Math.floor((to.getTime() - Date.parse(from)) / 86_400_000)
 
+/** "ASB", "ASB and Kiwibank", "ASB, Kiwibank and BNZ": the banks named in the order they were given, without repeats. */
+const list = (names: string[]) => {
+  const unique = [...new Set(names)]
+  if (unique.length <= 1) return unique[0] ?? ''
+  return `${unique.slice(0, -1).join(', ')} and ${unique.at(-1)}`
+}
+
+/**
+ * What is wrong, worst first, and what the Admin can do about it (spec 59). The first cause that has an Account decides the
+ * status, and the order is how little else can come right until it is fixed: a broken Link cannot be mended by Syncing, a token
+ * Akahu refuses stops every Account, an Account with no Cutover Date is waiting on the Admin, and one the run's budget did not
+ * reach is waiting on nothing at all.
+ *
+ * `hard` is a cause that is red even while the data is still current; the rest turn red once it is stale as well.
+ */
+const CAUSES: { failure: SyncFailure; hard: boolean; cause: (banks: string, many: boolean) => string; action: (many: boolean) => string }[] = [
+  {
+    failure: 'link-broken',
+    hard: true,
+    cause: (banks, many) =>
+      `${banks} ${many ? 'need' : 'needs'} reconnecting in Akahu: Akahu has stopped listing ${many ? 'those accounts' : 'that account'}. No Transaction has been removed.`,
+    action: (many) => `Reconnect ${many ? 'them' : 'it'} in Akahu, then link the ${many ? 'Accounts' : 'Account'} again in Settings.`,
+  },
+  {
+    failure: 'refused',
+    hard: true,
+    cause: () => 'Akahu token invalid: Akahu refused the tokens, so nothing could be read.',
+    action: () => 'Check both tokens in Akahu, set them again in Settings, then run a Sync.',
+  },
+  {
+    failure: 'unreadable',
+    hard: true,
+    cause: (banks) => `Akahu answered, but not with Transactions, for ${banks}.`,
+    action: () => "Run a Sync; if it keeps happening it is Akahu's end.",
+  },
+  {
+    failure: 'unreachable',
+    hard: false,
+    cause: (banks) => `Akahu unavailable for ${banks}: it could not be reached, or took too long.`,
+    // No retry runs by itself: the next daily Sync tries again, and the Admin can ask for one now.
+    action: () => 'The next Sync will try again. Run a Sync now if you would rather not wait.',
+  },
+  {
+    failure: 'no-window',
+    hard: false,
+    cause: (banks, many) => `${banks} ${many ? 'have' : 'has'} no Cutover Date, so Sync leaves ${many ? 'them' : 'it'} alone.`,
+    action: (many) => `Import a bank file for ${many ? 'each of them' : 'it'} to set its Cutover Date, then run a Sync.`,
+  },
+  {
+    failure: 'no-budget',
+    hard: false,
+    cause: (banks, many) => `Sync has not reached ${banks} yet: a run takes four Accounts, and ${many ? 'they come' : 'it comes'} first in the next one.`,
+    action: (many) => `The next Sync takes ${many ? 'them' : 'it'} first. Run a Sync now if you would rather not wait.`,
+  },
+]
+
 /**
  * The status of the linked Accounts as a whole, or null when none is linked to Akahu: an app running on Imports alone has no
- * Sync to have a status (ADR 0008), and a card that says so would be noise on every page that carries it.
+ * Sync to have a status (ADR 0008), and a line that said so would be noise on every page that carries it.
  *
- * The worst Account decides it, and the oldest successful Sync is what "last updated" says: a status may be behind what one
- * Account managed, never ahead of what the slowest did.
+ * "Last updated" is the oldest Sync that finished, so it is never more current than the slowest Account. An Account that has
+ * never synced does not take that line away from the Accounts that have, and does not hide how stale they are: it adds a clause
+ * of its own. Only where no Account has ever synced is there nothing to date.
  */
 export function syncStatus(accounts: SyncAccount[], now: Date, role: 'admin' | 'member'): SyncStatus | null {
   // `?? null` because an answer from before these fields existed, or one a test wrote by hand, leaves them undefined, and an
@@ -59,78 +118,40 @@ export function syncStatus(accounts: SyncAccount[], now: Date, role: 'admin' | '
       akahuConnectionName: account.akahuConnectionName ?? null,
     }))
   if (linked.length === 0) return null
-  const admin = role === 'admin'
 
-  // A broken Link first: nothing else about the Account can come right until it is re-linked (spec 32).
-  const broken = linked.filter((account) => account.akahuMissingSince !== null)
-  const failed = linked.filter((account) => account.akahuLastFailure !== null)
-  const synced = linked.map((account) => account.akahuSyncedAt)
-  const never = synced.some((at) => at === null)
-  const oldest = never ? null : synced.filter((at): at is string => at !== null).sort()[0]!
+  const synced = linked.filter((account) => account.akahuSyncedAt !== null)
+  const waiting = linked.length - synced.length
+  const oldest = synced.map((account) => account.akahuSyncedAt!).sort()[0] ?? null
   const staleDays = oldest === null ? null : daysBetween(oldest, now)
   const stale = staleDays !== null && staleDays >= STALE_DAYS
 
+  const waitingClause = waiting === 0 ? '' : ` ${waiting === 1 ? 'One Account is' : `${waiting} Accounts are`} waiting for a first Sync.`
   const text =
     oldest === null
       ? linked.length === 1
         ? 'Waiting for the first Sync of this Account.'
-        : 'Waiting for the first Sync of some of these Accounts.'
-      : `Bank data last updated ${formatDateAtTime(new Date(Date.parse(oldest)))}.`
+        : 'Waiting for the first Sync of these Accounts.'
+      : `Bank data last updated ${formatDateAtTime(new Date(Date.parse(oldest)))}.${waitingClause}`
 
-  if (broken.length > 0) {
-    const names = broken.map(bank)
-    return {
-      tone: 'danger',
-      text,
-      cause: `${list(names)} ${broken.length === 1 ? 'needs' : 'need'} reconnecting in Akahu: Akahu has stopped listing ${broken.length === 1 ? 'that account' : 'those accounts'}. No Transaction has been removed.`,
-      ...(admin ? { action: `Reconnect ${broken.length === 1 ? 'it' : 'them'} in Akahu, then link the Account again on the Accounts screen.` } : {}),
-    }
-  }
-
-  if (failed.length > 0) {
-    // The worst cause of the ones that failed: a token Akahu refuses stops every Account, where one timeout stops one.
-    const refused = failed.find((account) => account.akahuLastFailure === 'refused')
-    const unreadable = failed.find((account) => account.akahuLastFailure === 'unreadable')
-    if (refused !== undefined) {
-      return {
-        tone: 'danger',
-        text,
-        cause: 'Akahu token invalid: Akahu refused the tokens, so nothing could be read.',
-        ...(admin ? { action: 'Check both tokens in Akahu, set them again in Settings, then run a Sync.' } : {}),
-      }
-    }
-    if (unreadable !== undefined) {
-      return {
-        tone: 'danger',
-        text,
-        cause: `Akahu answered, but not with Transactions, for ${list(failed.map(bank))}.`,
-        ...(admin ? { action: "Run a Sync; if it keeps happening it is Akahu's end." } : {}),
-      }
-    }
-    return {
-      tone: stale ? 'danger' : 'warning',
-      text,
-      cause: `Akahu unavailable for ${list(failed.map(bank))}: it could not be reached, or took too long.`,
-      // No retry runs by itself: the next daily Sync tries again, and the Admin can ask for one now.
-      ...(admin ? { action: 'The next Sync will try again. Run a Sync now if you would rather not wait.' } : {}),
-    }
+  // A broken Link is recorded as the Account's last failure and as the day Akahu first stopped listing it; either says so.
+  const failureOf = (account: SyncAccount) => (account.akahuMissingSince !== null ? 'link-broken' : account.akahuLastFailure)
+  for (const { failure, hard, cause, action } of CAUSES) {
+    const affected = linked.filter((account) => failureOf(account) === failure)
+    if (affected.length === 0) continue
+    const many = affected.length > 1
+    return said({ tone: hard || stale ? 'danger' : 'warning', text, cause: cause(list(affected.map(bank)), many), action: action(many) }, role)
   }
 
   if (oldest === null) return { tone: 'neutral', text }
   if (stale) {
-    return {
-      tone: 'danger',
-      text,
-      cause: `No Sync has finished for ${staleDays} days, so this may be out of date.`,
-      ...(admin ? { action: 'Run a Sync. If it fails, the reason is shown with it.' } : {}),
-    }
+    return said(
+      { tone: 'danger', text, cause: `No Sync has finished for ${staleDays} days, so this may be out of date.`, action: 'Run a Sync. If it fails, the reason is shown with it.' },
+      role,
+    )
   }
   return { tone: 'success', text }
 }
 
-/** "ASB", "ASB and Kiwibank", "ASB, Kiwibank and BNZ": the banks named in the order they were given, without repeats. */
-const list = (names: string[]) => {
-  const unique = [...new Set(names)]
-  if (unique.length <= 1) return unique[0] ?? ''
-  return `${unique.slice(0, -1).join(', ')} and ${unique.at(-1)}`
-}
+/** The status as the reader is given it: a Member is told the state and the cause, and never what only the Admin can do (spec 60). */
+const said = (status: Required<SyncStatus>, role: 'admin' | 'member'): SyncStatus =>
+  role === 'admin' ? status : { tone: status.tone, text: status.text, cause: status.cause }

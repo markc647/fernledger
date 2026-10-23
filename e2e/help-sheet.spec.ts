@@ -182,7 +182,7 @@ const PAGES: Case[] = [
     // The cards' answers are stubbed, with a Budget, so that both have their tables when the cards' notes are looked for: the Budget card's note was shown only with a row to show.
     path: '/',
     heading: { admin: 'Dashboard', member: 'Summary' },
-    says: ['Balance as of the last Transaction we hold', 'Each month stands alone'],
+    says: ['Balance as of the last Transaction we hold', 'How current the bank data is', 'Each month stands alone'],
     roles: BOTH,
     setup: async (page) => {
       await stubBalances(page)

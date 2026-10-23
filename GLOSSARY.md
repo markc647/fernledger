@@ -35,7 +35,7 @@ How current the bank data is, above the Balances on the Summary and the Dashboar
 _Avoid_: Sync health, connection status
 
 **Account Link broken**:
-What a linked Account is called once Akahu stops listing the Akahu account it is linked to. No Transaction is removed for it, and the Admin reconnects the bank in Akahu and links the Account again.
+What a linked Account is called once Akahu stops listing the Akahu account it is linked to. A Sync of such an Account is never a Sync that finished: no Transaction is removed for it and its last Sync time stays where it was. The Admin reconnects the bank in Akahu and links the Account again.
 _Avoid_: Disconnected, dead link
 
 **Transfer**:

@@ -128,15 +128,27 @@ function Accounts() {
  * What Akahu says about the Account: whether its Link is broken, the bank, Akahu's own name for it (a wrong link shows at a glance), its type and status, its balance,
  * when Akahu last read the bank for each part and when Fernledger last Synced it, in NZ time.
  *
- * A broken Link is first, because nothing below it is current (spec 32): Akahu has stopped listing the account, so what is shown
- * is what the last Sync that found it stored. Nothing of the Account's is deleted for it, and re-linking is on the Settings page.
+ * A broken Link is said first, because nothing under it is current (spec 32): Akahu has stopped listing the account, so what
+ * follows is what the last Sync that still found it stored. The details stay on show under it, Akahu's own name among them,
+ * because that name is how the Admin tells which Akahu account this was when they come to link it again. Nothing of the
+ * Account's is deleted for a broken Link, and re-linking is on the Settings page.
  */
 function AkahuDetails({ account }: { account: Account }) {
   // A page that does not know the Account is linked (an older answer) reads the same as one that is not.
   if (!account.akahuAccountId) return <span className="text-muted-foreground">Not linked to Akahu</span>
-  if ((account.akahuMissingSince ?? null) !== null) return <BrokenLink account={account} />
-  if (account.akahuName === null) return <span>Linked to Akahu. The next Sync will read its details.</span>
-  const { akahuBalanceCurrentCents: current, akahuBalanceAvailableCents: available, akahuBalanceCurrency: currency } = account
+  const broken = (account.akahuMissingSince ?? null) !== null ? <BrokenLink account={account} /> : null
+  if (account.akahuName === null)
+    return (
+      <>
+        {broken}
+        <span>Linked to Akahu. The next Sync will read its details.</span>
+      </>
+    )
+  // `?? null` throughout: an answer from before a field was stored leaves it undefined, and a balance or a time that is not one
+  // must read as "Akahu did not give one" rather than fail the whole screen (the same guard `isMoment` gives the times).
+  const current = account.akahuBalanceCurrentCents ?? null
+  const available = account.akahuBalanceAvailableCents ?? null
+  const currency = account.akahuBalanceCurrency ?? null
   const balance =
     current === null
       ? 'Akahu did not give one'
@@ -148,29 +160,31 @@ function AkahuDetails({ account }: { account: Account }) {
       ['Account details', account.akahuRefreshedMetaAt],
       ['Transactions', account.akahuRefreshedTransactionsAt],
     ] as const
-  ).filter(([, at]) => at !== null)
+  ).filter(([, at]) => isMoment(at))
   return (
-    <dl className="grid grid-cols-[max-content_1fr] gap-x-3">
-      <DetailLine term="Bank">{account.akahuConnectionName}</DetailLine>
-      <DetailLine term="Akahu's name">{account.akahuName}</DetailLine>
-      <DetailLine term="Type">{account.akahuType && akahuWords(account.akahuType)}</DetailLine>
-      <DetailLine term="Status">{account.akahuStatus && akahuWords(account.akahuStatus)}</DetailLine>
-      <DetailLine term="Balance">{balance}</DetailLine>
-      <DetailLine term="Last Sync">{account.akahuSyncedAt === null ? 'Never synced' : formatDateTime(account.akahuSyncedAt)}</DetailLine>
-      <DetailLine term="Akahu last read the bank">{read.map(([what, at]) => `${what}: ${formatDateTime(at!)}`).join('; ')}</DetailLine>
-    </dl>
+    <>
+      {broken}
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-3">
+        <DetailLine term="Bank">{account.akahuConnectionName}</DetailLine>
+        <DetailLine term="Akahu's name">{account.akahuName}</DetailLine>
+        <DetailLine term="Type">{account.akahuType && akahuWords(account.akahuType)}</DetailLine>
+        <DetailLine term="Status">{account.akahuStatus && akahuWords(account.akahuStatus)}</DetailLine>
+        <DetailLine term="Balance">{balance}</DetailLine>
+        <DetailLine term="Last Sync">{isMoment(account.akahuSyncedAt) ? formatDateTime(account.akahuSyncedAt) : 'Never synced'}</DetailLine>
+        <DetailLine term="Akahu last read the bank">{read.map(([what, at]) => `${what}: ${formatDateTime(at!)}`).join('; ')}</DetailLine>
+      </dl>
+    </>
   )
 }
 
 /**
- * An Account Akahu has stopped listing: since when, and what to do about it. Only the Admin is told what to do (spec 60); the
- * Account's own details are left out, because they are from the last Sync that still found it and saying them here would read
- * as current.
+ * An Account Akahu has stopped listing: since when, and what to do about it. Only the Admin is told what to do (spec 60). What
+ * Akahu said about the Account follows it, as the last Sync that found it left it.
  */
 function BrokenLink({ account }: { account: Account }) {
   const { data: me } = useQuery(meQuery)
   return (
-    <div>
+    <div className="mb-2">
       <Status tone="danger">Account Link broken</Status>
       <p className="mt-1 text-muted-foreground">
         {/* Since when, where the time is known: an answer from before it was stored has none, and the sentence stands without it. */}

@@ -109,6 +109,7 @@ test.describe('About your data', () => {
     await page.goto('/about-your-data')
     const pending = section(page, 'What is held').getByRole('listitem').filter({ has: page.getByText('Pending Transactions:', { exact: true }) })
     await expect(pending).toContainText('if this Fernledger uses Akahu Sync')
+    await expect(pending).toContainText("the bank's own type for it, and when the Sync that read it ran")
     await expect(pending).toContainText('Every Sync replaces them all, so nothing older than the last Sync is kept, and they are counted in no Budget, Report or total.')
   })
 

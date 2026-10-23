@@ -346,7 +346,16 @@ export function windowStart(account: Pick<LinkedAccount, 'cutover_date' | 'akahu
 }
 
 /** What one Account's Sync did, for the run's own result and its log line. */
-export type AccountOutcome = { accountId: number; written: number; removed: number; complete: boolean; failure?: AkahuFailure | 'no-window' | 'no-budget' }
+/**
+ * Why a Sync of an Account did not finish, which is also what `accounts.akahu_last_failure` holds for the Sync status to name
+ * (spec 59; src/lib/sync-status.ts has the wording). Akahu's own three reasons, and the three of Sync's own:
+ * - no-window: the Account has no Cutover Date, so Sync left it alone (ADR 0003).
+ * - no-budget: the run's share of the database ran out before reaching it; it is first in the next run.
+ * - link-broken: Akahu answered the account list without naming it, so nothing it says about the Account can be trusted.
+ */
+export type SyncFailure = AkahuFailure | 'no-window' | 'no-budget' | 'link-broken'
+
+export type AccountOutcome = { accountId: number; written: number; removed: number; complete: boolean; failure?: SyncFailure }
 
 /** What `writeAccount` changed: Transactions written (added or updated), and Transactions Akahu no longer returns, removed. */
 export type AccountWrite = { written: number; removed: number }
@@ -416,10 +425,20 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
   // Asked for once, when the first Account is about to be read, so a run that reads none asks for nothing.
   let listed: AkahuResult<AkahuAccount[]> | undefined
 
+  // An Account the run did not get through is recorded with its cause, so the Sync status can say why rather than leaving the
+  // reader with data that is merely old (spec 59). One query, and only while the run has one to spend: an Account skipped for
+  // want of budget must not spend the little that is left.
+  const markFailure = async (account: LinkedAccount, reason: SyncFailure) => {
+    if (queriesLeft <= 0) return
+    await env.DB.prepare(MARK_FAILURE).bind(account.id, reason).run()
+    queriesLeft -= 1
+  }
+
   for (const account of results) {
     const window = windowStart(account)
     if (window.kind === 'skip') {
       logEvent('sync.account.no-window', { id: account.id })
+      await markFailure(account, 'no-window')
       outcomes.push({ accountId: account.id, written: 0, removed: 0, complete: false, failure: 'no-window' })
       continue
     }
@@ -427,6 +446,7 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     // rows written without the Rules, the pairing or the mark that says it finished.
     if (queriesLeft < QUERIES_PER_ACCOUNT) {
       logEvent('sync.account.no-budget', { id: account.id })
+      await markFailure(account, 'no-budget')
       outcomes.push({ accountId: account.id, written: 0, removed: 0, complete: false, failure: 'no-budget' })
       continue
     }
@@ -441,24 +461,26 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     const details = akahuAccount === undefined ? null : toDetails(akahuAccount)
     // Akahu answered the list and did not name this Account: its Link is broken (spec 32). Only then — a list that failed says
     // nothing about the Link, and a Link that is fine is cleared by the details statement itself (worker/akahu-details.ts).
-    if (listed.ok && akahuAccount === undefined) {
+    const linkBroken = listed.ok && akahuAccount === undefined
+    if (linkBroken) {
       logEvent('sync.account.link-broken', { id: account.id })
-      // Not taken off the budget: an Account Akahu did not list has no details to store and no balance to record or check, so this
-      // one query sits inside the share (QUERIES_PER_ACCOUNT) that those would have spent.
-      await env.DB.prepare(MARK_MISSING).bind(account.id, account.akahu_account_id, now.toISOString()).run()
+      // Both in one batch, and not taken off the budget: an Account Akahu did not list has no details to store and no balance to
+      // record or check, so these two queries sit inside the share (QUERIES_PER_ACCOUNT) that those four would have spent.
+      await env.DB.batch([
+        env.DB.prepare(MARK_MISSING).bind(account.id, account.akahu_account_id, now.toISOString()),
+        env.DB.prepare(MARK_FAILURE).bind(account.id, 'link-broken'),
+      ])
     }
     const answer = await fetchAkahuTransactions(tokens, account.akahu_account_id, { start, end }, budget)
     if (!answer.ok) {
-      // What Akahu said about the Account is still true, so it is kept: one query, which the Account's share (QUERIES_PER_ACCOUNT) already holds.
-      if (details !== null) {
-        await storeDetails(env.DB, account, details)
-        queriesLeft -= 1
-      }
       logEvent('sync.account.failed', { id: account.id })
-      // The cause, for the status to name and the Admin to act on (spec 59). Its own statement, because an Account that failed
-      // writes nothing else; the Account's share holds it, and a failed Account has spent little of that share.
-      await env.DB.prepare(MARK_FAILURE).bind(account.id, answer.reason).run()
-      queriesLeft -= 1
+      // The cause, for the status to name and the Admin to act on (spec 59), in one batch with the details that are still true
+      // (ADR 0004: writes are batched). The Account's share (QUERIES_PER_ACCOUNT) holds both, and a failed Account spends little of it.
+      await env.DB.batch([
+        ...(details === null ? [] : [detailsStatement(env.DB, account, details)]),
+        env.DB.prepare(MARK_FAILURE).bind(account.id, answer.reason),
+      ])
+      queriesLeft -= details === null ? 1 : 2
       outcomes.push({ accountId: account.id, written: 0, removed: 0, complete: false, failure: answer.reason })
       continue
     }
@@ -467,16 +489,21 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     // This run's word for the bank, or the one an earlier run stored when Akahu did not list the Account this time.
     const connectionName = details?.akahuConnectionName ?? account.akahu_connection_name
     // Only what Akahu said in this run: a balance stored by an earlier run is not new, and the Account may not have been listed.
-    const decision = details === null ? { skipped: 'no-balance' as const } : syncBalance(details, complete)
+    const decision = details === null ? { skipped: 'no-balance' as const } : syncBalance(details, complete)  // details are null when the Link is broken, so no balance is recorded either
     if ('skipped' in decision) logEvent(BALANCE_SKIPPED_EVENT[decision.skipped], { id: account.id })
     const balance = 'balance' in decision ? decision.balance : null
+    // An Account whose Link is broken is never a Sync that finished, whatever Akahu answered for its Transactions (spec 32).
+    // Akahu answering the account list without naming it, and then answering an empty page for it, is not evidence that the
+    // Account's Transactions are gone: taken as a finished window, that page would withdraw every Synced Transaction in it. So
+    // nothing is withdrawn, the last-success mark stays where it was, and the run is not a success.
+    const finished = complete && !linkBroken
     const { written, removed } = await writeAccount(env.DB, account, transactions.map((transaction) => toRow(transaction, connectionName)), {
-      syncedAt: complete ? now : null,
-      from: complete ? window.date : null,
+      syncedAt: finished ? now : null,
+      from: finished ? window.date : null,
     }, details, balance)
-    logEvent(complete ? 'sync.account.done' : 'sync.account.partial', { id: account.id, count: written })
+    logEvent(finished ? 'sync.account.done' : 'sync.account.partial', { id: account.id, count: written })
     if (removed > 0) logEvent('sync.account.withdrawn', { id: account.id, count: removed })
-    outcomes.push({ accountId: account.id, written, removed, complete })
+    outcomes.push({ accountId: account.id, written, removed, complete: finished, ...(linkBroken ? { failure: 'link-broken' as const } : {}) })
   }
 
   const pending = await replacePending(env.DB, tokens, results, now, budget)
@@ -490,7 +517,6 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
 const detailsStatement = (db: D1Database, account: LinkedAccount, details: AccountDetails) =>
   db.prepare(STORE_DETAILS).bind(account.id, account.akahu_account_id, JSON.stringify(details))
 
-const storeDetails = (db: D1Database, account: LinkedAccount, details: AccountDetails) => detailsStatement(db, account, details).run()
 
 /**
  * Write one Account's Transactions, give them their Rules and pair their Transfers, and — only when the Account finished
