@@ -188,8 +188,8 @@ describe('current balances', () => {
     await importFile([tx('S4', '2026-10-02', -250)], { ledger: SEPT_30, to: '2026-10-02' })
 
     expect(await balances()).toEqual([
-      { accountId: await accountId(current), accountName: current, balanceCents: 4000, asOfDate: '2026-09-30', cutoverDate: null, latestStatus: 'alone', syncedInLast24Hours: false, linked: false },
-      { accountId: await accountId(), accountName: savings, balanceCents: 10_250, asOfDate: '2026-10-02', cutoverDate: null, latestStatus: 'alone', syncedInLast24Hours: false, linked: false },
+      { accountId: await accountId(current), accountName: current, balanceCents: 4000, asOfDate: '2026-09-30', cutoverDate: null, latestStatus: 'alone', syncedInLast24Hours: false, linked: false, unchecked: null },
+      { accountId: await accountId(), accountName: savings, balanceCents: 10_250, asOfDate: '2026-10-02', cutoverDate: null, latestStatus: 'alone', syncedInLast24Hours: false, linked: false, unchecked: null },
     ])
   })
 
@@ -693,5 +693,49 @@ describe("an Account's balance from Akahu", () => {
     await env.DB.prepare("UPDATE accounts SET akahu_account_id = 'acc_example00000000000001'").run()
 
     expect((await balances())[0]).toMatchObject({ linked: true })
+  })
+
+  // #44: Akahu's balance is shown, unchecked, until a Sync records one. The file's balance here is after the Cutover Date, so none is held.
+  describe("Akahu's balance before a Sync records one", () => {
+    const link = (type: string, cents: number, currency = 'NZD') =>
+      env.DB.prepare(
+        "UPDATE accounts SET akahu_account_id = 'acc_example00000000000001', akahu_type = ?1, akahu_balance_current_cents = ?2, akahu_balance_currency = ?3, akahu_refreshed_balance_at = '2026-10-23T02:46:21.052Z'",
+      )
+        .bind(type, cents, currency)
+        .run()
+
+    it('is shown for a linked Account with no bank balance, dated the NZ day Akahu read it', async () => {
+      await importFile(september, { ledger: SEPT_30, cutoverDate: '2026-09-25' })
+      await link('SAVINGS', 70_717)
+      expect((await balances())[0]).toMatchObject({ balanceCents: null, unchecked: { cents: 70_717, asOfDate: '2026-10-23' } })
+    })
+
+    it("is money out for a credit card, which Akahu sends as what is owed", async () => {
+      await importFile(september, { ledger: SEPT_30, cutoverDate: '2026-09-25' })
+      await link('CREDITCARD', 126_841)
+      expect((await balances())[0]).toMatchObject({ unchecked: { cents: -126_841 } })
+    })
+
+    it('is not shown once the Account has a bank balance, nor for one in another currency, nor when not linked', async () => {
+      await importFile(september, { ledger: SEPT_30 })
+      await link('SAVINGS', 70_717)
+      expect((await balances())[0]).toMatchObject({ balanceCents: OPENING + 500, unchecked: null })
+
+      await env.DB.prepare('DELETE FROM balance_checks').run()
+      await link('SAVINGS', 70_717, 'AUD')
+      expect((await balances())[0]).toMatchObject({ balanceCents: null, unchecked: null })
+
+      await link('SAVINGS', 70_717)
+      await env.DB.prepare('UPDATE accounts SET akahu_account_id = NULL').run()
+      expect((await balances())[0]).toMatchObject({ balanceCents: null, unchecked: null })
+    })
+
+    it('writes nothing', async () => {
+      await importFile(september, { ledger: SEPT_30, cutoverDate: '2026-09-25' })
+      await link('SAVINGS', 70_717)
+      const before = await env.DB.prepare('SELECT COUNT(*) AS n FROM balance_checks').first<{ n: number }>()
+      await balances()
+      expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM balance_checks').first<{ n: number }>()).toEqual(before)
+    })
   })
 })
