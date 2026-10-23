@@ -6,7 +6,7 @@ import { EditPanel } from '@/components/edit-panel'
 import { NotATransfer, TreatAsTransferAgain } from '@/components/not-a-transfer'
 import { Button } from '@/components/ui/button'
 import { KIND_NOTES } from '@/lib/category-kinds'
-import { formatBalance, formatDate, formatDateTime, isMoment, withoutBankTime } from '@/lib/format'
+import { formatBalance, formatDate, formatDateTime, isMoment } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { transactionQuery } from '@/lib/queries'
 import type { DetailOrigin, TransactionSearch } from '@/lib/transaction-search'
@@ -46,13 +46,15 @@ const present = (value: string | null | undefined): value is string => value !==
 const NOT_SENT = <span className="text-muted-foreground">Not sent</span>
 /** A stored Akahu field as the page shows it: what Akahu sent, or "Not sent". An empty string is nothing sent, as `present` has it. */
 const orNotSent = (value: string | null | undefined) => (present(value) ? value : NOT_SENT)
+/** A stored moment: the NZ day and time, or, for something Akahu sent that is not a moment, that text as it came, so nothing stored is hidden. */
+const momentOrNotSent = (value: string | null | undefined) => (isMoment(value) ? formatDateTime(value) : orNotSent(value))
 
 /**
  * One Transaction in full: what the list shows, and then, under "From the bank", everything that came with it. For a Synced
  * Transaction that is every field Akahu sends, each on a line of its own and the ones Akahu did not send saying "Not sent", so the
  * Transaction can be read against Akahu's own row (A2). An Import has only what a bank file carries, and says what such a file lacks.
- * The Summary writes the description without the time the bank wrote at its end, which is the Bank Time (A3); everywhere else, this
- * page included, the bank's own words stand. Every Member can read it; the Admin can also set its Override and Note. `back` is the
+ * The description is the one Akahu sent, here as in every list and Report: where Kiwibank wrote the time of an EFTPOS purchase at the end
+ * of it, that text stands, and the time it carries is read out separately as the Bank Time. Every Member can read it; the Admin can also set its Override and Note. `back` is the
  * search the reader came from, and `origin` the page, when it wasn't Transactions.
  */
 export function TransactionDetail({ id, back, origin }: { id: string; back: TransactionSearch; origin?: DetailOrigin }) {
@@ -105,20 +107,17 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
       </>
     )
 
-  // An Import's reference is a cheque number. It doesn't stand in for the payment details a bank file lacks, so it doesn't count as one.
   const imported = t.source === 'import'
-  const paymentDetails = [t.bankCounterpartyAccount, t.bankCardSuffix, t.bankParticulars, t.bankPaymentCode, imported ? null : t.bankReference].some((value) => value !== null && value.trim() !== '')
+  // An Import's reference is a cheque number, so it is not one of the payment details whose absence the sentence below explains.
+  const paymentDetails = [t.bankCounterpartyAccount, t.bankCardSuffix, t.bankParticulars, t.bankPaymentCode].some(present)
   const transferNote = transferExplanation(t)
-  // A3: the bank's own time at the end of the description is already the Bank Time below, so this page writes the description without it.
-  // Only here: the lists, Uncategorised, the Reports and "From the bank" all keep the bank's words, and nothing stored changes.
-  const described = withoutBankTime(t.description, t.bankTimeFromMemo)
 
   return (
     <>
       <BackLink search={back} origin={origin} />
       <h1 className="text-2xl font-semibold">Transaction</h1>
       <p className="mt-2">
-        {formatDate(t.date)}, {described}, <Amount cents={t.amountCents} />
+        {formatDate(t.date)}, {t.description}, <Amount cents={t.amountCents} />
       </p>
       {/* Always in the page, so a screen reader announces the text when it appears. */}
       <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
@@ -163,7 +162,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
           <Fact label="Amount">
             <Amount cents={t.amountCents} />
           </Fact>
-          <Fact label="Description">{described}</Fact>
+          <Fact label="Description">{t.description}</Fact>
           <Fact label="Account">{t.accountName}</Fact>
           <Fact label="Category">
             {t.categoryName ?? <span className="text-muted-foreground">{t.transfer === null ? 'Uncategorised' : 'None, as this is a Transfer'}</span>}
@@ -215,6 +214,11 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
             <>
               {present(t.bankType) && <Fact label="Type">{t.bankType}</Fact>}
               {present(t.bankMemo) && <Fact label="Bank memo">{t.bankMemo}</Fact>}
+              {/* A bank file carries no counterparty account or card, but Kiwibank's does carry particulars and a code, and an Import stores them (worker/imports.ts). */}
+              {present(t.bankCounterpartyAccount) && <Fact label="Counterparty account">{t.bankCounterpartyAccount}</Fact>}
+              {present(t.bankCardSuffix) && <Fact label="Card">Ending {t.bankCardSuffix}</Fact>}
+              {present(t.bankParticulars) && <Fact label="Particulars">{t.bankParticulars}</Fact>}
+              {present(t.bankPaymentCode) && <Fact label="Code">{t.bankPaymentCode}</Fact>}
               {present(t.bankReference) && <Fact label="Cheque number">{t.bankReference}</Fact>}
               {t.bankTime !== null && <Fact label="Bank Time">{formatDateTime(t.bankTime)}</Fact>}
               <Fact label="First seen by Akahu">
@@ -227,7 +231,7 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
             <>
               <Fact label="Akahu ID">{orNotSent(t.akahuId)}</Fact>
               <Fact label="Description">{orNotSent(t.description)}</Fact>
-              <Fact label="Merchant">{orNotSent(t.merchant)}</Fact>
+              <Fact label="Merchant">{orNotSent(t.akahuMerchant)}</Fact>
               <Fact label="Type">{orNotSent(t.bankType)}</Fact>
               <Fact label="Bank memo">{orNotSent(t.bankMemo)}</Fact>
               <Fact label="Akahu's category">
@@ -246,12 +250,15 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
               <Fact label="Reference">{orNotSent(t.bankReference)}</Fact>
               <Fact label="Date, as Akahu sent it">{orNotSent(t.akahuDateRaw)}</Fact>
               <Fact label="Posted date">{orNotSent(t.akahuPostedDate)}</Fact>
+              {/* The Bank Time is whichever of these two there is; both are kept, so the page says which one it came from. */}
+              <Fact label="Akahu's date carried a time">{t.hasBankTime === null || t.hasBankTime === undefined ? NOT_SENT : t.hasBankTime ? 'Yes' : 'No'}</Fact>
+              <Fact label="Time read from the description">{momentOrNotSent(t.bankTimeFromMemo)}</Fact>
               <Fact label="Bank Time">{isMoment(t.bankTime) ? formatDateTime(t.bankTime) : NOT_SENT}</Fact>
               <Fact label="Balance after">{typeof t.akahuBalanceCents === 'number' ? formatBalance(t.akahuBalanceCents) : NOT_SENT}</Fact>
-              <Fact label="First seen by Akahu">{isMoment(t.firstSeenAt) ? formatDateTime(t.firstSeenAt) : NOT_SENT}</Fact>
-              <Fact label="Last changed at Akahu">{isMoment(t.akahuUpdatedAt) ? formatDateTime(t.akahuUpdatedAt) : orNotSent(t.akahuUpdatedAt)}</Fact>
+              <Fact label="First seen by Akahu">{momentOrNotSent(t.firstSeenAt)}</Fact>
+              <Fact label="Last changed at Akahu">{momentOrNotSent(t.akahuUpdatedAt)}</Fact>
               <Fact label="Akahu's hash">{orNotSent(t.akahuHash)}</Fact>
-              <Fact label="Connection ID">{orNotSent(t.akahuConnectionId)}</Fact>
+              <Fact label="Akahu's bank connection">{orNotSent(t.akahuConnectionId)}</Fact>
             </>
           )}
         </dl>

@@ -621,9 +621,9 @@ test("the details show Akahu's category, labelled as Akahu's, and an EFTPOS time
   await noAxeViolations(page)
 })
 
-// A3: the time Kiwibank writes at the end of its description is the Bank Time, so the detail page writes the description without it. Only here:
-// "From the bank" still shows the bank's own words, and nothing stored changes.
-test("the detail page writes the description without the time the bank wrote at its end, and keeps the bank's own words under 'From the bank'", async ({ page, context }) => {
+// The description is shown exactly as Akahu sent it, the time Kiwibank writes at the end of it included: the time is read out as the Bank
+// Time and nothing is taken off the words. The Transaction is stubbed, so this needs nothing in the database.
+test('the detail page shows the description as the bank wrote it, time at the end and all, and reads that time out as the Bank Time', async ({ page, context }) => {
   await signInAs(context, 'member')
   const detail = {
     id: 4244,
@@ -651,30 +651,23 @@ test("the detail page writes the description without the time the bank wrote at 
     transferPartnerOverridden: false,
     canMarkNotTransfer: false,
     notTransfer: false,
-    bankTime: '2026-10-15T23:07:00.000Z',
+    bankTime: '2026-10-15T23:07:00.000Z', // 12:07 pm on the 16th in NZ, read from the description
     firstSeenAt: '2026-10-16T06:30:00.000Z',
     akahuCategoryName: null,
     akahuCategoryGroupName: null,
-    bankTimeFromMemo: '2026-10-15T23:07:00.000Z', // the time was read from the description, which is why it comes off
+    bankTimeFromMemo: '2026-10-15T23:07:00.000Z',
   }
   await page.route('**/api/transactions/4244', (route) => route.fulfill({ json: detail }))
   await page.goto('/transactions/4244')
 
   const summary = page.getByRole('region', { name: 'Summary' })
-  await expect(summary).toContainText('POS W/D Example Store')
-  await expect(summary).not.toContainText('POS W/D Example Store-12:07')
-  // The line under the heading, which says the same Transaction, reads the same way.
-  await expect(page.getByText(/^Fri 16 Oct 2026, POS W\/D Example Store, /)).toBeVisible()
-  const bank = page.getByRole('region', { name: 'From the bank' })
-  await expect(bank).toContainText('POS W/D Example Store-12:07') // the Description Akahu sent and the bank memo, both as the bank wrote them
-  await expect(bank).toContainText('Fri 16 Oct 2026, 12:07 pm')
-  await noAxeViolations(page)
-
-  // The same description with no time read from it keeps every character: only a Bank Time read from the description takes one off.
-  await page.unroute('**/api/transactions/4244')
-  await page.route('**/api/transactions/4244', (route) => route.fulfill({ json: { ...detail, bankTime: null, bankTimeFromMemo: null } }))
-  await page.reload()
   await expect(summary).toContainText('POS W/D Example Store-12:07')
+  // The line under the heading says the same Transaction, in the same words.
+  await expect(page.getByText(/^Fri 16 Oct 2026, POS W\/D Example Store-12:07, /)).toBeVisible()
+  const bank = page.getByRole('region', { name: 'From the bank' })
+  await expect(bank).toContainText('POS W/D Example Store-12:07')
+  await expect(bank).toContainText('Fri 16 Oct 2026, 12:07 pm') // the time, read out of those words
+  await noAxeViolations(page)
 })
 
 test.describe('a Transaction that does not exist', () => {

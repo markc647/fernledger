@@ -22,15 +22,15 @@ const giveStoredOnly = (id: number) =>
   env.DB.prepare("UPDATE transactions SET akahu_balance_cents = 70717, akahu_hash = 'h', akahu_updated_at = 'u', akahu_posted_date = 'p', akahu_connection_id = 'c' WHERE id = ?").bind(id).run()
 const DETAIL_KEYS = [
   'accountId', 'accountName', 'akahuBalanceCents', 'akahuCategoryGroupId', 'akahuCategoryGroupName', 'akahuCategoryId', 'akahuCategoryName', 'akahuConnectionId',
-  'akahuDateRaw', 'akahuHash', 'akahuId', 'akahuPostedDate', 'akahuUpdatedAt', 'amountCents', 'bankCardSuffix', 'bankCounterpartyAccount', 'bankMemo',
-  'bankParticulars', 'bankPaymentCode', 'bankReference', 'bankTime', 'bankTimeFromMemo', 'bankType', 'canMarkNotTransfer', 'categoryId', 'categoryKind',
-  'categoryName', 'categorySource', 'date', 'description', 'firstSeenAt', 'id', 'merchant', 'notTransfer', 'note', 'source', 'transfer', 'transferAccountName',
-  'transferPartnerOverridden', 'transferTransactionId',
+  'akahuDateRaw', 'akahuHash', 'akahuId', 'akahuMerchant', 'akahuPostedDate', 'akahuUpdatedAt', 'amountCents', 'bankCardSuffix', 'bankCounterpartyAccount',
+  'bankMemo', 'bankParticulars', 'bankPaymentCode', 'bankReference', 'bankTime', 'bankTimeFromMemo', 'bankType', 'canMarkNotTransfer', 'categoryId',
+  'categoryKind', 'categoryName', 'categorySource', 'date', 'description', 'firstSeenAt', 'hasBankTime', 'id', 'notTransfer', 'note', 'source', 'transfer',
+  'transferAccountName', 'transferPartnerOverridden', 'transferTransactionId',
 ]
 /** The fields the detail sends only to be read on the page, which Akahu's own row is checked against (A2). Nothing else reads them. */
 const SHOWN_ONLY_KEYS = [
   'akahuBalanceCents', 'akahuCategoryGroupId', 'akahuCategoryGroupName', 'akahuCategoryId', 'akahuCategoryName', 'akahuConnectionId', 'akahuDateRaw',
-  'akahuHash', 'akahuId', 'akahuPostedDate', 'akahuUpdatedAt', 'bankTimeFromMemo', 'merchant',
+  'akahuHash', 'akahuId', 'akahuMerchant', 'akahuPostedDate', 'akahuUpdatedAt', 'bankTimeFromMemo', 'hasBankTime',
 ] as const
 const LIST_KEYS = [
   'accountId', 'accountName', 'amountCents', 'bankType', 'canMarkNotTransfer', 'categoryId', 'categoryKind', 'categoryName', 'categorySource', 'date',
@@ -74,6 +74,10 @@ describe('the Transaction detail', () => {
 
   // What the page may read, by exact name: a column that stopped being sent, or a new one, fails this. Every field Akahu sends about the
   // Transaction is here, because the page shows them all, each on a line of its own (A2).
+  it('shows every field it sends only to be read: each one is a field of the detail', () => {
+    expect(DETAIL_KEYS).toEqual(expect.arrayContaining([...SHOWN_ONLY_KEYS])) // the two lists cannot drift apart
+  })
+
   it('sends exactly these fields, every stored Akahu column among them', async () => {
     const id = await add()
     await giveAkahuCategory(id)

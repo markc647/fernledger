@@ -83,7 +83,7 @@ type TransactionDetail = {
   akahuCategoryGroupName: string | null
   /** Everything else Akahu sent about the Transaction, as Sync stored it (migrations/4301). Null is "Akahu did not send it", which the detail page says as "Not sent". */
   akahuId: string | null
-  merchant: string | null
+  akahuMerchant: string | null
   akahuCategoryId: string | null
   akahuCategoryGroupId: string | null
   akahuDateRaw: string | null
@@ -93,6 +93,8 @@ type TransactionDetail = {
   akahuUpdatedAt: string | null
   akahuHash: string | null
   akahuConnectionId: string | null
+  /** 1 when Akahu's own date carried a time of day, 0 when it did not, null for a Transaction no Sync has written. */
+  hasBankTime: number | null
   /** The Bank Time read out of the bank's own description (worker/kiwibank-time.ts), which is also why the detail page shows that description without its `-HH:MM`. */
   bankTimeFromMemo: string | null
 }
@@ -197,9 +199,9 @@ export const transactions = new Hono<AppEnv>()
               ${category.markable} AS canMarkNotTransfer, t.not_transfer_with IS NOT NULL AS notTransfer,
               COALESCE(CASE WHEN t.has_bank_time = 1 THEN t.akahu_date_raw END, t.bank_time_from_memo) AS bankTime, t.akahu_first_seen_at AS firstSeenAt,
               t.akahu_category_name AS akahuCategoryName, t.akahu_category_group_name AS akahuCategoryGroupName,
-              t.akahu_id AS akahuId, t.merchant, t.akahu_category_id AS akahuCategoryId, t.akahu_category_group_id AS akahuCategoryGroupId,
+              t.akahu_id AS akahuId, t.merchant AS akahuMerchant, t.akahu_category_id AS akahuCategoryId, t.akahu_category_group_id AS akahuCategoryGroupId,
               t.akahu_date_raw AS akahuDateRaw, t.akahu_posted_date AS akahuPostedDate, t.akahu_balance_cents AS akahuBalanceCents,
-              t.akahu_updated_at AS akahuUpdatedAt, t.akahu_hash AS akahuHash, t.akahu_connection_id AS akahuConnectionId, t.bank_time_from_memo AS bankTimeFromMemo
+              t.akahu_updated_at AS akahuUpdatedAt, t.akahu_hash AS akahuHash, t.akahu_connection_id AS akahuConnectionId, t.has_bank_time AS hasBankTime, t.bank_time_from_memo AS bankTimeFromMemo
        FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
        ${PARTNER_JOIN}
        WHERE t.id = ?`,

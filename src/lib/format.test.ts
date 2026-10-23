@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAmount, formatAxisDollars, formatBalance, formatCount, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, formatMonthShort, nzDate, withoutBankTime } from './format'
-import { eftposTime } from '../../worker/kiwibank-time'
+import { formatAmount, formatAxisDollars, formatBalance, formatCount, formatDate, formatDateTime, formatDateAtTime, formatInstantDate, formatMonth, formatMonthShort, nzDate } from './format'
 
 describe('formatCount (a number of things that is not money)', () => {
   it.each([
@@ -217,23 +216,5 @@ describe('formatAxisDollars (the numbers along a chart\'s axis)', () => {
     [100_000_000_000, '$1,000,000,000'],
   ])('writes %i cents as "%s"', (cents, text) => {
     expect(formatAxisDollars(cents)).toBe(text)
-  })
-})
-
-describe('withoutBankTime (the description on the Transaction detail page)', () => {
-  it('takes off the time the bank wrote at the end, when that is where the Bank Time was read', () => {
-    expect(withoutBankTime('POS W/D Example Store-12:07', '2026-10-09T23:07:00.000Z')).toBe('POS W/D Example Store')
-  })
-
-  it('leaves the description alone when no time was read from it, however it ends', () => {
-    expect(withoutBankTime('POS W/D Example Store-12:07', null)).toBe('POS W/D Example Store-12:07')
-    expect(withoutBankTime('Example Store', null)).toBe('Example Store')
-  })
-
-  it('takes off nothing else: only a real time at the very end goes', () => {
-    // The same strings the Worker reads a time from, so the two patterns cannot drift apart (worker/kiwibank-time.ts).
-    for (const description of ['POS W/D Example Store-25:99', 'POS W/D Example Store-1207', 'POS W/D 12:07 Example Store', 'Example Store'])
-      expect([withoutBankTime(description, 'read'), eftposTime(description)]).toEqual([description, null])
-    expect(eftposTime('POS W/D Example Store-12:07')).toBe('12:07')
   })
 })
