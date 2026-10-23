@@ -497,7 +497,6 @@ describe('GET /api/transactions/:id', () => {
       akahuHash: null,
       akahuConnectionId: null,
       hasBankTime: null,
-      bankTimeFromMemo: null,
     })
   })
 

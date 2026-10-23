@@ -250,9 +250,8 @@ export function TransactionDetail({ id, back, origin }: { id: string; back: Tran
               <Fact label="Reference">{orNotSent(t.bankReference)}</Fact>
               <Fact label="Date, as Akahu sent it">{orNotSent(t.akahuDateRaw)}</Fact>
               <Fact label="Posted date">{orNotSent(t.akahuPostedDate)}</Fact>
-              {/* The Bank Time is whichever of these two there is; both are kept, so the page says which one it came from. */}
+              {/* Whether Akahu's own date carried a time of day, which is the only thing a Bank Time comes from. */}
               <Fact label="Akahu's date carried a time">{t.hasBankTime === null || t.hasBankTime === undefined ? NOT_SENT : t.hasBankTime ? 'Yes' : 'No'}</Fact>
-              <Fact label="Time read from the description">{momentOrNotSent(t.bankTimeFromMemo)}</Fact>
               <Fact label="Bank Time">{isMoment(t.bankTime) ? formatDateTime(t.bankTime) : NOT_SENT}</Fact>
               <Fact label="Balance after">{typeof t.akahuBalanceCents === 'number' ? formatBalance(t.akahuBalanceCents) : NOT_SENT}</Fact>
               <Fact label="First seen by Akahu">{momentOrNotSent(t.firstSeenAt)}</Fact>

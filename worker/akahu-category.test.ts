@@ -23,14 +23,14 @@ const giveStoredOnly = (id: number) =>
 const DETAIL_KEYS = [
   'accountId', 'accountName', 'akahuBalanceCents', 'akahuCategoryGroupId', 'akahuCategoryGroupName', 'akahuCategoryId', 'akahuCategoryName', 'akahuConnectionId',
   'akahuDateRaw', 'akahuHash', 'akahuId', 'akahuMerchant', 'akahuPostedDate', 'akahuUpdatedAt', 'amountCents', 'bankCardSuffix', 'bankCounterpartyAccount',
-  'bankMemo', 'bankParticulars', 'bankPaymentCode', 'bankReference', 'bankTime', 'bankTimeFromMemo', 'bankType', 'canMarkNotTransfer', 'categoryId',
+  'bankMemo', 'bankParticulars', 'bankPaymentCode', 'bankReference', 'bankTime', 'bankType', 'canMarkNotTransfer', 'categoryId',
   'categoryKind', 'categoryName', 'categorySource', 'date', 'description', 'firstSeenAt', 'hasBankTime', 'id', 'notTransfer', 'note', 'source', 'transfer',
   'transferAccountName', 'transferPartnerOverridden', 'transferTransactionId',
 ]
 /** The fields the detail sends only to be read on the page, which Akahu's own row is checked against (A2). Nothing else reads them. */
 const SHOWN_ONLY_KEYS = [
   'akahuBalanceCents', 'akahuCategoryGroupId', 'akahuCategoryGroupName', 'akahuCategoryId', 'akahuCategoryName', 'akahuConnectionId', 'akahuDateRaw',
-  'akahuHash', 'akahuId', 'akahuMerchant', 'akahuPostedDate', 'akahuUpdatedAt', 'bankTimeFromMemo', 'hasBankTime',
+  'akahuHash', 'akahuId', 'akahuMerchant', 'akahuPostedDate', 'akahuUpdatedAt', 'hasBankTime',
 ] as const
 const LIST_KEYS = [
   'accountId', 'accountName', 'amountCents', 'bankType', 'canMarkNotTransfer', 'categoryId', 'categoryKind', 'categoryName', 'categorySource', 'date',
@@ -85,25 +85,26 @@ describe('the Transaction detail', () => {
     expect(Object.keys(await detail(id)).sort()).toEqual(DETAIL_KEYS)
   })
 
+  // Akahu's own date is the only thing a Bank Time comes from (Mark, 2026-10-23): a time written into a description stays there.
   describe('the Bank Time', () => {
     const set = (id: number, raw: string | null, hasTime: number | null, fromMemo: string | null) =>
       env.DB.prepare('UPDATE transactions SET akahu_date_raw = ?, has_bank_time = ?, bank_time_from_memo = ? WHERE id = ?').bind(raw, hasTime, fromMemo, id).run()
 
-    it('is the time read from the description when Akahu supplied none', async () => {
+    it('is the time Akahu supplied when its date carried one', async () => {
       const id = await add()
-      await set(id, '2026-10-09T11:00:00.000Z', 0, '2026-10-09T23:07:00.000Z')
-      expect(await detail(id)).toMatchObject({ bankTime: '2026-10-09T23:07:00.000Z' })
-    })
-
-    it("is the time Akahu supplied when it did, before one read from the description", async () => {
-      const id = await add()
-      await set(id, '2026-10-09T20:15:00.000Z', 1, '2026-10-09T23:07:00.000Z')
+      await set(id, '2026-10-09T20:15:00.000Z', 1, null)
       expect(await detail(id)).toMatchObject({ bankTime: '2026-10-09T20:15:00.000Z' })
     })
 
-    it('is none when neither is known, and a date at midnight is not a time', async () => {
+    it('is none when Akahu sent a date at midnight, which is not a time', async () => {
       const id = await add()
       await set(id, '2026-10-09T11:00:00.000Z', 0, null)
+      expect(await detail(id)).toMatchObject({ bankTime: null })
+    })
+
+    it('is still none where an older Sync had stored a time read from the description', async () => {
+      const id = await add()
+      await set(id, '2026-10-09T11:00:00.000Z', 0, '2026-10-09T23:07:00.000Z')
       expect(await detail(id)).toMatchObject({ bankTime: null })
     })
   })

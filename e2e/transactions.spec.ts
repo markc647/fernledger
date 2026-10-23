@@ -621,9 +621,9 @@ test("the details show Akahu's category, labelled as Akahu's, and an EFTPOS time
   await noAxeViolations(page)
 })
 
-// The description is shown exactly as Akahu sent it, the time Kiwibank writes at the end of it included: the time is read out as the Bank
-// Time and nothing is taken off the words. The Transaction is stubbed, so this needs nothing in the database.
-test('the detail page shows the description as the bank wrote it, time at the end and all, and reads that time out as the Bank Time', async ({ page, context }) => {
+// The description is shown exactly as Akahu sent it, the time Kiwibank writes at the end of it included, and that time is not read out
+// as anything: a Bank Time is Akahu's own date carrying a time, or none. The Transaction is stubbed, so this needs nothing in the database.
+test('the detail page keeps the time the bank wrote into the description and makes no Bank Time of it', async ({ page, context }) => {
   await signInAs(context, 'member')
   const detail = {
     id: 4244,
@@ -651,11 +651,11 @@ test('the detail page shows the description as the bank wrote it, time at the en
     transferPartnerOverridden: false,
     canMarkNotTransfer: false,
     notTransfer: false,
-    bankTime: '2026-10-15T23:07:00.000Z', // 12:07 pm on the 16th in NZ, read from the description
+    bankTime: null, // Akahu's date is midnight, so there is no time of day
+    hasBankTime: 0,
     firstSeenAt: '2026-10-16T06:30:00.000Z',
     akahuCategoryName: null,
     akahuCategoryGroupName: null,
-    bankTimeFromMemo: '2026-10-15T23:07:00.000Z',
   }
   await page.route('**/api/transactions/4244', (route) => route.fulfill({ json: detail }))
   await page.goto('/transactions/4244')
@@ -666,8 +666,17 @@ test('the detail page shows the description as the bank wrote it, time at the en
   await expect(page.getByText(/^Fri 16 Oct 2026, POS W\/D Example Store-12:07, /)).toBeVisible()
   const bank = page.getByRole('region', { name: 'From the bank' })
   await expect(bank).toContainText('POS W/D Example Store-12:07')
-  await expect(bank).toContainText('Fri 16 Oct 2026, 12:07 pm') // the time, read out of those words
+  await expect(bank.getByText("Akahu's date carried a time")).toBeVisible()
+  await expect(bank).toContainText('No')
+  await expect(bank.locator('dt:text-is("Bank Time") + dd')).toHaveText('Not sent')
+  await expect(bank).not.toContainText('12:07 pm') // nothing is read out of those words
   await noAxeViolations(page)
+
+  // Where Akahu's own date does carry a time, that is the Bank Time.
+  await page.unroute('**/api/transactions/4244')
+  await page.route('**/api/transactions/4244', (route) => route.fulfill({ json: { ...detail, hasBankTime: 1, bankTime: '2026-10-15T20:15:00.000Z' } }))
+  await page.reload()
+  await expect(bank.locator('dt:text-is("Bank Time") + dd')).toHaveText('Fri 16 Oct 2026, 9:15 am')
 })
 
 test.describe('a Transaction that does not exist', () => {

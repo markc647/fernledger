@@ -811,64 +811,23 @@ describe('the rest of an Akahu Transaction', () => {
     ])
   })
 
-  describe('the EFTPOS time in a Kiwibank description', () => {
+  // Mark, 2026-10-23: nothing is read out of the words the bank wrote. Kiwibank writes the time of an EFTPOS purchase at the end of its
+  // description, and it stays there: a Transaction has a time of day only where Akahu's own date carries one.
+  describe('the time Kiwibank writes into a description', () => {
     const eftpos = (description: string, over: Record<string, unknown> = {}) => transaction({ description, date: '2026-10-15T11:00:00.000Z', ...over })
-    const bankTime = async () => (await kept())[0]!.bank_time_from_memo
 
-    it('is read as an NZ time, and the description and memo stay as the bank wrote them', async () => {
+    it('is left in the words, and makes no time of day for the Transaction', async () => {
       connection('Kiwibank')
       stubAkahu(() => onePage([eftpos('POS W/D Example Store-12:07')]))
       await runSync()
-      // 11:00 UTC is NZ midnight at the start of the 16th, on summer time (UTC+13), so 12:07 is 23:07 UTC the day before.
-      expect(await bankTime()).toBe('2026-10-15T23:07:00.000Z')
-      expect((await rows())[0]).toMatchObject({ description: 'POS W/D Example Store-12:07', bank_memo: 'POS W/D Example Store-12:07', has_bank_time: 0, akahu_date_raw: '2026-10-15T11:00:00.000Z' })
-    })
-
-    it.each([
-      ['has no time', 'DIRECT DEBIT Example Energy'],
-      ['has an impossible one', 'POS W/D Example Store-25:99'],
-      ['has no colon', 'POS W/D Example Store-1207'],
-      ['has no dash', 'POS W/D Example Store 12:07'],
-      ['has one mid-string', 'POS W/D Example-12:07 Store'],
-    ])('is not read when the description %s', async (_, description) => {
-      connection('Kiwibank')
-      stubAkahu(() => onePage([eftpos(description)]))
-      await runSync()
-      expect(await bankTime()).toBeNull()
-      expect((await rows())[0]).toMatchObject({ bank_memo: description })
-    })
-
-    it('is not read from another bank, even in the same words', async () => {
-      connection('Example Bank')
-      stubAkahu(() => onePage([eftpos('POS W/D Example Store-12:07')]))
-      await runSync()
-      expect(await bankTime()).toBeNull()
-    })
-
-    it('is not read when the bank is not known', async () => {
-      connection(null)
-      stubAkahu(() => onePage([eftpos('POS W/D Example Store-12:07')]))
-      await runSync()
-      expect(await bankTime()).toBeNull()
-    })
-
-    it('uses the bank an earlier Sync learned when this one cannot say', async () => {
-      connection('Kiwibank')
-      stubAkahu(() => onePage([]))
-      await runSync()
-      accountsAnswer = () => asJson({}, 500)
-      stubAkahu(() => onePage([eftpos('POS W/D Example Store-12:07')]))
-      await env.DB.prepare('UPDATE accounts SET akahu_synced_at = NULL WHERE id = ?').bind(accountId).run()
-      await runSync()
-      expect(await bankTime()).toBe('2026-10-15T23:07:00.000Z')
-    })
-
-    it('reads a clock time NZ never had as no time at all', async () => {
-      connection('Kiwibank')
-      // 2026-09-27 is the day clocks went forward: 02:30 never happened.
-      stubAkahu(() => onePage([eftpos('POS W/D Example Store-02:30', { date: '2026-09-26T12:00:00.000Z' })]))
-      await runSync()
-      expect(await bankTime()).toBeNull()
+      expect((await rows())[0]).toMatchObject({
+        description: 'POS W/D Example Store-12:07',
+        bank_memo: 'POS W/D Example Store-12:07',
+        has_bank_time: 0,
+        akahu_date_raw: '2026-10-15T11:00:00.000Z',
+      })
+      // The column 4301 added for the time read out of a description is no longer written (migrations are add-only, ADR 0009).
+      expect((await kept())[0]!.bank_time_from_memo).toBeNull()
     })
   })
 })

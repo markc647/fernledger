@@ -53,7 +53,7 @@ A load of Transactions from bank-exported files; used for history older than Aka
 _Avoid_: Upload, migration
 
 **Bank Time**:
-The time of day of a Transaction, shown only when the bank actually supplied one; most Transactions have a date only. Akahu's own time counts, and so does the `-HH:MM` Kiwibank writes at the end of an EFTPOS description (`POS W/D Example Store-12:07`), read for Kiwibank Accounts alone. A description with no such ending, or with something that only looks like one, gives none.
+The time of day of a Transaction, shown only when the bank actually supplied one; most Transactions have a date only. It is Akahu's own `date` where that carries a time of day, and nothing else: a time written into the words of a description (Kiwibank's `POS W/D Example Store-12:07`) is left in those words and never read out as a time.
 _Avoid_: Timestamp, posted time
 
 **Akahu category**:

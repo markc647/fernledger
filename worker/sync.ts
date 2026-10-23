@@ -45,9 +45,8 @@ import { akahuTokens, fetchAkahuTransactions, fetchPendingTransactions, listAkah
 import type { AkahuAccount, AkahuFailure, AkahuResult, AkahuTokens, AkahuTransaction } from './akahu'
 import { recordBalance, refreshBalanceChecks } from './balance-check'
 import { syncBalance, type SyncBalance, type SyncBalanceSkipped } from './balance-rules'
-import { eftposTime, isKiwibank } from './kiwibank-time'
 import { logEvent } from './log'
-import { nzClockTime, nzDate, nzDayStart } from './nz-time'
+import { nzDate, nzDayStart } from './nz-time'
 import { DELETE_PENDING, INSERT_PENDING, toPendingRows } from './pending'
 import { applyRulesStatement, lastTransactionId } from './rule-apply'
 import { pairTransfersStatement } from './transfers'
@@ -130,7 +129,7 @@ export const UPSERT_SYNCED = `
     account_id, date, amount_cents, description, bank_memo, bank_type, bank_reference, source, akahu_id, merchant,
     bank_counterparty_account, bank_card_suffix, bank_particulars, bank_payment_code, akahu_date_raw, has_bank_time, akahu_first_seen_at,
     akahu_category_id, akahu_category_name, akahu_category_group_id, akahu_category_group_name, akahu_balance_cents, akahu_hash,
-    akahu_updated_at, akahu_posted_date, akahu_connection_id, bank_time_from_memo)
+    akahu_updated_at, akahu_posted_date, akahu_connection_id)
   SELECT ?1,
          json_extract(value, '$.date'),
          json_extract(value, '$.amountCents'),
@@ -156,8 +155,7 @@ export const UPSERT_SYNCED = `
          json_extract(value, '$.hash'),
          json_extract(value, '$.updatedAt'),
          json_extract(value, '$.postedDate'),
-         json_extract(value, '$.connectionId'),
-         json_extract(value, '$.bankTimeFromMemo')
+         json_extract(value, '$.connectionId')
   FROM json_each(?2)
   -- Required, not decoration: after an INSERT … SELECT … FROM, SQLite reads a bare ON CONFLICT as a JOIN's ON and refuses the
   -- statement ("a JOIN clause is required before ON"), so the upsert clause must follow a WHERE. This one also says the rule the
@@ -185,8 +183,7 @@ export const UPSERT_SYNCED = `
     akahu_hash = excluded.akahu_hash,
     akahu_updated_at = excluded.akahu_updated_at,
     akahu_posted_date = excluded.akahu_posted_date,
-    akahu_connection_id = excluded.akahu_connection_id,
-    bank_time_from_memo = excluded.bank_time_from_memo`
+    akahu_connection_id = excluded.akahu_connection_id`
 
 // The last-success mark. It clears the last failure in the same statement and so for no extra query: an Account that has just
 // finished has nothing wrong with it, and the Sync status reads that column for the cause it names (spec 59).
@@ -250,8 +247,6 @@ export type SyncRow = {
   updatedAt: string | null
   postedDate: string | null
   connectionId: string | null
-  /** The Bank Time read from the end of the description (Kiwibank's EFTPOS time), as a UTC instant. */
-  bankTimeFromMemo: string | null
 }
 
 /**
@@ -282,14 +277,12 @@ export function hasBankTime(dateRaw: string): boolean {
 
 /**
  * One Akahu Transaction as a row. `description` is the merchant Akahu recognised, or the bank's own description when there is none.
- * `connectionName` is Akahu's name for the Account's bank connection, which decides whether the description is read for a time: only
- * Kiwibank's is (worker/kiwibank-time.ts), and a bank that is not known is not Kiwibank. The category, balance and the rest
- * are kept as Akahu sent them, or as not known.
+ * Every field is Akahu's own, kept as Akahu sent it or as not known: nothing here is read out of the words the bank wrote. A time of
+ * day is Akahu's `date` when it carries one (`hasBankTime`), and otherwise there is none (Mark, 2026-10-23).
  */
-export function toRow(transaction: AkahuTransaction, connectionName: string | null): SyncRow {
+export function toRow(transaction: AkahuTransaction): SyncRow {
   const meta = transaction.meta ?? {}
   const merchant = transaction.merchant?.name ?? null
-  const time = isKiwibank(connectionName) ? eftposTime(transaction.description) : null
   return {
     akahuId: transaction._id,
     date: nzDate(new Date(transaction.date)),
@@ -315,7 +308,6 @@ export function toRow(transaction: AkahuTransaction, connectionName: string | nu
     updatedAt: transaction.updated_at ?? null,
     postedDate: transaction.posted_date ?? null,
     connectionId: transaction._connection ?? null,
-    bankTimeFromMemo: time === null ? null : nzClockTime(nzDate(new Date(transaction.date)), time),
   }
 }
 
@@ -486,8 +478,6 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     }
     const { transactions, complete } = answer.value
     queriesLeft -= QUERIES_PER_ACCOUNT
-    // This run's word for the bank, or the one an earlier run stored when Akahu did not list the Account this time.
-    const connectionName = details?.akahuConnectionName ?? account.akahu_connection_name
     // Only what Akahu said in this run: a balance stored by an earlier run is not new, and the Account may not have been listed.
     const decision = details === null ? { skipped: 'no-balance' as const } : syncBalance(details, complete)  // details are null when the Link is broken, so no balance is recorded either
     if ('skipped' in decision) logEvent(BALANCE_SKIPPED_EVENT[decision.skipped], { id: account.id })
@@ -497,7 +487,7 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     // Account's Transactions are gone: taken as a finished window, that page would withdraw every Synced Transaction in it. So
     // nothing is withdrawn, the last-success mark stays where it was, and the run is not a success.
     const finished = complete && !linkBroken
-    const { written, removed } = await writeAccount(env.DB, account, transactions.map((transaction) => toRow(transaction, connectionName)), {
+    const { written, removed } = await writeAccount(env.DB, account, transactions.map(toRow), {
       syncedAt: finished ? now : null,
       from: finished ? window.date : null,
     }, details, balance)

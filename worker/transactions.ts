@@ -42,8 +42,7 @@ type TransactionListRow = {
 /**
  * One Transaction in full. The `bank…` fields are the bank's own words, as the bank or Akahu gave them; the ones Sync supplies
  * are null for an Import. `bankTime` is the bank's time of day, as a UTC instant, and is null unless the bank actually supplied
- * one (Bank Time), however the raw date looks: Akahu's own when it supplied one, else the time at the end of a Kiwibank description
- * (worker/kiwibank-time.ts). `firstSeenAt` is when Akahu first reported the Transaction, as a UTC instant.
+ * one (Bank Time): Akahu's own `date` when it carried a time of day, and none otherwise. Nothing is read out of the words the bank wrote. `firstSeenAt` is when Akahu first reported the Transaction, as a UTC instant.
  *
  * `akahuCategoryName` and `akahuCategoryGroupName` are Akahu's category for the Transaction, which only Sync supplies and only a card
  * Transaction has. They are for showing, as Akahu's, and nothing reads them: they are not the Category (`categoryName`). Null is not known.
@@ -95,8 +94,6 @@ type TransactionDetail = {
   akahuConnectionId: string | null
   /** 1 when Akahu's own date carried a time of day, 0 when it did not, null for a Transaction no Sync has written. */
   hasBankTime: number | null
-  /** The Bank Time read out of the bank's own description (worker/kiwibank-time.ts), which is also why the detail page shows that description without its `-HH:MM`. */
-  bankTimeFromMemo: string | null
 }
 
 /** Describes a Transaction in a Change Log summary: enough to find it, from its ID, date and description. */
@@ -197,11 +194,11 @@ export const transactions = new Hono<AppEnv>()
               ${category.transfer} AS transfer, partner_account.name AS transferAccountName, partner.id AS transferTransactionId,
               EXISTS (SELECT 1 FROM categories partner_override WHERE partner_override.id = partner.override_category AND partner_override.removed_at IS NULL) AS transferPartnerOverridden,
               ${category.markable} AS canMarkNotTransfer, t.not_transfer_with IS NOT NULL AS notTransfer,
-              COALESCE(CASE WHEN t.has_bank_time = 1 THEN t.akahu_date_raw END, t.bank_time_from_memo) AS bankTime, t.akahu_first_seen_at AS firstSeenAt,
+              CASE WHEN t.has_bank_time = 1 THEN t.akahu_date_raw END AS bankTime, t.akahu_first_seen_at AS firstSeenAt,
               t.akahu_category_name AS akahuCategoryName, t.akahu_category_group_name AS akahuCategoryGroupName,
               t.akahu_id AS akahuId, t.merchant AS akahuMerchant, t.akahu_category_id AS akahuCategoryId, t.akahu_category_group_id AS akahuCategoryGroupId,
               t.akahu_date_raw AS akahuDateRaw, t.akahu_posted_date AS akahuPostedDate, t.akahu_balance_cents AS akahuBalanceCents,
-              t.akahu_updated_at AS akahuUpdatedAt, t.akahu_hash AS akahuHash, t.akahu_connection_id AS akahuConnectionId, t.has_bank_time AS hasBankTime, t.bank_time_from_memo AS bankTimeFromMemo
+              t.akahu_updated_at AS akahuUpdatedAt, t.akahu_hash AS akahuHash, t.akahu_connection_id AS akahuConnectionId, t.has_bank_time AS hasBankTime
        FROM transactions t JOIN accounts a ON a.id = t.account_id ${category.joins}
        ${PARTNER_JOIN}
        WHERE t.id = ?`,
