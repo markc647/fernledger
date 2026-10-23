@@ -12,9 +12,10 @@ export interface BankCsvRowError {
 export interface BankCsvResult {
   /** Id of the adapter that parsed the file. */
   adapterId: string
-  /** Normalised `BB-bbbb-AAAAAAA-SS`. */
-  accountNumber: string
-  ledgerBalance: { cents: number; date: string }
+  /** Normalised `BB-bbbb-AAAAAAA-SS`, or null where the bank prints no account number and the Import must ask which Account the file is for (ADR 0017). */
+  accountNumber: string | null
+  /** Null where the file states no balance, as a credit card export does not: such an Account gets no Balance Check from an Import. */
+  ledgerBalance: { cents: number; date: string } | null
   /** The date range the file covers. */
   dateRange: { from: string; to: string }
   rows: BankCsvRow[]

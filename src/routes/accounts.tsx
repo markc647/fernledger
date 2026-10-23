@@ -2,11 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState, type ReactNode } from 'react'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
+import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { RowButton, useFocusBack } from '@/components/row-actions'
 import { Status } from '@/components/status'
 import { focusPanel, RowPanel, useDrafts, type Drafts } from '@/components/row-panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { isGeneratedKey } from '@/lib/account-key'
 import { akahuWords } from '@/lib/akahu'
 import { formatBalance, formatDateTime, isMoment } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
@@ -46,7 +48,13 @@ function Accounts() {
 
   const columns: Column<Account>[] = [
     { key: 'name', header: 'Name', cell: (account) => account.name },
-    { key: 'number', header: 'Account number', cell: (account) => <span className="tabular-nums">{account.accountNumber}</span> },
+    {
+      key: 'number',
+      header: 'Account number',
+      // An Account whose bank prints no number has a key Fernledger generated, which is never shown as the bank's own (ADR 0017).
+      cell: (account) =>
+        isGeneratedKey(account.accountNumber) ? <span className="text-muted-foreground">None from the bank</span> : <span className="tabular-nums">{account.accountNumber}</span>,
+    },
   ]
   if (me?.role === 'admin')
     columns.push({
@@ -69,13 +77,13 @@ function Accounts() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold">Accounts</h1>
+      <PageHeading help={me?.role === 'admin' && <AccountsHelp />}>Accounts</PageHeading>
       {error ? (
         <p role="alert" className="mt-2">Fernledger couldn't load the Accounts. Reload the page to try again.</p>
       ) : !accounts ? (
         <p role="status" className="mt-2">Loading…</p>
       ) : accounts.length === 0 ? (
-        <p className="mt-2">There are no Accounts yet. An Account is added the first time you import a file for it.</p>
+        <p className="mt-2">There are no Accounts yet. An Account is added the first time you import a file for it, or below for a credit card, whose bank prints no account number.</p>
       ) : (
         <div className="mt-4">
           <ResponsiveTable
@@ -109,7 +117,81 @@ function Accounts() {
           />
         </div>
       )}
+      {me?.role === 'admin' && <AddCardAccount />}
     </>
+  )
+}
+
+/** What a reader reads once about this page: why a credit card is added here and not by an Import (CODING_STANDARDS.md#ui). */
+function AccountsHelp() {
+  return (
+    <>
+      <p>Every Account the bank gives a number for is added the first time you import a file for it, and this page is where you see and rename them.</p>
+      <HelpHeading>Add a Credit Card Account</HelpHeading>
+      <p>
+        A credit card has no account number from the bank, and its card number is not one either: a card is reissued on fraud or expiry, so an Account keyed on it would split in two. Fernledger gives
+        the Account a key of its own, which you never type and are never shown.
+      </p>
+      <p>Add the card by name, then import the card's CSV or link the Account to Akahu in Settings. An Import of a card's file asks which Account it is for, because the file does not say.</p>
+    </>
+  )
+}
+
+/**
+ * Adds an Account for a credit card. A card's bank prints no account number and its card number is not one (a reissue would
+ * split the Account in two), so Fernledger gives the Account a key of its own and the Admin types only the name (ADR 0017).
+ * Every other Account is still created by importing a file for it, which is where its number comes from.
+ */
+function AddCardAccount() {
+  const queryClient = useQueryClient()
+  const [name, setName] = useState('')
+  const [added, setAdded] = useState<string | null>(null)
+  const add = useMutation({
+    mutationFn: async () => {
+      const res = await api.accounts.$post({ json: { name: name.trim() } })
+      if (!res.ok) throw new HttpError(res.status)
+      return (await res.json()).name
+    },
+    onSuccess: async (addedName) => {
+      setName('')
+      setAdded(addedName)
+      await queryClient.invalidateQueries({ queryKey: ['accounts'] })
+    },
+  })
+
+  return (
+    <section aria-labelledby="add-card" className="mt-8 max-w-xl">
+      <h2 id="add-card" className="text-xl font-semibold">
+        Add a Credit Card Account
+      </h2>
+      <form
+        className="mt-2 flex flex-wrap items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          add.mutate()
+        }}
+      >
+        <div>
+          {/* Not "Account name": the Rename panel on this page has one of those, and two fields of the same name on a page are two the same to a screen reader. */}
+          <label htmlFor="card-name" className="block font-medium">
+            Credit card Account name
+          </label>
+          <Input id="card-name" value={name} maxLength={60} required aria-describedby="card-name-hint" onChange={(event) => setName(event.target.value)} />
+          <p id="card-name-hint" className="mt-1 text-sm text-muted-foreground">
+            Yours to choose, and you can change it later.
+          </p>
+        </div>
+        <Button type="submit" size="touch" disabled={add.isPending || !name.trim()}>
+          Add the Account
+        </Button>
+        {add.isError && <p role="alert" className="basis-full font-medium text-destructive">The Account could not be added. Try again.</p>}
+      </form>
+      {added !== null && (
+        <p role="status" className="mt-2">
+          Added {added}. Its Transactions come from the card's CSV or from Akahu.
+        </p>
+      )}
+    </section>
   )
 }
 

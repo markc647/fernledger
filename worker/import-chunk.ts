@@ -32,7 +32,7 @@ export function chunkSummary(outcome: ChunkOutcome): string {
 /** The Change Log entry's `after`: what the chunk did and what the whole file looked like. */
 export function chunkDetail(
   outcome: ChunkOutcome,
-  context: { file: { adapterId: string; rowCount: number; skipped: number; from: string; to: string; ledgerBalance: { cents: number; date: string } }; rowsInChunk: number; cutoverDate: string | null; newAccount: boolean },
+  context: { file: { adapterId: string; rowCount: number; skipped: number; from: string; to: string; ledgerBalance?: { cents: number; date: string } }; rowsInChunk: number; cutoverDate: string | null; newAccount: boolean },
 ) {
   const { file } = context
   return {
@@ -50,7 +50,8 @@ export function chunkDetail(
     skipped: file.skipped,
     from: file.from,
     to: file.to,
-    ledgerBalance: file.ledgerBalance,
+    // A file that states none (a credit card export) has no line for it rather than an empty one.
+    ...(file.ledgerBalance ? { ledgerBalance: file.ledgerBalance } : {}),
     newAccount: context.newAccount,
   }
 }

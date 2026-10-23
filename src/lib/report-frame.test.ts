@@ -23,6 +23,11 @@ describe('accountLabel', () => {
   it('names the Account and gives its bank number', () => {
     expect(accountLabel({ name: 'Example savings', accountNumber: '99-9999-9999999-99' })).toBe('Example savings (99-9999-9999999-99)')
   })
+
+  // A key Fernledger generated is not a number the bank issued, so it is never printed as one (ADR 0017).
+  it('is the name alone for an Account whose bank prints no number', () => {
+    expect(accountLabel({ name: 'Example Visa', accountNumber: 'card-0001' })).toBe('Example Visa')
+  })
 })
 
 describe('reportHeading', () => {

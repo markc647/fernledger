@@ -166,6 +166,8 @@ const PAGES: Case[] = [
   { path: '/budgets', heading: 'Budgets', says: ['A Budget is the amount you plan to spend'], adminSays: ["Choose Edit on a Category's row to set or end its Budget"], memberSays: ['Only the Admin can change them.'], roles: BOTH },
   { path: '/settings', heading: 'Settings', says: ["The Admin is set when Fernledger is deployed", 'A Cutover Date is the day an Account stops taking Transactions'], ready: (page) => expect(page.getByLabel('App title')).toBeVisible() },
   { path: '/change-log', heading: 'Change Log', says: ['Everything the Admin has changed'], roles: BOTH },
+  // Only the Admin adds an Account, so only the Admin's page has a sheet; a Member sees the Accounts and no "?".
+  { path: '/accounts', heading: 'Accounts', says: [], adminSays: ['Every Account the bank gives a number for is added', 'A credit card has no account number from the bank', 'Add the card by name'] },
   {
     path: '/reports',
     heading: 'Reports',
@@ -235,10 +237,7 @@ test.describe('every page with text to read once has the "?"', () => {
   }
 })
 
-for (const [path, heading] of [
-  ['/accounts', 'Accounts'],
-  ['/how-to-sign-in', 'How to sign in'],
-] as const) {
+for (const [path, heading] of [['/how-to-sign-in', 'How to sign in']] as const) {
   test(`${heading} has no text to read once, so no "?"`, async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto(path)

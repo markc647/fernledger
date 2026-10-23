@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import * as z from 'zod/mini'
-import { accountName, bankAccountNumber, isoDate, normaliseAccountNumber } from './account-fields'
+import { accountKey, accountName, isGeneratedKey, isoDate, normaliseAccountNumber } from './account-fields'
 import type { AppEnv } from './app-env'
 import { checkAfterRecording, DELETE_IMPORT_BALANCES, recordBalance } from './balance-check'
 import { statusOnRecord } from './balance-rules'
@@ -59,7 +59,8 @@ import { CHANGED_MEANWHILE, pathId, validate } from './validate'
 
 const chunkRequest = z.object({
   account: z.object({
-    number: bankAccountNumber,
+    /** The Account's key: the bank's number, or the one Fernledger generated for an Account the bank prints no number for (ADR 0017). */
+    number: accountKey,
     /** Used only when this chunk creates the Account. */
     name: z.optional(accountName),
   }),
@@ -73,8 +74,11 @@ const chunkRequest = z.object({
     skipped: z.int().check(z.minimum(0)),
     from: isoDate,
     to: isoDate,
-    /** The balance in the file's header and the date it is as of; recorded with the last chunk (balance-check.ts). */
-    ledgerBalance: z.object({ cents: z.int(), date: isoDate }),
+    /**
+     * The balance in the file's header and the date it is as of; recorded with the last chunk (balance-check.ts). Absent for a
+     * file that states none, as a credit card export does not: that Account simply has no Balance Check from CSV (ADR 0017).
+     */
+    ledgerBalance: z.optional(z.object({ cents: z.int(), date: isoDate })),
   }),
   // Checked by badRowField: a schema is too slow for 500 rows within 10 ms of CPU (CODING_STANDARDS.md#structure).
   // The custom type only carries the type.
@@ -101,7 +105,7 @@ const previewRequest = z.object({ accountId: z.int().check(z.minimum(1)), rows: 
 // ?3 is the Cutover Date (or null): rows dated on or after it are not inserted. ISO dates compare correctly as text.
 export const INSERT_ROWS = `
   INSERT INTO transactions (account_id, date, amount_cents, description, bank_memo, bank_type, bank_reference, source, bank_unique_id,
-                            bank_particulars, bank_payment_code, bank_counterparty_account)
+                            bank_particulars, bank_payment_code, bank_counterparty_account, bank_card_suffix)
   SELECT (SELECT id FROM accounts WHERE account_number = ?1),
          json_extract(value, '$.date'),
          json_extract(value, '$.amountCents'),
@@ -115,7 +119,9 @@ export const INSERT_ROWS = `
          -- three, exactly as before; Kiwibank prints Particulars and Code and the other party's account number.
          json_extract(value, '$.particulars'),
          json_extract(value, '$.paymentCode'),
-         json_extract(value, '$.counterpartyAccount')
+         json_extract(value, '$.counterpartyAccount'),
+         -- The card used, where the bank prints it (Kiwibank's credit card export). Sync has filled this column since migration 1201.
+         json_extract(value, '$.cardSuffix')
   FROM json_each(?2)
   WHERE ?3 IS NULL OR json_extract(value, '$.date') < ?3
   ON CONFLICT (account_id, bank_unique_id) WHERE bank_unique_id IS NOT NULL DO NOTHING`
@@ -190,6 +196,12 @@ export const imports = new Hono<AppEnv>()
     const number = normaliseAccountNumber(account.number)
     const existing = await db.prepare('SELECT id, name, cutover_date FROM accounts WHERE account_number = ?').bind(number).first<AccountRow>()
     if (!existing && chunk.index !== 0) return c.json({ error: 'Send the first chunk of the Import first' }, 409)
+    // An Import creates the Account for a file that carries the bank's number, taking the number from the file. A generated key
+    // is not a number any file carries: the Worker hands those out (ADR 0017). An Import naming one for an Account that is not
+    // there would create a key nothing allocated, under a name that is the key itself (`name`, below).
+    if (!existing && isGeneratedKey(number)) {
+      return c.json({ error: 'An Account the bank prints no number for is added on the Accounts screen, not by an Import' }, 400)
+    }
 
     // Replacing imported history removes the Account's Import-sourced Transactions in the same batch as this chunk's
     // rows, so a failure leaves the old history untouched. A history too big for one batch is cleared in steps first.
@@ -258,7 +270,7 @@ export const imports = new Hono<AppEnv>()
       ...give,
       pairTransfersStatement(db, { accountNumber: number, afterId }),
       ...finish,
-      ...(lastChunk
+      ...(lastChunk && ledger
         ? [recordBalance(db, { accountNumber: number, asOfDate: ledger.date, bankCents: ledger.cents, source: 'import', status: statusOnRecord({ asOfDate: ledger.date, fileTo: file.to, cutoverDate: effectiveCutover }) })]
         : []),
     ]
@@ -280,8 +292,9 @@ export const imports = new Hono<AppEnv>()
     })
     const accountId = existing?.id ?? results[0]!.meta.last_row_id
     const inserted = results[insertAt]!.meta.changes
-    // After the last chunk, every balance of the Account is checked again: this file's, and the neighbours it changes.
-    const balanceCheck = lastChunk ? await checkAfterRecording(db, accountId, ledger.date) : null
+    // After the last chunk, every balance of the Account is checked again: this file's, and the neighbours it changes. A file
+    // with no balance of its own records none, so there is nothing to check it against and nothing to say about it.
+    const balanceCheck = lastChunk && ledger ? await checkAfterRecording(db, accountId, ledger.date) : null
     // The response says what the batch did (rows marked given out), where the Change Log entry, written before it, said what was counted.
     const done = carryOutcome(carryPlan, counts, lastChunk, carryPlan.applies ? results[markAt]!.meta.changes : 0)
     return c.json({

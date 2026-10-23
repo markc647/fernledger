@@ -5,6 +5,7 @@ import { formatDate } from '@/lib/format'
 import { accountLabel } from '@/lib/report-frame'
 import { detailsOf, REPORT_ROW_CAP, type AccountListing, type Listing, type ReportRow } from '@/lib/report-transactions'
 import { PAPER } from '@/lib/utils'
+import { AccountHeading } from './account-heading'
 
 // A page's width is shared out by what each column holds. Dates, Categories and amounts keep their words whole (the page's
 // `overflow-wrap: anywhere` would let them shrink to a character wide and split "Uncategorised"), so the Description and Note,
@@ -76,9 +77,7 @@ function AccountSection({ section }: { section: AccountListing }) {
   const printHeading = useReportIdentity()(accountLabel({ name: section.accountName, accountNumber: section.accountNumber }))
   return (
     <section aria-labelledby={headingId} className="mt-8 print:mt-6">
-      <h2 id={headingId} className="text-xl font-semibold print:text-[15pt]">
-        {section.accountName} <span className="font-normal">({section.accountNumber})</span>
-      </h2>
+      <AccountHeading id={headingId} name={section.accountName} accountNumber={section.accountNumber} />
       {section.status === 'not-listed' ? (
         <p className="mt-2 font-semibold">Not listed: this Report stopped before this Account.</p>
       ) : section.rows.length === 0 ? (
