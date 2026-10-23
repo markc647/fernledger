@@ -12,7 +12,7 @@ Pending money is what a bank is showing at the moment of asking: it may change, 
 
 ## Consequences
 
-- Unlinking or re-linking an Account deletes its pending rows (`worker/accounts.ts`): they came from the old link, and a Sync only ever replaces the rows of Accounts that are linked.
+- Unlinking or re-linking an Account deletes its pending rows in the same batch as the link itself (`worker/accounts.ts`): they came from the old link, and a Sync only ever replaces the rows of Accounts that are linked, so rows left behind would be shown for good. The list also reads only Accounts that are still linked, so a row that somehow outlives its link is not shown.
 - Nothing in the app can give a Pending Transaction a Category or a Note, and no Report will ever list one. If that is wanted, it is a new ticket, and it means moving them into `transactions` behind a flag, with the `WHERE` clause in every query above.
 - A backup holds the pending rows like any other table, and a restore brings back the pending money as at the backup. The next Sync replaces it.
 - The Transactions page makes one more read, which returns a handful of rows and is not paged.

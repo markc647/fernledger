@@ -141,7 +141,6 @@ export const akahuPending = z.object({
   // Dollars, negative for money out, as a settled Transaction's is.
   amount: z.number(),
   type: z.optional(z.string()),
-  updated_at: z.optional(z.string()),
 })
 export type AkahuPending = z.infer<typeof akahuPending>
 

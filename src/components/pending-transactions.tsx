@@ -59,7 +59,7 @@ export function PendingTransactions() {
         Budget, Report or total. The next Sync replaces them.
       </p>
       <div className="mt-3">
-        <ResponsiveTable caption="Pending Transactions, newest first" columns={columns} rows={pending} getRowKey={(row) => row.id} look="in-card" />
+        <ResponsiveTable caption="Pending Transactions, newest first" columns={columns} rows={pending} getRowKey={(row) => row.id} />
       </div>
     </section>
   )

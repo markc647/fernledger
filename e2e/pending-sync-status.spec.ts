@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { FEATURES, stubBalances } from './balances-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { expectTableLook } from './table-look-helpers'
 
 // Pending money above the Transactions table, and the Sync status above the Balances (ticket 29, spec 32, 54-60). Both are filled by
 // Sync, which a browser test does not run, so the Worker's answers are stubbed. Times are NZ times whatever the device's time zone.
@@ -81,6 +82,11 @@ test('nothing is said about pending money when there is none', async ({ page, co
   await openTransactions(page, context, [])
   await expect(pendingSection(page)).toHaveCount(0)
   await expect(page.getByText('Pending', { exact: true })).toHaveCount(0)
+})
+
+test('the pending table has the look every table has', async ({ page, context }) => {
+  const pending = await openTransactions(page, context)
+  await expectTableLook(pending.getByRole('table', { name: 'Pending Transactions, newest first' }))
 })
 
 test('the pending money passes the accessibility scan', async ({ page, context }) => {

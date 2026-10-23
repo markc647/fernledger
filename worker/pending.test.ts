@@ -15,7 +15,6 @@ const pending = (over: Record<string, unknown> = {}) => ({
   description: 'PENDING CAFE',
   amount: -4.5,
   type: 'EFTPOS',
-  updated_at: '2026-10-20T20:00:00.000Z',
   ...over,
 })
 
@@ -29,7 +28,6 @@ describe('reading Akahu’s pending money', () => {
         amountCents: -450,
         description: 'PENDING CAFE',
         bankType: 'EFTPOS',
-        updatedAt: '2026-10-20T20:00:00.000Z',
       },
     ])
   })
@@ -44,6 +42,6 @@ describe('reading Akahu’s pending money', () => {
 
   it('keeps what Akahu did not say as nothing, rather than refusing the row', () => {
     const [row] = toPendingRows([{ _account: 'acc_linked000000000000002', date: '2026-10-20T11:00:00.000Z', description: 'PENDING', amount: 25 }], ids)
-    expect(row).toEqual({ accountId: 9, date: '2026-10-21', amountCents: 2500, description: 'PENDING', bankType: null, updatedAt: null })
+    expect(row).toEqual({ accountId: 9, date: '2026-10-21', amountCents: 2500, description: 'PENDING', bankType: null })
   })
 })

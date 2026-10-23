@@ -37,9 +37,44 @@ describe('the Sync status', () => {
     expect(status!.text).toBe('Bank data last updated Tue 20 Oct 2026 at 7:00 am.')
   })
 
-  it('waits for the first Sync rather than claiming an update', () => {
+  it('waits for the first Sync rather than claiming an update, where no Account has ever synced', () => {
     expect(asAdmin([linked({ akahuSyncedAt: null })])).toEqual({ tone: 'neutral', text: 'Waiting for the first Sync of this Account.' })
-    expect(asAdmin([linked(), linked({ name: 'Savings', akahuSyncedAt: null })])!.text).toBe('Waiting for the first Sync of some of these Accounts.')
+    expect(asAdmin([linked({ akahuSyncedAt: null }), linked({ name: 'Savings', akahuSyncedAt: null })])!.text).toBe('Waiting for the first Sync of these Accounts.')
+  })
+
+  // The review of this ticket found a newly linked Account hid every other Account's staleness: `oldest` went null, so the line
+  // dropped the time and the tone never turned red. An Account waiting for its first Sync says so beside the time, and nothing more.
+  it('still dates the data, and still turns red, when one Account has never synced', () => {
+    const status = asAdmin([linked({ akahuSyncedAt: '2026-10-17T05:00:00.000Z' }), linked({ name: 'New', akahuSyncedAt: null })])
+    expect(status!.tone).toBe('danger')
+    expect(status!.text).toBe('Bank data last updated Sat 17 Oct 2026 at 6:00 pm. One Account is waiting for a first Sync.')
+    expect(status!.cause).toBe('No Sync has finished for 3 days, so this may be out of date.')
+  })
+
+  it('counts the Accounts that are waiting, and says so without claiming they are stale', () => {
+    const status = asAdmin([linked(), linked({ name: 'New', akahuSyncedAt: null }), linked({ name: 'Newer', akahuSyncedAt: null })])
+    expect(status!.tone).toBe('success')
+    expect(status!.text).toBe('Bank data last updated Tue 20 Oct 2026 at 7:00 am. 2 Accounts are waiting for a first Sync.')
+  })
+
+  // Spec 59 asks the cause to be named, and an Account the run could not start is a cause like any other: without this it read
+  // as merely stale, with nothing to act on.
+  it('names an Account with no Cutover Date, and what the Admin does about it', () => {
+    const status = asAdmin([linked({ akahuLastFailure: 'no-window' })])
+    expect(status!.cause).toBe('Kiwibank has no Cutover Date, so Sync leaves it alone.')
+    expect(status!.action).toBe('Import a bank file for it to set its Cutover Date, then run a Sync.')
+  })
+
+  it('says when the run has not reached an Account yet, as a warning and not a fault', () => {
+    const status = asAdmin([linked({ akahuLastFailure: 'no-budget' })])
+    expect(status!.tone).toBe('warning')
+    expect(status!.cause).toBe('Sync has not reached Kiwibank yet: a run takes four Accounts, and it comes first in the next one.')
+    expect(status!.action).toBe('The next Sync takes it first. Run a Sync now if you would rather not wait.')
+  })
+
+  it('reads a Link the Worker marked broken the same as one Akahu has stopped listing', () => {
+    const status = asAdmin([linked({ akahuLastFailure: 'link-broken' })])
+    expect(status!.cause).toContain('needs reconnecting in Akahu')
   })
 
   it(`turns red after ${STALE_DAYS} days without a Sync that finished, and says how long it has been`, () => {
@@ -55,7 +90,7 @@ describe('the Sync status', () => {
     const status = asAdmin([linked({ akahuMissingSince: '2026-10-18T18:00:00.000Z' })])
     expect(status!.tone).toBe('danger')
     expect(status!.cause).toBe('Kiwibank needs reconnecting in Akahu: Akahu has stopped listing that account. No Transaction has been removed.')
-    expect(status!.action).toBe('Reconnect it in Akahu, then link the Account again on the Accounts screen.')
+    expect(status!.action).toBe('Reconnect it in Akahu, then link the Account again in Settings.')
   })
 
   it('names every bank whose Link is broken, without repeating one', () => {
