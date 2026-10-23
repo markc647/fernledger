@@ -39,7 +39,8 @@ export default defineConfig({
   ],
   webServer: {
     // The production build, served by the Worker runtime with the real headers (public/_headers and worker/security-headers.ts).
-    command: `node scripts/e2e-prepare.mjs && npm run build && npx vite preview --port ${port} --strictPort`,
+    // E2E_SKIP_BUILD serves the build already in dist/: scripts/e2e-shards.mjs builds once for all its parts, which would overwrite each other's.
+    command: `node scripts/e2e-prepare.mjs && ${process.env.E2E_SKIP_BUILD ? '' : 'npm run build && '}npx vite preview --port ${port} --strictPort`,
     timeout: 180_000,
     url: baseURL,
     reuseExistingServer: !process.env.CI,

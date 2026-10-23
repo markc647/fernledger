@@ -14,7 +14,8 @@ Self-hosted NZ bank-account tracker on Cloudflare Workers (free plan) + D1 + R2,
 
 ## Before reporting work done
 - Run `npm run check` (lint, typecheck, tests, script tests, migration check, secret scan and its self-test). It's green when it exits 0. The first scan downloads a pinned, checksum-verified gitleaks into your user cache.
-- Run the browser specs of the pages your change affects (`npx playwright test e2e/<spec>.ts`; `TEST_TEMP_ROOT=<folder>`, such as a RAM disk, puts the tests' database and temp files there), not the full suite. Push the branch; CI runs the full suite on it.
+- Run the browser specs of the pages your change affects (`npx playwright test e2e/<spec>.ts`; `TEST_TEMP_ROOT=<folder>`, such as a RAM disk, puts the tests' database and temp files there), not the full suite.
+  For the whole suite, `npm run test:e2e:shards` builds once and runs it in four parts side by side, each on its own database (about a quarter of the time). Push the branch; CI runs the full suite on it.
 - `npm install` points git at `.githooks/`, whose pre-commit hook runs lint, typecheck and a staged-files secret scan.
 
 ## Hard rules

@@ -15,6 +15,7 @@
     "lint": "oxlint",
     "seed": "node scripts/seed.mjs",
     "test:e2e": "playwright test",
+    "test:e2e:shards": "node scripts/e2e-shards.mjs",
     "test:scripts": "node --test \"scripts/*.test.mjs\"",
     "migrations:check": "node scripts/check-migrations.mjs",
     "sample-db": "node scripts/sample-db.mjs",

@@ -23,6 +23,10 @@ import {
   themeToggle,
 } from './shell-helpers'
 
+// A third of the whole suite is in this file, and none of its tests needs another's: let a shard take some of them
+// (ci.yml, scripts/e2e-shards.mjs) rather than all. Each shard still runs them one at a time (playwright.config.ts).
+test.describe.configure({ mode: 'parallel' })
+
 /** A box (null if the thing is not there) is wholly inside a window of this size: something fixed to the window, or drawn outside the page (a dialog, a popover), is not in the page's scrollWidth. */
 function expectInside(box: { x: number; y: number; width: number; height: number } | null, viewport: { width: number; height: number }) {
   expect(box, 'it is drawn').not.toBeNull()
