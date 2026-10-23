@@ -63,12 +63,19 @@ export const STORE_DETAILS = `UPDATE accounts SET ${entries.map(([key, column]) 
  */
 export const CLEAR_DETAILS = [...entries.map(([, column]) => column), 'akahu_missing_since', 'akahu_last_failure'].map((column) => `${column} = NULL`).join(', ')
 
-/** The part of the details the Accounts screen shows, as the Accounts list reads them. The logo URL is not among them. */
+/**
+ * The part of the details the Accounts screen shows, as the Accounts list reads them: everything Akahu sends about the Account except the
+ * logo URL, which is stored and never sent to the browser (ADR 0010, and the comment at the top of this file).
+ */
 const DISPLAYED = [
   'akahuName',
+  'akahuFormattedAccount',
   'akahuStatus',
   'akahuType',
+  'akahuAttributes',
+  'akahuConnectionId',
   'akahuConnectionName',
+  'akahuConnectionType',
   'akahuBalanceCurrency',
   'akahuBalanceCurrentCents',
   'akahuBalanceAvailableCents',

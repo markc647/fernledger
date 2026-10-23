@@ -12,6 +12,10 @@ const LOGO = 'https://cdn.akahu.nz/logos/connections/conn_example0000000000001'
 const none = {
   akahuAccountId: null,
   akahuName: null,
+  akahuFormattedAccount: null,
+  akahuAttributes: null,
+  akahuConnectionId: null,
+  akahuConnectionType: null,
   akahuStatus: null,
   akahuType: null,
   akahuConnectionName: null,
@@ -37,9 +41,13 @@ const ACCOUNTS = [
     cutoverDate: null,
     akahuAccountId: 'acc_example000000000000001',
     akahuName: 'EXAMPLE EVERYDAY',
+    akahuFormattedAccount: '99-9999-9999999-27',
     akahuStatus: 'ACTIVE',
     akahuType: 'CHECKING',
+    akahuAttributes: '["PAYMENT_TO","PAYMENT_FROM","TRANSACTIONS"]',
+    akahuConnectionId: 'conn_example0000000000001',
     akahuConnectionName: 'Example Bank',
+    akahuConnectionType: 'official',
     akahuConnectionLogo: LOGO,
     akahuBalanceCurrency: 'NZD',
     akahuBalanceCurrentCents: 70_717,
@@ -102,8 +110,13 @@ test('a linked Account shows the bank, Akahu\'s name beside Fernledger\'s, its t
   const fact = async (term: string) => akahu.locator(`dt:text-is("${term}") + dd`).innerText()
   expect(await fact('Bank')).toBe('Example Bank')
   expect(await fact("Akahu's name")).toBe('EXAMPLE EVERYDAY')
+  expect(await fact("Akahu's account number")).toBe('99-9999-9999999-27')
   expect(await fact('Type')).toBe('Checking')
   expect(await fact('Status')).toBe('Active')
+  // Akahu's own words, read as words: what it says it can do with the Account, which bank connection it came from and of what kind (ticket 42).
+  expect(await fact("Akahu's attributes")).toBe('Payment to, Payment from, Transactions')
+  expect(await fact("Akahu's bank connection")).toBe('conn_example0000000000001')
+  expect(await fact("Akahu's connection type")).toBe('Official')
   expect(await fact('Balance')).toBe('$707.17 NZD ($700.10 available)')
   // 02:46 UTC on 21 October is 3:46 pm that day in NZ (UTC+13), and 18:05 UTC on the 20th is 7:05 am on the 21st.
   expect(await fact('Akahu last read the bank')).toBe('Balance: Wed 21 Oct 2026, 3:46 pm; Account details: Wed 21 Oct 2026, 3:47 pm; Transactions: Wed 21 Oct 2026, 7:05 am')

@@ -28,6 +28,12 @@ type Account = {
   /** When Fernledger last finished a Sync of the Account; Akahu's own `refreshed` times below are when Akahu last read the bank. */
   akahuSyncedAt: string | null
   akahuName: string | null
+  /** The account number as Akahu formats it, which may differ from the one Fernledger holds. */
+  akahuFormattedAccount: string | null
+  /** Akahu's attributes for the Account, as the JSON array of words Akahu sent (["PAYMENT_TO","TRANSACTIONS"]). */
+  akahuAttributes: string | null
+  akahuConnectionId: string | null
+  akahuConnectionType: string | null
   /** When Akahu first stopped listing the Account, which is a broken Account Link, or null while it still lists it. */
   akahuMissingSince: string | null
   /** Why the last Sync of it did not finish ('refused', 'unreachable', 'unreadable'), or null when the last one did. */
@@ -175,11 +181,15 @@ function AkahuDetails({ account }: { account: Account }) {
       <dl className="grid grid-cols-[max-content_1fr] gap-x-3">
         <DetailLine term="Bank">{account.akahuConnectionName}</DetailLine>
         <DetailLine term="Akahu's name">{account.akahuName}</DetailLine>
+        <DetailLine term="Akahu's account number">{account.akahuFormattedAccount}</DetailLine>
         <DetailLine term="Type">{account.akahuType && akahuWords(account.akahuType)}</DetailLine>
         <DetailLine term="Status">{account.akahuStatus && akahuWords(account.akahuStatus)}</DetailLine>
+        <DetailLine term="Akahu's attributes">{attributes(account.akahuAttributes)}</DetailLine>
         <DetailLine term="Balance">{balance}</DetailLine>
         <DetailLine term="Last Sync">{isMoment(account.akahuSyncedAt) ? formatDateTime(account.akahuSyncedAt) : 'Never synced'}</DetailLine>
         <DetailLine term="Akahu last read the bank">{read.map(([what, at]) => `${what}: ${formatDateTime(at!)}`).join('; ')}</DetailLine>
+        <DetailLine term="Akahu's bank connection">{account.akahuConnectionId}</DetailLine>
+        <DetailLine term="Akahu's connection type">{account.akahuConnectionType && akahuWords(account.akahuConnectionType)}</DetailLine>
       </dl>
     </>
   )
@@ -210,6 +220,22 @@ function BrokenLink({ account }: { account: Account }) {
       )}
     </div>
   )
+}
+
+/**
+ * Akahu's attributes for an Account, as words a reader can read ("Payment to, Transactions"). The stored value is the JSON array Akahu sent;
+ * anything else in that column, from an older answer or a hand-edited row, gives no line rather than failing the screen.
+ */
+function attributes(stored: string | null | undefined) {
+  if (!stored) return null
+  try {
+    const words: unknown = JSON.parse(stored)
+    if (!Array.isArray(words)) return null
+    const listed = words.filter((word): word is string => typeof word === 'string' && word.trim() !== '')
+    return listed.length === 0 ? null : listed.map(akahuWords).join(', ')
+  } catch {
+    return null
+  }
 }
 
 /** One line of the details; a thing Akahu did not give has no line. */
