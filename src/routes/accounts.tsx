@@ -66,7 +66,6 @@ function Accounts() {
   const columns: Column<Account>[] = [
     { key: 'name', header: 'Name', cell: (account) => account.name },
     { key: 'number', header: 'Account number', cell: (account) => <span className="tabular-nums">{account.accountNumber}</span> },
-    { key: 'akahu', header: 'From Akahu', cell: (account) => <AkahuDetails account={account} /> },
   ]
   if (me?.role === 'admin')
     columns.push({
@@ -103,6 +102,15 @@ function Accounts() {
             columns={columns}
             rows={accounts}
             getRowKey={(account) => account.id}
+            /* What Akahu says sits under the Account, across the whole table, rather than in a column of its own: its label-and-value lines are too wide
+               to share the row, and squeezed into a column they wrapped the Name, the Account number and the Rename button (A1). */
+            detail={(account) => (
+              <>
+                {/* The row under the Account has no column heading of its own, so it says whose details these are for a screen reader. */}
+                <span className="sr-only">From Akahu, {account.name}</span>
+                <AkahuDetails account={account} />
+              </>
+            )}
             expanded={
               renamingAccount && {
                 after: renamingAccount.id,

@@ -119,3 +119,15 @@ export function formatDateAtTime(instant: Date | number) {
   const moment = new Date(instant)
   return `${formatInstantDate(moment)} at ${timeOfDay(moment)}`
 }
+
+/**
+ * A Transaction's description with the time the bank wrote at its end taken off ("POS W/D Example Store-12:07" → "POS W/D Example Store"), for the
+ * Transaction detail page alone: the lists, Uncategorised and the Reports show the description as the bank wrote it, and so does "From the bank".
+ * `readFromDescription` is the Bank Time that was read out of this description (`bankTimeFromMemo`); without one nothing is taken off, so a
+ * description that merely ends in something time-shaped keeps it. The pattern is worker/kiwibank-time.ts's, which a page cannot import
+ * (tsconfig.api-types.json): the two are kept the same by the test beside this file.
+ */
+export function withoutBankTime(description: string, readFromDescription: string | null | undefined) {
+  // Undefined, not just null, because an answer from before the field was sent has none, and that must leave the description whole.
+  return readFromDescription ? description.trimEnd().replace(/-([01]\d|2[0-3]):([0-5]\d)$/, '') : description
+}

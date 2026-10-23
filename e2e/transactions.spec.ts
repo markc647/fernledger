@@ -547,12 +547,14 @@ test('the details show what Sync supplies, and a Bank Time only when the bank ga
   await expect(page.getByRole('region', { name: 'Summary' })).toContainText('Lunch with Sam')
   await noAxeViolations(page)
 
-  // The same Transaction without a Bank Time shows no time at all, though the raw date has one.
+  // The same Transaction without a Bank Time keeps the line and says Akahu sent none, rather than dropping it (A2): every field Akahu
+  // sends about a Synced Transaction has a line, so what is held can be read against Akahu's own row.
   await page.unroute('**/api/transactions/4242')
   await page.route('**/api/transactions/4242', (route) => route.fulfill({ json: { ...detail, bankTime: null } }))
   await page.reload()
   await expect(page.getByRole('region', { name: 'From the bank' })).toContainText('First seen by Akahu')
-  await expect(page.getByRole('region', { name: 'From the bank' }).getByText('Bank Time')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'From the bank' }).getByText('Bank Time')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'From the bank' })).toContainText('Not sent')
 })
 
 // Ticket 43: Akahu's category and the EFTPOS time read from a Kiwibank description. The Transaction is stubbed, so this needs nothing in the database.
@@ -605,17 +607,74 @@ test("the details show Akahu's category, labelled as Akahu's, and an EFTPOS time
   await expect(page.getByRole('region', { name: 'Summary' })).not.toContainText('Example category')
   await noAxeViolations(page)
 
-  // One with neither says nothing of them, rather than "none".
+  // One with neither keeps both lines and says Akahu sent nothing for them (A2), and never reads as a category called nothing.
   await page.unroute('**/api/transactions/4243')
   await page.route('**/api/transactions/4243', (route) =>
     route.fulfill({ json: { ...detail, bankMemo: 'DIRECT DEBIT Example Energy', bankTime: null, akahuCategoryName: null, akahuCategoryGroupName: null } }),
   )
   await page.reload()
   await expect(bank).toContainText('DIRECT DEBIT Example Energy')
-  await expect(bank.getByText('Bank Time')).toHaveCount(0)
-  await expect(bank.getByText("Akahu's category")).toHaveCount(0)
-  await expect(bank).not.toContainText("Akahu's group")
+  await expect(bank.getByText('Bank Time')).toBeVisible()
+  await expect(bank.getByText("Akahu's category")).toBeVisible()
+  await expect(bank).toContainText('Akahu sent no group for it')
+  await expect(bank).not.toContainText("In Akahu's group")
   await noAxeViolations(page)
+})
+
+// A3: the time Kiwibank writes at the end of its description is the Bank Time, so the detail page writes the description without it. Only here:
+// "From the bank" still shows the bank's own words, and nothing stored changes.
+test("the detail page writes the description without the time the bank wrote at its end, and keeps the bank's own words under 'From the bank'", async ({ page, context }) => {
+  await signInAs(context, 'member')
+  const detail = {
+    id: 4244,
+    accountId: 1,
+    accountName: 'Example cheque',
+    date: '2026-10-16',
+    amountCents: -1840,
+    description: 'POS W/D Example Store-12:07',
+    bankMemo: 'POS W/D Example Store-12:07',
+    bankType: 'EFTPOS',
+    bankReference: null,
+    bankCounterpartyAccount: null,
+    bankCardSuffix: null,
+    bankParticulars: null,
+    bankPaymentCode: null,
+    source: 'sync',
+    categoryId: null,
+    categoryName: null,
+    categorySource: null,
+    categoryKind: null,
+    note: null,
+    transfer: null,
+    transferAccountName: null,
+    transferTransactionId: null,
+    transferPartnerOverridden: false,
+    canMarkNotTransfer: false,
+    notTransfer: false,
+    bankTime: '2026-10-15T23:07:00.000Z',
+    firstSeenAt: '2026-10-16T06:30:00.000Z',
+    akahuCategoryName: null,
+    akahuCategoryGroupName: null,
+    bankTimeFromMemo: '2026-10-15T23:07:00.000Z', // the time was read from the description, which is why it comes off
+  }
+  await page.route('**/api/transactions/4244', (route) => route.fulfill({ json: detail }))
+  await page.goto('/transactions/4244')
+
+  const summary = page.getByRole('region', { name: 'Summary' })
+  await expect(summary).toContainText('POS W/D Example Store')
+  await expect(summary).not.toContainText('POS W/D Example Store-12:07')
+  // The line under the heading, which says the same Transaction, reads the same way.
+  await expect(page.getByText(/^Fri 16 Oct 2026, POS W\/D Example Store, /)).toBeVisible()
+  const bank = page.getByRole('region', { name: 'From the bank' })
+  await expect(bank).toContainText('POS W/D Example Store-12:07') // the Description Akahu sent and the bank memo, both as the bank wrote them
+  await expect(bank).toContainText('Fri 16 Oct 2026, 12:07 pm')
+  await noAxeViolations(page)
+
+  // The same description with no time read from it keeps every character: only a Bank Time read from the description takes one off.
+  await page.unroute('**/api/transactions/4244')
+  await page.route('**/api/transactions/4244', (route) => route.fulfill({ json: { ...detail, bankTime: null, bankTimeFromMemo: null } }))
+  await page.reload()
+  await expect(summary).toContainText('POS W/D Example Store-12:07')
 })
 
 test.describe('a Transaction that does not exist', () => {

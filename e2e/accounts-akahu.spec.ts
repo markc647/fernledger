@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 
 // What the Accounts screen shows of what Akahu says about a linked Account (ticket 42). The Worker's answer is stubbed, because Sync is what fills
@@ -88,9 +88,16 @@ async function open(page: Page, context: Parameters<typeof signInAs>[0], role: '
   return page.getByRole('table', { name: 'Accounts' }).getByRole('row')
 }
 
+/**
+ * What Akahu says about an Account is a row of its own under it, across the table, and not a column (A1), so these tests read that row.
+ * It is found by the words only it carries: the screen-reader label that says whose details they are.
+ */
+const akahuRow = (rows: Locator, name: string) => rows.filter({ hasText: `From Akahu, ${name}` })
+
 test('a linked Account shows the bank, Akahu\'s name beside Fernledger\'s, its type and status, the balance with its currency, when Akahu last read the bank and when Fernledger last Synced it, in NZ time', async ({ page, context }) => {
-  const row = (await open(page, context)).filter({ hasText: 'Example everyday' })
-  await expect(row.getByRole('cell', { name: 'Example everyday', exact: true })).toBeVisible()
+  const rows = await open(page, context)
+  await expect(rows.getByRole('cell', { name: 'Example everyday', exact: true })).toBeVisible()
+  const row = akahuRow(rows, 'Example everyday')
   const akahu = row.getByRole('term').locator('xpath=ancestor::dl[1]')
   const fact = async (term: string) => akahu.locator(`dt:text-is("${term}") + dd`).innerText()
   expect(await fact('Bank')).toBe('Example Bank')
@@ -106,14 +113,14 @@ test('a linked Account shows the bank, Akahu\'s name beside Fernledger\'s, its t
 })
 
 test('an Account with no Akahu link shows none of it, and says it is not linked', async ({ page, context }) => {
-  const row = (await open(page, context)).filter({ hasText: 'Example savings' })
+  const row = akahuRow(await open(page, context), 'Example savings')
   await expect(row).toContainText('Not linked to Akahu')
   await expect(row.getByRole('term')).toHaveCount(0)
   await expect(row).not.toContainText(/null|undefined|NaN|Invalid/)
 })
 
 test('a linked Account whose balance and optional fields are missing shows what Akahu gave and says the balance was not given', async ({ page, context }) => {
-  const row = (await open(page, context)).filter({ hasText: 'Example card' })
+  const row = akahuRow(await open(page, context), 'Example card')
   await expect(row.locator('dt:text-is("Bank") + dd')).toHaveText('Example Bank')
   await expect(row.locator('dt:text-is("Akahu\'s name") + dd')).toHaveText('EXAMPLE CARD')
   await expect(row.locator('dt:text-is("Type") + dd')).toHaveText('Credit card')
@@ -129,13 +136,13 @@ test('a linked Account Akahu gave no status, type or bank for shows the lines it
   await signInAs(context, 'member')
   await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ ...ACCOUNTS[2], akahuStatus: null, akahuType: null, akahuConnectionName: null }] }))
   await page.goto('/accounts')
-  const row = page.getByRole('table', { name: 'Accounts' }).getByRole('row').filter({ hasText: 'Example card' })
+  const row = akahuRow(page.getByRole('table', { name: 'Accounts' }).getByRole('row'), 'Example card')
   await expect(row.locator("dt:text-is(\"Akahu's name\") + dd")).toHaveText('EXAMPLE CARD')
   await expect(row.getByRole('term')).toHaveText(["Akahu's name", 'Balance', 'Last Sync'])
 })
 
 test('a linked Account that Sync has not read yet says so', async ({ page, context }) => {
-  const row = (await open(page, context)).filter({ hasText: 'Example new link' })
+  const row = akahuRow(await open(page, context), 'Example new link')
   await expect(row).toContainText('Linked to Akahu. The next Sync will read its details.')
   await expect(row.getByRole('term')).toHaveCount(0)
 })
@@ -172,7 +179,7 @@ test('an Account whose answer holds no balance or times shows what it has and sa
     }),
   )
   await page.goto('/accounts')
-  const row = page.getByRole('table', { name: 'Accounts' }).getByRole('row').filter({ hasText: 'Example sparse' })
+  const row = akahuRow(page.getByRole('table', { name: 'Accounts' }).getByRole('row'), 'Example sparse')
   await expect(row.locator('dt:text-is("Balance") + dd')).toHaveText('Akahu did not give one')
   await expect(row.locator('dt:text-is("Last Sync") + dd')).toHaveText('Never synced')
   await expect(row).not.toContainText(/null|undefined|NaN|Invalid/)
@@ -183,14 +190,14 @@ test('an Account whose answer predates the Link fields shows its details and no 
   const { akahuMissingSince: _since, akahuLastFailure: _failure, ...older } = ACCOUNTS[0]!
   await page.route('**/api/accounts', (route) => route.fulfill({ json: [older] }))
   await page.goto('/accounts')
-  const row = page.getByRole('table', { name: 'Accounts' }).getByRole('row').filter({ hasText: 'Example everyday' })
+  const row = akahuRow(page.getByRole('table', { name: 'Accounts' }).getByRole('row'), 'Example everyday')
   await expect(row.locator("dt:text-is(\"Akahu's name\") + dd")).toHaveText('EXAMPLE EVERYDAY')
   await expect(row).not.toContainText('Account Link broken')
   await expect(row).not.toContainText(/null|undefined|NaN|Invalid/)
 })
 
 test('an Account Akahu has stopped listing says its Link is broken, since when, and that nothing was removed', async ({ page, context }) => {
-  const row = (await open(page, context)).filter({ hasText: 'Example gone' })
+  const row = akahuRow(await open(page, context), 'Example gone')
   await expect(row).toContainText('Account Link broken')
   // 18:00 UTC on 19 October is 7:00 am on the 20th in NZ.
   await expect(row).toContainText('Akahu has stopped listing this account since Tue 20 Oct 2026, 7:00 am.')
@@ -203,7 +210,7 @@ test('an Account Akahu has stopped listing says its Link is broken, since when, 
 })
 
 test('the Admin is sent to Settings to link an Account whose Link is broken again', async ({ page, context }) => {
-  const row = (await open(page, context, 'admin')).filter({ hasText: 'Example gone' })
+  const row = akahuRow(await open(page, context, 'admin'), 'Example gone')
   await expect(row).toContainText('Reconnect the bank in Akahu, then')
   await expect(row.getByRole('link', { name: 'link this Account again in Settings' })).toHaveAttribute('href', '/settings')
   await noAxeViolations(page)
