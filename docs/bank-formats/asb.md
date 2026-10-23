@@ -22,7 +22,7 @@ Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount
 |---|---|---|
 | 1 | Export timestamp | Ignored |
 | 2 | Bank, branch, account number and suffix, then the account's name in brackets | Matching the Account |
-| 3–4 | From / To dates (`YYYYMMDD`) | The file's date range. The To date is the default Cutover Date |
+| 3–4 | From / To dates (`YYYYMMDD`) | The file's date range. The Cutover Date the Import offers is the day **after** the To date |
 | 5 | Available balance | Ignored |
 | 6 | **Ledger balance** and its date | Balance history and the Balance Check |
 | 7 | Column header | Format detection |

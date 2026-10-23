@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BankCsvRow } from './bank-csv'
-import { CHUNK_SIZE, countOnOrAfter, DAILY_ROW_WRITES, MAX_CHUNKS, MAX_IMPORT_ROWS, planChunks, previewChunks, replaceWrites } from './import-chunks'
+import { CHUNK_SIZE, countOnOrAfter, cutoverOffer, DAILY_ROW_WRITES, MAX_CHUNKS, MAX_IMPORT_ROWS, planChunks, previewChunks, replaceWrites } from './import-chunks'
 
 const row = (date: string, uniqueId: string): BankCsvRow => ({ date, uniqueId, tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE', bankMemo: '', amountCents: -100 })
 const many = (n: number) => Array.from({ length: n }, (_, i) => row('2026-10-01', `ID${String(i).padStart(5, '0')}`))
@@ -25,6 +25,24 @@ describe('planChunks', () => {
     const newestFirst = [row('2019-10-31', '2019103101'), row('2019-10-04', '2019100402'), row('2019-10-04', '2019100401'), row('2019-10-02', '2019100201')]
 
     expect(planChunks(newestFirst).flat().map((r) => r.uniqueId)).toEqual(['2019100201', '2019100401', '2019100402', '2019103101'])
+  })
+})
+
+describe('cutoverOffer', () => {
+  it('offers the day after the last date a file holds, so every row of the file is imported', () => {
+    expect(cutoverOffer('2026-10-01', null)).toEqual({ date: '2026-10-02', alreadyLater: false })
+    expect(cutoverOffer('2026-10-31', null)).toEqual({ date: '2026-11-01', alreadyLater: false })
+    expect(cutoverOffer('2026-12-31', null)).toEqual({ date: '2027-01-01', alreadyLater: false })
+  })
+
+  it('still offers it to an Account whose Cutover Date is the same day or earlier', () => {
+    expect(cutoverOffer('2026-10-01', '2026-10-02')).toEqual({ date: '2026-10-02', alreadyLater: false })
+    expect(cutoverOffer('2026-10-01', '2026-09-01')).toEqual({ date: '2026-10-02', alreadyLater: false })
+  })
+
+  it('will not move an Account whose Cutover Date is already later backwards', () => {
+    expect(cutoverOffer('2026-10-01', '2026-10-03')).toEqual({ date: '2026-10-02', alreadyLater: true })
+    expect(cutoverOffer('2026-06-30', '2026-10-02')).toEqual({ date: '2026-07-01', alreadyLater: true })
   })
 })
 
