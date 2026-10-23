@@ -108,7 +108,7 @@ describe('importOutcome', () => {
 
 describe('syncBalance', () => {
   // Akahu read the bank at 02:46 UTC on 21 October, which is 15:46 that day in NZ.
-  const reported = { akahuBalanceCurrency: 'NZD', akahuBalanceCurrentCents: 70_717, akahuRefreshedBalanceAt: '2026-10-21T02:46:00.000Z', akahuRefreshedTransactionsAt: '2026-10-21T02:46:00.000Z' }
+  const reported = { akahuType: 'CHECKING', akahuBalanceCurrency: 'NZD', akahuBalanceCurrentCents: 70_717, akahuRefreshedBalanceAt: '2026-10-21T02:46:00.000Z', akahuRefreshedTransactionsAt: '2026-10-21T02:46:00.000Z' }
 
   it("takes Akahu's balance as of the NZ date it was read, in cents", () => {
     expect(syncBalance(reported, true)).toEqual({ balance: { asOfDate: '2026-10-21', bankCents: 70_717 } })
@@ -122,6 +122,12 @@ describe('syncBalance', () => {
   it('takes an overdrawn or zero balance, which are balances', () => {
     expect(syncBalance({ ...reported, akahuBalanceCurrentCents: -1_250 }, true)).toMatchObject({ balance: { bankCents: -1_250 } })
     expect(syncBalance({ ...reported, akahuBalanceCurrentCents: 0 }, true)).toMatchObject({ balance: { bankCents: 0 } })
+  })
+
+  it("takes a credit card's balance, which Akahu sends as what is owed, as money out", () => {
+    const card = { ...reported, akahuType: 'CREDITCARD' }
+    expect(syncBalance({ ...card, akahuBalanceCurrentCents: 126_841 }, true)).toMatchObject({ balance: { bankCents: -126_841 } })
+    expect(syncBalance({ ...card, akahuBalanceCurrentCents: -2_500 }, true)).toMatchObject({ balance: { bankCents: 2_500 } }) // in credit
   })
 
   it('records nothing when Akahu sent no balance', () => {
