@@ -165,7 +165,16 @@ function AkahuDetails({ account }: { account: Account }) {
         <DetailLine term="Akahu's attributes">{account.akahuAttributes && (account.akahuAttributes.length === 0 ? 'None' : account.akahuAttributes.map(akahuWords).join(', '))}</DetailLine>
         <DetailLine term="Balance">{balance}</DetailLine>
         <DetailLine term="Last Sync">{isMoment(account.akahuSyncedAt) ? formatDateTime(account.akahuSyncedAt) : 'Never synced'}</DetailLine>
-        <DetailLine term="Akahu last read the bank">{read.map(([what, at]) => `${what}: ${formatDateTime(at!)}`).join('; ')}</DetailLine>
+        {/* One part to a line: three times run together read as one long string, and it is three separate readings of the bank. */}
+        <DetailLine term="Akahu last read the bank">
+          {read.length === 0
+            ? null
+            : read.map(([what, at]) => (
+                <span key={what} className="block">
+                  {what}: {formatDateTime(at!)}
+                </span>
+              ))}
+        </DetailLine>
       </dl>
     </>
   )

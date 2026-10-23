@@ -119,7 +119,12 @@ test('a linked Account shows the bank, Akahu\'s name beside Fernledger\'s, its t
   expect(await fact("Akahu's connection type")).toBe('Official')
   expect(await fact('Balance')).toBe('$707.17 NZD ($700.10 available)')
   // 02:46 UTC on 21 October is 3:46 pm that day in NZ (UTC+13), and 18:05 UTC on the 20th is 7:05 am on the 21st.
-  expect(await fact('Akahu last read the bank')).toBe('Balance: Wed 21 Oct 2026, 3:46 pm; Account details: Wed 21 Oct 2026, 3:47 pm; Transactions: Wed 21 Oct 2026, 7:05 am')
+  // One reading of the bank to a line, because they are three separate readings and run together they read as one long string.
+  expect((await fact('Akahu last read the bank')).split('\n')).toEqual([
+    'Balance: Wed 21 Oct 2026, 3:46 pm',
+    'Account details: Wed 21 Oct 2026, 3:47 pm',
+    'Transactions: Wed 21 Oct 2026, 7:05 am',
+  ])
   // Fernledger's own last Sync is a different time from those, and the screen keeps the two apart: 18:00 UTC on the 20th is 7:00 am on the 21st.
   expect(await fact('Last Sync')).toBe('Wed 21 Oct 2026, 7:00 am')
   await expect(row).not.toContainText('refreshed')
