@@ -90,7 +90,9 @@ test.describe('About your data', () => {
     await page.goto('/about-your-data')
     const accounts = section(page, 'What is held').getByRole('listitem').filter({ has: page.getByText('Accounts:', { exact: true }) })
     await expect(accounts).toContainText('If this Fernledger uses Akahu Sync')
-    await expect(accounts).toContainText("its own name for the account, its status and type, the bank's name, the balance it reports (with the currency) and when Akahu last read the bank for each part, and when Fernledger last Synced the Account (its Last Sync)")
+    await expect(accounts).toContainText(
+      "its own name for the account, the account number as Akahu formats it, its status and type, Akahu's attributes for it, the bank's name, the balance it reports (with the currency) and when Akahu last read the bank for each part, the bank connection it came from and of what kind, and when Fernledger last Synced the Account (its Last Sync)",
+    )
     await expect(accounts).toContainText("Fernledger keeps the address and nothing else: it never fetches or shows the logo, so nobody's browser contacts Akahu for it. Unlinking an Account clears all of this.")
   })
 

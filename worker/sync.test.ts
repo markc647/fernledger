@@ -592,11 +592,14 @@ describe('the Account details Sync keeps', () => {
     stubAkahu(() => onePage([]))
     listing(akahuAccountBody())
     await runSync()
-    const { balance: _balance, refreshed: _refreshed, ...fewer } = akahuAccountBody()
+    const { balance: _balance, refreshed: _refreshed, attributes: _attributes, formatted_account: _formatted, ...fewer } = akahuAccountBody()
     listing({ ...fewer, connection: { _id: 'conn_example0000000000001', name: 'Example Bank' }, name: 'RENAMED' })
     await runSync()
     expect(stored(await details(accountId))).toMatchObject({
       akahu_name: 'RENAMED',
+      // The two the Accounts screen gained with ticket 42 go back to nothing like the rest, rather than showing what Akahu no longer says.
+      akahu_formatted_account: null,
+      akahu_attributes: null,
       akahu_connection_logo: null,
       akahu_connection_type: null,
       akahu_balance_currency: null,

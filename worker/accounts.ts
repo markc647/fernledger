@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import { accountName, isoDate } from './account-fields'
-import { CLEAR_DETAILS, SELECT_DISPLAYED } from './akahu-details'
+import { CLEAR_DETAILS, SELECT_DISPLAYED, toAttributeWords } from './akahu-details'
 import type { DisplayedDetails } from './akahu-details'
 import type { AppEnv } from './app-env'
 import { recordChange } from './changelog'
@@ -26,6 +26,9 @@ type AccountRow = {
   [K in keyof DisplayedDetails]: DisplayedDetails[K] | null
 }
 
+/** One Account as the browser gets it: the row, with Akahu's attributes as the words they are rather than the JSON the column holds. */
+type Account = Omit<AccountRow, 'akahuAttributes'> & { akahuAttributes: string[] | null }
+
 const rename = z.object({ name: accountName })
 const cutover = z.object({ cutoverDate: z.nullable(isoDate) })
 // Akahu's own account ID, which is opaque: its shape is all that can be checked, and the link is only as good as the Admin's choice
@@ -39,7 +42,7 @@ export const accounts = new Hono<AppEnv>()
               akahu_missing_since AS akahuMissingSince, akahu_last_failure AS akahuLastFailure, ${SELECT_DISPLAYED}
        FROM accounts ORDER BY name COLLATE NOCASE, id`,
     ).all<AccountRow>()
-    return c.json(results)
+    return c.json(results.map(({ akahuAttributes, ...account }): Account => ({ ...account, akahuAttributes: toAttributeWords(akahuAttributes) })))
   })
   .patch('/:id', validate('json', rename), async (c) => {
     const id = pathId(c.req.param('id'))

@@ -69,8 +69,10 @@ The daily pull of new Transactions and Pending Transactions from Akahu. An Accou
 _Avoid_: Refresh, update, fetch
 
 **Account Link**:
-The association between an Account and its account in Akahu; it can break when a bank reconnects or migrates, and is then re-linked by the Admin. While it holds, each Sync keeps what Akahu says about the account (the bank's name, Akahu's own name for it, its type and status, its balance and currency, when Akahu last read the bank for it, when Fernledger last Synced it (its Last Sync), and the bank's logo address, which is never fetched or shown); unlinking or re-linking clears it.
-_Avoid_: Mapping, connection
+The association between an Account and its account in Akahu; it can break when a bank reconnects or migrates, and is then re-linked by the Admin. While it holds, each Sync keeps everything Akahu says about the account and the Accounts screen shows it: the bank's name, Akahu's own connection to that bank (its ID and the kind of connection it is), Akahu's own name for the account and the account number it formats, its type and status, what Akahu says it can do with the account (its attributes), its balance and currency, when Akahu last read the bank for it, and when Fernledger last Synced it (its Last Sync). The bank's logo address is kept too and never fetched, shown or sent to the browser (ADR 0010). Unlinking or re-linking clears the lot.
+
+Akahu's own *connection* is one of those fields, not another word for this: it is Akahu's object for the bank the account sits at, and it is only ever written as Akahu's (`akahuConnectionId`, "Akahu's connection ID").
+_Avoid_: Mapping, connection (for the Account Link itself)
 
 **Bank balance**:
 What the bank says an Account held on a date: the ledger balance in an Import's file, or the balance Akahu reports, recorded after a Sync that finished and dated the NZ day Akahu read the bank. An Account's balance is its latest bank balance the Transactions reach, plus the Transactions after it.

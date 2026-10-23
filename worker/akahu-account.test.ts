@@ -168,7 +168,9 @@ describe('the routes that carry it', () => {
   it('lists the details the Accounts screen shows, and never the logo URL', async () => {
     const id = (await env.DB.prepare("INSERT INTO accounts (account_number, name, akahu_account_id) VALUES ('99-9999-9999999-01', 'Everyday', 'acc_example000000000000001') RETURNING id").first<{ id: number }>())!.id
     await env.DB.prepare(
-      `UPDATE accounts SET akahu_name = 'EXAMPLE EVERYDAY', akahu_status = 'ACTIVE', akahu_type = 'CHECKING', akahu_connection_name = 'Example Bank',
+      `UPDATE accounts SET akahu_name = 'EXAMPLE EVERYDAY', akahu_formatted_account = '99-9999-9999999-01', akahu_status = 'ACTIVE', akahu_type = 'CHECKING',
+         akahu_attributes = '["PAYMENT_TO","TRANSACTIONS"]', akahu_connection_id = 'conn_example0000000000001', akahu_connection_name = 'Example Bank',
+         akahu_connection_type = 'official',
          akahu_connection_logo = 'https://cdn.akahu.nz/logos/connections/conn_example0000000000001', akahu_balance_currency = 'NZD',
          akahu_balance_current_cents = 70717, akahu_balance_available_cents = 70010, akahu_refreshed_balance_at = '2026-10-21T02:46:00.000Z',
          akahu_synced_at = '2026-10-20T18:00:00.000Z' WHERE id = ?`,
@@ -182,9 +184,14 @@ describe('the routes that carry it', () => {
         id,
         akahuAccountId: 'acc_example000000000000001',
         akahuName: 'EXAMPLE EVERYDAY',
+        akahuFormattedAccount: '99-9999-9999999-01',
         akahuStatus: 'ACTIVE',
         akahuType: 'CHECKING',
+        // The words Akahu sent, as the words they are: the JSON the column holds is this Worker's storage and never the browser's to read.
+        akahuAttributes: ['PAYMENT_TO', 'TRANSACTIONS'],
+        akahuConnectionId: 'conn_example0000000000001',
         akahuConnectionName: 'Example Bank',
+        akahuConnectionType: 'official',
         akahuBalanceCurrency: 'NZD',
         akahuBalanceCurrentCents: 70717,
         akahuBalanceAvailableCents: 70010,
@@ -194,6 +201,17 @@ describe('the routes that carry it', () => {
         akahuSyncedAt: '2026-10-20T18:00:00.000Z',
       }),
     ])
+  })
+
+  it.each([
+    ['an empty list, which is Akahu saying the Account can do nothing', '[]', []],
+    ['nothing at all, when Akahu sent no attributes', null, null],
+    ['nothing at all, when the column holds something that is not a list of words', '{"not":"a list"}', null],
+  ])('gives the attributes as %s', async (_, stored, expected) => {
+    const id = (await env.DB.prepare("INSERT INTO accounts (account_number, name, akahu_account_id) VALUES ('99-9999-9999999-03', 'Card', 'acc_example000000000000003') RETURNING id").first<{ id: number }>())!.id
+    await env.DB.prepare('UPDATE accounts SET akahu_attributes = ? WHERE id = ?').bind(stored, id).run()
+    const [account] = (await (await list('member')).json()) as Record<string, unknown>[]
+    expect(account).toMatchObject({ akahuAttributes: expected })
   })
 
   it('lists an Account that is not linked with none of it', async () => {

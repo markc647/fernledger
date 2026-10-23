@@ -12,36 +12,17 @@ import { formatBalance, formatDateTime, isMoment } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { accountsQuery } from '@/lib/queries'
 import { api } from '@/lib/api'
+import type { InferResponseType } from 'hono/client'
 
 export const Route = createFileRoute('/accounts')({
   component: Accounts,
   staticData: { nav: { label: 'Accounts', group: 'setup', order: 30, member: { group: 'reports', order: 60 } } },
 })
 
-// What Akahu said about a linked Account, as Sync last kept it (worker/akahu-details.ts). Null for an Account that is not linked, and until Sync has read it.
-// The logo URL Akahu gives is kept by the Worker and is not here: nothing on this page draws it or asks Akahu's CDN for it (ADR 0010).
-type Account = {
-  id: number
-  name: string
-  accountNumber: string
-  akahuAccountId: string | null
-  /** When Fernledger last finished a Sync of the Account; Akahu's own `refreshed` times below are when Akahu last read the bank. */
-  akahuSyncedAt: string | null
-  akahuName: string | null
-  /** When Akahu first stopped listing the Account, which is a broken Account Link, or null while it still lists it. */
-  akahuMissingSince: string | null
-  /** Why the last Sync of it did not finish ('refused', 'unreachable', 'unreadable'), or null when the last one did. */
-  akahuLastFailure: string | null
-  akahuStatus: string | null
-  akahuType: string | null
-  akahuConnectionName: string | null
-  akahuBalanceCurrency: string | null
-  akahuBalanceCurrentCents: number | null
-  akahuBalanceAvailableCents: number | null
-  akahuRefreshedBalanceAt: string | null
-  akahuRefreshedMetaAt: string | null
-  akahuRefreshedTransactionsAt: string | null
-}
+// What Akahu said about a linked Account, as Sync last kept it (worker/akahu-details.ts), with Fernledger's own name, number and Sync state.
+// Taken from the Worker's own answer rather than written out again: a field the Accounts list starts sending is then a field this page has,
+// and the four that went unshown until ticket 42 could not happen twice. The logo URL Akahu gives is not in that answer at all (ADR 0010).
+type Account = InferResponseType<typeof api.accounts.$get>[number]
 
 /** The id of an Account's Rename button, which focus goes back to when its rename form is closed. */
 const renameId = (id: number) => `account-${id}-rename`
@@ -174,12 +155,26 @@ function AkahuDetails({ account }: { account: Account }) {
       {broken}
       <dl className="grid grid-cols-[max-content_1fr] gap-x-3">
         <DetailLine term="Bank">{account.akahuConnectionName}</DetailLine>
+        <DetailLine term="Akahu's connection type">{account.akahuConnectionType && akahuWords(account.akahuConnectionType)}</DetailLine>
+        <DetailLine term="Akahu's connection ID">{account.akahuConnectionId}</DetailLine>
         <DetailLine term="Akahu's name">{account.akahuName}</DetailLine>
+        <DetailLine term="Akahu's account number">{account.akahuFormattedAccount}</DetailLine>
         <DetailLine term="Type">{account.akahuType && akahuWords(account.akahuType)}</DetailLine>
         <DetailLine term="Status">{account.akahuStatus && akahuWords(account.akahuStatus)}</DetailLine>
+        {/* Akahu saying the Account can do nothing is not Akahu saying nothing about it: an empty list has a line, and reads as none. */}
+        <DetailLine term="Akahu's attributes">{account.akahuAttributes && (account.akahuAttributes.length === 0 ? 'None' : account.akahuAttributes.map(akahuWords).join(', '))}</DetailLine>
         <DetailLine term="Balance">{balance}</DetailLine>
         <DetailLine term="Last Sync">{isMoment(account.akahuSyncedAt) ? formatDateTime(account.akahuSyncedAt) : 'Never synced'}</DetailLine>
-        <DetailLine term="Akahu last read the bank">{read.map(([what, at]) => `${what}: ${formatDateTime(at!)}`).join('; ')}</DetailLine>
+        {/* One part to a line: three times run together read as one long string, and it is three separate readings of the bank. */}
+        <DetailLine term="Akahu last read the bank">
+          {read.length === 0
+            ? null
+            : read.map(([what, at]) => (
+                <span key={what} className="block">
+                  {what}: {formatDateTime(at!)}
+                </span>
+              ))}
+        </DetailLine>
       </dl>
     </>
   )

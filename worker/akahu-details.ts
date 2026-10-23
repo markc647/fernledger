@@ -63,12 +63,19 @@ export const STORE_DETAILS = `UPDATE accounts SET ${entries.map(([key, column]) 
  */
 export const CLEAR_DETAILS = [...entries.map(([, column]) => column), 'akahu_missing_since', 'akahu_last_failure'].map((column) => `${column} = NULL`).join(', ')
 
-/** The part of the details the Accounts screen shows, as the Accounts list reads them. The logo URL is not among them. */
+/**
+ * The part of the details the Accounts screen shows, as the Accounts list reads them: everything Akahu sends about the Account except the
+ * logo URL, which is stored and never sent to the browser (ADR 0010, and the comment at the top of this file).
+ */
 const DISPLAYED = [
   'akahuName',
+  'akahuFormattedAccount',
   'akahuStatus',
   'akahuType',
+  'akahuAttributes',
+  'akahuConnectionId',
   'akahuConnectionName',
+  'akahuConnectionType',
   'akahuBalanceCurrency',
   'akahuBalanceCurrentCents',
   'akahuBalanceAvailableCents',
@@ -80,6 +87,22 @@ const DISPLAYED = [
 export type DisplayedDetails = Pick<AccountDetails, (typeof DISPLAYED)[number]>
 
 export const SELECT_DISPLAYED = DISPLAYED.map((key) => `${COLUMNS[key]} AS ${key}`).join(', ')
+
+/**
+ * Akahu's attributes as the list of words they are, for the Accounts list to send the browser: the column holds the JSON array Akahu sent
+ * (`akahu_attributes`), and that is this file's storage, not an API shape. An empty list is Akahu saying the Account can do nothing, which
+ * is not the same as Akahu sending no attributes at all (null). Anything else in the column — an older answer, a hand-edited row — is
+ * nothing known, so null.
+ */
+export function toAttributeWords(stored: string | null): string[] | null {
+  if (stored === null) return null
+  try {
+    const words: unknown = JSON.parse(stored)
+    return Array.isArray(words) && words.every((word) => typeof word === 'string') ? words : null
+  } catch {
+    return null
+  }
+}
 
 /** Akahu's dollars as integer NZD cents. Rounded, because JSON numbers are binary floats and 12.34 is not exact. */
 export const toCents = (amount: number): number => Math.round(amount * 100)
