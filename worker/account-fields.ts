@@ -4,10 +4,8 @@ import { isRealDate } from './dates'
 /** An Account's display name, as the Admin types it (trimmed, 1 to 60 characters). */
 export const accountName = z.string().check(z.trim(), z.minLength(1), z.maxLength(60))
 
-const BANK_NUMBER = /^\d{2}-\d{4}-\d{7}-\d{2,3}$/
-
 /** A bank account number as the bank prints it: `BB-bbbb-AAAAAAA-SS`, where the suffix may have a third digit (`-099`). */
-export const bankAccountNumber = z.string().check(z.regex(BANK_NUMBER))
+const BANK_NUMBER = /^\d{2}-\d{4}-\d{7}-\d{2,3}$/
 
 /**
  * The shape of the key Fernledger generates for an Account whose bank prints no number, such as a credit card (ADR 0017):
@@ -17,10 +15,14 @@ export const bankAccountNumber = z.string().check(z.regex(BANK_NUMBER))
 export const GENERATED_KEY_PATTERN = '^card-[0-9]{4,}$'
 const GENERATED_KEY = new RegExp(GENERATED_KEY_PATTERN)
 
+/** True for a key Fernledger generated: one only `ADD_CARD_ACCOUNT` (worker/accounts.ts) hands out, and never typed by the Admin. */
+export const isGeneratedKey = (key: string) => GENERATED_KEY.test(key)
+
 /**
  * An Account's stable key as it crosses the API: the number the bank prints, or the one Fernledger generated where the bank
- * prints none. This is what an Import matches a file against and what `transactions.account_id` is resolved through;
- * `bankAccountNumber` stays what a CSV adapter must produce for a bank that prints a number.
+ * prints none. This is what an Import matches a file against and what `transactions.account_id` is resolved through. A CSV
+ * adapter still produces the bank's own shape for a bank that prints a number; a file for an Account the bank numbers none of
+ * carries no number at all, and the Admin says which Account it is for.
  */
 export const accountKey = z.string().check(z.refine((value) => BANK_NUMBER.test(value) || GENERATED_KEY.test(value)))
 

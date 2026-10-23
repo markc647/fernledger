@@ -42,12 +42,12 @@ export function AccountLink() {
         // What to add is said once on this screen, in Setup needed below, so it is not repeated here (as "Run a Sync now" does not).
         <p className="mt-3">Akahu Sync isn't set up yet, so there is nothing to link to. Setup needed, below, says what to add.</p>
       ) : accounts.length === 0 ? (
-        <p className="mt-3">There are no Accounts yet. An Account is added the first time you import a file for it, and linked to Akahu after that.</p>
+        <p className="mt-3">There are no Accounts yet. An Account is added the first time you import a file for it, or on the Accounts screen for a credit card, and linked to Akahu after that.</p>
       ) : (
         <>
           <p className="mt-1 text-sm text-muted-foreground">
-            A linked Account receives its Transactions from Akahu each morning, from its Cutover Date onwards. Import a file for an Account before linking it: an Account with no Cutover Date is not
-            synced.
+            A linked Account receives its Transactions from Akahu each morning, from its Cutover Date onwards. An Account with no Cutover Date is not synced, so import a file for it before linking it,
+            or set one in Cutover Dates below.
           </p>
           {!asked ? (
             <Button type="button" size="touch" className="mt-3" onClick={() => setAsked(true)}>

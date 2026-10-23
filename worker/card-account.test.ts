@@ -150,6 +150,25 @@ describe('an Import into an Account whose bank prints no number', () => {
     expect(await again.json()).toMatchObject({ added: 0, duplicates: 2 })
   })
 
+  // Only the Accounts screen hands out a generated key (ADR 0017). An Import that names one for an Account that is not there
+  // would create a key nothing allocated, under a name that is the key itself, which every Report and the CSV export then print.
+  it('refuses to create an Account from a generated key, which is the Worker’s to hand out', async () => {
+    const res = await call('/api/imports/chunks', { method: 'POST', body: cardChunk('card-0042', [cardRow('2026-09-02', -450)]) })
+
+    expect(res.status).toBe(400)
+    expect(await accounts()).toEqual([])
+  })
+
+  it('still creates an Account from the number a file carries', async () => {
+    const res = await call('/api/imports/chunks', {
+      method: 'POST',
+      body: { ...cardChunk(savings, [cardRow('2026-09-02', -450)]), account: { number: savings, name: 'Example savings' } },
+    })
+
+    expect(res.status).toBe(200)
+    expect(await accounts()).toMatchObject([{ name: 'Example savings', accountNumber: savings }])
+  })
+
   it('refuses a key that is neither a bank number nor one Fernledger generates', async () => {
     for (const number of ['Visa', 'card-1', 'card-', '99-9999-9999999']) {
       expect((await call('/api/imports/chunks', { method: 'POST', body: cardChunk(number, [cardRow('2026-09-02', -450)]) })).status, number).toBe(400)

@@ -86,4 +86,6 @@ test('a Member can neither add an Account nor see the form', async ({ page, cont
   await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Add a Credit Card Account' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Add the Account' })).toHaveCount(0)
+  // The page's only text to read once is about adding one, so a Member has no "?" either.
+  await expect(page.getByRole('button', { name: 'About this page' })).toHaveCount(0)
 })

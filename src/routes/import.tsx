@@ -149,9 +149,7 @@ function ImportFlow() {
             offer={offer}
             cutoverToSet={cutoverToSet}
             existing={existing || undefined}
-            choices={choices}
-            chosen={chosenAccount}
-            onChoose={setChosenAccount}
+            choose={{ options: choices, chosen: chosenAccount, onChoose: setChosenAccount }}
             accountKey={accountKey}
             accountName={accountName}
             onAccountName={setAccountName}
@@ -399,10 +397,8 @@ function Preview(props: {
   /** The Cutover Date this Import will set, from `ImportFlow`, so the screen shows the one the request carries. */
   cutoverToSet: string | undefined
   existing: { id: number; name: string; cutoverDate: string | null } | undefined
-  /** The Accounts a file with no account number may be for (ADR 0017); empty when none has been added yet. */
-  choices: { id: number; name: string }[]
-  chosen: number | null
-  onChoose: (id: number | null) => void
+  /** Which Account a file with no account number is for: the Accounts it may be (ADR 0017), and the Admin's choice among them. */
+  choose: AccountChoice
   /** The Account key this Import will use, or undefined while a numberless file has no Account chosen, when there is nothing to import into. */
   accountKey: string | undefined
   accountName: string
@@ -457,7 +453,7 @@ function Preview(props: {
       </dl>
 
       {file.accountNumber === null ? (
-        <ChooseAccount choices={props.choices} chosen={props.chosen} onChoose={props.onChoose} existing={existing} />
+        <ChooseAccount choose={props.choose} existing={existing} />
       ) : existingName !== undefined ? (
         <>
           <p>Existing Account: {existingName}. These transactions will be added to it.</p>
@@ -638,13 +634,16 @@ function ReplaceDialog(props: {
   )
 }
 
+/** Which Account a file with no account number is for: the Accounts it may be, and the Admin's choice among them. */
+type AccountChoice = { options: { id: number; name: string }[]; chosen: number | null; onChoose: (id: number | null) => void }
+
 /**
  * Asks which Account a file with no account number is for. Nothing is matched, because the file says nothing to match on, and
  * only Accounts whose key Fernledger generated are offered: such a file is a credit card export, and a bank-numbered Account
  * would be a cheque account to put a card's Transactions into (ADR 0017).
  */
-function ChooseAccount(props: { choices: { id: number; name: string }[]; chosen: number | null; onChoose: (id: number | null) => void; existing: { id: number } | undefined }) {
-  if (props.choices.length === 0)
+function ChooseAccount({ choose, existing }: { choose: AccountChoice; existing: { id: number } | undefined }) {
+  if (choose.options.length === 0)
     return (
       <p className="max-w-xl">
         This file carries no account number, so it cannot say which Account it is for, and no Account has been added for a credit card yet. Add one on the{' '}
@@ -659,16 +658,16 @@ function ChooseAccount(props: { choices: { id: number; name: string }[]; chosen:
       <label htmlFor="for-account" className="block font-medium">
         Which Account is this file for?
       </label>
-      <Select id="for-account" className="mt-1" value={props.chosen === null ? '' : String(props.chosen)} onChange={(event) => props.onChoose(event.target.value === '' ? null : Number(event.target.value))}>
+      <Select id="for-account" className="mt-1" value={choose.chosen === null ? '' : String(choose.chosen)} onChange={(event) => choose.onChoose(event.target.value === '' ? null : Number(event.target.value))}>
         <option value="">Choose an Account</option>
-        {props.choices.map((account) => (
+        {choose.options.map((account) => (
           <option key={account.id} value={account.id}>
             {account.name}
           </option>
         ))}
       </Select>
       <p className="mt-1 text-sm text-muted-foreground">This file carries no account number, so it cannot say. Only Accounts added for a credit card are offered.</p>
-      {props.existing && <WaitingNotice accountId={props.existing.id} />}
+      {existing && <WaitingNotice accountId={existing.id} />}
     </div>
   )
 }

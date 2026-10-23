@@ -10,8 +10,10 @@
 // - **There is no balance**, so there is no ledger balance and a card Account gets no Balance Check from an Import. Nothing is
 //   added up from the Transactions to stand in for one.
 //
-// The readers are the bank-account adapter's (kiwibank.ts): the same bank, a different layout.
-import { parseCents, parseDate, splitFields, splitLines } from './kiwibank'
+// The dates and amounts are read by the bank-account adapter's parsers (kiwibank.ts): the same bank, a different layout. How a
+// line and its fields are split is shared by every adapter (read.ts).
+import { parseCents, parseDate } from './kiwibank'
+import { splitFields, splitLines } from './read'
 import { BankCsvError, type BankCsvAdapter, type BankCsvResult, type BankCsvRow, type BankCsvRowError } from './types'
 
 const COLUMN_HEADER = 'Date,Description,Card,Amount'

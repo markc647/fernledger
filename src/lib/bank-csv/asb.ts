@@ -1,4 +1,5 @@
 // Layout reference: docs/bank-formats/asb.md
+import { splitFields, splitLines } from './read'
 import { BankCsvError, type BankCsvAdapter, type BankCsvResult, type BankCsvRow, type BankCsvRowError } from './types'
 
 const COLUMN_HEADER = 'Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount'
@@ -9,8 +10,6 @@ const ACCOUNT_LINE_NUMBER = 2
 const ACCOUNT_LINE = /^Bank (\d{2}); Branch (\d{4}); Account (\d{7})-(\d{2,3})(?:\s|$)/
 const BALANCE_LINE = /^Ledger Balance : (-?\d+(?:\.\d{1,2})?) as of (\d{8})\s*$/
 const AMOUNT = /^(-|\+)?(\d+)(?:\.(\d{1,2}))?$/
-
-const splitLines = (text: string) => text.replace(/^﻿/, '').split(/\r\n|\n|\r/)
 
 /** The only date parser: `YYYYMMDD` (header) or `YYYY/MM/DD` (rows) to ISO `YYYY-MM-DD`, or null if not a real date. */
 function parseDate(text: string): string | null {
@@ -28,40 +27,6 @@ function parseCents(text: string): number | null {
   if (!parts) return null
   const magnitude = Number(parts[2]) * 100 + Number((parts[3] ?? '').padEnd(2, '0'))
   return parts[1] === '-' && magnitude !== 0 ? -magnitude : magnitude
-}
-
-/** Splits one CSV line. Returns null if a quote is left open or text follows a closing quote. */
-function splitFields(line: string): string[] | null {
-  const fields: string[] = []
-  let i = 0
-  while (i <= line.length) {
-    if (line[i] === '"') {
-      let value = ''
-      i++
-      for (;;) {
-        if (i >= line.length) return null
-        if (line[i] === '"') {
-          if (line[i + 1] === '"') {
-            value += '"'
-            i += 2
-            continue
-          }
-          i++
-          break
-        }
-        value += line[i++]
-      }
-      if (i < line.length && line[i] !== ',') return null
-      fields.push(value)
-    } else {
-      const end = line.indexOf(',', i)
-      const stop = end === -1 ? line.length : end
-      fields.push(line.slice(i, stop))
-      i = stop
-    }
-    i++ // skip the comma
-  }
-  return fields
 }
 
 type RowResult = { ok: true; row: BankCsvRow } | { ok: false; message: string }

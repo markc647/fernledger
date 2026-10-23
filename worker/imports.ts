@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import * as z from 'zod/mini'
-import { accountKey, accountName, isoDate, normaliseAccountNumber } from './account-fields'
+import { accountKey, accountName, isGeneratedKey, isoDate, normaliseAccountNumber } from './account-fields'
 import type { AppEnv } from './app-env'
 import { checkAfterRecording, DELETE_IMPORT_BALANCES, recordBalance } from './balance-check'
 import { statusOnRecord } from './balance-rules'
@@ -196,6 +196,12 @@ export const imports = new Hono<AppEnv>()
     const number = normaliseAccountNumber(account.number)
     const existing = await db.prepare('SELECT id, name, cutover_date FROM accounts WHERE account_number = ?').bind(number).first<AccountRow>()
     if (!existing && chunk.index !== 0) return c.json({ error: 'Send the first chunk of the Import first' }, 409)
+    // An Import creates the Account for a file that carries the bank's number, taking the number from the file. A generated key
+    // is not a number any file carries: the Worker hands those out (ADR 0017). An Import naming one for an Account that is not
+    // there would create a key nothing allocated, under a name that is the key itself (`name`, below).
+    if (!existing && isGeneratedKey(number)) {
+      return c.json({ error: 'An Account the bank prints no number for is added on the Accounts screen, not by an Import' }, 400)
+    }
 
     // Replacing imported history removes the Account's Import-sourced Transactions in the same batch as this chunk's
     // rows, so a failure leaves the old history untouched. A history too big for one batch is cleared in steps first.

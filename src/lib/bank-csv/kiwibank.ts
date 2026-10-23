@@ -9,6 +9,7 @@
 //   the export is oldest first.
 //
 // The credit card export is a different format (four columns, no account number, no balance) and is not this adapter.
+import { splitFields, splitLines } from './read'
 import { BankCsvError, type BankCsvAdapter, type BankCsvResult, type BankCsvRow, type BankCsvRowError } from './types'
 
 const COLUMN_HEADER =
@@ -19,8 +20,8 @@ const ACCOUNT_NUMBER = /^\d{2}-\d{4}-\d{7}-\d{2,3}$/
 const AMOUNT = /^(-|\+)?(\d+)(?:\.(\d{1,2}))?$/
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 
-// The four readers below are shared with the credit card adapter (kiwibank-card.ts), which is the same bank in a different layout.
-export const splitLines = (text: string) => text.replace(/^﻿/, '').split(/\r\n|\n|\r/)
+// The two parsers below are Kiwibank's own formats, shared with the credit card adapter (kiwibank-card.ts): the same bank in a
+// different layout. How a line and its fields are split is in read.ts, which every adapter uses.
 
 /** `YYYY-MM-DD` to itself, or null when it is not a real day (the 30th of February). The only date parser here. */
 export function parseDate(text: string): string | null {
@@ -37,40 +38,6 @@ export function parseCents(text: string): number | null {
   if (!parts) return null
   const magnitude = Number(parts[2]) * 100 + Number((parts[3] ?? '').padEnd(2, '0'))
   return parts[1] === '-' && magnitude !== 0 ? -magnitude : magnitude
-}
-
-/** Splits one CSV line. Returns null if a quote is left open or text follows a closing quote. (Same reader as the ASB adapter's.) */
-export function splitFields(line: string): string[] | null {
-  const fields: string[] = []
-  let i = 0
-  while (i <= line.length) {
-    if (line[i] === '"') {
-      let value = ''
-      i++
-      for (;;) {
-        if (i >= line.length) return null
-        if (line[i] === '"') {
-          if (line[i + 1] === '"') {
-            value += '"'
-            i += 2
-            continue
-          }
-          i++
-          break
-        }
-        value += line[i++]
-      }
-      if (i < line.length && line[i] !== ',') return null
-      fields.push(value)
-    } else {
-      const end = line.indexOf(',', i)
-      const stop = end === -1 ? line.length : end
-      fields.push(line.slice(i, stop))
-      i = stop
-    }
-    i++ // skip the comma
-  }
-  return fields
 }
 
 /**

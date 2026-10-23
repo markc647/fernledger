@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState, type ReactNode } from 'react'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
+import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { RowButton, useFocusBack } from '@/components/row-actions'
 import { Status } from '@/components/status'
 import { focusPanel, RowPanel, useDrafts, type Drafts } from '@/components/row-panel'
@@ -76,7 +77,7 @@ function Accounts() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold">Accounts</h1>
+      <PageHeading help={me?.role === 'admin' && <AccountsHelp />}>Accounts</PageHeading>
       {error ? (
         <p role="alert" className="mt-2">Fernledger couldn't load the Accounts. Reload the page to try again.</p>
       ) : !accounts ? (
@@ -121,6 +122,21 @@ function Accounts() {
   )
 }
 
+/** What a reader reads once about this page: why a credit card is added here and not by an Import (CODING_STANDARDS.md#ui). */
+function AccountsHelp() {
+  return (
+    <>
+      <p>Every Account the bank gives a number for is added the first time you import a file for it, and this page is where you see and rename them.</p>
+      <HelpHeading>Add a Credit Card Account</HelpHeading>
+      <p>
+        A credit card has no account number from the bank, and its card number is not one either: a card is reissued on fraud or expiry, so an Account keyed on it would split in two. Fernledger gives
+        the Account a key of its own, which you never type and are never shown.
+      </p>
+      <p>Add the card by name, then import the card's CSV or link the Account to Akahu in Settings. An Import of a card's file asks which Account it is for, because the file does not say.</p>
+    </>
+  )
+}
+
 /**
  * Adds an Account for a credit card. A card's bank prints no account number and its card number is not one (a reissue would
  * split the Account in two), so Fernledger gives the Account a key of its own and the Admin types only the name (ADR 0017).
@@ -148,10 +164,6 @@ function AddCardAccount() {
       <h2 id="add-card" className="text-xl font-semibold">
         Add a Credit Card Account
       </h2>
-      <p className="mt-2">
-        A credit card has no account number from the bank, so Fernledger gives the Account a key of its own and you never have to type one. Import the card's CSV afterwards, or link the Account to Akahu
-        in Settings. The name is yours and can be changed later.
-      </p>
       <form
         className="mt-2 flex flex-wrap items-end gap-2"
         onSubmit={(event) => {
@@ -164,7 +176,10 @@ function AddCardAccount() {
           <label htmlFor="card-name" className="block font-medium">
             Credit card Account name
           </label>
-          <Input id="card-name" value={name} maxLength={60} required onChange={(event) => setName(event.target.value)} />
+          <Input id="card-name" value={name} maxLength={60} required aria-describedby="card-name-hint" onChange={(event) => setName(event.target.value)} />
+          <p id="card-name-hint" className="mt-1 text-sm text-muted-foreground">
+            Yours to choose, and you can change it later.
+          </p>
         </div>
         <Button type="submit" size="touch" disabled={add.isPending || !name.trim()}>
           Add the Account
