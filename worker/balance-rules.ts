@@ -42,7 +42,7 @@ export type SyncBalance = { asOfDate: string; bankCents: number }
 export type SyncBalanceSkipped = 'no-balance' | 'incomplete' | 'refreshed-apart' | 'currency'
 
 /** What Akahu said of an Account's balance, as Sync stores it (worker/akahu-details.ts). Null where Akahu did not say. */
-export type ReportedBalance = Pick<AccountDetails, 'akahuBalanceCurrency' | 'akahuBalanceCurrentCents' | 'akahuRefreshedBalanceAt' | 'akahuRefreshedTransactionsAt'>
+export type ReportedBalance = Pick<AccountDetails, 'akahuType' | 'akahuBalanceCurrency' | 'akahuBalanceCurrentCents' | 'akahuRefreshedBalanceAt' | 'akahuRefreshedTransactionsAt'>
 
 /**
  * The bank balance to record after a Sync of an Account, or why there is none. Akahu's `balance.current` is the balance when Akahu last
@@ -55,6 +55,8 @@ export type ReportedBalance = Pick<AccountDetails, 'akahuBalanceCurrency' | 'aka
  *   the same moment cannot be asked for; a bank posting inside that gap is the risk the allowance takes.
  * - A Sync that did not finish has not read the whole window, so nothing is recorded.
  * - Anything Akahu left out, or a currency that is not NZD (money here is NZD cents), is not a balance to check.
+ * - A credit card's balance is what is owed, which Akahu sends as a positive figure. In the ledger a purchase is money out, so the
+ *   bank balance is its negative: owing $1,268.41 is -126_841 cents, as the card's Transactions add up to.
  */
 export function syncBalance(reported: ReportedBalance, complete: boolean): { balance: SyncBalance } | { skipped: SyncBalanceSkipped } {
   if (reported.akahuBalanceCurrentCents === null || reported.akahuRefreshedBalanceAt === null) return { skipped: 'no-balance' }
@@ -62,7 +64,8 @@ export function syncBalance(reported: ReportedBalance, complete: boolean): { bal
   if (!complete) return { skipped: 'incomplete' }
   const gap = Math.abs(Date.parse(reported.akahuRefreshedTransactionsAt ?? '') - Date.parse(reported.akahuRefreshedBalanceAt))
   if (!(gap <= REFRESH_GAP_MS)) return { skipped: 'refreshed-apart' }
-  return { balance: { asOfDate: nzDate(new Date(reported.akahuRefreshedBalanceAt)), bankCents: reported.akahuBalanceCurrentCents } }
+  const bankCents = reported.akahuType === 'CREDITCARD' ? -reported.akahuBalanceCurrentCents : reported.akahuBalanceCurrentCents
+  return { balance: { asOfDate: nzDate(new Date(reported.akahuRefreshedBalanceAt)), bankCents } }
 }
 
 export type BalanceRow = {
