@@ -21,11 +21,17 @@ async function add(over: { description?: string; amountCents?: number; date?: st
 const giveStoredOnly = (id: number) =>
   env.DB.prepare("UPDATE transactions SET akahu_balance_cents = 70717, akahu_hash = 'h', akahu_updated_at = 'u', akahu_posted_date = 'p', akahu_connection_id = 'c' WHERE id = ?").bind(id).run()
 const DETAIL_KEYS = [
-  'accountId', 'accountName', 'akahuCategoryGroupName', 'akahuCategoryName', 'amountCents', 'bankCardSuffix', 'bankCounterpartyAccount', 'bankMemo',
-  'bankParticulars', 'bankPaymentCode', 'bankReference', 'bankTime', 'bankType', 'canMarkNotTransfer', 'categoryId', 'categoryKind', 'categoryName',
-  'categorySource', 'date', 'description', 'firstSeenAt', 'id', 'notTransfer', 'note', 'source', 'transfer', 'transferAccountName', 'transferPartnerOverridden',
-  'transferTransactionId',
+  'accountId', 'accountName', 'akahuBalanceCents', 'akahuCategoryGroupId', 'akahuCategoryGroupName', 'akahuCategoryId', 'akahuCategoryName', 'akahuConnectionId',
+  'akahuDateRaw', 'akahuHash', 'akahuId', 'akahuMerchant', 'akahuPostedDate', 'akahuUpdatedAt', 'amountCents', 'bankCardSuffix', 'bankCounterpartyAccount',
+  'bankMemo', 'bankParticulars', 'bankPaymentCode', 'bankReference', 'bankTime', 'bankTimeFromMemo', 'bankType', 'canMarkNotTransfer', 'categoryId',
+  'categoryKind', 'categoryName', 'categorySource', 'date', 'description', 'firstSeenAt', 'hasBankTime', 'id', 'notTransfer', 'note', 'source', 'transfer',
+  'transferAccountName', 'transferPartnerOverridden', 'transferTransactionId',
 ]
+/** The fields the detail sends only to be read on the page, which Akahu's own row is checked against (A2). Nothing else reads them. */
+const SHOWN_ONLY_KEYS = [
+  'akahuBalanceCents', 'akahuCategoryGroupId', 'akahuCategoryGroupName', 'akahuCategoryId', 'akahuCategoryName', 'akahuConnectionId', 'akahuDateRaw',
+  'akahuHash', 'akahuId', 'akahuMerchant', 'akahuPostedDate', 'akahuUpdatedAt', 'bankTimeFromMemo', 'hasBankTime',
+] as const
 const LIST_KEYS = [
   'accountId', 'accountName', 'amountCents', 'bankType', 'canMarkNotTransfer', 'categoryId', 'categoryKind', 'categoryName', 'categorySource', 'date',
   'description', 'id', 'notTransfer', 'note', 'transfer', 'transferAccountName',
@@ -66,8 +72,13 @@ describe('the Transaction detail', () => {
     expect(await detail(id)).toMatchObject({ akahuCategoryName: null, akahuCategoryGroupName: null })
   })
 
-  // What the page may read, by exact name: a stored-only column that was sent would be a new name here, and fail this.
-  it('sends exactly these fields, and none of the stored-only columns or the category IDs, whatever is stored', async () => {
+  // What the page may read, by exact name: a column that stopped being sent, or a new one, fails this. Every field Akahu sends about the
+  // Transaction is here, because the page shows them all, each on a line of its own (A2).
+  it('shows every field it sends only to be read: each one is a field of the detail', () => {
+    expect(DETAIL_KEYS).toEqual(expect.arrayContaining([...SHOWN_ONLY_KEYS])) // the two lists cannot drift apart
+  })
+
+  it('sends exactly these fields, every stored Akahu column among them', async () => {
     const id = await add()
     await giveAkahuCategory(id)
     await giveStoredOnly(id)
@@ -167,8 +178,8 @@ describe("Akahu's category through the real paths", () => {
     return {
       list: list.transactions.map(({ description, categoryName, categorySource, categoryKind }) => ({ description, categoryName, categorySource, categoryKind })),
       uncategorised: await json('/api/transactions?uncategorised=true&count=only'),
-      // Akahu's category is the one thing that may differ, and only in the two fields made to show it.
-      detail: (({ akahuCategoryName: _name, akahuCategoryGroupName: _group, ...rest }) => rest)((await json(`/api/transactions/${firstId}`)).body as Record<string, unknown>),
+      // What Akahu sent is the one thing that may differ, and only in the fields the detail page shows it in: none of them reaches a Category, a count or a Report.
+      detail: Object.fromEntries(Object.entries((await json(`/api/transactions/${firstId}`)).body as Record<string, unknown>).filter(([key]) => !SHOWN_ONLY_KEYS.includes(key as (typeof SHOWN_ONLY_KEYS)[number]))),
       reports: {
         transactions: await json(`/api/reports/transactions?accountId=${accountId}&${range}`),
         spending: await json(`/api/reports/spending?${range}`),

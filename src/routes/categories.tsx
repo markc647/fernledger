@@ -180,7 +180,7 @@ function AddForm({ taken, onAdded }: { taken: (name: string) => boolean; onAdded
         Add Category
       </Button>
       <p id="new-category-hint" className="basis-full text-muted-foreground">
-        For example, Care Fees. {NAME_HINT}
+        {NAME_HINT}
       </p>
       <p id="new-category-kind-hint" className="basis-full text-muted-foreground">
         {KIND_HINTS[kind]}

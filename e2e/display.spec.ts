@@ -933,7 +933,7 @@ test.describe('zoom', () => {
             },
       }),
     )
-  // One Account linked to Akahu with everything it says, long values included, so the "From Akahu" column is drawn at every width and text size; one not linked.
+  // One Account linked to Akahu with everything it says, long values included, so the row of Akahu's details under it is drawn at every width and text size; one not linked.
   const stubLongAccounts = (page: Page) =>
     page.route('**/api/accounts', (route) =>
       route.fulfill({

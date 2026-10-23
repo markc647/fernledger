@@ -164,9 +164,10 @@ test('the Admin renames an Account and the new name shows on its Transactions', 
   await expect(page.getByRole('columnheader', { name: 'Action', exact: true })).toBeVisible() // one action: a button named for it, under a singular heading
   await expect(page.getByRole('button', { name: /^Actions for/ })).toHaveCount(0)
   await rowButton(page, 'Rename', before).click()
-  // The form is a panel under its row, across the table.
+  // The form is a panel under its row, across the table: under the Account and the row of Akahu's details that goes with it (A1).
   const panel = page.getByRole('region', { name: `Rename ${before}` })
-  await expect(panel.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[1]').getByRole('button', { name: `Rename ${before}`, exact: true })).toBeVisible()
+  await expect(panel.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[1]')).toHaveAttribute('data-slot', 'table-detail')
+  await expect(panel.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[2]').getByRole('button', { name: `Rename ${before}`, exact: true })).toBeVisible()
   await page.getByLabel('Account name').fill(after)
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save name' }).click()

@@ -485,6 +485,19 @@ describe('GET /api/transactions/:id', () => {
       firstSeenAt: null,
       akahuCategoryName: null,
       akahuCategoryGroupName: null,
+      // Everything else Akahu sends, which an Import has none of: the detail page gives every field a line and says "Not sent" for these (A2).
+      akahuId: null,
+      akahuMerchant: null,
+      akahuCategoryId: null,
+      akahuCategoryGroupId: null,
+      akahuDateRaw: null,
+      akahuPostedDate: null,
+      akahuBalanceCents: null,
+      akahuUpdatedAt: null,
+      akahuHash: null,
+      akahuConnectionId: null,
+      hasBankTime: null,
+      bankTimeFromMemo: null,
     })
   })
 

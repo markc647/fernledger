@@ -233,6 +233,9 @@ const SHOTS = [
   { name: 'transactions', path: '/transactions' },
   { name: 'transactions-edit', path: '/transactions', fullPage: false, before: (p) => p.getByRole('button', { name: /^Edit / }).first().click() },
   { name: 'uncategorised', path: '/uncategorised' },
+  // The detail of the first Transaction in the list. The made-up household is imported, not Synced, so this is the Import's short
+  // "From the bank": what Akahu sends, field by field, is only there for a Synced Transaction.
+  { name: 'transaction-detail', path: '/transactions', before: async (p) => { await p.getByRole('cell').getByRole('link').first().click(); await p.getByRole('region', { name: 'From the bank' }).waitFor() } },
   { name: 'import-preview', path: '/import', before: async (p) => { await p.locator('input[type="file"]').setInputFiles(join(root, 'test/fixtures/asb/savings.csv')); await tableShown(p) } },
   { name: 'export', path: '/export' },
   { name: 'reports', path: '/reports' },

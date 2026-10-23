@@ -179,6 +179,18 @@ const ExpandedTableRow = ({ columns, children }: { columns: number; children: Re
   </TableRow>
 )
 
+/**
+ * What `detail` puts under a row: one cell across every column. It is the row's own data, not a panel, so it is printed and keeps the table's text and divider; the divider between it
+ * and the row above is the one that goes, so the two read as one row. `data-slot` is how the look check knows which pair that is (e2e/table-look-helpers.ts).
+ */
+const DetailTableRow = ({ columns, children }: { columns: number; children: ReactNode }) => (
+  <TableRow data-slot="table-detail">
+    <TableCell colSpan={columns} className="px-3 pt-0 pb-3 text-start whitespace-normal print:align-top">
+      {children}
+    </TableCell>
+  </TableRow>
+)
+
 /** A card, when the page has not given its rows an element of their own. */
 const CardItem = ({ className, children }: RowProps) => <li className={className}>{children}</li>
 /** A row of the shadcn table, likewise. */
@@ -202,6 +214,7 @@ export function ResponsiveTable<Row>({
   look = 'shadcn',
   RowElement,
   expanded,
+  detail,
 }: {
   caption: string
   columns: Column<Row>[]
@@ -228,6 +241,12 @@ export function ResponsiveTable<Row>({
   RowElement?: ComponentType<RowProps>
   /** One row of its own, across the table, after a row (see `ExpandedRow`). At most one at a time. */
   expanded?: ExpandedRow
+  /**
+   * What goes under every row, across the whole table: details too wide to be a column of their own without squeezing the rest (the Accounts page's
+   * "From Akahu"). The row and what is under it read as one: no divider between them, and no column heading for it, so what it holds labels itself.
+   * A row it returns nothing for has nothing under it. Unlike `expanded` it is printed, because it is the data, not a panel.
+   */
+  detail?: (row: Row) => ReactNode
 }) {
   const wide = useIsWide()
   // The caption stays on the empty state: a screen reader still hears what the missing data was.
@@ -248,7 +267,9 @@ export function ResponsiveTable<Row>({
         {/* One column that may shrink to the window: without it a card is as wide as its longest unbroken word (a long web address in a Note). */}
         <ul aria-label={caption} className="grid grid-cols-1 gap-3 text-base">
           {expanded?.after === null && <li className="print:hidden">{expanded.content}</li>}
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const under = detail?.(row)
+            return (
             <Fragment key={getRowKey(row)}>
               <Item
                 rowKey={getRowKey(row)}
@@ -270,10 +291,12 @@ export function ResponsiveTable<Row>({
                       </div>
                     ))}
                 </dl>
+                {under && <div className="mt-3">{under}</div>}
               </Item>
               {expanded?.after === getRowKey(row) && <li className="print:hidden">{expanded.content}</li>}
             </Fragment>
-          ))}
+            )
+          })}
         </ul>
       </>
     )
@@ -307,18 +330,23 @@ export function ResponsiveTable<Row>({
         </TableHeader>
         <TableBody className={BODY}>
           {expanded?.after === null && <ExpandedTableRow columns={columns.length}>{expanded.content}</ExpandedTableRow>}
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const under = detail?.(row)
+            return (
             <Fragment key={getRowKey(row)}>
-              <Item rowKey={getRowKey(row)} layout="table">
+              {/* The row and what is under it are two rows of the table, each with the table's own divider: the look is the same on every page (table-look-helpers.ts). */}
+              <Item rowKey={getRowKey(row)} layout="table" className={under ? 'border-b-0' : undefined}>
                 {columns.map((column) => (
                   <TableCell key={column.key} className={cn(column.handle ? HANDLE_CELL : 'px-3 py-2', 'whitespace-normal print:py-3 print:align-top', align(column), column.className)}>
                     {column.cell(row)}
                   </TableCell>
                 ))}
               </Item>
+              {under && <DetailTableRow columns={columns.length}>{under}</DetailTableRow>}
               {expanded?.after === getRowKey(row) && <ExpandedTableRow columns={columns.length}>{expanded.content}</ExpandedTableRow>}
             </Fragment>
-          ))}
+            )
+          })}
         </TableBody>
       </Table>
     </TableFrame>

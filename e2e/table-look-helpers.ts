@@ -17,7 +17,8 @@ const resolvedBackground = (page: Page, value: string) =>
 
 /**
  * The table has the shared look on screen: in a rounded box (with a border, or without one `inCard`, where the card is the box), a heading row in the muted fill, a divider under every
- * row but the last, and every word in the size of the page's text. The table has two rows or more, so there is a divider to look at, unless the data is only ever one (`single`).
+ * row but the last, and every word in the size of the page's text. A row whose details follow it in a row of their own (`detail`, the Accounts screen) is the one exception: the divider
+ * goes under the details, so the pair reads as one row. The table has two rows or more, so there is a divider to look at, unless the data is only ever one (`single`).
  */
 export async function expectTableLook(table: Locator, { inCard = false, single = false }: { inCard?: boolean; single?: boolean } = {}) {
   await expect(table).toBeVisible()
@@ -32,6 +33,7 @@ export async function expectTableLook(table: Locator, { inCard = false, single =
       heading: getComputedStyle(element.querySelector('thead')!).backgroundColor,
       dividers: Array.from(element.querySelectorAll('tbody tr'))
         .slice(0, -1)
+        .filter((row) => row.nextElementSibling?.getAttribute('data-slot') !== 'table-detail')
         .map((row) => parseFloat(getComputedStyle(row).borderBottomWidth)),
       sizes: Array.from(new Set(Array.from(element.querySelectorAll('th, td')).map((cell) => getComputedStyle(cell).fontSize))),
       pageSize: getComputedStyle(document.body).fontSize,
