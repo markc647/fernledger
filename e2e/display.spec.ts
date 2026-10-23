@@ -344,7 +344,9 @@ test.describe('one size for all text', () => {
         await page.goto(path)
         await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
         await settle(page)
-        await expectOneSize(page, size)
+        // The Spending Report with no Transactions to report has fewer words than the others: a test must not lean on what
+        // an earlier spec file left in the database, because a shard (ci.yml) runs this one without them.
+        await expectOneSize(page, size, path === '/reports/spending' ? 5 : 10)
       })
     }
   }
