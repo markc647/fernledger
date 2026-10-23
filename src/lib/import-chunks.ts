@@ -10,6 +10,7 @@ import type {
   WRITES_PER_ROW as WORKER_WRITES_PER_ROW,
 } from '@/generated/api/import-rows'
 import type { BankCsvRow } from './bank-csv'
+import { nextDay } from './iso-date'
 
 // The Worker's limits (worker/import-rows.ts; the sizing is explained in worker/imports.ts). Typing these as the
 // Worker's literal types makes the build fail if the two sides drift apart.
@@ -40,6 +41,31 @@ export const replaceWrites = (imported: number, incoming: number, carried = 0, p
 /** How many rows are dated on or after the Cutover Date, so the preview can say how many an Import will drop. ISO dates compare as text. */
 export const countOnOrAfter = (rows: readonly BankCsvRow[], cutoverDate: string | null | undefined): number =>
   cutoverDate ? rows.filter((row) => row.date >= cutoverDate).length : 0
+
+/**
+ * The Cutover Date the Import screen offers for a file, and whether the Account's own Cutover Date is already later than it, so
+ * the offer is shown but cannot be taken.
+ *
+ * The offer is the day **after** the file's last date. Offering the last date itself dropped every row dated on it, because an
+ * Import skips rows on or after the Cutover Date, and it left the file's own ledger balance unchecked, because that balance is
+ * dated that same last day. For an Account linked to Akahu that was nearly harmless, since Sync covers the Cutover Date onwards;
+ * for one not linked, those Transactions were simply missing, and the balance that would have shown it was skipped too. Found
+ * importing real files on 2026-10-20 (#40). The day after is right either way: every row imports, the balance is checked, and
+ * Sync still starts where the file stops.
+ *
+ * The offer cannot be taken when the Account's Cutover Date is already later, which happens when an older file is imported into
+ * an Account already imported up to a later date. Taking it would move the boundary backwards, leaving the rows already held
+ * on or after the offered date in the ledger (setting a Cutover Date deletes nothing already saved) while Sync claims them from
+ * that date too, and nothing dedups across the two sources (ADR 0003). Moving an Account's boundary earlier is done in Settings,
+ * deliberately, where the Change Log records it.
+ *
+ * The date is on offer either way, so the screen can name it while refusing to set it. `fileTo` is a date the adapter produced,
+ * so `nextDay` always has one; the fallback keeps the type honest. ISO dates compare as text.
+ */
+export function cutoverOffer(fileTo: string, accountCutover: string | null | undefined): { date: string; alreadyLater: boolean } {
+  const date = nextDay(fileTo) ?? fileTo
+  return { date, alreadyLater: accountCutover != null && accountCutover > date }
+}
 
 /**
  * Orders rows oldest first (bank unique IDs start with the date and end with a daily sequence, so ordering by

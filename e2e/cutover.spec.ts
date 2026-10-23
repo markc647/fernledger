@@ -15,7 +15,7 @@ function asbFile(suffix: string, dates: string[]) {
     'From date 20260901',
     'To date 20261001',
     'Avail Bal : 10.00 as of 20260930',
-    'Ledger Balance : 10.00 as of 20261002',
+    'Ledger Balance : 10.00 as of 20261001',
     'Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount',
     '',
     ...dates.map((date, i) => `${date},${date.replaceAll('/', '')}0${i},EFTPOS,,"EXAMPLE SHOP ${date.slice(-2)}","EFTPOS",-1.00`),
@@ -55,6 +55,10 @@ test('the Admin takes the Cutover Date offer, and every row of the file is impor
   await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
   await expect(summaryValue(page, 'Added')).toHaveText('3')
   await expect(summaryValue(page, 'On or after the Cutover Date (not imported)')).toHaveText('0')
+  // And the file's own ledger balance is kept as one to check: the offer leaves it before the Cutover Date, so it anchors the
+  // next Import's Balance Check instead of being set aside as after-cutover, which is what offering the last date itself did.
+  await expect(page.getByText('This is the first balance Fernledger holds for this Account. The next Import will be checked against it.')).toBeVisible()
+  await expect(page.getByText("This file's balance is dated on or after the Account's Cutover Date")).toHaveCount(0)
 })
 
 test('the Admin changes and clears the Cutover Date in Settings, which explains what it does', async ({ page, context }, testInfo) => {
@@ -198,7 +202,7 @@ test('a replace that stopped part way leaves its Notes waiting, an Import says s
     data: {
       account: { number: `99-9999-9999999-${suffix(testInfo)}` },
       chunk: { index: 0, count: 2 },
-      file: { adapterId: 'asb', rowCount: 2, skipped: 0, from: '2026-09-01', to: '2026-10-01', ledgerBalance: { cents: 1000, date: '2026-10-02' } },
+      file: { adapterId: 'asb', rowCount: 2, skipped: 0, from: '2026-09-01', to: '2026-10-01', ledgerBalance: { cents: 1000, date: '2026-10-01' } },
       rows: [{ date: '2026-09-10', uniqueId: '2026091000', tranType: 'EFTPOS', chequeNumber: null, payee: 'EXAMPLE SHOP 10', bankMemo: 'EFTPOS', amountCents: -100 }],
       replace: true,
     },
@@ -251,6 +255,33 @@ test('the Import refuses to offer a replace that would import nothing', async ({
 
   await expect(page.getByRole('button', { name: 'Replace imported history…' })).toBeDisabled()
   await expect(page.getByText('there is nothing to replace the old history with')).toBeVisible()
+})
+
+// The only way to reach this is importing an older file into an Account already imported up to a later date. Taking the offer
+// there would move the boundary back, leaving the rows already held on or after it in the ledger while Sync covers them too (#40).
+test('the Cutover Date offer is shown but cannot be taken when the Account has a later one', async ({ page, context, baseURL }, testInfo) => {
+  const name = accountName(testInfo)
+  await signInAs(context, 'admin')
+  const accounts = (await (await context.request.get('/api/accounts')).json()) as { id: number; name: string }[]
+  const account = accounts.find((a) => a.name === name)
+  expect(account, name).toBeDefined()
+  const put = await context.request.put(`/api/accounts/${account!.id}/cutover-date`, { headers: { Origin: baseURL! }, data: { cutoverDate: '2026-11-01' } })
+  expect(put.ok()).toBe(true)
+
+  await page.goto('/import')
+  await chooseFile(page, asbFile(suffix(testInfo), ['2026/09/10'])) // the file runs to 1 Oct, so the offer is 2 Oct
+
+  const offer = page.getByLabel(/Change the Cutover Date to the day after the last date in this file, Fri 2 Oct 2026/)
+  await expect(offer).toBeDisabled()
+  await expect(offer).not.toBeChecked()
+  await expect(page.getByText("This Account's Cutover Date is already later, so the offer cannot be taken")).toBeVisible()
+  // The Import goes by the Account's own Cutover Date, which the offer has not touched.
+  await expect(page.getByText('0 rows in this file are dated on or after Sun 1 Nov 2026 and will not be imported.')).toBeVisible()
+  await noAxeViolations(page)
+
+  await page.goto('/settings')
+  await page.getByRole('button', { name: `Clear the Cutover Date for ${name}` }).click() // leave the Account as the earlier tests found it
+  await expectDate(page, `Cutover Date for ${name}`, '')
 })
 
 test('a Member sees no Cutover Date controls', async ({ page, context }) => {
