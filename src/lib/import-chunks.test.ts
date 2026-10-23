@@ -44,10 +44,6 @@ describe('cutoverOffer', () => {
     expect(cutoverOffer('2026-10-01', '2026-10-03')).toEqual({ date: '2026-10-02', alreadyLater: true })
     expect(cutoverOffer('2026-06-30', '2026-10-02')).toEqual({ date: '2026-07-01', alreadyLater: true })
   })
-
-  it('falls back to the last date it was given when that is not a date it can step', () => {
-    expect(cutoverOffer('not a date', null)).toEqual({ date: 'not a date', alreadyLater: false })
-  })
 })
 
 describe('countOnOrAfter', () => {

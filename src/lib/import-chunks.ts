@@ -42,6 +42,9 @@ export const replaceWrites = (imported: number, incoming: number, carried = 0, p
 export const countOnOrAfter = (rows: readonly BankCsvRow[], cutoverDate: string | null | undefined): number =>
   cutoverDate ? rows.filter((row) => row.date >= cutoverDate).length : 0
 
+/** The Cutover Date a file puts on offer, and whether the Account's own is already later than it, so the offer cannot be taken. */
+export type CutoverOffer = { date: string; alreadyLater: boolean }
+
 /**
  * The Cutover Date the Import screen offers for a file, and whether the Account's own Cutover Date is already later than it, so
  * the offer is shown but cannot be taken.
@@ -62,7 +65,7 @@ export const countOnOrAfter = (rows: readonly BankCsvRow[], cutoverDate: string 
  * The date is on offer either way, so the screen can name it while refusing to set it. `fileTo` is a date the adapter produced,
  * so `nextDay` always has one; the fallback keeps the type honest. ISO dates compare as text.
  */
-export function cutoverOffer(fileTo: string, accountCutover: string | null | undefined): { date: string; alreadyLater: boolean } {
+export function cutoverOffer(fileTo: string, accountCutover: string | null | undefined): CutoverOffer {
   const date = nextDay(fileTo) ?? fileTo
   return { date, alreadyLater: accountCutover != null && accountCutover > date }
 }

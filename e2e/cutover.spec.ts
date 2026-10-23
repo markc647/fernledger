@@ -279,7 +279,12 @@ test('the Cutover Date offer is shown but cannot be taken when the Account has a
   await expect(page.getByText('0 rows in this file are dated on or after Sun 1 Nov 2026 and will not be imported.')).toBeVisible()
   await noAxeViolations(page)
 
+  // And importing leaves the Account's Cutover Date where it was: the offer is the only one an Import sets, and this one was not taken.
+  await page.getByRole('button', { name: 'Import 1 transaction' }).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Import finished' })).toBeVisible()
+
   await page.goto('/settings')
+  await expectDate(page, `Cutover Date for ${name}`, '2026-11-01')
   await page.getByRole('button', { name: `Clear the Cutover Date for ${name}` }).click() // leave the Account as the earlier tests found it
   await expectDate(page, `Cutover Date for ${name}`, '')
 })

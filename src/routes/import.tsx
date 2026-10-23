@@ -13,7 +13,7 @@ import { describeBalanceCheck, type BalanceCheckOutcome } from '@/lib/balance-ch
 import { adapters, BankCsvError, parseBankCsv, type BankCsvResult } from '@/lib/bank-csv'
 import { formatBalance, formatDate } from '@/lib/format'
 import { describeCarryBefore, describeDiffering, describeLost, describeWaiting } from '@/lib/import-carry'
-import { countOnOrAfter, cutoverOffer, DAILY_ROW_WRITES, MAX_IMPORT_ROWS, previewChunks, REPLACE_SLICE, replaceWrites, WRITES_PER_ROW } from '@/lib/import-chunks'
+import { countOnOrAfter, cutoverOffer, type CutoverOffer, DAILY_ROW_WRITES, MAX_IMPORT_ROWS, previewChunks, REPLACE_SLICE, replaceWrites, WRITES_PER_ROW } from '@/lib/import-chunks'
 import { describeStop } from '@/lib/import-stop'
 import { meQuery } from '@/lib/me'
 import { accountsQuery, carryPreviewQuery, importedRowsQuery } from '@/lib/queries'
@@ -105,7 +105,8 @@ function ImportFlow() {
     const file = step.name === 'preview' ? step.file : undefined
     const existing = file && accounts?.find((a) => a.accountNumber === file.accountNumber)
     // The Cutover Date this file puts on offer, and whether the Account's own is already later (src/lib/import-chunks.ts). The
-    // offer is the only Cutover Date an Import sets, so one that cannot be taken is never sent.
+    // offer is the only Cutover Date an Import sets, so one that cannot be taken is never sent. The screen and the request read
+    // this one answer, so what is shown is what is sent.
     const offer = file ? cutoverOffer(file.dateRange.to, existing?.cutoverDate ?? null) : undefined
     const cutoverToSet = setCutover && offer && !offer.alreadyLater ? offer.date : undefined
     return (
@@ -132,6 +133,7 @@ function ImportFlow() {
           <Preview
             file={file}
             offer={offer}
+            cutoverToSet={cutoverToSet}
             existing={existing || undefined}
             accountName={accountName}
             onAccountName={setAccountName}
@@ -375,7 +377,9 @@ function DiscardDialog(props: { failed: boolean; onDiscard: () => void; onCancel
 
 function Preview(props: {
   file: BankCsvResult
-  offer: { date: string; alreadyLater: boolean }
+  offer: CutoverOffer
+  /** The Cutover Date this Import will set, from `ImportFlow`, so the screen shows the one the request carries. */
+  cutoverToSet: string | undefined
   existing: { id: number; name: string; cutoverDate: string | null } | undefined
   accountName: string
   onAccountName: (name: string) => void
@@ -394,7 +398,7 @@ function Preview(props: {
   const tooMany = count > MAX_IMPORT_ROWS
   const replaceButton = useRef<HTMLButtonElement>(null)
   // The Cutover Date that will apply to this Import: the one being set, else the Account's own.
-  const effectiveCutover = props.setCutover && !props.offer.alreadyLater ? props.offer.date : (existing?.cutoverDate ?? null)
+  const effectiveCutover = props.cutoverToSet ?? existing?.cutoverDate ?? null
   // The Worker refuses a replace that would remove the old history and import nothing; the screen says so first.
   const nothingToReplaceWith = count > 0 && countOnOrAfter(file.rows, effectiveCutover) === count
   const firstRows = file.rows.slice(0, PREVIEW_ROWS)
@@ -605,7 +609,7 @@ function ReplaceDialog(props: {
 /** Tells the Admin what the Account's Cutover Date will do to this file, and offers the day after the file's last date as the Cutover Date (`cutoverOffer`). */
 function CutoverChoice(props: {
   file: BankCsvResult
-  offer: { date: string; alreadyLater: boolean }
+  offer: CutoverOffer
   accountCutover: string | null
   effective: string | null
   setCutover: boolean
@@ -628,13 +632,13 @@ function CutoverChoice(props: {
           onChange={(event) => props.onSetCutover(event.target.checked)}
         />
         <span>
-          {accountCutover === null ? 'Set' : 'Change'} the Cutover Date to the day after the last date in this file, {formatDate(offer.date)}. Every row in this file is imported, and Akahu Sync covers that day onwards
-          once the Account is linked.
+          {accountCutover === null ? 'Set' : 'Change'} the Cutover Date to the day after the last date in this file, {formatDate(offer.date)}.
+          {offer.alreadyLater ? '' : ' Every row in this file is imported, and Akahu Sync covers that day onwards once the Account is linked.'}
         </span>
       </label>
       {offer.alreadyLater && (
         <p id="cutover-offer-off">
-          This Account's Cutover Date is already later, so the offer cannot be taken: moving it back would leave Sync covering days the imported history already holds. A Cutover Date is changed in{' '}
+          This Account's Cutover Date is already later, so the offer cannot be taken: moving it back would leave the imported history and Sync covering the same days. A Cutover Date is changed in{' '}
           <Link to="/settings" className="underline underline-offset-4">
             Settings
           </Link>
