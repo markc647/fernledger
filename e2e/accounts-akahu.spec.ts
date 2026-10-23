@@ -44,7 +44,7 @@ const ACCOUNTS = [
     akahuFormattedAccount: '99-9999-9999999-27',
     akahuStatus: 'ACTIVE',
     akahuType: 'CHECKING',
-    akahuAttributes: '["PAYMENT_TO","PAYMENT_FROM","TRANSACTIONS"]',
+    akahuAttributes: ['PAYMENT_TO', 'PAYMENT_FROM', 'TRANSACTIONS'],
     akahuConnectionId: 'conn_example0000000000001',
     akahuConnectionName: 'Example Bank',
     akahuConnectionType: 'official',
@@ -115,7 +115,7 @@ test('a linked Account shows the bank, Akahu\'s name beside Fernledger\'s, its t
   expect(await fact('Status')).toBe('Active')
   // Akahu's own words, read as words: what it says it can do with the Account, which bank connection it came from and of what kind (ticket 42).
   expect(await fact("Akahu's attributes")).toBe('Payment to, Payment from, Transactions')
-  expect(await fact("Akahu's bank connection")).toBe('conn_example0000000000001')
+  expect(await fact("Akahu's connection ID")).toBe('conn_example0000000000001')
   expect(await fact("Akahu's connection type")).toBe('Official')
   expect(await fact('Balance')).toBe('$707.17 NZD ($700.10 available)')
   // 02:46 UTC on 21 October is 3:46 pm that day in NZ (UTC+13), and 18:05 UTC on the 20th is 7:05 am on the 21st.
@@ -123,6 +123,15 @@ test('a linked Account shows the bank, Akahu\'s name beside Fernledger\'s, its t
   // Fernledger's own last Sync is a different time from those, and the screen keeps the two apart: 18:00 UTC on the 20th is 7:00 am on the 21st.
   expect(await fact('Last Sync')).toBe('Wed 21 Oct 2026, 7:00 am')
   await expect(row).not.toContainText('refreshed')
+})
+
+test('a linked Account Akahu says can do nothing has a line saying so, which is not the same as no attributes at all', async ({ page, context }) => {
+  await signInAs(context, 'member')
+  await page.route('**/api/accounts', (route) => route.fulfill({ json: [{ ...ACCOUNTS[0], akahuAttributes: [] }, { ...ACCOUNTS[2], akahuAttributes: null }] }))
+  await page.goto('/accounts')
+  const rows = page.getByRole('table', { name: 'Accounts' }).getByRole('row')
+  await expect(akahuRow(rows, 'Example everyday').locator(`dt:text-is("Akahu's attributes") + dd`)).toHaveText('None')
+  await expect(akahuRow(rows, 'Example card').getByText("Akahu's attributes")).toHaveCount(0)
 })
 
 test('an Account with no Akahu link shows none of it, and says it is not linked', async ({ page, context }) => {

@@ -948,7 +948,7 @@ test.describe('zoom', () => {
             akahuStatus: 'ACTIVE',
             akahuType: 'CREDIT_CARD_WITH_A_LONG_TYPE_NAME',
             akahuFormattedAccount: '99-9999-9999999-97',
-            akahuAttributes: '["PAYMENT_TO","PAYMENT_FROM","TRANSACTIONS","TRANSFER_TO","TRANSFER_FROM"]',
+            akahuAttributes: ['PAYMENT_TO', 'PAYMENT_FROM', 'TRANSACTIONS', 'TRANSFER_TO', 'TRANSFER_FROM'],
             akahuConnectionId: 'conn_example0000000000001',
             akahuConnectionName: 'Example Bank with a long name'.padEnd(60, 'k'),
             akahuConnectionType: 'OFFICIAL_WITH_A_LONG_CONNECTION_TYPE',
