@@ -1,4 +1,4 @@
--- The Members' share of D1 Free's daily rows read (worker/member-read-limit.ts): one row for each Member charged today (UTC).
+-- The Members' share of D1 Free's daily rows read (ticket #50, worker/member-read-limit.ts): one row for each Member charged today (UTC).
 --
 --   member_key  SHA-256 of the UTC day and the Member's email, so the table holds no email address and a Member's key changes every day
 --   usage_day   the UTC day, YYYY-MM-DD, as D1 counts a day

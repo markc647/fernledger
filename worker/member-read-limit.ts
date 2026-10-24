@@ -10,7 +10,7 @@ import { utcDay } from './rule-rerun'
 // cron included. The Admin's requests are not counted: the Admin owns the deployment, and the re-run (rule-rerun.ts) keeps its own share.
 //
 // - Each Member GET under /api/* runs on a copy of the D1 binding that adds up the `meta.rows_read` D1 reports for each statement.
-// - Once a request is answered, what it read is charged to today's tally (member_read_usage, 9702_member_read_usage.sql). A request that read
+// - Once a request is answered, what it read is charged to today's tally (member_read_usage, 5001_member_read_usage.sql). A request that read
 //   CHARGE_FROM_ROWS or more is charged what it read. A cheaper one is charged CHARGE_FROM_ROWS by chance, with the chance rows / CHARGE_FROM_ROWS,
 //   and otherwise writes nothing: on average it is charged what it read, so many small reads reach the limit as one large one does, and the
 //   tally still writes at most about MEMBER_DAILY_READS / CHARGE_FROM_ROWS rows a day. The table's trigger clears earlier days on a
