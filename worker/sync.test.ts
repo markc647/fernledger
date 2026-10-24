@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AKAHU_API, MAX_PAGES } from './akahu'
 import worker from './index'
 import { toCents } from './akahu-details'
-import { ACCOUNTS_PER_RUN, hasBankTime, MAX_QUERIES, QUERIES_PER_ACCOUNT, RUN_QUERIES, RECHECK_DAYS, syncAll, SYNC_CRON, windowStart } from './sync'
+import { ACCOUNTS_PER_RUN, hasBankTime, MAX_QUERIES, MAX_WINDOW_DAYS, QUERIES_PER_ACCOUNT, RUN_QUERIES, RECHECK_DAYS, syncAll, SYNC_CRON, windowEnd, windowStart } from './sync'
+import { nzDayStart } from './nz-time'
 
 // Seam 1: the daily Sync cron through the Worker's exported handler, with Akahu faked at `fetch`, so nothing here reaches
 // Akahu. What is checked is what the ticket promises: only linked Accounts are stored, a re-run never duplicates, the window
@@ -124,6 +125,15 @@ afterEach(() => {
 })
 
 describe('the Sync window', () => {
+  it(`reads to now when that is within ${MAX_WINDOW_DAYS} days of where the window starts`, () => {
+    const now = new Date('2026-10-20T18:00:00.000Z')
+    expect(windowEnd('2026-10-06', now)).toEqual(now)
+  })
+
+  it(`reads at most ${MAX_WINDOW_DAYS} days, to NZ midnight, when the window starts longer ago than that`, () => {
+    expect(windowEnd('2026-01-01', new Date('2026-10-20T18:00:00.000Z')).toISOString()).toBe(nzDayStart('2026-03-02'))
+  })
+
   it('starts at the Cutover Date when the Account has never synced', () => {
     expect(windowStart({ cutover_date: '2026-10-01', akahu_synced_at: null })).toEqual({ kind: 'from', date: '2026-10-01' })
   })
@@ -1209,5 +1219,168 @@ describe('a broken Account Link is never a finished Sync', () => {
     await runSync()
 
     expect(await failureOf(accountId)).toBe('no-window')
+  })
+})
+
+// Akahu may correct a Transaction it has already given (spec 49's re-check is there to see it). What was worked out from the old
+// values, its Rule result and its Transfer pair, is worked out again from the new ones in the same batch; a row that comes back
+// unchanged is left exactly as it was.
+describe('a Transaction Akahu corrects', () => {
+  const pairOf = async (id: number) => (await env.DB.prepare('SELECT transfer_of FROM transactions WHERE id = ?').bind(id).first<{ transfer_of: number | null }>())!.transfer_of
+  const synced = async () => (await env.DB.prepare("SELECT id, transfer_of, rule_id, rule_category FROM transactions WHERE source = 'sync'").first<{ id: number; transfer_of: number | null; rule_id: number | null; rule_category: number | null }>())!
+  const imported = async (amountCents: number) =>
+    (await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source) VALUES (?, '2026-10-15', ?, 'TRANSFER FROM EVERYDAY', 'import') RETURNING id")
+      .bind(otherAccountId, amountCents)
+      .first<{ id: number }>())!.id
+  const rule = async (text: string, position: number) => {
+    const category = (await env.DB.prepare('INSERT INTO categories (name) VALUES (?) RETURNING id').bind(`Category for ${text}`).first<{ id: number }>())!.id
+    const id = (await env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?) RETURNING id').bind(position, text, category).first<{ id: number }>())!.id
+    return { id, category }
+  }
+  const syncs = async (over: Record<string, unknown>) => {
+    stubAkahu(() => onePage([transaction(over)]))
+    await runSync()
+  }
+
+  beforeEach(async () => {
+    await env.DB.prepare('DELETE FROM rules').run()
+    await env.DB.prepare('DELETE FROM categories').run()
+  })
+
+  it('lets go of the Transfer it no longer matches, and pairs with the one it now does', async () => {
+    const was = await imported(4250)
+    const now = await imported(5025)
+    await syncs({})
+    expect((await synced()).transfer_of).toBe(was)
+
+    await syncs({ amount: -50.25 })
+
+    const row = await synced()
+    expect(row.transfer_of).toBe(now)
+    expect(await pairOf(now)).toBe(row.id)
+    expect(await pairOf(was)).toBeNull()
+  })
+
+  it('is no longer a Transfer when its new amount matches nothing, and neither is its old partner', async () => {
+    const was = await imported(4250)
+    await syncs({})
+
+    await syncs({ amount: -50.25 })
+
+    expect((await synced()).transfer_of).toBeNull()
+    expect(await pairOf(was)).toBeNull()
+  })
+
+  it('lets go of the Transfer when only its date moves', async () => {
+    const was = await imported(4250)
+    await syncs({})
+
+    await syncs({ date: '2026-10-16T00:00:00.000Z' })
+
+    expect((await synced()).transfer_of).toBeNull()
+    expect(await pairOf(was)).toBeNull()
+  })
+
+  it('takes the Rule its new words match, and none when no Rule matches them', async () => {
+    const groceries = await rule('COUNTDOWN', 1)
+    const hardware = await rule('MITRE 10', 2)
+    await syncs({})
+    expect(await synced()).toMatchObject({ rule_id: groceries.id, rule_category: groceries.category })
+
+    await syncs({ description: 'MITRE 10 MEGA' })
+    expect(await synced()).toMatchObject({ rule_id: hardware.id, rule_category: hardware.category })
+
+    await syncs({ description: 'SOMEWHERE ELSE' })
+    expect(await synced()).toMatchObject({ rule_id: null, rule_category: null })
+  })
+
+  it('takes the Rule its new amount matches', async () => {
+    await env.DB.prepare("INSERT INTO categories (name) VALUES ('Big shop')").run()
+    const big = (await env.DB.prepare("INSERT INTO rules (position, min_cents, category_id) SELECT 1, 5000, id FROM categories WHERE name = 'Big shop' RETURNING id").first<{ id: number }>())!.id
+    await syncs({})
+    expect((await synced()).rule_id).toBeNull()
+
+    await syncs({ amount: -50.25 })
+
+    expect((await synced()).rule_id).toBe(big)
+  })
+
+  it('leaves a row that comes back unchanged alone: its pair stays, and a Rule added since is not given to it', async () => {
+    const partner = await imported(4250)
+    await syncs({})
+    await rule('COUNTDOWN', 1)
+
+    await syncs({})
+
+    expect(await synced()).toMatchObject({ transfer_of: partner, rule_id: null })
+    expect(await pairOf(partner)).not.toBeNull()
+  })
+})
+
+// A window too big for one run's pages (worker/akahu.ts: MAX_PAGES): the first Sync of an Account with an old Cutover Date, or one
+// after Sync was off for months. A run asks for at most MAX_WINDOW_DAYS from where the window starts, and having read that much it
+// marks the Account synced to where it stopped, so the next run starts from there (less the re-check) and a backlog of any length
+// is caught up over a run or a few, rather than every run asking for the same first pages again.
+describe('a long backlog', () => {
+  const RUN_AT = '2026-10-20T18:00:00.000Z'
+  const failureOf = async (id: number) =>
+    (await env.DB.prepare('SELECT akahu_last_failure FROM accounts WHERE id = ?').bind(id).first<{ akahu_last_failure: string | null }>())!.akahu_last_failure
+  const count = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM transactions').first<{ n: number }>())!.n
+
+  /** An Akahu with `perDay` Transactions on every NZ day from 2026-01-01 to the run, answering only for the range asked, 100 a page. */
+  const busyAkahu = (perDay: number) =>
+    stubAkahu((call) => {
+      const query = new URL(call.url).searchParams
+      const [start, end] = [Date.parse(query.get('start')!), Date.parse(query.get('end')!)]
+      const items = []
+      for (let at = Date.parse('2026-01-01T00:00:00.000Z'); at <= Date.parse(RUN_AT); at += 86_400_000) {
+        if (at <= start || at > end) continue
+        const day = new Date(at).toISOString().slice(0, 10).replaceAll('-', '')
+        for (let k = 0; k < perDay; k++) items.push(transaction({ _id: `trans_${day}_${k}`, date: new Date(at).toISOString() }))
+      }
+      const offset = Number(query.get('cursor') ?? 0)
+      return asJson({ items: items.slice(offset, offset + 100), cursor: { next: offset + 100 < items.length ? String(offset + 100) : null } })
+    })
+
+  beforeEach(async () => {
+    await env.DB.prepare('UPDATE accounts SET cutover_date = ? WHERE id = ?').bind('2026-01-01', accountId).run()
+  })
+
+  it(`asks for at most ${MAX_WINDOW_DAYS} days, and marks the Account synced to where that stopped`, async () => {
+    stubAkahu(() => onePage([]))
+
+    const outcome = await runSyncOutcome()
+
+    const until = nzDayStart('2026-03-02') // 2026-01-01 and 60 days
+    expect(new URL(calls[0]!.url).searchParams.get('end')).toBe(until)
+    expect(await syncedAt(accountId)).toBe(until)
+    // Not up to date yet, so not a success, and the status can say why.
+    expect(outcome.success).toBe(false)
+    expect(outcome.accounts[0]).toMatchObject({ complete: false, failure: 'catching-up' })
+    expect(await failureOf(accountId)).toBe('catching-up')
+  })
+
+  it('catches up a backlog bigger than one run can read, a part at a time', async () => {
+    // 4,395 Transactions in all, over twice the pages one run may ask for.
+    busyAkahu(15)
+
+    let runs = 0
+    while ((await syncedAt(accountId)) !== RUN_AT && runs < 10) {
+      await runSync()
+      runs++
+    }
+
+    expect(await syncedAt(accountId)).toBe(RUN_AT)
+    expect(await count()).toBe(293 * 15)
+    expect(await failureOf(accountId)).toBeNull()
+  })
+
+  it('withdraws nothing dated after the part of the window it read', async () => {
+    await env.DB.prepare("INSERT INTO transactions (account_id, date, amount_cents, description, source, akahu_id) VALUES (?, '2026-10-10', -100, 'LATER', 'sync', 'trans_later')").bind(accountId).run()
+    stubAkahu(() => onePage([]))
+
+    await runSync()
+
+    expect(await count()).toBe(1)
   })
 })

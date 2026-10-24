@@ -77,3 +77,12 @@ describe('an Account the run did not reach', () => {
     expect(note.text).toContain('first next time')
   })
 })
+
+// A long gap is read two months a run (worker/sync.ts: MAX_WINDOW_DAYS), so here running again does get further.
+describe('an Account catching up on a long gap', () => {
+  it('says what it brought in, that there is more, and that running again carries on', () => {
+    const note = accountNote({ accountId: 1, written: 900, removed: 0, complete: false, failure: 'catching-up' })
+    expect(note.tone).toBe('neutral')
+    expect(note.text).toBe('Brought in 900 Transactions of a long gap, two months at a time. There is more: run a Sync again to carry on.')
+  })
+})

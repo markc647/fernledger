@@ -94,6 +94,13 @@ const CAUSES: { failure: SyncFailure; hard: boolean; cause: (banks: string, many
     cause: (banks, many) => `Sync has not reached ${banks} yet: a run takes four Accounts, and ${many ? 'they come' : 'it comes'} first in the next one.`,
     action: (many) => `The next Sync takes ${many ? 'them' : 'it'} first. Run a Sync now if you would rather not wait.`,
   },
+  {
+    // A long gap is read MAX_WINDOW_DAYS a run (worker/sync.ts), and each run gets further, so running one is the fix.
+    failure: 'catching-up',
+    hard: false,
+    cause: (banks, many) => `${banks} ${many ? 'are' : 'is'} catching up on a long gap: a Sync reads two months of it at a time.`,
+    action: () => 'The next Sync carries on. Run a Sync now to catch up sooner.',
+  },
 ]
 
 /**

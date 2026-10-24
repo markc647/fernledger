@@ -62,6 +62,10 @@ export function accountNote(account: AccountOutcome): { tone: Tone; text: string
     // the page cap below.
     case 'no-budget':
       return { tone: 'neutral', text: 'Sync ran out of its share of the database for this run before reaching this Account. It is first next time; run a Sync again to do it now.' }
+    // A long gap is read MAX_WINDOW_DAYS a run (worker/sync.ts) and each run gets further, so here, unlike the page cap below,
+    // running again is the fix.
+    case 'catching-up':
+      return { tone: 'neutral', text: `Brought in ${count(account.written)} of a long gap, two months at a time. There is more: run a Sync again to carry on.` }
     // Akahu answered the account list and did not name this Account, so nothing it said about it can be trusted: the Transactions
     // held are kept as they are, nothing was withdrawn, and the Account keeps its old last-success mark (spec 32).
     case 'link-broken':

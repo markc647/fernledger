@@ -72,6 +72,12 @@ describe('the Sync status', () => {
     expect(status!.action).toBe('The next Sync takes it first. Run a Sync now if you would rather not wait.')
   })
 
+  it('says when an Account is catching up on a long gap, and that running a Sync carries it on', () => {
+    const status = asAdmin([linked({ akahuLastFailure: 'catching-up' })])
+    expect(status!.cause).toBe('Kiwibank is catching up on a long gap: a Sync reads two months of it at a time.')
+    expect(status!.action).toBe('The next Sync carries on. Run a Sync now to catch up sooner.')
+  })
+
   it('reads a Link the Worker marked broken the same as one Akahu has stopped listing', () => {
     const status = asAdmin([linked({ akahuLastFailure: 'link-broken' })])
     expect(status!.cause).toContain('needs reconnecting in Akahu')

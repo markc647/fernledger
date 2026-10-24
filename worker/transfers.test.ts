@@ -833,7 +833,7 @@ describe('what pairing reads and writes (ADR 0004: free plan limits)', () => {
   })
 
   it('reads the other Accounts on the date index, and the chunk as an ID range', async () => {
-    const reads = (await plan(PAIR, 0, EVERYDAY.number)).filter((detail) => /^(SCAN|SEARCH) (t|transactions)\b/.test(detail))
+    const reads = (await plan(PAIR, 0, EVERYDAY.number, "[]")).filter((detail) => /^(SCAN|SEARCH) (t|transactions)\b/.test(detail))
 
     expect(reads.length).toBeGreaterThan(0)
     for (const read of reads) expect(read).toMatch(/USING (INTEGER PRIMARY KEY|INDEX transactions_date)/)

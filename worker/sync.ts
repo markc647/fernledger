@@ -38,7 +38,8 @@
 // D1 and subrequest budget (ADR 0004: 50 subrequests and 50 queries an invocation). One Account costs one page request for each
 // 100 Transactions (akahu.ts caps the run, the details request included, at MAX_PAGES) and one batch of up to 8 statements. A household's
 // daily Sync is a page or two an Account. A run that reaches the page cap, or that any Account fails in, is not a success and does not move that Account's
-// `akahu_synced_at`, so the next run asks for the same window again (spec 47).
+// `akahu_synced_at`, so the next run asks for the same window again (spec 47). A window too long for one run's pages is read
+// MAX_WINDOW_DAYS a run instead, each moving the mark on, so a long gap is caught up rather than started again every run.
 import { STORE_DETAILS, toCents, toDetails } from './akahu-details'
 import type { AccountDetails } from './akahu-details'
 import { akahuTokens, fetchAkahuTransactions, fetchPendingTransactions, listAkahuAccounts, MAX_PAGES } from './akahu'
@@ -48,7 +49,7 @@ import { syncBalance, type SyncBalance, type SyncBalanceSkipped } from './balanc
 import { logEvent } from './log'
 import { nzDate, nzDayStart } from './nz-time'
 import { DELETE_PENDING, INSERT_PENDING, toPendingRows } from './pending'
-import { applyRulesStatement, lastTransactionId } from './rule-apply'
+import { applyRulesStatement } from './rule-apply'
 import { pairTransfersStatement } from './transfers'
 
 /**
@@ -71,6 +72,19 @@ export const SYNC_CRON = '30 13 * * *'
 export const RECHECK_DAYS = 14
 
 /**
+ * The most days one run asks Akahu for, from where the Account's window starts. A window can be far longer than one run's pages
+ * (worker/akahu.ts: MAX_PAGES) hold: the first Sync of an Account with an old Cutover Date, or the first after Sync was off for
+ * months. Asked for whole, such a window stops at the page cap every run and never finishes, because a run that does not finish
+ * starts the same window again from its first page. So a run reads at most this many days, and having read them marks the Account
+ * synced to the moment it read to (`windowEnd`), which is where the next run's window starts (less the re-check). The Account is
+ * `catching-up` until a run reaches now.
+ *
+ * Sixty: a run then gets 46 days further (60 less the 14 re-checked), and sixty days fit in the pages a run has for an Account
+ * that takes about 30 Transactions a day, which is more than a household's busiest account.
+ */
+export const MAX_WINDOW_DAYS = 60
+
+/**
  * The D1 queries one Sync may spend, and what one Account costs at most.
  *
  * An invocation gets 50 (ADR 0004). Sync has it to itself, on its own cron and in "Run a Sync now" (the other crons carry on the
@@ -78,8 +92,8 @@ export const RECHECK_DAYS = 14
  * replace the Pending Transactions of the whole run) and ACCOUNTS_PER_RUN (4) Accounts at QUERIES_PER_ACCOUNT each, 47, which leaves
  * 3 in hand because D1's own count of a batch can't be seen from a test.
  *
- * An Account costs one read for the highest Transaction ID, a batch of up to 8 statements (the upsert, the two for what was
- * withdrawn, the Rules, the pairing, the mark, the details and the bank balance) and the Balance Check's two (one read, one write):
+ * An Account costs the one read before its batch (BEFORE_WRITE), a batch of up to 8 statements (the upsert, letting go of the pairs that
+ * no longer hold, removing what was withdrawn, the Rules, the pairing, the mark, the details and the bank balance) and the Balance Check's two (one read, one write):
  * 11, which a test pins. Sync stops starting Accounts when fewer than QUERIES_PER_ACCOUNT remain, rather than being cut off inside
  * a batch, so a fifth linked Account waits (it was a sixth before the Balance Check); those not reached keep their old last-success
  * mark and come first in the next run (LINKED_ACCOUNTS).
@@ -185,9 +199,10 @@ export const UPSERT_SYNCED = `
     akahu_posted_date = excluded.akahu_posted_date,
     akahu_connection_id = excluded.akahu_connection_id`
 
-// The last-success mark. It clears the last failure in the same statement and so for no extra query: an Account that has just
-// finished has nothing wrong with it, and the Sync status reads that column for the cause it names (spec 59).
-export const MARK_SYNCED = 'UPDATE accounts SET akahu_synced_at = ?2, akahu_last_failure = NULL WHERE id = ?1'
+// The last-success mark. It sets the last failure in the same statement and so for no extra query: ?3 is NULL when the Account has
+// just finished, which has nothing wrong with it, or 'catching-up' when it read as far as one run may and not yet to now
+// (MAX_WINDOW_DAYS). The Sync status reads that column for the cause it names (spec 59).
+export const MARK_SYNCED = 'UPDATE accounts SET akahu_synced_at = ?2, akahu_last_failure = ?3 WHERE id = ?1'
 
 /** Why the last Sync of this Account did not finish, for the status to name. ?2 is one of worker/akahu.ts's AkahuFailure words. */
 export const MARK_FAILURE = 'UPDATE accounts SET akahu_last_failure = ?2 WHERE id = ?1'
@@ -204,20 +219,42 @@ export const MARK_MISSING = `UPDATE accounts SET akahu_missing_since = COALESCE(
 //
 // What it will not touch, by construction:
 // - Imported Transactions. `source = 'sync'` only; the dates before the Cutover Date are the Import's and are not in the window.
-// - Anything outside the window. `date >= ?2` is the window's first date, and the window is what Akahu was asked about.
+// - Anything outside the window. `date >= ?2` is the window's first date, and the window is what Akahu was asked about. ?4, when
+//   a run read only as far as MAX_WINDOW_DAYS, is the NZ date it read to, and nothing on or after it goes: Akahu was not asked
+//   about those days, and a Transaction on the day itself may have been stamped after the moment it was asked up to.
 // - Anything at all after a run that did not finish. The caller runs this only when the fetch was complete: a run cut short at
 //   the page budget has not seen the whole window, and every Transaction it did not reach would look withdrawn.
 //
-// ?1 is the Account, ?2 the window's first date, ?3 the JSON array of Akahu IDs this Sync did return.
+// ?1 is the Account, ?2 the window's first date, ?3 the JSON array of Akahu IDs this Sync did return, ?4 the date it read to or NULL.
 const WITHDRAWN = `
   SELECT id FROM transactions
-  WHERE account_id = ?1 AND source = 'sync' AND date >= ?2
+  WHERE account_id = ?1 AND source = 'sync' AND date >= ?2 AND (?4 IS NULL OR date < ?4)
     AND akahu_id IS NOT NULL AND akahu_id NOT IN (SELECT value FROM json_each(?3))`
 
-// A withdrawn Transaction may be half of a Transfer. Its partner is let go first, or it would be left pointing at a row that is
-// no longer there (worker/transfers.ts does the same when an Import removes rows). Re-pairing is what pairTransfersStatement
-// does afterwards, with whatever Akahu returned in its place.
-export const UNPAIR_WITHDRAWN = `UPDATE transactions SET transfer_of = NULL WHERE transfer_of IN (${WITHDRAWN})`
+// What the batch needs to know first, in the one read before it: the highest Transaction ID (the Rules and the pairing take the rows
+// above it as new), and which of the rows this Sync returns are already held with values that Akahu has since corrected.
+// - `moved`: the date or the amount changed, so a Transfer pair made from the old ones may no longer hold.
+// - `reworded`: anything a Rule looks at changed (rule-criteria.ts: the description, the bank memo, the bank type, the amount), so the
+//   stored Rule result may no longer be the right one.
+// A row that comes back as it was is in neither, and is not written by the Rules or the pairing: a Rule added since is not given to it,
+// as it is not given to any Transaction already held (rule-rerun.ts is how that is done). ?1 is the rows as UPSERT_SYNCED takes them.
+export const BEFORE_WRITE = `
+  WITH held AS (
+    SELECT t.id,
+           t.date IS NOT json_extract(j.value, '$.date') OR t.amount_cents IS NOT json_extract(j.value, '$.amountCents') AS moved,
+           t.amount_cents IS NOT json_extract(j.value, '$.amountCents') OR t.description IS NOT json_extract(j.value, '$.description')
+             OR t.bank_memo IS NOT json_extract(j.value, '$.bankMemo') OR t.bank_type IS NOT json_extract(j.value, '$.bankType') AS reworded
+    FROM json_each(?1) j JOIN transactions t ON t.akahu_id = json_extract(j.value, '$.akahuId'))
+  SELECT (SELECT COALESCE(MAX(id), 0) FROM transactions) AS after_id,
+         (SELECT json_group_array(id) FROM held WHERE moved) AS moved,
+         (SELECT json_group_array(id) FROM held WHERE reworded) AS reworded`
+
+// Lets go of the Transfer pairs that no longer hold: a withdrawn Transaction's partner, which would otherwise be left pointing at a
+// row that is no longer there (worker/transfers.ts does the same when an Import removes rows), and both halves of a pair a moved row
+// (?5, BEFORE_WRITE) was in. Re-pairing is what pairTransfersStatement does afterwards, with whatever Akahu returned in place of the
+// withdrawn and with the moved rows' new date and amount. ?2 is NULL when nothing is withdrawn, which makes WITHDRAWN find nothing.
+export const LET_GO_OF_PAIRS = `UPDATE transactions SET transfer_of = NULL
+  WHERE transfer_of IN (${WITHDRAWN}) OR id IN (SELECT value FROM json_each(?5)) OR transfer_of IN (SELECT value FROM json_each(?5))`
 
 export const DELETE_WITHDRAWN = `DELETE FROM transactions WHERE id IN (${WITHDRAWN})`
 
@@ -337,15 +374,25 @@ export function windowStart(account: Pick<LinkedAccount, 'cutover_date' | 'akahu
   return { kind: 'from', date: recheckFrom }
 }
 
+/**
+ * Where a run stops asking Akahu for this Account's Transactions: the run's moment, or NZ midnight MAX_WINDOW_DAYS after the
+ * window's first date when that is earlier. A whole day, so that what was read and what was not are told apart by NZ date.
+ */
+export function windowEnd(from: string, now: Date): Date {
+  const end = new Date(nzDayStart(daysBefore(from, -MAX_WINDOW_DAYS)))
+  return end < now ? end : now
+}
+
 /** What one Account's Sync did, for the run's own result and its log line. */
 /**
  * Why a Sync of an Account did not finish, which is also what `accounts.akahu_last_failure` holds for the Sync status to name
  * (spec 59; src/lib/sync-status.ts has the wording). Akahu's own three reasons, and the three of Sync's own:
  * - no-window: the Account has no Cutover Date, so Sync left it alone (ADR 0003).
  * - no-budget: the run's share of the database ran out before reaching it; it is first in the next run.
+ * - catching-up: it finished as much of its window as one run asks for (MAX_WINDOW_DAYS) and is not up to now yet; the next run carries on.
  * - link-broken: Akahu answered the account list without naming it, so nothing it says about the Account can be trusted.
  */
-export type SyncFailure = AkahuFailure | 'no-window' | 'no-budget' | 'link-broken'
+export type SyncFailure = AkahuFailure | 'no-window' | 'no-budget' | 'link-broken' | 'catching-up'
 
 export type AccountOutcome = { accountId: number; written: number; removed: number; complete: boolean; failure?: SyncFailure }
 
@@ -353,11 +400,13 @@ export type AccountOutcome = { accountId: number; written: number; removed: numb
 export type AccountWrite = { written: number; removed: number }
 
 /**
- * What the write may do, which depends on how the fetch ended. `syncedAt` is the run's moment when the Account finished and
- * null when it did not; `from` is the window's first date, and is given only when the whole window was read, because that is
- * the only time Sync can tell a withdrawn Transaction from one it has not reached yet.
+ * What the write may do, which depends on how the fetch ended. `syncedAt` is the moment the Account was read to when it finished
+ * (the run's moment, or `windowEnd` when the run read only as far as MAX_WINDOW_DAYS) and null when it did not; `from` is the
+ * window's first date, and is given only when the whole window was read, because that is the only time Sync can tell a withdrawn
+ * Transaction from one it has not reached yet. `to` is the NZ date of `windowEnd` when that is before the run's moment, and null
+ * when the window reached now: the Account is then still catching up, and nothing dated from `to` on is withdrawn.
  */
-export type WriteWindow = { syncedAt: Date | null; from: string | null }
+export type WriteWindow = { syncedAt: Date | null; from: string | null; to: string | null }
 
 /** `pending` is how many Pending Transactions the run wrote, or null when Akahu could not be asked for them and what was held was kept. */
 export type SyncOutcome = { ran: boolean; success: boolean; pending: number | null; accounts: AccountOutcome[] }
@@ -412,7 +461,6 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
   const budget = { pagesLeft: MAX_PAGES }
   // One query has already gone on reading the Accounts.
   let queriesLeft = MAX_QUERIES - RUN_QUERIES
-  const end = now.toISOString()
   const outcomes: AccountOutcome[] = []
   // Asked for once, when the first Account is about to be read, so a run that reads none asks for nothing.
   let listed: AkahuResult<AkahuAccount[]> | undefined
@@ -445,6 +493,8 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     // Akahu's `start` is exclusive, so the instant asked for is the millisecond before NZ midnight on the window's first date: a
     // Transaction stamped at exactly that midnight is inside the window, not just outside it.
     const start = new Date(Date.parse(nzDayStart(window.date)) - 1).toISOString()
+    const until = windowEnd(window.date, now)
+    const caughtUp = until.getTime() === now.getTime()
     if (listed === undefined) {
       budget.pagesLeft -= 1
       listed = await listAkahuAccounts(tokens)
@@ -463,7 +513,7 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
         env.DB.prepare(MARK_FAILURE).bind(account.id, 'link-broken'),
       ])
     }
-    const answer = await fetchAkahuTransactions(tokens, account.akahu_account_id, { start, end }, budget)
+    const answer = await fetchAkahuTransactions(tokens, account.akahu_account_id, { start, end: until.toISOString() }, budget)
     if (!answer.ok) {
       logEvent('sync.account.failed', { id: account.id })
       // The cause, for the status to name and the Admin to act on (spec 59), in one batch with the details that are still true
@@ -479,7 +529,8 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     const { transactions, complete } = answer.value
     queriesLeft -= QUERIES_PER_ACCOUNT
     // Only what Akahu said in this run: a balance stored by an earlier run is not new, and the Account may not have been listed.
-    const decision = details === null ? { skipped: 'no-balance' as const } : syncBalance(details, complete)  // details are null when the Link is broken, so no balance is recorded either
+    // And only once the window reached now: Akahu's balance is today's, and an Account still catching up has not the Transactions to explain it.
+    const decision = details === null ? { skipped: 'no-balance' as const } : syncBalance(details, complete && caughtUp)  // details are null when the Link is broken, so no balance is recorded either
     if ('skipped' in decision) logEvent(BALANCE_SKIPPED_EVENT[decision.skipped], { id: account.id })
     const balance = 'balance' in decision ? decision.balance : null
     // An Account whose Link is broken is never a Sync that finished, whatever Akahu answered for its Transactions (spec 32).
@@ -488,12 +539,15 @@ export async function syncAll(env: Env, now: Date): Promise<SyncOutcome> {
     // nothing is withdrawn, the last-success mark stays where it was, and the run is not a success.
     const finished = complete && !linkBroken
     const { written, removed } = await writeAccount(env.DB, account, transactions.map(toRow), {
-      syncedAt: finished ? now : null,
+      syncedAt: finished ? until : null,
       from: finished ? window.date : null,
+      to: caughtUp ? null : nzDate(until),
     }, details, balance)
-    logEvent(finished ? 'sync.account.done' : 'sync.account.partial', { id: account.id, count: written })
+    logEvent(!finished ? 'sync.account.partial' : caughtUp ? 'sync.account.done' : 'sync.account.catching-up', { id: account.id, count: written })
     if (removed > 0) logEvent('sync.account.withdrawn', { id: account.id, count: removed })
-    outcomes.push({ accountId: account.id, written, removed, complete: finished, ...(linkBroken ? { failure: 'link-broken' as const } : {}) })
+    // An Account still catching up finished what it asked for, but is not up to date, so the run is not a success.
+    const failure = linkBroken ? 'link-broken' as const : finished && !caughtUp ? 'catching-up' as const : undefined
+    outcomes.push({ accountId: account.id, written, removed, complete: finished && caughtUp, ...(failure === undefined ? {} : { failure }) })
   }
 
   const pending = await replacePending(env.DB, tokens, results, now, budget)
@@ -523,20 +577,27 @@ const detailsStatement = (db: D1Database, account: LinkedAccount, details: Accou
  * A Sync is the app's own daily work with no one behind it, and the Sync status (ticket 29, #30) is where a Member sees it.
  */
 export async function writeAccount(db: D1Database, account: LinkedAccount, rows: SyncRow[], window: WriteWindow, details: AccountDetails | null, balance: SyncBalance | null = null): Promise<AccountWrite> {
-  const { syncedAt, from } = window
+  const { syncedAt, from, to } = window
   // Only a finished fetch has seen the whole window, so only a finished fetch may say what is no longer in it.
   const withdrawable = syncedAt !== null && from !== null
   if (rows.length === 0 && !withdrawable && details === null && balance === null) return { written: 0, removed: 0 }
 
   const ids = JSON.stringify(rows.map((row) => row.akahuId))
-  const afterId = await lastTransactionId(db)
+  const json = JSON.stringify(rows)
+  const before = (await db.prepare(BEFORE_WRITE).bind(json).first<{ after_id: number; moved: string; reworded: string }>())!
+  const afterId = before.after_id
+  const moved: number[] = JSON.parse(before.moved)
+  const reworded: number[] = JSON.parse(before.reworded)
+  const upsert = rows.length === 0 ? [] : [db.prepare(UPSERT_SYNCED).bind(account.id, json)]
+  const letGo = withdrawable || moved.length > 0 ? [db.prepare(LET_GO_OF_PAIRS).bind(account.id, withdrawable ? from : null, ids, to, before.moved)] : []
   const statements = [
-    ...(rows.length === 0 ? [] : [db.prepare(UPSERT_SYNCED).bind(account.id, JSON.stringify(rows))]),
-    // The partners go first, then the rows, then the Rules and the pairing over what is left.
-    ...(withdrawable ? [db.prepare(UNPAIR_WITHDRAWN).bind(account.id, from, ids), db.prepare(DELETE_WITHDRAWN).bind(account.id, from, ids)] : []),
-    applyRulesStatement(db, { accountNumber: account.account_number, afterId }),
-    pairTransfersStatement(db, { accountNumber: account.account_number, afterId }),
-    ...(syncedAt === null ? [] : [db.prepare(MARK_SYNCED).bind(account.id, syncedAt.toISOString())]),
+    ...upsert,
+    // The pairs that no longer hold are let go first, then the withdrawn rows go, then the Rules and the pairing over what is left.
+    ...letGo,
+    ...(withdrawable ? [db.prepare(DELETE_WITHDRAWN).bind(account.id, from, ids, to)] : []),
+    applyRulesStatement(db, { accountNumber: account.account_number, afterId, redo: reworded }),
+    pairTransfersStatement(db, { accountNumber: account.account_number, afterId, redo: moved }),
+    ...(syncedAt === null ? [] : [db.prepare(MARK_SYNCED).bind(account.id, syncedAt.toISOString(), to === null ? null : 'catching-up')]),
     ...(details === null ? [] : [detailsStatement(db, account, details)]),
     // Last, so it counts the rows above. A balance that Akahu read on a day this Account already has one for replaces it.
     ...(balance === null ? [] : [recordBalance(db, { accountNumber: account.account_number, ...balance, source: 'sync', status: 'alone' })]),
@@ -549,8 +610,8 @@ export async function writeAccount(db: D1Database, account: LinkedAccount, rows:
       logEvent('sync.balance.check-failed', { id: account.id, error })
     }
   }
-  const written = rows.length === 0 ? 0 : results[0]!.meta.changes
-  // The delete is the second of the withdrawn pair, after the upsert when there was one.
-  const removed = withdrawable ? results[(rows.length === 0 ? 0 : 1) + 1]!.meta.changes : 0
+  const written = upsert.length === 0 ? 0 : results[0]!.meta.changes
+  // The delete follows the upsert and letting go of the pairs, when they ran.
+  const removed = withdrawable ? results[upsert.length + letGo.length]!.meta.changes : 0
   return { written, removed }
 }

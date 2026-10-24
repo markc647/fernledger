@@ -69,7 +69,7 @@ When Akahu first reported a Transaction to Sync, shown in its details as "First 
 _Avoid_: Created time, import time
 
 **Sync**:
-The daily pull of new Transactions and Pending Transactions from Akahu. An Account is **Synced** when Sync reached it in the last 24 hours (the time is `accounts.akahu_synced_at`, which Sync will write), and **Not Synced** when not; README [What it does](README.md#what-it-does) says where that shows.
+The daily pull of new Transactions and Pending Transactions from Akahu. An Account is **Synced** when Sync has read it up to a moment in the last 24 hours (that moment is `accounts.akahu_synced_at`, which Sync writes when it finishes an Account: the run's own moment, or, for an Account still catching up on a long gap, the moment that run read to), and **Not Synced** when not; README [What it does](README.md#what-it-does) says where that shows.
 _Avoid_: Refresh, update, fetch
 
 **Account Link**:

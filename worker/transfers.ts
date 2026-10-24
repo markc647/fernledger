@@ -44,13 +44,22 @@ const MARKABLE = effectiveCategory().markable
  * A Pending Transaction is stored apart from `transactions` (spec #1), so it is never a candidate here.
  * An amount of nothing never pairs: two empty Transactions are not money moving.
  * A Transaction marked Not a Transfer (`not_transfer_with`) is left out of both `mine` and `others`, so it never pairs and takes no part in the numbering.
+ *
+ * ?3 is a JSON array of the Account's rows at or below ?1 that look again too, found by ID: Transactions Sync has just corrected and let go
+ * of their pair for (worker/sync.ts). An Import passes none.
  */
 export const PAIR = `
-  WITH mine AS (
-    SELECT t.id, t.date, t.amount_cents,
-           ROW_NUMBER() OVER (PARTITION BY t.date, t.amount_cents ORDER BY t.id) AS n
+  WITH mine_rows AS (
+    SELECT t.id, t.date, t.amount_cents
     FROM transactions t NOT INDEXED
-    WHERE t.id > ?1 AND t.account_id = (SELECT id FROM accounts WHERE account_number = ?2) AND t.transfer_of IS NULL AND t.not_transfer_with IS NULL AND t.amount_cents <> 0),
+    WHERE t.id > ?1 AND t.account_id = (SELECT id FROM accounts WHERE account_number = ?2) AND t.transfer_of IS NULL AND t.not_transfer_with IS NULL AND t.amount_cents <> 0
+    UNION ALL
+    SELECT t.id, t.date, t.amount_cents
+    FROM transactions t NOT INDEXED
+    WHERE t.id IN (SELECT value FROM json_each(?3)) AND t.id <= ?1
+      AND t.account_id = (SELECT id FROM accounts WHERE account_number = ?2) AND t.transfer_of IS NULL AND t.not_transfer_with IS NULL AND t.amount_cents <> 0),
+  mine AS (
+    SELECT id, date, amount_cents, ROW_NUMBER() OVER (PARTITION BY date, amount_cents ORDER BY id) AS n FROM mine_rows),
   others AS (
     SELECT t.id, t.date, -t.amount_cents AS amount_cents,
            ROW_NUMBER() OVER (PARTITION BY t.date, t.amount_cents ORDER BY t.id) AS n
@@ -75,9 +84,11 @@ export const PARTNER_JOIN = 'LEFT JOIN transactions partner ON partner.id = t.tr
 /**
  * The statement that pairs the Account's Transactions with an ID above `afterId`. It is not run here: put it in the batch that
  * adds the Transactions (after the insert and the Rules), so they and their pairs commit together. The Account is named by its
- * normalised number, as the Import's insert does, because a first chunk creates the Account in the same batch.
+ * normalised number, as the Import's insert does, because a first chunk creates the Account in the same batch. `redo` is the IDs of rows
+ * already held that look for a pair again (PAIR's ?3).
  */
-export const pairTransfersStatement = (db: D1Database, scope: { accountNumber: string; afterId: number }) => db.prepare(PAIR).bind(scope.afterId, scope.accountNumber)
+export const pairTransfersStatement = (db: D1Database, scope: { accountNumber: string; afterId: number; redo?: number[] }) =>
+  db.prepare(PAIR).bind(scope.afterId, scope.accountNumber, JSON.stringify(scope.redo ?? []))
 
 /**
  * Lets go of the matching Transactions of the rows a replace (or a step of clearing) is about to remove: ?1 is the Account, ?2 the most

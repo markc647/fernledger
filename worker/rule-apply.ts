@@ -31,24 +31,31 @@ export const firstMatchingRule = (transaction: string) =>
   `(SELECT r.id FROM rules r LEFT JOIN categories c ON c.id = r.category_id
     WHERE ${IS_ACTIVE} AND ${ruleMatches('r', transaction)} ORDER BY r.position, r.id LIMIT 1)`
 
-// Transactions with no matching Rule are left out by the inner join. ?1 is the highest Transaction ID to leave alone, ?2 the Account's number.
+// A new Transaction with no matching Rule is not written. ?1 is the highest Transaction ID to leave alone, ?2 the Account's number.
 // `NOT INDEXED` makes the scan an ID range, so only the rows above ?1 are read. Left to itself SQLite walks the
 // Account's whole history through its Account index and throws the old rows away, which is thousands of reads per chunk.
+// ?3 is a JSON array of IDs at or below ?1 whose result is worked out again, found by ID: Transactions Sync has just corrected
+// (worker/sync.ts). Their result is written whatever it is, so one that no Rule matches any more loses it. An Import passes none.
 const APPLY = `
   WITH first_match AS (
     SELECT t.id AS transaction_id, ${firstMatchingRule('t')} AS rule_id
     FROM transactions t NOT INDEXED
     WHERE t.id > ?1 AND t.account_id = (SELECT id FROM accounts WHERE account_number = ?2)
+    UNION ALL
+    SELECT t.id, ${firstMatchingRule('t')}
+    FROM transactions t NOT INDEXED
+    WHERE t.id IN (SELECT value FROM json_each(?3)) AND t.id <= ?1
   )
   UPDATE transactions
   SET rule_id = hit.id, rule_category = hit.category_id, rule_transfer = CASE WHEN hit.is_transfer = 1 THEN 1 END
-  FROM first_match JOIN rules hit ON hit.id = first_match.rule_id
-  WHERE transactions.id = first_match.transaction_id`
+  FROM first_match LEFT JOIN rules hit ON hit.id = first_match.rule_id
+  WHERE transactions.id = first_match.transaction_id AND (hit.id IS NOT NULL OR transactions.id <= ?1)`
 
 /**
  * The statement that applies the Rules to the Account's Transactions with an ID above `afterId`. It is not run here:
  * put it in the batch that adds the Transactions (after the insert), so they and their Rule results commit together.
  * The Account is named by its normalised number, as the Import's insert does, because a first chunk creates the Account
- * in the same batch and its ID does not exist yet.
+ * in the same batch and its ID does not exist yet. `redo` is the IDs of rows already held whose result is worked out again (APPLY's ?3).
  */
-export const applyRulesStatement = (db: D1Database, scope: { accountNumber: string; afterId: number }) => db.prepare(APPLY).bind(scope.afterId, scope.accountNumber)
+export const applyRulesStatement = (db: D1Database, scope: { accountNumber: string; afterId: number; redo?: number[] }) =>
+  db.prepare(APPLY).bind(scope.afterId, scope.accountNumber, JSON.stringify(scope.redo ?? []))

@@ -16,7 +16,7 @@ overlaps the last run's by RECHECK_DAYS (worker/sync.ts; ADR 0003, spec 49), so 
   it will pair before it writes any, so a row paired by the first run is not a candidate for the second and nothing is paired
   twice.
 - **The last-success mark.** `akahu_synced_at` moves only for an Account that finished. Two runs that both finish write their
-  own `now`, so the later-finishing of the two can leave the *earlier* moment on the row. That only widens the next run's
+  own `now` (or, for an Account still catching up on a long gap, the moment each read to: worker/sync.ts `MAX_WINDOW_DAYS`), so the later-finishing of the two can leave the *earlier* moment on the row. That only widens the next run's
   window, which is the direction Sync is already built to tolerate.
 - **The budgets.** Each run is its own Workers invocation with its own 50 subrequests and 50 D1 queries (ADR 0004), and
   `MAX_PAGES` caps the pages of a run, not of a day. Two runs cannot between them breach either per-invocation budget. What
