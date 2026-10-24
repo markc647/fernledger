@@ -1,7 +1,7 @@
 // Screenshots of the app with MADE-UP data, for a design review (docs/agents/design-review.md).
 // One foreground run: a fresh local database, the production build served on a port of this checkout's own, the
 // made-up data put in through the API, the screenshots, then the server stopped. Nothing touches `npm run dev`'s data.
-// Usage: node scripts/review-shots.mjs [--out <folder>] [--only <regex>] [--skip-build]
+// Usage: node scripts/review-shots.mjs [--out <folder>] [--only <name|name…>] [--skip-build]
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
@@ -12,7 +12,8 @@ const root = resolve(import.meta.dirname, '..')
 const args = process.argv.slice(2)
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)
 const out = resolve(root, option('--out') ?? 'test-results/review-shots')
-const only = option('--only') ? new RegExp(option('--only')) : null
+// Parts of screenshot names, `|` between them. Plain text rather than a regular expression made from an argument (CodeQL js/regex-injection).
+const only = option('--only')?.split('|') ?? null
 
 // A port and database of this checkout's own, as playwright.config.ts does for the browser tests, in 30000–39999 so the two never meet.
 const port = Number(process.env.REVIEW_PORT ?? 30_000 + (parseInt(createHash('sha256').update(root.toLowerCase()).digest('hex').slice(0, 8), 16) % 10_000))
@@ -277,7 +278,7 @@ async function shootAll() {
     // A shot marked `akahu` needs both Akahu tokens in the environment, which `serverEnv` passes to the Worker. Without
     // them Sync is switched off and there is nothing to photograph, so it is left out rather than failing.
     const akahuOn = Boolean(process.env.AKAHU_APP_TOKEN && process.env.AKAHU_USER_TOKEN)
-    for (const shot of SHOTS.filter((s) => (!only || only.test(s.name)) && (!s.akahu || akahuOn))) {
+    for (const shot of SHOTS.filter((s) => (!only || only.some((part) => s.name.includes(part))) && (!s.akahu || akahuOn))) {
       const { role = 'admin', theme = 'light', viewport = DESKTOP } = shot
       const context = await browser.newContext({ viewport, colorScheme: theme, ...(viewport.phone ? { isMobile: true, hasTouch: true } : {}) })
       await context.addCookies([{ name: 'fernledger_dev_as', value: role, domain: 'localhost', path: '/' }])

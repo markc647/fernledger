@@ -382,7 +382,7 @@ test.describe("the form's hints", () => {
     { field: ['Transaction type'], about: 'About Transaction type', text: "The bank's own type, as the bank's export shows it (Tran Type), such as EFTPOS." },
     { field: ['Amount from ($)', 'Amount up to ($)'], about: 'About Amount from and up to', text: 'Both ends count. The amount is its size, whichever way the money went' },
   ]
-  const start = (text: string) => new RegExp(text.slice(0, 30).replace(/[()]/g, '\\$&'))
+  const start = (text: string) => new RegExp(text.slice(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 
   test('a "?" beside the label opens the hint, Esc closes it and gives focus back, and the box is described by it throughout', async ({ page, context }) => {
     await signInAs(context, 'admin')

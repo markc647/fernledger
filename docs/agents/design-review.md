@@ -10,7 +10,7 @@ node scripts/review-shots.mjs
 
 One foreground command, about two minutes. It gives a fresh local database (in `.wrangler/review-state-<port>`, or under `TEST_TEMP_ROOT`), builds the app, serves it on a port of this checkout's own (30000–39999, from its folder; `REVIEW_PORT` overrides it), puts in the made-up household through the API, takes the screenshots, and stops the server it started. `npm run dev`'s data and the browser tests' database are never touched.
 
-- `--only <regex>` takes the screenshots whose names match, such as `--only "rules|budgets"`.
+- `--only <names>` takes the screenshots whose names contain any of the given parts, `|` between them, such as `--only "rules|budgets"`.
 - `--skip-build` reuses `dist/` when nothing has changed since the last build.
 - `--out <folder>` puts them elsewhere. The default is `test-results/review-shots/`, which git ignores.
 - `PLAYWRIGHT_CHANNEL=msedge` (or `chrome`) uses a browser already on the machine, as the browser tests do.

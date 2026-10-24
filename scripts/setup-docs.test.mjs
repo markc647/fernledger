@@ -12,7 +12,7 @@ const HEADING = 'D1 usage bar (optional)'
 const ANCHOR = 'd1-usage-bar-optional'
 
 test('docs/setup.md has the heading the app points to, and the README links to it', () => {
-  assert.match(read('docs/setup.md'), new RegExp(`^## ${HEADING.replace(/[()]/g, '\\$&')}$`, 'm'))
+  assert.match(read('docs/setup.md'), new RegExp(`^## ${HEADING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
   assert.ok(read('README.md').includes(`docs/setup.md#${ANCHOR}`), 'the README should link to the section')
 })
 
