@@ -1,6 +1,8 @@
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CHARGE_FROM_ROWS, chargeFor, countingReads, EACH_MEMBER_DAILY_READS, MEMBER_DAILY_READS, MEMBER_LIMIT_REACHED, memberKey } from './member-read-limit'
+import worker from './index'
 import { utcDay } from './rule-rerun'
 
 const origin = 'http://localhost:5173'
@@ -162,6 +164,32 @@ describe('the Members\' daily limit', () => {
     expect(status).toBe(429)
     expect(seen.slice(1).map((n, i) => n - seen[i]!)).toEqual([CHARGE_FROM_ROWS, CHARGE_FROM_ROWS, CHARGE_FROM_ROWS])
     expect(requests).toBeGreaterThan(10) // most small reads were not charged, and wrote nothing
+  })
+
+  it('keeps today\'s counts when a request begun before 00:00 UTC is charged after it', async () => {
+    const yesterday = utcDay(new Date(Date.now() - 86_400_000))
+    await seed(await memberKey(today(), EMAIL.other), today(), 5_000)
+
+    await seed(await memberKey(yesterday, EMAIL.member), yesterday, 2_000) // the late charge's row
+
+    expect(await usage()).toHaveLength(2)
+    expect(await charged('other')).toBe(5_000)
+  })
+
+  it('still answers a read whose charge fails', async () => {
+    const failing = new Proxy(env.DB, {
+      get(target, property) {
+        if (property === 'prepare') return (sql: string) => (sql.startsWith('INSERT INTO member_read_usage') ? { bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } : target.prepare(sql))
+        const value = Reflect.get(target, property)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    const ctx = createExecutionContext()
+    const res = await worker.fetch!(new Request(`${origin}${DEAR}`, { headers: { Cookie: 'fernledger_dev_as=member' } }) as never, { ...env, DB: failing }, ctx)
+    await waitOnExecutionContext(ctx)
+
+    expect(res.status).toBe(200)
+    expect(await usage()).toEqual([])
   })
 
   it('starts each UTC day at nothing, and the next charge clears the days before', async () => {

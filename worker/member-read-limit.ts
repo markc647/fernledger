@@ -102,5 +102,11 @@ export const memberReadLimit = createMiddleware<AppEnv>(async (c, next) => {
   c.env = { ...c.env, DB: countingReads(db, tally) }
   await next()
   const charge = chargeFor(tally.rows)
-  if (charge > 0) await db.prepare(CHARGE).bind(day, key, charge).run()
+  if (charge === 0) return
+  // The answer is already made: a charge that fails (D1's daily writes gone, say) is logged rather than turned into an error for a read that worked.
+  try {
+    await db.prepare(CHARGE).bind(day, key, charge).run()
+  } catch (error) {
+    logEvent('request.member-read-charge-failed', { error })
+  }
 })
