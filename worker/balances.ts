@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import * as z from 'zod/mini'
-import { isoDate } from './account-fields'
+import { accountOrder, isoDate } from './account-fields'
 import { syncedInLast24Hours } from './akahu-sync'
 import type { AppEnv } from './app-env'
 import { UNCOUNTED_SQL } from './balance-check'
@@ -25,7 +25,7 @@ export const CURRENT = `
          a.akahu_refreshed_balance_at AS akahuRefreshedBalanceAt,
          (SELECT status FROM balance_checks WHERE account_id = a.id ORDER BY as_of_date DESC LIMIT 1) AS latestStatus
   FROM accounts a LEFT JOIN balance_checks b ON b.id = (${ANCHOR_ID})
-  ORDER BY a.name COLLATE NOCASE, a.id`
+  ORDER BY ${accountOrder('a')}`
 
 // Balance at the end of each day with Transactions (and the anchor's day): the opening balance the anchor implies, plus the
 // running total of the days. Working backwards from the bank's balance is the same sum. `net` is the day's own total, so a
@@ -119,12 +119,12 @@ const DIFFERENCES = `
   SELECT c.account_id AS accountId, a.name AS accountName, c.as_of_date AS asOfDate, c.checked_against AS since, c.difference_cents AS differenceCents
   FROM balance_checks c JOIN accounts a ON a.id = c.account_id
   WHERE c.status = 'differs'
-  ORDER BY a.name COLLATE NOCASE, a.id, c.as_of_date DESC`
+  ORDER BY ${accountOrder('a')}, c.as_of_date DESC`
 
 const LATEST_CHECKS = `
   SELECT a.id AS accountId, a.name AS accountName, c.as_of_date AS asOfDate, c.status AS status
   FROM accounts a LEFT JOIN balance_checks c ON c.id = (SELECT id FROM balance_checks WHERE account_id = a.id ORDER BY as_of_date DESC LIMIT 1)
-  ORDER BY a.name COLLATE NOCASE, a.id`
+  ORDER BY ${accountOrder('a')}`
 
 export const balanceChecks = new Hono<AppEnv>()
   // The warnings: every span where the bank and the Transactions disagree, newest first within each Account. `since` is

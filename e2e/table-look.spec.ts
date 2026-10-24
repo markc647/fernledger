@@ -1,7 +1,7 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
 import { importRows } from './report-helpers'
-import { actionsButton, menuAction, openActions, rowButton } from './row-actions-helpers'
+import { actionsButton, chooseAction, menuAction, openActions, rowButton } from './row-actions-helpers'
 import { expectTableLook } from './table-look-helpers'
 
 // The one look every table has (ResponsiveTable, src/components/responsive-table.tsx): tested once here, on the Transactions table (in its own box) and the Recent transactions table of the Dashboard (in a card, which is the
@@ -60,7 +60,7 @@ test('on a phone the rows are cards with the border, corners and text size the t
   await expect(page.getByRole('table')).toHaveCount(0)
   expect(parseFloat(box.border)).toBeGreaterThan(0)
   expect(await boxOf(card, 'dd')).toEqual(box)
-  await expect(rowButton(page, 'Rename', name)).toBeVisible() // the same button, on the card
+  await expect(actionsButton(page, name)).toBeVisible() // the same button, on the card
 })
 
 test('a panel that opens under a row is a full-width row of the table, in its look, and on a phone a card after the row\'s card', async ({ page, context, baseURL }, testInfo) => {
@@ -71,33 +71,33 @@ test('a panel that opens under a row is a full-width row of the table, in its lo
   await expect(table.getByRole('cell', { name, exact: true })).toBeVisible()
   const columns = await table.getByRole('columnheader').count()
 
-  await rowButton(page, 'Rename', name).click()
+  await chooseAction(actionsButton(page, name), 'Rename')
   // This page has a second name field of its own, for adding a credit card Account, so the panel's own one is read through it.
   const panel = page.getByRole('region', { name: `Rename ${name}` })
   await expect(panel).toBeVisible()
   await expect(panel.locator('xpath=ancestor::td[1]')).toHaveAttribute('colspan', String(columns)) // across every column
-  await expect(rowButton(page, 'Rename', name)).toHaveAttribute('aria-controls', (await panel.getAttribute('id'))!)
   await expectTableLook(table) // the open panel is a row of the table: the same box, text size and dividers
   await panel.getByLabel('Account name').fill(`${name} typed`)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByRole('table')).toHaveCount(0)
   await expect(panel).toBeVisible()
-  await expect(panel.locator('xpath=ancestor::li[1]/preceding-sibling::li[1]').getByRole('button', { name: `Rename ${name}`, exact: true })).toBeVisible()
+  await expect(panel.locator('xpath=ancestor::li[1]/preceding-sibling::li[1]').getByRole('button', { name: `Actions for ${name}`, exact: true })).toBeVisible()
   await expect(panel.getByLabel('Account name')).toHaveValue(`${name} typed`) // the cards start the form again, with what was typed in it
   await page.setViewportSize({ width: 1280, height: 900 })
   await expect(panel.getByLabel('Account name')).toHaveValue(`${name} typed`)
   await panel.getByRole('button', { name: 'Cancel' }).click()
-  await rowButton(page, 'Rename', name).click()
+  await chooseAction(actionsButton(page, name), 'Rename')
   await expect(panel.getByLabel('Account name')).toHaveValue(name) // Cancel throws it away
 })
 
 // A panel that opens from a row of the Accounts or the Budgets (stubbed, with enough rows for the page to scroll) leaves the page where it was, and puts focus in its first field.
-for (const { path, table, button, field, stub } of [
+for (const { path, table, button, open, field, stub } of [
   {
     path: '/accounts',
     table: 'Accounts',
-    button: (page: Page, n: number) => rowButton(page, 'Rename', `Stub account ${n}`),
+    button: (page: Page, n: number) => actionsButton(page, `Stub account ${n}`),
+    open: (button: Locator) => chooseAction(button, 'Rename'), // Rename is in the row's Actions menu, with Move up and Move down (#45)
     field: 'Account name',
     stub: (page: Page) =>
       page.route('**/api/accounts', (route) => route.fulfill({ json: Array.from({ length: 16 }, (_, i) => ({ id: i + 1, name: `Stub account ${i + 1}`, accountNumber: '99-9999-9999999-97', cutoverDate: null })) })),
@@ -106,6 +106,7 @@ for (const { path, table, button, field, stub } of [
     path: '/budgets',
     table: 'Budgets',
     button: (page: Page, n: number) => rowButton(page, 'Edit Budget for', `Stub category ${n}`),
+    open: (button: Locator) => button.click(),
     field: 'Monthly Budget in dollars',
     stub: (page: Page) =>
       page.route(/\/api\/budgets(\?.*)?$/, (route) =>
@@ -130,22 +131,22 @@ for (const { path, table, button, field, stub } of [
     const scrolled = await page.evaluate(() => window.scrollY)
     expect(scrolled).toBeGreaterThan(100)
 
-    await button(page, 6).click()
+    await open(button(page, 6))
     await expect(page.getByLabel(field, { exact: true })).toBeFocused()
     expect(await page.evaluate(() => window.scrollY)).toBe(scrolled)
     await expect(page.getByRole('region').filter({ has: page.getByLabel(field, { exact: true }) })).toBeInViewport()
 
     // What is typed in it is still there when the reader has been to another row and comes back; Cancel throws it away.
     await page.getByLabel(field, { exact: true }).fill('75')
-    await button(page, 7).click()
+    await open(button(page, 7))
     // One panel is open at a time. A row's panel is a RowPanel (a Card with role="region"), which is what is counted: a page may
     // have sections of its own that are regions too, as /accounts has for adding a credit card Account.
     await expect(page.locator('[data-slot="card"][role="region"]')).toHaveCount(1)
     await expect(page.getByLabel(field, { exact: true })).not.toHaveValue('75')
-    await button(page, 6).click()
+    await open(button(page, 6))
     await expect(page.getByLabel(field, { exact: true })).toHaveValue('75')
     await page.getByRole('button', { name: 'Cancel' }).click()
-    await button(page, 6).click()
+    await open(button(page, 6))
     await expect(page.getByLabel(field, { exact: true })).not.toHaveValue('75')
   })
 }

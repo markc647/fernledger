@@ -1,4 +1,5 @@
 import * as z from 'zod/mini'
+import { accountOrder } from './account-fields'
 import type { BalanceStatus } from './balance-rules'
 import { carryForward } from './month-balances'
 import { monthEnd, monthsBefore, monthStart, nzMonth } from './months'
@@ -105,10 +106,10 @@ export function netWorthPoints(histories: HistoryRow[][], from: string): NetWort
   }))
 }
 
-/** The Accounts with the status of each one's newest bank balance (as the Summary has it), by name as everywhere else. */
+/** The Accounts with the status of each one's newest bank balance (as the Summary has it), in the order used everywhere (accountOrder). */
 export const ACCOUNTS = `
   SELECT a.id, a.name, (SELECT status FROM balance_checks WHERE account_id = a.id ORDER BY as_of_date DESC LIMIT 1) AS latestStatus
-  FROM accounts a ORDER BY a.name COLLATE NOCASE, a.id`
+  FROM accounts a ORDER BY ${accountOrder('a')}`
 
 /** One statement for each Account: its history picked at month-ends from `from` (?1 = the Account). The same statements the Report runs. */
 export const historyStatements = (db: D1Database, accounts: { id: number }[], from: string) => accounts.map((account) => db.prepare(REPORT_HISTORY).bind(account.id, from, EVERY_DATE.to))

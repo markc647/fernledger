@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { rowButton } from './row-actions-helpers'
+import { actionsButton, chooseAction } from './row-actions-helpers'
 import { mainNav, navigateTo } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
@@ -161,19 +161,18 @@ test('the Admin renames an Account and the new name shows on its Transactions', 
   await page.goto('/accounts')
   await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toBeVisible()
 
-  await expect(page.getByRole('columnheader', { name: 'Action', exact: true })).toBeVisible() // one action: a button named for it, under a singular heading
-  await expect(page.getByRole('button', { name: /^Actions for/ })).toHaveCount(0)
-  await rowButton(page, 'Rename', before).click()
+  await expect(page.getByRole('columnheader', { name: 'Action', exact: true })).toBeVisible()
+  await chooseAction(actionsButton(page, before), 'Rename') // a menu: Rename, and Move up and Move down (#45)
   // The form is a panel under its row, across the table: under the Account and the row of Akahu's details that goes with it (A1).
   const panel = page.getByRole('region', { name: `Rename ${before}` })
   await expect(panel.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[1]')).toHaveAttribute('data-slot', 'table-detail')
-  await expect(panel.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[2]').getByRole('button', { name: `Rename ${before}`, exact: true })).toBeVisible()
+  await expect(panel.locator('xpath=ancestor::tr[1]/preceding-sibling::tr[2]').getByRole('button', { name: `Actions for ${before}`, exact: true })).toBeVisible()
   await panel.getByLabel('Account name').fill(after) // this page has a second name field, for adding a credit card Account
   await noAxeViolations(page)
   await page.getByRole('button', { name: 'Save name' }).click()
 
   await expect(page.getByRole('cell', { name: after, exact: true })).toBeVisible()
-  await expect(rowButton(page, 'Rename', after)).toBeFocused() // the row's button, which opened the form
+  await expect(actionsButton(page, after)).toBeFocused() // the row's Actions button, which opened the form
   await navigateTo(page, 'All Transactions', 'Transactions')
   await expect(page.getByRole('row', { name: new RegExp(`${after} ASB BANK - INTEREST`) })).toBeVisible()
 })
@@ -193,7 +192,7 @@ test('a Member sees Transactions and Accounts but no Import and no rename', asyn
   await navigateTo(page, 'Accounts', 'Reports')
   await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toBeVisible()
   await expect(page.getByRole('cell', { name: numberWith(suffixes(testInfo).small) })).toBeVisible()
-  await expect(page.getByRole('button', { name: /^Rename / })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^(Actions for|Drag to reorder) / })).toHaveCount(0)
   await expect(page.getByRole('columnheader', { name: /^Action/ })).toHaveCount(0)
   await noAxeViolations(page)
 
