@@ -70,12 +70,12 @@ test("a Member lands on a Summary with balances, the Balance Check warning in th
   await expect(account).toContainText('$113.00') // the bank's own balance on 7 October, which the Summary starts from
   await expect(account).toContainText('Tue 7 Oct 2031')
 
-  // The Balance Check warning is in the Account's own row, in the Checked column after As of: Check, with an icon as well as the word, and by how much. There is no card of Balance checks,
+  // The Balance Check warning is in the Account's own row, in the Checked column after As of (the Balance is last): Check, with an icon as well as the word, and by how much. There is no card of Balance checks,
   // and no Sync column: Akahu Sync is not set up (and not built), so no Account could be called Synced.
-  const checked = account.getByRole('cell').nth(3)
+  const checked = account.getByRole('cell').nth(2)
   await expect(checked).toHaveText('Check: balance differs from the bank by $5.00')
   await expect(checked.locator('svg[aria-hidden="true"]')).toHaveCount(1)
-  await expect(balances.getByRole('columnheader')).toHaveText(['Account', 'Balance', 'As of', 'Checked'])
+  await expect(balances.getByRole('columnheader')).toHaveText(['Account', 'As of', 'Checked', 'Balance'])
   await expectTableLook(balances.getByRole('table'), { inCard: true, single: true })
   await expect(page.getByRole('region', { name: 'Balance checks' })).toHaveCount(0)
 
@@ -131,12 +131,12 @@ test.describe('the Balances table: Checked and Sync', () => {
   }
   const headers = (region: Locator) => region.getByRole('columnheader')
   const row = (region: Locator, name: string) => region.getByRole('row', { name: new RegExp(name) })
-  const cell = (region: Locator, name: string, column: 'Checked' | 'Sync') => row(region, name).getByRole('cell').nth(column === 'Checked' ? 3 : 4)
+  const cell = (region: Locator, name: string, column: 'Checked' | 'Sync') => row(region, name).getByRole('cell').nth(column === 'Checked' ? 2 : 3)
 
   test('has a Checked column after As of: OK where the checks agree with the bank, Check and by how much where one disagrees, and a dash where nothing was compared', async ({ page, context }) => {
     await signInAs(context, 'member')
     const balances = await open(page)
-    await expect(headers(balances)).toHaveText(['Account', 'Balance', 'As of', 'Checked'])
+    await expect(headers(balances)).toHaveText(['Account', 'As of', 'Checked', 'Balance'])
 
     const agrees = cell(balances, 'Example everyday', 'Checked')
     await expect(agrees).toHaveText('OK: agrees with the bank')
@@ -185,14 +185,14 @@ test.describe('the Balances table: Checked and Sync', () => {
   test('has no Sync column when Akahu Sync is not set up, which is so until Sync is built, whatever an Account says', async ({ page, context }) => {
     await signInAs(context, 'member')
     const balances = await open(page, { syncSetUp: false })
-    await expect(headers(balances)).toHaveText(['Account', 'Balance', 'As of', 'Checked'])
+    await expect(headers(balances)).toHaveText(['Account', 'As of', 'Checked', 'Balance'])
     await expect(balances.getByText('Synced')).toHaveCount(0) // the first Account says it was synced, and the column is still not there
   })
 
   test('has a Sync column after Checked when Akahu Sync is set up: Synced in green where it reached the Account in the last 24 hours, Not Synced in red where not', async ({ page, context }) => {
     await signInAs(context, 'admin')
     const balances = await open(page, { syncSetUp: true })
-    await expect(headers(balances)).toHaveText(['Account', 'Balance', 'As of', 'Checked', 'Sync'])
+    await expect(headers(balances)).toHaveText(['Account', 'As of', 'Checked', 'Sync', 'Balance'])
 
     const synced = cell(balances, 'Example everyday', 'Sync')
     await expect(synced).toHaveText('Synced')
@@ -307,7 +307,7 @@ test.describe('the Balances table: Checked and Sync', () => {
       const balances = page.getByRole('region', { name: 'Balances' })
       await expect(balances.getByRole('alert')).toHaveText("Fernledger couldn't check the balances against the bank. Reload the page to try again.")
       await expect(balances.getByRole('row', { name: /Example savings/ })).toBeVisible()
-      await expect(headers(balances)).toHaveText(['Account', 'Balance', 'As of'])
+      await expect(headers(balances)).toHaveText(['Account', 'As of', 'Balance'])
     })
   })
 
@@ -321,7 +321,7 @@ test.describe('the Balances table: Checked and Sync', () => {
       await page.route('**/api/features', (route) => route.fulfill({ status: 500, json: { error: 'Something went wrong' } }))
       await page.goto('/')
       const balances = page.getByRole('region', { name: 'Balances' })
-      await expect(headers(balances)).toHaveText(['Account', 'Balance', 'As of', 'Checked'])
+      await expect(headers(balances)).toHaveText(['Account', 'As of', 'Checked', 'Balance'])
       await expect(balances.getByRole('alert')).toHaveCount(0)
     })
   })
