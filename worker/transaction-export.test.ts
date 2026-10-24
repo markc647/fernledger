@@ -27,11 +27,12 @@ const request = (query: string, who: Who = 'member') =>
 
 /**
  * Calls the Worker's handler with `db` standing in for D1, to count its queries or make one fail. Called directly, not through
- * `exports.default.fetch`, because the test changes the Worker's env (CODING_STANDARDS.md: Tests).
+ * `exports.default.fetch`, because the test changes the Worker's env (CODING_STANDARDS.md: Tests). As the Admin, so what is counted is the
+ * export's own queries and not the Members' daily limit's (member-read-limit.test.ts), which a Member's request adds.
  */
 async function requestWith(db: D1Database, query = '') {
   const ctx = createExecutionContext()
-  const res = await worker.fetch!(new Request(`${origin}/api/transactions/export.csv${query}`, { headers: { Cookie: 'fernledger_dev_as=member' } }) as never, { ...env, DB: db }, ctx)
+  const res = await worker.fetch!(new Request(`${origin}/api/transactions/export.csv${query}`, { headers: { Cookie: 'fernledger_dev_as=admin' } }) as never, { ...env, DB: db }, ctx)
   await waitOnExecutionContext(ctx)
   return res
 }

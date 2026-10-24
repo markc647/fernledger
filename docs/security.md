@@ -19,6 +19,7 @@ Each Deployer runs their own copy in their own Cloudflare account. There is no F
 | Stolen or guessed passwords | The app has no passwords. [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) handles sign-in with email one-time codes. |
 | A forged or missing sign-in token | The app checks Access's signed token (signature, issuer, audience) on **every** request. If configuration is missing, it refuses all requests rather than allowing them (ADR 0002). |
 | A Member changing data | Read-only by default. Only the Admin can change anything, and every change goes in the Change Log, which all Members can see. |
+| A Member using up the free plan's daily reads | Members' reads have a daily limit: all of them together 1.5 million rows, one Member 1 million, so the Admin, Sync and the backup keep the rest ([ADR 0004](adr/0004-runs-on-workers-free-plan.md)). Past it a Member's request is refused until 00:00 UTC. |
 | A leaked Akahu token (if you use Akahu Sync) | Akahu personal-app tokens can't make payments, so a leak exposes history, not money. Tokens are stored as encrypted Worker secrets, never in code or the database. |
 | Interception or disk theft | Data is encrypted in transit (TLS) and at rest (D1, R2). |
 | Cross-site attacks | Changes must come from the app's own address with a JSON body. Strict security headers are set: a Content Security Policy, no framing, no referrer. |

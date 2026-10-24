@@ -1,6 +1,7 @@
 import * as z from 'zod/mini'
 import { isQueryDate } from './dates'
-import { monthEnd, monthsBefore, monthStart, nzMonth } from './months'
+import { monthCount, monthEnd, monthsBefore, monthStart, nzMonth } from './months'
+import { MAX_REPORT_MONTHS } from './report-budget'
 
 // The question GET /api/charts/spending takes (no page asks it now; it was the Summary's spending chart's): which dates. The answer is spending-by-category.ts's, the same one a Report of it
 // gets (ADR 0012), so this file is only the periods the Worker names and the query string that asks for them or for two dates.
@@ -44,6 +45,8 @@ export const spendingQuery = z
     z.refine<Query>((q) => q.period !== undefined || q.to !== undefined || q.from === undefined, { path: ['to'] }),
     z.refine<Query>((q) => q.period !== undefined || q.from !== undefined || q.to !== undefined, { path: ['period'] }),
     z.refine<Query>((q) => q.from === undefined || q.to === undefined || q.from <= q.to, { path: ['to'] }),
+    // Spending reads every Transaction in the dates (ADR 0004), so the dates are capped as Budget vs actual's are. The longest period is 12 months.
+    z.refine<Query>((q) => q.from === undefined || q.to === undefined || monthCount(q.from.slice(0, 7), q.to.slice(0, 7)) <= MAX_REPORT_MONTHS, { path: ['to'] }),
   )
 
 /** The NZ dates the query asks about. The query has been checked, so a period or both dates are there. */

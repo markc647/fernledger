@@ -17,6 +17,7 @@ import { FEATURES, featureStatuses } from './features'
 import { imports } from './imports'
 import { keptReports } from './kept-reports'
 import { logEvent } from './log'
+import { memberReadLimit } from './member-read-limit'
 import { reports } from './reports'
 import { isJson, isWrite } from './request-format'
 import { rules } from './rules'
@@ -55,6 +56,7 @@ export const app = new Hono<AppEnv>()
     if (!isJson(c.req.header('Content-Type'))) return c.json({ error: 'JSON body required' }, 415)
     await next()
   })
+  .use('/api/*', memberReadLimit)
   .get('/api/me', (c) => c.json(c.var.member))
   .get('/api/settings', async (c) => c.json(await readSettings(c.env.DB)))
   .get('/api/features', (c) => c.json({ features: featureStatuses(FEATURES, c.env, c.var.member.role) }))

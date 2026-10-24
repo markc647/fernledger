@@ -1,12 +1,14 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as z from 'zod/mini'
 import { REPORTS } from '../src/lib/reports'
 import { app } from './app'
 import worker from './index'
 import { KEPT_LIMIT, keepBody, NOT_KEPT, REPORT_IDS, requestedChoices, SHAPES, type ReportId } from './kept-reports'
 import { callAsAdminWith, callWhileInterrupted, meteredDb } from './test-support'
+
+afterEach(() => vi.restoreAllMocks())
 
 // Seam 1: the list of kept Reports, through the Worker's exported handler as the local-development Admin or a read-only Member. A kept Report is a Report's CHOICES (which
 // Report, the dates, the Account or Category), never its figures. Only the Admin makes Reports: the Admin showing one keeps it, and a Member can read only a Report that is kept.
@@ -689,6 +691,8 @@ describe('a Member reading a Report', () => {
   it('costs one small query to check: a row or two more than the Report reads for the Admin, however many are kept', async () => {
     for (const to of days(30)) await seedKept({ report: 'spending', to })
     await seedKept({ report: 'spending', to: '2026-10-31' })
+    // No chance charge of the Members' daily limit (member-read-limit.ts), whose write would read a row or two more.
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation(<T extends ArrayBufferView | null>(array: T) => (array as unknown as Uint32Array).fill(0xffffffff) as unknown as T)
     const rowsRead = async (who: Who) => {
       const { db, usage } = meteredDb()
       const ctx = createExecutionContext()
