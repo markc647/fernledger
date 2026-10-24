@@ -119,7 +119,7 @@ export function BalancesWidget() {
           )}
           {syncSetUp && <SyncStatusLine />}
           <ResponsiveTable
-            caption="Balance of each Account, calculated from the Transactions held"
+            caption="Balance of each Account"
             rows={accounts}
             getRowKey={(row) => row.accountId}
             emptyMessage="There are no Accounts yet."
