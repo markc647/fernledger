@@ -1,0 +1,723 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { PreviewRow } from '@/generated/api/import-rows'
+import { Amount } from '@/components/amount'
+import { PageHeading } from '@/components/help-sheet'
+import { ResponsiveTable } from '@/components/responsive-table'
+import { Status } from '@/components/status'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { isGeneratedKey } from '@/lib/account-key'
+import { api } from '@/lib/api'
+import { describeBalanceCheck, type BalanceCheckOutcome } from '@/lib/balance-check'
+import { adapters, BankCsvError, parseBankCsv, type BankCsvResult } from '@/lib/bank-csv'
+import { formatBalance, formatDate } from '@/lib/format'
+import { describeCarryBefore, describeDiffering, describeLost, describeWaiting } from '@/lib/import-carry'
+import { countOnOrAfter, cutoverOffer, type CutoverOffer, DAILY_ROW_WRITES, MAX_IMPORT_ROWS, previewChunks, REPLACE_SLICE, replaceWrites, WRITES_PER_ROW } from '@/lib/import-chunks'
+import { describeStop } from '@/lib/import-stop'
+import { meQuery } from '@/lib/me'
+import { accountsQuery, carryPreviewQuery, importedRowsQuery } from '@/lib/queries'
+import { ImportStopped, runImport, type ImportSummary, type LostTransaction } from '@/lib/run-import'
+
+export const Route = createFileRoute('/import')({
+  component: ImportScreen,
+  staticData: { nav: { label: 'Import', group: 'transactions', adminOnly: true, order: 20 } },
+})
+
+type Step =
+  | { name: 'choose'; problem?: string }
+  | { name: 'preview'; file: BankCsvResult }
+  | { name: 'sending'; sent: number; total: number }
+  | { name: 'done'; summary: ImportSummary }
+  | { name: 'stopped'; sent: number; total: number; replacing: boolean; removed: number; dailyLimit: boolean }
+
+const PREVIEW_ROWS = 5
+const SHOWN_ERRORS = 10
+
+function ImportScreen() {
+  // Fails closed: the Import controls appear only once the API has said the visitor is the Admin.
+  const { data: me, isPending } = useQuery(meQuery)
+  return (
+    <>
+      <PageHeading help={me?.role === 'admin' && <p>Choose a bank export (a CSV file). Fernledger reads it in your browser and shows you what it found. Nothing is saved until you confirm.</p>}>Import</PageHeading>
+      {me?.role === 'admin' ? (
+        <ImportFlow />
+      ) : isPending ? (
+        <p role="status" className="mt-2">
+          Checking who you are.
+        </p>
+      ) : (
+        <p className="mt-2">Only the Admin can import files.</p>
+      )}
+    </>
+  )
+}
+
+function ImportFlow() {
+  const queryClient = useQueryClient()
+  const [step, setStep] = useState<Step>({ name: 'choose' })
+  const [accountName, setAccountName] = useState('')
+  const [setCutover, setSetCutover] = useState(false)
+  // Which Account a file that carries no account number is for: the Admin's choice, because the file cannot say (ADR 0017).
+  const [chosenAccount, setChosenAccount] = useState<number | null>(null)
+  const [confirmingReplace, setConfirmingReplace] = useState(false)
+  const { data: accounts } = useQuery(accountsQuery)
+
+  async function onFile(file: File | undefined) {
+    if (!file) return
+    try {
+      setStep({ name: 'preview', file: parseBankCsv(await file.text()) })
+      setAccountName('')
+      setSetCutover(false)
+      setChosenAccount(null)
+      setConfirmingReplace(false)
+    } catch (error) {
+      // Error messages name a line or field only, never a value from the file.
+      setStep({ name: 'choose', problem: error instanceof BankCsvError ? error.message : 'The file could not be read.' })
+    }
+  }
+
+  async function confirm(file: BankCsvResult, accountKey: string, cutoverDate: string | undefined, replaceAccountId?: number) {
+    setStep({ name: 'sending', sent: 0, total: 1 })
+    const replacing = replaceAccountId !== undefined
+    try {
+      const summary = await runImport(
+        file,
+        { accountKey, accountName: accountName.trim() || undefined, cutoverDate, replaceAccountId },
+        (sent, total) => setStep({ name: 'sending', sent, total }),
+      )
+      setStep({ name: 'done', summary })
+    } catch (error) {
+      setStep(
+        error instanceof ImportStopped
+          ? { name: 'stopped', sent: error.sent, total: error.total, replacing, removed: error.removed, dailyLimit: error.dailyLimit }
+          : { name: 'stopped', sent: 0, total: 0, replacing, removed: 0, dailyLimit: false },
+      )
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ['accounts'] })
+      await queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      await queryClient.invalidateQueries({ queryKey: ['imported-rows'] })
+      await queryClient.invalidateQueries({ queryKey: ['balances'] })
+      await queryClient.invalidateQueries({ queryKey: ['balance-checks'] })
+    }
+  }
+
+  const reset = () => setStep({ name: 'choose' })
+
+  if (step.name === 'choose' || step.name === 'preview') {
+    const file = step.name === 'preview' ? step.file : undefined
+    // The Accounts a numberless file may be for: those whose key Fernledger generated, which are the Accounts added as credit
+    // cards. Offering a bank-numbered Account would invite putting a card's Transactions into a cheque account (ADR 0017).
+    const choices = accounts?.filter((a) => isGeneratedKey(a.accountNumber)) ?? []
+    const existing = file
+      ? file.accountNumber === null
+        ? choices.find((a) => a.id === chosenAccount)
+        : accounts?.find((a) => a.accountNumber === file.accountNumber)
+      : undefined
+    // The key this Import is for: the file's own number, or the chosen Account's. Without one there is nothing to import into.
+    const accountKey = file?.accountNumber ?? existing?.accountNumber
+    // The Cutover Date this file puts on offer, and whether the Account's own is already later (src/lib/import-chunks.ts). The
+    // offer is the only Cutover Date an Import sets, so one that cannot be taken is never sent. The screen and the request read
+    // this one answer, so what is shown is what is sent.
+    const offer = file ? cutoverOffer(file.dateRange.to, existing?.cutoverDate ?? null) : undefined
+    const cutoverToSet = setCutover && offer && !offer.alreadyLater ? offer.date : undefined
+    return (
+      <div className="mt-4 space-y-6">
+        <div>
+          <label htmlFor="bank-file" className="block font-medium">
+            Bank export file
+          </label>
+          <Input
+            id="bank-file"
+            type="file"
+            accept=".csv,text/csv"
+            className="mt-1"
+            aria-describedby={step.name === 'choose' && step.problem ? 'file-problem' : undefined}
+            onChange={(event) => void onFile(event.target.files?.[0])}
+          />
+          {step.name === 'choose' && step.problem && (
+            <p id="file-problem" role="alert" className="mt-2 font-medium text-destructive">
+              This file is not a supported bank export. {step.problem}
+            </p>
+          )}
+        </div>
+        {file && offer && (
+          <Preview
+            file={file}
+            offer={offer}
+            cutoverToSet={cutoverToSet}
+            existing={existing || undefined}
+            choose={{ options: choices, chosen: chosenAccount, onChoose: setChosenAccount }}
+            accountKey={accountKey}
+            accountName={accountName}
+            onAccountName={setAccountName}
+            setCutover={setCutover}
+            onSetCutover={setSetCutover}
+            confirmingReplace={confirmingReplace}
+            onConfirmingReplace={setConfirmingReplace}
+            onConfirm={() => accountKey !== undefined && void confirm(file, accountKey, cutoverToSet)}
+            onReplace={() => existing && accountKey !== undefined && void confirm(file, accountKey, cutoverToSet, existing.id)}
+            onCancel={reset}
+          />
+        )}
+      </div>
+    )
+  }
+
+  if (step.name === 'sending') {
+    return (
+      <p role="status" className="mt-4">
+        Importing, part {Math.min(step.sent + 1, step.total)} of {step.total}. Keep this page open.
+      </p>
+    )
+  }
+
+  if (step.name === 'stopped') {
+    const { headline, happened, kept, next } = describeStop(step)
+    return (
+      <div className="mt-4 max-w-xl space-y-4">
+        <p role="alert">
+          <Status tone="danger">{headline}</Status>
+        </p>
+        {happened && <p className="font-medium">{happened}</p>}
+        {kept && <p>{kept}</p>}
+        <p>{next}</p>
+        <Button size="touch" onClick={reset}>
+          Choose the file again
+        </Button>
+      </div>
+    )
+  }
+
+  const lostMessage = describeLost(step.summary.lost)
+  const differingMessage = describeDiffering(step.summary.differing)
+  const waitingMessage = describeWaiting(step.summary.stillWaiting, true)
+  return (
+    <section className="mt-4 space-y-4" aria-labelledby="summary-heading">
+      <h2 id="summary-heading" className="text-xl font-semibold">
+        Import finished
+      </h2>
+      <dl className="grid max-w-md grid-cols-[1fr_auto] gap-x-6 gap-y-2">
+        <dt>Added</dt>
+        <dd className="text-right tabular-nums">{step.summary.added}</dd>
+        <dt>Already held (skipped)</dt>
+        <dd className="text-right tabular-nums">{step.summary.duplicates}</dd>
+        <dt>Could not be read (skipped)</dt>
+        <dd className="text-right tabular-nums">{step.summary.skipped}</dd>
+        <dt>On or after the Cutover Date (not imported)</dt>
+        <dd className="text-right tabular-nums">{step.summary.dropped}</dd>
+        {step.summary.removed > 0 && (
+          <>
+            <dt>Old imported Transactions removed</dt>
+            <dd className="text-right tabular-nums">{step.summary.removed}</dd>
+          </>
+        )}
+        {step.summary.paired > 0 && (
+          <>
+            <dt>Transfers matched with other Accounts</dt>
+            <dd className="text-right tabular-nums">{step.summary.paired}</dd>
+          </>
+        )}
+        {(step.summary.carried > 0 || step.summary.lost > 0) && (
+          <>
+            <dt>Transactions that kept their Override, Note or Not a Transfer mark</dt>
+            <dd className="text-right tabular-nums">{step.summary.carried}</dd>
+            <dt>Transactions that lost their Override, Note or Not a Transfer mark</dt>
+            <dd className="text-right tabular-nums">{step.summary.lost}</dd>
+          </>
+        )}
+        {step.summary.differing > 0 && (
+          <>
+            <dt>Kept, on a Transaction with a different amount</dt>
+            <dd className="text-right tabular-nums">{step.summary.differing}</dd>
+          </>
+        )}
+      </dl>
+      {lostMessage && (
+        <p role="status" className="max-w-xl">
+          <Status tone="warning">{lostMessage}</Status>
+        </p>
+      )}
+      {step.summary.lostTransactions.length > 0 && <LostTransactions rows={step.summary.lostTransactions} lost={step.summary.lost} />}
+      {differingMessage && (
+        <p role="status" className="max-w-xl">
+          <Status tone="warning">{differingMessage}</Status>
+        </p>
+      )}
+      {waitingMessage && (
+        <p role="status" className="max-w-xl">
+          <Status tone="neutral">{waitingMessage}</Status>
+        </p>
+      )}
+      {step.summary.balanceCheck && <BalanceCheckResult outcome={step.summary.balanceCheck} />}
+      <div className="flex flex-wrap gap-2">
+        <Link to="/transactions" className="inline-flex min-h-11 items-center rounded-lg bg-primary px-4 text-primary-foreground hover:bg-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          See the transactions
+        </Link>
+        <Button size="touch" variant="outline" onClick={reset}>
+          Import another file
+        </Button>
+      </div>
+    </section>
+  )
+}
+
+/** How many of the Transactions that lost their Override, Note or Not a Transfer mark the finished screen lists; the Change Log has up to 20. */
+const SHOWN_LOST = 10
+
+/** Which Transactions lost their Override, Note or Not a Transfer mark, so the Admin can set it again by hand. */
+function LostTransactions({ rows, lost }: { rows: LostTransaction[]; lost: number }) {
+  const shown = rows.slice(0, SHOWN_LOST)
+  return (
+    <section aria-labelledby="lost-heading" className="max-w-xl space-y-1">
+      <h3 id="lost-heading" className="text-lg font-semibold">
+        Transactions to set again by hand
+      </h3>
+      <ul className="list-disc space-y-1 ps-6">
+        {shown.map((row, index) => (
+          <li key={index}>
+            {formatDate(row.date)}, {row.description}, <Amount cents={row.amountCents} />
+            {row.category && `, Override: ${row.category}`}
+            {row.note && `, Note: ${row.note}`}
+            {row.notTransfer && ', Not a Transfer'}
+          </li>
+        ))}
+      </ul>
+      {lost > shown.length && <p>And {lost - shown.length} more{lost > rows.length ? `. The Change Log lists the first ${rows.length}.` : ', in the Change Log.'}</p>}
+    </section>
+  )
+}
+
+/** What the Balance Check made of the file's ledger balance. A difference is a warning with the direction in words, never colour alone. */
+function BalanceCheckResult({ outcome }: { outcome: BalanceCheckOutcome }) {
+  const { tone, headline, detail } = describeBalanceCheck(outcome)
+  return (
+    <div role="status" className="max-w-xl space-y-1">
+      <p>
+        <Status tone={tone}>{headline}</Status>
+      </p>
+      {detail && <p>{detail}</p>}
+    </div>
+  )
+}
+
+/**
+ * Says how many Overrides, Notes and Not a Transfer marks a replace that stopped part way is still holding for the Account, before any Import of it,
+ * and lets the Admin discard them. An Import gives them to matching Transactions and leaves the rest; only a completed
+ * replace or this clears them (worker/carry-over.ts).
+ */
+function WaitingNotice({ accountId }: { accountId: number }) {
+  const queryClient = useQueryClient()
+  const { data } = useQuery(importedRowsQuery(accountId))
+  const [confirming, setConfirming] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const discardButton = useRef<HTMLButtonElement>(null)
+  const message = describeWaiting(data?.carryOverWaiting ?? 0)
+  if (!message) return null
+
+  async function discard() {
+    // A network error and a server error both keep the dialog open with the message, so the Admin can try again.
+    let ok: boolean
+    try {
+      ok = (await api.imports['discard-held'].$post({ json: { accountId } })).ok
+    } catch {
+      ok = false
+    }
+    setFailed(!ok)
+    if (!ok) return
+    setConfirming(false)
+    await queryClient.invalidateQueries({ queryKey: ['imported-rows'] })
+    await queryClient.invalidateQueries({ queryKey: ['change-log'] })
+    // The Replace question's forecast counted what is discarded.
+    await queryClient.invalidateQueries({ queryKey: ['carry-preview'] })
+  }
+
+  return (
+    <div className="max-w-xl space-y-2">
+      <p role="status">
+        <Status tone="neutral">{message}</Status>
+      </p>
+      <Button ref={discardButton} size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" onClick={() => setConfirming(true)}>
+        Discard them…
+      </Button>
+      {confirming && (
+        <DiscardDialog
+          failed={failed}
+          onDiscard={() => void discard()}
+          onCancel={() => {
+            setConfirming(false)
+            // The dialog's own button is about to unmount; put focus back on the button that opened it.
+            discardButton.current?.focus()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/** Asks before discarding, as the Replace question does: the safe answer has focus, and Escape says no. */
+function DiscardDialog(props: { failed: boolean; onDiscard: () => void; onCancel: () => void }) {
+  const keepButton = useRef<HTMLButtonElement>(null)
+  useEffect(() => keepButton.current?.focus(), [])
+  return (
+    <section
+      role="alertdialog"
+      aria-labelledby="discard-heading"
+      className="space-y-3 rounded-lg border-2 border-foreground p-4"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') props.onCancel()
+      }}
+    >
+      <h3 id="discard-heading" className="text-lg font-semibold">
+        Discard what is waiting?
+      </h3>
+      <p>The Overrides, Notes and Not a Transfer marks will be gone for good. The Change Log records which Transactions they were on.</p>
+      {props.failed && (
+        <p role="alert">
+          <Status tone="danger">Fernledger could not discard them. Try again.</Status>
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button ref={keepButton} size="touch" className="max-w-full py-2 whitespace-normal" onClick={props.onCancel}>
+          No, keep them
+        </Button>
+        <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" onClick={props.onDiscard}>
+          Yes, discard them
+        </Button>
+      </div>
+    </section>
+  )
+}
+
+function Preview(props: {
+  file: BankCsvResult
+  offer: CutoverOffer
+  /** The Cutover Date this Import will set, from `ImportFlow`, so the screen shows the one the request carries. */
+  cutoverToSet: string | undefined
+  existing: { id: number; name: string; cutoverDate: string | null } | undefined
+  /** Which Account a file with no account number is for: the Accounts it may be (ADR 0017), and the Admin's choice among them. */
+  choose: AccountChoice
+  /** The Account key this Import will use, or undefined while a numberless file has no Account chosen, when there is nothing to import into. */
+  accountKey: string | undefined
+  accountName: string
+  onAccountName: (name: string) => void
+  setCutover: boolean
+  onSetCutover: (set: boolean) => void
+  confirmingReplace: boolean
+  onConfirmingReplace: (confirming: boolean) => void
+  onConfirm: () => void
+  onReplace: () => void
+  onCancel: () => void
+}) {
+  const { file, existing } = props
+  const existingName = existing?.name
+  const adapter = adapters.find((a) => a.id === file.adapterId)
+  const count = file.rows.length
+  const tooMany = count > MAX_IMPORT_ROWS
+  const replaceButton = useRef<HTMLButtonElement>(null)
+  // The Cutover Date that will apply to this Import: the one being set, else the Account's own.
+  const effectiveCutover = props.cutoverToSet ?? existing?.cutoverDate ?? null
+  // The Worker refuses a replace that would remove the old history and import nothing; the screen says so first.
+  const nothingToReplaceWith = count > 0 && countOnOrAfter(file.rows, effectiveCutover) === count
+  const firstRows = file.rows.slice(0, PREVIEW_ROWS)
+  // What the Replace question asks the Worker about: the file's bank numbers and amounts, without the rows the Cutover Date drops.
+  const previewRows = useMemo(() => previewChunks(file.rows, effectiveCutover), [file.rows, effectiveCutover])
+  return (
+    <section aria-labelledby="preview-heading" className="space-y-4">
+      <h2 id="preview-heading" className="text-xl font-semibold">
+        Preview
+      </h2>
+      <dl className="grid max-w-xl grid-cols-[auto_1fr] gap-x-6 gap-y-2">
+        <dt>Bank</dt>
+        <dd>{adapter?.name ?? file.adapterId}</dd>
+        <dt>Account number</dt>
+        <dd className={file.accountNumber === null ? undefined : 'tabular-nums'}>{file.accountNumber ?? 'None in this file'}</dd>
+        <dt>Dates</dt>
+        <dd>
+          {formatDate(file.dateRange.from)} to {formatDate(file.dateRange.to)}
+        </dd>
+        <dt>Rows</dt>
+        <dd>{count} transactions to import</dd>
+        <dt>Bank balance</dt>
+        <dd>
+          {file.ledgerBalance === null ? (
+            'None in this file, so this Import has no Balance Check'
+          ) : (
+            <>
+              <span className="tabular-nums">{formatBalance(file.ledgerBalance.cents)}</span> as of {formatDate(file.ledgerBalance.date)}
+            </>
+          )}
+        </dd>
+      </dl>
+
+      {file.accountNumber === null ? (
+        <ChooseAccount choose={props.choose} existing={existing} />
+      ) : existingName !== undefined ? (
+        <>
+          <p>Existing Account: {existingName}. These transactions will be added to it.</p>
+          <WaitingNotice accountId={existing!.id} />
+        </>
+      ) : (
+        <div className="max-w-sm">
+          <p>New Account. It will be added when you import.</p>
+          <label htmlFor="account-name" className="mt-2 block font-medium">
+            Account name
+          </label>
+          <Input id="account-name" value={props.accountName} maxLength={60} placeholder={file.accountNumber} onChange={(event) => props.onAccountName(event.target.value)} />
+          <p className="mt-1 text-sm text-muted-foreground">Optional. You can rename it later.</p>
+        </div>
+      )}
+
+      <CutoverChoice file={file} offer={props.offer} accountCutover={existing?.cutoverDate ?? null} effective={effectiveCutover} setCutover={props.setCutover} onSetCutover={props.onSetCutover} />
+
+      {file.errors.length > 0 && (
+        <div>
+          <p role="status" className="font-medium">
+            {file.errors.length} {file.errors.length === 1 ? 'row' : 'rows'} could not be read and will be skipped:
+          </p>
+          <ul className="mt-1 list-disc ps-6">
+            {file.errors.slice(0, SHOWN_ERRORS).map((error) => (
+              <li key={error.line}>
+                Line {error.line}: {error.message}
+              </li>
+            ))}
+          </ul>
+          {file.errors.length > SHOWN_ERRORS && <p className="mt-1">And {file.errors.length - SHOWN_ERRORS} more.</p>}
+        </div>
+      )}
+
+      {tooMany && (
+        <p role="alert" className="font-medium text-destructive">
+          This file has {count} transactions, and one Import can take at most {MAX_IMPORT_ROWS}. Export a shorter date range from your bank and import the files one at a time.
+        </p>
+      )}
+
+      {count > 0 && (
+        <ResponsiveTable
+          caption={`First ${firstRows.length} rows in the file`}
+          rows={firstRows}
+          getRowKey={(row) => row.uniqueId}
+          columns={[
+            { key: 'date', header: 'Date', cell: (row) => formatDate(row.date) },
+            { key: 'description', header: 'Description', cell: (row) => row.payee || row.bankMemo },
+            { key: 'amount', header: 'Amount', align: 'end', cell: (row) => <Amount cents={row.amountCents} /> },
+          ]}
+        />
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <Button size="touch" disabled={count === 0 || tooMany || props.accountKey === undefined} onClick={props.onConfirm}>
+          Import {count} transactions
+        </Button>
+        {existing && (
+          <Button
+            ref={replaceButton}
+            size="touch"
+            variant="outline"
+            className="max-w-full py-2 whitespace-normal"
+            disabled={count === 0 || tooMany || nothingToReplaceWith}
+            aria-describedby={nothingToReplaceWith ? 'replace-blocked' : undefined}
+            onClick={() => props.onConfirmingReplace(true)}
+          >
+            Replace imported history…
+          </Button>
+        )}
+        <Button size="touch" variant="outline" onClick={props.onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {existing && nothingToReplaceWith && (
+        <p id="replace-blocked" className="max-w-xl">
+          <Status tone="warning">Every row in this file is dated on or after the Cutover Date, so there is nothing to replace the old history with.</Status>
+        </p>
+      )}
+
+      {existing && props.confirmingReplace && (
+        <ReplaceDialog
+          account={existing}
+          incomingRows={count - countOnOrAfter(file.rows, effectiveCutover)}
+          previewRows={previewRows}
+          previewKey={`${file.accountNumber}:${effectiveCutover}:${count}:${file.rows[0]?.uniqueId}:${file.rows.at(-1)?.uniqueId}`}
+          onReplace={props.onReplace}
+          onCancel={() => {
+            props.onConfirmingReplace(false)
+            // The dialog's own button is about to unmount; put focus back where the Admin was rather than on the page.
+            replaceButton.current?.focus()
+          }}
+        />
+      )}
+    </section>
+  )
+}
+
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-NZ')} ${n === 1 ? one : many}`
+
+/**
+ * Asks before replacing an Account's imported history. It opens with the safe answer focused, Escape says no, and it
+ * says how many imported Transactions will go. A history of more than REPLACE_SLICE rows goes in final steps, and one
+ * too big for a day's database writes (ADR 0004) can't finish today, so the Admin is told that before confirming.
+ */
+function ReplaceDialog(props: {
+  account: { id: number; name: string }
+  incomingRows: number
+  /** The file's bank numbers and amounts, in chunks, for the Worker to forecast what would carry over; `previewKey` says which file. */
+  previewRows: PreviewRow[][]
+  previewKey: string
+  onReplace: () => void
+  onCancel: () => void
+}) {
+  const { data, isError } = useQuery(importedRowsQuery(props.account.id))
+  // The Worker forecasts how many of the Account's Overrides, Notes and Not a Transfer marks the file would carry over. Until it has, or if it can't, the
+  // question says they are carried over and that how many have no match is counted after the Import.
+  const { data: preview } = useQuery(carryPreviewQuery(props.account.id, props.previewRows, props.previewKey))
+  const imported = data?.imported
+  const withOwnWork = data?.withOwnWork ?? 0
+  const waiting = data?.carryOverWaiting ?? 0
+  const paired = data?.paired ?? 0
+  const carryText = describeCarryBefore({ withOwnWork, waiting, preview })
+  const keepButton = useRef<HTMLButtonElement>(null)
+  useEffect(() => keepButton.current?.focus(), [])
+  const inSteps = imported !== undefined && imported > REPLACE_SLICE
+  const overOneDay = imported !== undefined && replaceWrites(imported, props.incomingRows, withOwnWork + waiting, paired) > DAILY_ROW_WRITES
+  return (
+    <section
+      role="alertdialog"
+      aria-labelledby="replace-heading"
+      aria-describedby="replace-text"
+      className="max-w-xl space-y-3 rounded-lg border-2 border-foreground p-4"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') props.onCancel()
+      }}
+    >
+      <h3 id="replace-heading" className="text-lg font-semibold">
+        Replace the imported history of {props.account.name}?
+      </h3>
+      <div id="replace-text" className="space-y-2">
+        {isError ? (
+          <p>Fernledger couldn't count the imported Transactions, so it can't replace them now. Choose "No" and try again.</p>
+        ) : imported === undefined ? (
+          <p>Counting the imported Transactions.</p>
+        ) : (
+          <p>
+            {imported === 0
+              ? 'There are no imported Transactions to remove, so this just imports the file. '
+              : `This removes the ${plural(imported, 'Transaction', 'Transactions')} that ${imported === 1 ? 'was' : 'were'} imported into this Account, then imports this file in its place. `}
+            Transactions that came from Sync are not touched. It can't be undone, except by importing the old files again. The Change Log records it.
+          </p>
+        )}
+        {carryText.map((paragraph, index) => (
+          <p key={paragraph} className={index === 0 ? 'font-semibold' : undefined}>
+            {paragraph}
+          </p>
+        ))}
+        {inSteps && (
+          <p>
+            That is more than {REPLACE_SLICE.toLocaleString('en-NZ')}, so the old Transactions are removed in steps of {REPLACE_SLICE.toLocaleString('en-NZ')}, the oldest dates first, before the file is imported. Each step is final: if the
+            Import stops part way, the part of the old history already removed can't be put back.{' '}
+            {overOneDay
+              ? `Removing and importing this many Transactions takes more database writes than the free plan allows in a day (${DAILY_ROW_WRITES.toLocaleString('en-NZ')}). Fernledger stops when the limit is reached, and you choose the same file again tomorrow to finish.`
+              : `Each step uses about ${(REPLACE_SLICE * WRITES_PER_ROW).toLocaleString('en-NZ')} of the ${DAILY_ROW_WRITES.toLocaleString('en-NZ')} database writes the free plan allows each day, and a few more for each Override, Note, Not a Transfer mark or Transfer it holds.`}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button ref={keepButton} size="touch" className="max-w-full py-2 whitespace-normal" onClick={props.onCancel}>
+          No, keep what is there
+        </Button>
+        <Button size="touch" variant="outline" className="max-w-full py-2 whitespace-normal" disabled={imported === undefined} onClick={props.onReplace}>
+          Yes, replace imported history
+        </Button>
+      </div>
+    </section>
+  )
+}
+
+/** Which Account a file with no account number is for: the Accounts it may be, and the Admin's choice among them. */
+type AccountChoice = { options: { id: number; name: string }[]; chosen: number | null; onChoose: (id: number | null) => void }
+
+/**
+ * Asks which Account a file with no account number is for. Nothing is matched, because the file says nothing to match on, and
+ * only Accounts whose key Fernledger generated are offered: such a file is a credit card export, and a bank-numbered Account
+ * would be a cheque account to put a card's Transactions into (ADR 0017).
+ */
+function ChooseAccount({ choose, existing }: { choose: AccountChoice; existing: { id: number } | undefined }) {
+  if (choose.options.length === 0)
+    return (
+      <p className="max-w-xl">
+        This file carries no account number, so it cannot say which Account it is for, and no Account has been added for a credit card yet. Add one on the{' '}
+        <Link to="/accounts" className="underline underline-offset-4">
+          Accounts
+        </Link>{' '}
+        screen, then choose this file again.
+      </p>
+    )
+  return (
+    <div className="max-w-sm">
+      <label htmlFor="for-account" className="block font-medium">
+        Which Account is this file for?
+      </label>
+      <Select id="for-account" className="mt-1" value={choose.chosen === null ? '' : String(choose.chosen)} onChange={(event) => choose.onChoose(event.target.value === '' ? null : Number(event.target.value))}>
+        <option value="">Choose an Account</option>
+        {choose.options.map((account) => (
+          <option key={account.id} value={account.id}>
+            {account.name}
+          </option>
+        ))}
+      </Select>
+      <p className="mt-1 text-sm text-muted-foreground">This file carries no account number, so it cannot say. Only Accounts added for a credit card are offered.</p>
+      {existing && <WaitingNotice accountId={existing.id} />}
+    </div>
+  )
+}
+
+/** Tells the Admin what the Account's Cutover Date will do to this file, and offers the day after the file's last date as the Cutover Date (`cutoverOffer`). */
+function CutoverChoice(props: {
+  file: BankCsvResult
+  offer: CutoverOffer
+  accountCutover: string | null
+  effective: string | null
+  setCutover: boolean
+  onSetCutover: (set: boolean) => void
+}) {
+  const { file, offer, accountCutover, effective } = props
+  const dropped = countOnOrAfter(file.rows, effective)
+  return (
+    <div className="max-w-xl space-y-2">
+      {accountCutover !== null && <p>This Account's Cutover Date is {formatDate(accountCutover)}. Rows dated on or after it are not imported.</p>}
+      {/* The label is the hit area: the box itself is 20px, but the whole padded row is at least 44px tall. */}
+      <label htmlFor="set-cutover" className="flex min-h-11 cursor-pointer items-start gap-3 py-2">
+        <input
+          id="set-cutover"
+          type="checkbox"
+          className="mt-0.5 size-5 shrink-0"
+          checked={props.setCutover}
+          disabled={offer.alreadyLater}
+          aria-describedby={offer.alreadyLater ? 'cutover-offer-off' : undefined}
+          onChange={(event) => props.onSetCutover(event.target.checked)}
+        />
+        <span>
+          {accountCutover === null ? 'Set' : 'Change'} the Cutover Date to the day after the last date in this file, {formatDate(offer.date)}.
+          {offer.alreadyLater ? '' : ' Every row in this file is imported, and Akahu Sync covers that day onwards once the Account is linked.'}
+        </span>
+      </label>
+      {offer.alreadyLater && (
+        <p id="cutover-offer-off">
+          This Account's Cutover Date is already later, so the offer cannot be taken: moving it back would leave the imported history and Sync covering the same days. A Cutover Date is changed in{' '}
+          <Link to="/settings" className="underline underline-offset-4">
+            Settings
+          </Link>
+          .
+        </p>
+      )}
+      {effective !== null && (
+        <div role="status">
+          <Status tone={dropped > 0 ? 'warning' : 'neutral'}>
+            {dropped} {dropped === 1 ? 'row' : 'rows'} in this file {dropped === 1 ? 'is' : 'are'} dated on or after {formatDate(effective)} and will not be imported.
+          </Status>
+        </div>
+      )}
+    </div>
+  )
+}

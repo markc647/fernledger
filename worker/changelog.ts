@@ -1,0 +1,83 @@
+import type { Member } from './auth'
+
+/** What kind of thing changed, and how the Change Log names it. A ticket that adds a kind of Admin change adds its type here. */
+export const CHANGE_TYPES = { settings: 'Settings', account: 'Account', import: 'Import', category: 'Category', rule: 'Rule', budget: 'Budget', transaction: 'Transaction', transfer: 'Transfer', report: 'Report' } as const
+export type ChangeType = keyof typeof CHANGE_TYPES
+export const CHANGE_TYPE_IDS = Object.keys(CHANGE_TYPES) as [ChangeType, ...ChangeType[]]
+
+export type ChangeLogRow = {
+  id: number
+  /** UTC time, ISO 8601. */
+  at: string
+  /** Email of the Admin who made the change. */
+  actor: string
+  /** Null for entries from before types existed that could not be told apart. */
+  type: ChangeType | null
+  summary: string
+  /** JSON text. */
+  before: string | null
+  after: string | null
+}
+
+export type ChangeEntry = {
+  /** The Member making the change; their email is recorded. */
+  actor: Member
+  type: ChangeType
+  summary: string
+  before?: unknown
+  after?: unknown
+  /**
+   * For a mutation that may find, when it runs, that there is nothing for it to do (it ends a job that another request
+   * has already ended): the entry is written only if the mutation's last statement changed a row. `false` always writes it.
+   * Required, so a new route says which: a write guarded on what the request read (`WHERE name = ?old`) wants `true`.
+   */
+  onlyIfChanged: boolean
+  /**
+   * With `onlyIfChanged`, for an entry that counts what the statement just before it changed: the last `CHANGES` in the `summary` is replaced by that number. It has to be asked for, because a
+   * summary may hold the words by chance (a Rule's text, an Account's name, a bank's description) and is then left as it is.
+   */
+  countChanges?: boolean
+}
+
+const json = (value: unknown) => (value === undefined ? null : JSON.stringify(value))
+
+/**
+ * Where the number of rows the statement just before an entry changed belongs in its `summary`, for an entry with `countChanges` ("Transactions given the Category: {changes}"). The
+ * database counts them (`changes()`) as it writes the entry, so the entry says what happened and not what the request expected when it read. The last one in the summary is the
+ * place; any other is only the words it is (a name that happens to contain it). It has no plural to get wrong: put the number after the thing counted.
+ */
+export const CHANGES = '{changes}'
+
+/**
+ * The statement that writes an entry. With `onlyIfChanged` it writes only if the statement just before it in the batch changed a row (`changes()` is that statement's row count),
+ * and, with `countChanges`, puts that count where the summary has `CHANGES`.
+ * `recordChange` ends its batch with one; a change that makes a second entry (a kept Report that also drops another) puts that entry's statement after the one it describes,
+ * in the same batch.
+ */
+export function changeLogStatement(db: D1Database, entry: ChangeEntry): D1PreparedStatement {
+  if (entry.onlyIfChanged && entry.countChanges) {
+    const counted = entry.summary.lastIndexOf(CHANGES)
+    if (counted < 0) throw new Error('A Change Log entry that counts what changed needs CHANGES in its summary')
+    return db
+      .prepare('INSERT INTO change_log (actor, type, summary, before, after) SELECT ?, ?, ? || changes() || ?, ?, ? WHERE changes() > 0')
+      .bind(entry.actor.email, entry.type, entry.summary.slice(0, counted), entry.summary.slice(counted + CHANGES.length), json(entry.before), json(entry.after))
+  }
+  return db
+    .prepare(
+      entry.onlyIfChanged
+        ? 'INSERT INTO change_log (actor, type, summary, before, after) SELECT ?, ?, ?, ?, ? WHERE changes() > 0'
+        : 'INSERT INTO change_log (actor, type, summary, before, after) VALUES (?, ?, ?, ?, ?)',
+    )
+    .bind(entry.actor.email, entry.type, entry.summary, json(entry.before), json(entry.after))
+}
+
+/**
+ * Runs the mutation and writes its Change Log entry in one D1 batch, which is atomic:
+ * if the mutation fails there is no entry, and if the entry fails the mutation is rolled back.
+ * Every Admin change goes through this, so the Change Log can't miss one.
+ * Returns the mutation statements' results (not the entry's), for callers that need row counts or new IDs.
+ */
+export async function recordChange(db: D1Database, mutation: D1PreparedStatement | D1PreparedStatement[], entry: ChangeEntry): Promise<D1Result[]> {
+  const statements = Array.isArray(mutation) ? mutation : [mutation]
+  return (await db.batch([...statements, changeLogStatement(db, entry)])).slice(0, statements.length)
+}

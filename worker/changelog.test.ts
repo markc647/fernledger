@@ -1,0 +1,141 @@
+import { env } from 'cloudflare:workers'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { Member } from './auth'
+import { changeLogStatement, CHANGES, recordChange, type ChangeLogRow } from './changelog'
+import { getSetting, putSetting } from './test-support'
+
+const admin: Member = { email: 'admin@example.com', role: 'admin' }
+const changeLog = async () => (await env.DB.prepare('SELECT * FROM change_log ORDER BY id').all<ChangeLogRow>()).results
+
+// Each test starts from the same known state, so the order tests run in doesn't matter.
+beforeEach(async () => {
+  await env.DB.batch([env.DB.prepare('DELETE FROM change_log'), env.DB.prepare('DELETE FROM settings'), putSetting(env.DB, 'app_title', 'Starting title')])
+})
+
+describe('recordChange', () => {
+  it('writes the change and its Change Log entry together', async () => {
+    const before = Date.now()
+    await recordChange(env.DB, putSetting(env.DB, 'app_title', "Mum's finances"), {
+      actor: admin,
+      type: 'settings',
+      summary: 'Changed the app title',
+      onlyIfChanged: false,
+      before: { app_title: 'Starting title' },
+      after: { app_title: "Mum's finances" },
+    })
+
+    expect(await getSetting(env.DB, 'app_title')).toBe("Mum's finances")
+    const [entry, ...rest] = await changeLog()
+    expect(rest).toEqual([])
+    expect(entry).toMatchObject({
+      actor: 'admin@example.com',
+      type: 'settings',
+      summary: 'Changed the app title',
+      before: '{"app_title":"Starting title"}',
+      after: '{"app_title":"Mum\'s finances"}',
+    })
+    expect(Date.parse(entry!.at)).toBeGreaterThanOrEqual(before - 1000) // when: an ISO UTC time
+    expect(Date.parse(entry!.at)).toBeLessThanOrEqual(Date.now() + 1000)
+  })
+
+  it('takes several statements, and stores a missing before or after as null', async () => {
+    await recordChange(env.DB, [putSetting(env.DB, 'about_contact', 'Sam'), putSetting(env.DB, 'about_retention', 'Forever')], {
+      actor: admin,
+      type: 'settings',
+      summary: 'Filled in About your data',
+      onlyIfChanged: false,
+    })
+
+    expect(await getSetting(env.DB, 'about_contact')).toBe('Sam')
+    expect(await getSetting(env.DB, 'about_retention')).toBe('Forever')
+    expect(await changeLog()).toMatchObject([{ summary: 'Filled in About your data', before: null, after: null }])
+  })
+
+  describe('for a mutation that may find it has nothing to do (onlyIfChanged)', () => {
+    const rename = (from: string, to: string) => env.DB.prepare("UPDATE settings SET value = ? WHERE key = 'app_title' AND value = ?").bind(to, from)
+    const entry = { actor: admin, type: 'settings', summary: 'Changed the app title', onlyIfChanged: true } as const
+
+    it('writes the entry when the mutation changed a row', async () => {
+      await recordChange(env.DB, rename('Starting title', 'Changed'), entry)
+
+      expect(await getSetting(env.DB, 'app_title')).toBe('Changed')
+      expect(await changeLog()).toMatchObject([{ summary: 'Changed the app title' }])
+    })
+
+    it('writes nothing when the mutation changed no row, so a change that did not happen has no entry', async () => {
+      await recordChange(env.DB, rename('Some other title', 'Changed'), entry)
+
+      expect(await getSetting(env.DB, 'app_title')).toBe('Starting title')
+      expect(await changeLog()).toEqual([])
+    })
+
+    it('goes by the last statement of several', async () => {
+      await recordChange(env.DB, [putSetting(env.DB, 'about_contact', 'Sam'), rename('Some other title', 'Changed')], entry)
+
+      expect(await getSetting(env.DB, 'about_contact')).toBe('Sam') // the first statement still ran
+      expect(await changeLog()).toEqual([])
+    })
+
+    it('writes the entry whatever changed when it is false', async () => {
+      await recordChange(env.DB, rename('Some other title', 'Changed'), { actor: admin, type: 'settings', summary: 'Tried to change the app title', onlyIfChanged: false })
+
+      expect(await changeLog()).toMatchObject([{ summary: 'Tried to change the app title' }])
+    })
+  })
+
+  describe('an entry that counts what the statement before it changed (countChanges, and CHANGES in its summary)', () => {
+    const touch = (rows: number) => env.DB.prepare('UPDATE categories SET name = name WHERE id IN (SELECT id FROM categories ORDER BY id LIMIT ?)').bind(rows)
+    const entry = (summary: string) => ({ actor: admin, type: 'category', summary, onlyIfChanged: true, countChanges: true }) as const
+
+    it('says how many rows the statement changed, counted by the database and not by the request', async () => {
+      await recordChange(env.DB, touch(3), entry(`Touched Categories: ${CHANGES}`))
+      await recordChange(env.DB, touch(1), entry(`Touched Categories: ${CHANGES}`))
+
+      expect(await changeLog()).toMatchObject([{ summary: 'Touched Categories: 3' }, { summary: 'Touched Categories: 1' }])
+    })
+
+    it('writes nothing when the statement changed no row', async () => {
+      await recordChange(env.DB, touch(0), entry(`Touched Categories: ${CHANGES}`))
+
+      expect(await changeLog()).toEqual([])
+    })
+
+    it('is asked for, and not found in any summary that has the words (a Rule\'s text, an Account\'s name or a bank\'s description may)', async () => {
+      const words = `Added a Rule: text contains "${CHANGES}"`
+
+      await recordChange(env.DB, touch(2), { actor: admin, type: 'category', summary: words, onlyIfChanged: true })
+      await recordChange(env.DB, touch(2), { actor: admin, type: 'category', summary: words, onlyIfChanged: false })
+
+      expect(await changeLog()).toMatchObject([{ summary: words }, { summary: words }])
+    })
+
+    it('says so when it is asked for and there is no place for the count', () => {
+      expect(() => changeLogStatement(env.DB, { actor: admin, type: 'category', summary: 'Touched Categories', onlyIfChanged: true, countChanges: true })).toThrow(/CHANGES/)
+    })
+
+    it('counts at the last place it is written, so the same words earlier in the summary (a name) are left as they are', async () => {
+      await recordChange(env.DB, touch(2), entry(`Touched ${CHANGES} Categories: ${CHANGES}`))
+
+      expect(await changeLog()).toMatchObject([{ summary: `Touched ${CHANGES} Categories: 2` }])
+    })
+  })
+
+  it('leaves no entry, and no partial change, when a mutation fails', async () => {
+    const failing = [putSetting(env.DB, 'app_title', 'Should not stick'), env.DB.prepare('INSERT INTO no_such_table (x) VALUES (1)')]
+
+    await expect(recordChange(env.DB, failing, { actor: admin, type: 'settings', summary: 'Will fail', onlyIfChanged: false })).rejects.toThrow()
+
+    expect(await changeLog()).toEqual([])
+    expect(await getSetting(env.DB, 'app_title')).toBe('Starting title')
+  })
+
+  it('leaves no change behind when the entry cannot be written', async () => {
+    // The entry's actor is NOT NULL, so the entry is refused after the mutation ran inside the same batch.
+    const noActor = { actor: { email: null } as unknown as Member, type: 'settings' as const, summary: 'Will fail', onlyIfChanged: false }
+
+    await expect(recordChange(env.DB, putSetting(env.DB, 'app_title', 'Should not stick'), noActor)).rejects.toThrow()
+
+    expect(await changeLog()).toEqual([])
+    expect(await getSetting(env.DB, 'app_title')).toBe('Starting title')
+  })
+})

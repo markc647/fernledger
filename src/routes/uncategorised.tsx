@@ -1,0 +1,61 @@
+import { useQuery } from '@tanstack/react-query'
+import { createFileRoute } from '@tanstack/react-router'
+import { useCallback, useMemo } from 'react'
+import { PageHeading } from '@/components/help-sheet'
+import { TransactionList } from '@/components/transaction-list'
+import { formatCount } from '@/lib/format'
+import { meQuery } from '@/lib/me'
+import { MAX_INLINE_APPLY } from '@/lib/rule-from-transaction'
+import { parseTransactionSearch, tidy, type TransactionSearch } from '@/lib/transaction-search'
+
+// Only the order and the page are in the address (?sort=amount&page=2): the list is always the Transactions with no Category.
+// Keeping them there lets "Back to Uncategorised" from a Transaction's details return to the same page of the list.
+export const Route = createFileRoute('/uncategorised')({
+  component: Uncategorised,
+  validateSearch: (raw: Record<string, unknown>) => {
+    const { sort, dir, page } = parseTransactionSearch(raw)
+    return { sort, dir, page }
+  },
+  staticData: { nav: { label: 'Uncategorised', group: 'transactions', adminOnly: true, order: 15 } },
+})
+
+function Uncategorised() {
+  const { data: me } = useQuery(meQuery)
+  const { sort, dir, page } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const search = useMemo<TransactionSearch>(() => tidy({ category: 'uncategorised', sort, dir, page }), [sort, dir, page])
+  const onSearch = useCallback(
+    (next: TransactionSearch, options?: { replace?: boolean }) => void navigate({ search: { sort: next.sort, dir: next.dir, page: next.page }, replace: options?.replace }),
+    [navigate],
+  )
+  // Hiding the navigation is a courtesy; the API serves the same list to every Member, and refuses a Member's write.
+  if (!me) return null
+  const admin = me.role === 'admin'
+  return (
+    <>
+      <PageHeading
+        help={
+          admin && (
+            <>
+              <p>
+                Transactions with no Category. Choose Edit on a Transaction's row to set an Override; it leaves this list once it has a Category. Transfers between your own Accounts are left out, as they are not spending. Until a
+                Transaction has a Category it counts as Spending, so money in left here, such as a wage, reduces Spending.
+              </p>
+              <p>
+                To give a Category to every Transaction like one on this list, choose Edit on it, then the Category, then Create Rule. The Rule starts with the words that name the shop, and says how many Transactions match as you change
+                them. Save Category and Rule adds the Rule and gives the Category to the Uncategorised Transactions it matches, up to {formatCount(MAX_INLINE_APPLY)} others at a time.
+              </p>
+            </>
+          )
+        }
+      >
+        Uncategorised
+      </PageHeading>
+      {admin ? (
+        <TransactionList search={search} onSearch={onSearch} origin="uncategorised" emptyMessage="There are no Uncategorised Transactions." />
+      ) : (
+        <p className="mt-2">Only the Admin can use this list. Every Member can see each Transaction's Category on the Transactions page.</p>
+      )}
+    </>
+  )
+}
