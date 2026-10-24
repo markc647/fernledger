@@ -60,7 +60,7 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
 type Opts = { method?: string; body?: unknown }
 type Exercise = { route: string; path: (accountId: number) => string; opts?: Opts | ((accountId: number) => Opts) }
 // IDs made by earlier exercises, for the later ones that need them (the Category and Transaction are read lazily, after they exist).
-const made = { categoryId: 0, transactionId: 0, ruleId: 0, keptId: 0 }
+const made = { categoryId: 0, transactionId: 0, ruleId: 0, keptId: 0, accountIds: [] as number[] }
 const EXERCISES: Exercise[] = [
   // A second Account, with the other half of a Transfer: the next chunk's $10.00 out pairs with this $10.00 in, so the Not a Transfer routes
   // below have a pairing to say no to. Its name sorts after the first Account's number, so the first Account is still the first listed.
@@ -162,6 +162,8 @@ const EXERCISES: Exercise[] = [
   { route: 'DELETE /api/kept-reports/:id', path: () => `/api/kept-reports/${made.keptId}`, opts: { method: 'DELETE', body: {} } },
   { route: 'PATCH /api/settings', path: () => '/api/settings', opts: { method: 'PATCH', body: { app_title: 'Example family' } } },
   { route: 'PATCH /api/accounts/:id', path: (id) => `/api/accounts/${id}`, opts: { method: 'PATCH', body: { name: 'Example savings' } } },
+  // The order of Accounts (#45): the two Accounts the Imports above made, as they are listed.
+  { route: 'PUT /api/accounts/order', path: () => '/api/accounts/order', opts: () => ({ method: 'PUT', body: { ids: made.accountIds } }) },
   // Adding an Account for a credit card contacts no one: the bank prints no number for it and Fernledger allocates its key itself (ADR 0017).
   { route: 'POST /api/accounts', path: () => '/api/accounts', opts: { method: 'POST', body: { name: 'Example Visa' } } },
 ]
@@ -179,7 +181,8 @@ async function exerciseEveryRoute(secrets?: Partial<Env>) {
     const res = await call(path(accountId), typeof opts === 'function' ? opts(accountId) : opts, secrets)
     if (route === 'POST /api/imports/chunks') {
       expect(res.status).toBe(200)
-      accountId = ((await (await call('/api/accounts')).json()) as { id: number }[])[0].id
+      made.accountIds = ((await (await call('/api/accounts')).json()) as { id: number }[]).map((account) => account.id)
+      accountId = made.accountIds[0]!
       made.transactionId = ((await (await call('/api/transactions')).json()) as { transactions: { id: number }[] }).transactions[0].id
     }
     if (route === 'POST /api/categories') {

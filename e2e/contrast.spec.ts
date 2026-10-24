@@ -5,7 +5,7 @@ import { dateField, pickDate, thisMonth } from './date-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { helpButton, helpSheet } from './help-helpers'
 import { ensureCategory, forgetKeptReportsAfterEach, importRows, restoreAppTitleAfterEach, signInToOpen, transactionId, type SeedRow } from './report-helpers'
-import { arrowTo, menuAction, OPEN_MENU, openActions, rowButton } from './row-actions-helpers'
+import { actionsButton, arrowTo, chooseAction, menuAction, OPEN_MENU, openActions, rowButton } from './row-actions-helpers'
 import { categoryId, openApplyDialog, ruleActions, runningJob, spinner, usageFigures, usageOn, withRules } from './rule-helpers'
 import { navGroup, openHeaderControls, openNavGroup, siteHeader } from './shell-helpers'
 
@@ -325,7 +325,7 @@ const PAGES: {
       await page.reload()
       await expect(page.getByText(data.everyday.name).first()).toBeVisible()
       if (role === 'member') return
-      await rowButton(page, 'Rename', data.everyday.name).click()
+      await chooseAction(actionsButton(page, data.everyday.name), 'Rename')
       await expect(page.getByRole('region', { name: `Rename ${data.everyday.name}` })).toBeVisible()
       await scan('with the rename panel open')
     },

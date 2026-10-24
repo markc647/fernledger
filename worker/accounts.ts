@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import * as z from 'zod/mini'
-import { accountName, isoDate } from './account-fields'
+import { accountName, accountOrder, isoDate } from './account-fields'
 import { CLEAR_DETAILS, SELECT_DISPLAYED, toAttributeWords } from './akahu-details'
 import type { DisplayedDetails } from './akahu-details'
 import type { AppEnv } from './app-env'
@@ -46,6 +46,7 @@ const ADD_CARD_ACCOUNT = `
   FROM accounts WHERE account_number LIKE 'card-%'
   RETURNING id, account_number AS accountNumber`
 const cutover = z.object({ cutoverDate: z.nullable(isoDate) })
+const orderBody = z.object({ ids: z.array(z.int().check(z.positive())).check(z.maxLength(500)) })
 // Akahu's own account ID, which is opaque: its shape is all that can be checked, and the link is only as good as the Admin's choice
 // from /api/akahu/accounts. Null unlinks the Account.
 const link = z.object({ akahuAccountId: z.nullable(z.string().check(z.regex(/^acc_[A-Za-z0-9]{1,64}$/))) })
@@ -55,7 +56,7 @@ export const accounts = new Hono<AppEnv>()
     const { results } = await c.env.DB.prepare(
       `SELECT id, name, account_number AS accountNumber, cutover_date AS cutoverDate, akahu_account_id AS akahuAccountId, akahu_synced_at AS akahuSyncedAt,
               akahu_missing_since AS akahuMissingSince, akahu_last_failure AS akahuLastFailure, ${SELECT_DISPLAYED}
-       FROM accounts ORDER BY name COLLATE NOCASE, id`,
+       FROM accounts a ORDER BY ${accountOrder('a')}`,
     ).all<AccountRow>()
     return c.json(results.map(({ akahuAttributes, ...account }): Account => ({ ...account, akahuAttributes: toAttributeWords(akahuAttributes) })))
   })
@@ -71,6 +72,47 @@ export const accounts = new Hono<AppEnv>()
     })
     const { id, accountNumber } = added!.results[0] as { id: number; accountNumber: string }
     return c.json({ id, name, accountNumber }, 201)
+  })
+  // The Admin's order of Accounts (#45), used wherever they are listed (accountOrder), as PUT /api/rules/order is for Rules. The list
+  // must be exactly the Accounts held, and the UPDATE runs only if they are still in the order read, so a page open while another
+  // changed them cannot lose an Account's place. Every Account gets a position, so one added afterwards goes last.
+  .put('/order', validate('json', orderBody), async (c) => {
+    const { ids } = c.req.valid('json')
+    const db = c.env.DB
+    const current = (await db.prepare(`SELECT id, name FROM accounts a ORDER BY ${accountOrder('a')}`).all<{ id: number; name: string }>()).results
+    const isTheAccounts = ids.length === current.length && new Set(ids).size === ids.length && current.every((account) => ids.includes(account.id))
+    if (!isTheAccounts) return c.json({ error: 'Invalid request', field: 'ids' }, 400)
+    if (ids.every((id, i) => id === current[i]!.id)) return c.json({ ids })
+
+    const nameOf = new Map(current.map((account) => [account.id, account.name]))
+    const numbered = (id: number, i: number) => `${i + 1}. ${nameOf.get(id)!}` // the Change Log joins a list with commas, and a name can have one
+    const [moved] = await recordChange(
+      db,
+      db
+        .prepare(
+          `UPDATE accounts SET position = j.key + 1 FROM json_each(?1) j
+           WHERE accounts.id = j.value
+             AND (SELECT COUNT(*) FROM accounts) = json_array_length(?2)
+             AND NOT EXISTS (
+               SELECT 1 FROM (SELECT x.id, row_number() OVER (ORDER BY ${accountOrder('x')}) AS n FROM accounts x) r
+               WHERE r.id IS NOT json_extract(?2, '$[' || (r.n - 1) || ']')
+             )`,
+        )
+        .bind(JSON.stringify(ids), JSON.stringify(current.map((account) => account.id))),
+      {
+        actor: c.var.member,
+        type: 'account',
+        summary: 'Changed the order of Accounts',
+        before: { order: current.map((account, i) => numbered(account.id, i)) },
+        after: { order: ids.map(numbered) },
+        onlyIfChanged: true,
+      },
+    )
+    if (moved!.meta.changes === 0) {
+      const now = (await db.prepare(`SELECT id FROM accounts a ORDER BY ${accountOrder('a')}`).all<{ id: number }>()).results.map((account) => account.id)
+      return now.length === ids.length && now.every((id, i) => id === ids[i]) ? c.json({ ids }) : c.json(CHANGED_MEANWHILE, 409)
+    }
+    return c.json({ ids })
   })
   .patch('/:id', validate('json', rename), async (c) => {
     const id = pathId(c.req.param('id'))

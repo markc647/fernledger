@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ResponsiveTable, type Column } from '@/components/responsive-table'
 import { HelpHeading, PageHeading } from '@/components/help-sheet'
-import { RowButton, useFocusBack } from '@/components/row-actions'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
+import { DragHandle, SortableFrame, SortableRow } from '@/components/sortable-rows'
 import { Status } from '@/components/status'
 import { focusPanel, RowPanel, useDrafts, type Drafts } from '@/components/row-panel'
 import { Button } from '@/components/ui/button'
@@ -13,6 +14,7 @@ import { akahuWords } from '@/lib/akahu'
 import { formatBalance, formatDateTime, isMoment } from '@/lib/format'
 import { HttpError, meQuery } from '@/lib/me'
 import { accountsQuery } from '@/lib/queries'
+import { dragAnnouncements, dragInstructions, dragRole, inOrder, moveRuleBy, moveRuleTo } from '@/lib/rules'
 import { api } from '@/lib/api'
 import type { InferResponseType } from 'hono/client'
 
@@ -26,9 +28,11 @@ export const Route = createFileRoute('/accounts')({
 // and the four that went unshown until ticket 42 could not happen twice. The logo URL Akahu gives is not in that answer at all (ADR 0010).
 type Account = InferResponseType<typeof api.accounts.$get>[number]
 
-/** The id of an Account's Rename button, which focus goes back to when its rename form is closed. */
-const renameId = (id: number) => `account-${id}-rename`
-/** The id of its rename panel, which the button controls. */
+/** The id of an Account's Actions button, which focus goes back to when its rename form is closed, or after a Move up or Move down. */
+const actionsId = (id: number) => `account-${id}-actions`
+/** The id of its drag handle (#45), which keeps focus after a drag. */
+const gripId = (id: number) => `account-${id}-grip`
+/** The id of its rename panel. */
 const panelId = (id: number) => `account-${id}-panel`
 
 function Accounts() {
@@ -36,17 +40,74 @@ function Accounts() {
   const { data: accounts, error } = useQuery(accountsQuery)
   const [renaming, setRenaming] = useState<number | null>(null)
 
-  // Back to the row's Rename button when the form is closed, saved or not.
+  // Back to the row's Actions button when the form is closed, saved or not.
   const focusBack = useFocusBack(renaming)
   // The name typed into a form and not saved stays until that form is saved or cancelled, whichever form is open and whichever layout (table or cards) it is in.
   const drafts = useDrafts<string>()
   const closeForm = (id: number) => {
     drafts.set(id, null)
-    focusBack(renameId(id))
+    focusBack(actionsId(id))
     setRenaming(null)
   }
 
+  // The Admin's order of Accounts (#45), used wherever they are listed, changed as the Rules page changes the order of Rules: the order is shown as soon as it is chosen, and the one
+  // before comes back if the Worker refuses it. Every list of Accounts is read again after, as each one follows this order.
+  const queryClient = useQueryClient()
+  const [notice, setNotice] = useState('')
+  const [problem, setProblem] = useState('')
+  const moveFocus = useRef<string | null>(null)
+  const move = useMutation({
+    mutationFn: async (change: { ids: number[]; message: string }) => {
+      const res = await api.accounts.order.$put({ json: { ids: change.ids } })
+      if (!res.ok) throw new HttpError(res.status)
+    },
+    onMutate: async (change) => {
+      await queryClient.cancelQueries({ queryKey: accountsQuery.queryKey })
+      const before = queryClient.getQueryData(accountsQuery.queryKey)
+      if (before) queryClient.setQueryData(accountsQuery.queryKey, inOrder(before, change.ids))
+      return { before }
+    },
+    onSuccess: async (_data, change) => {
+      await queryClient.invalidateQueries()
+      setProblem('')
+      setNotice(change.message)
+    },
+    onError: (failure, _change, context) => {
+      if (context?.before) queryClient.setQueryData(accountsQuery.queryKey, context.before)
+      void queryClient.invalidateQueries({ queryKey: accountsQuery.queryKey })
+      setNotice('')
+      setProblem(failure instanceof HttpError && (failure.status === 400 || failure.status === 409) ? 'The Accounts have changed since this page loaded. The list is up to date now; try again.' : 'That did not work. Try again.')
+    },
+  })
+  // After a move the Account is somewhere else in the list: focus stays on a control that still works for it (its Actions button after Move up or Move down, its handle after a drag).
+  useEffect(() => {
+    if (!moveFocus.current || move.isPending) return
+    const target = document.getElementById(moveFocus.current)
+    moveFocus.current = null
+    target?.focus()
+  }, [accounts, move.isPending])
+  const ids = (accounts ?? []).map((account) => account.id)
+  const reorder = (next: number[], message: string, focus: string) => {
+    moveFocus.current = focus
+    move.mutate({ ids: next, message })
+  }
+  const moveAccount = (account: Account, by: -1 | 1) => {
+    const next = moveRuleBy(ids, account.id, by)
+    const place = ids.indexOf(account.id) + 1
+    if (next) reorder(next, `Moved ${account.name} ${by < 0 ? 'up' : 'down'}. It is now Account ${place + by} of ${ids.length}.`, actionsId(account.id))
+  }
+  const dropAccount = (id: number, overId: number) => {
+    const next = moveRuleTo(ids, id, overId)
+    const account = accounts?.find((each) => each.id === id)
+    if (next && account) reorder(next, `Moved ${account.name} to position ${next.indexOf(id) + 1} of ${ids.length}.`, gripId(id))
+  }
+  const sortable = me?.role === 'admin' && ids.length > 1
+
   const columns: Column<Account>[] = [
+    // With one Account there is nothing to put in order, so no handle; a Member sees the order and no controls.
+    ...(sortable
+      ? [{ key: 'reorder', header: 'Reorder', handle: true, cell: (account: Account) => <DragHandle id={gripId(account.id)} label={`Drag to reorder ${account.name}`} /> }]
+      : []),
     { key: 'name', header: 'Name', cell: (account) => account.name },
     {
       key: 'number',
@@ -61,16 +122,21 @@ function Accounts() {
       key: 'actions',
       header: 'Action',
       align: 'end',
-      // One action, so a button named for it and not a menu; the form it opens is a panel under the row.
+      // Rename opens a panel under the row; Move up and Move down are the single-pointer way to reorder, for anyone who cannot drag (WCAG 2.5.7), as on the Rules page.
       cell: (account) => (
-        <RowButton
-          id={renameId(account.id)}
-          label="Rename"
-          name={`Rename ${account.name}`}
-          open={renaming === account.id}
-          controls={panelId(account.id)}
-          onPress={() => (renaming === account.id ? focusPanel(panelId(account.id)) : setRenaming(account.id))}
-        />
+        <RowActions row={account.name} id={actionsId(account.id)}>
+          <RowAction run={() => (renaming === account.id ? focusPanel(panelId(account.id)) : setRenaming(account.id))}>Rename</RowAction>
+          {ids.length > 1 && (
+            <>
+              <RowAction disabled={ids[0] === account.id || move.isPending} run={() => moveAccount(account, -1)}>
+                Move up
+              </RowAction>
+              <RowAction disabled={ids.at(-1) === account.id || move.isPending} run={() => moveAccount(account, 1)}>
+                Move down
+              </RowAction>
+            </>
+          )}
+        </RowActions>
       ),
     })
   const renamingAccount = me?.role === 'admin' ? accounts?.find((account) => account.id === renaming) : undefined
@@ -78,6 +144,11 @@ function Accounts() {
   return (
     <>
       <PageHeading help={me?.role === 'admin' && <AccountsHelp />}>Accounts</PageHeading>
+      {/* Always in the page, so a screen reader announces a move when it is said. */}
+      <p role="status" className="mt-2 font-medium">
+        {notice}
+      </p>
+      {problem && <p role="alert" className="mt-2 font-medium text-destructive">{problem}</p>}
       {error ? (
         <p role="alert" className="mt-2">Fernledger couldn't load the Accounts. Reload the page to try again.</p>
       ) : !accounts ? (
@@ -86,7 +157,10 @@ function Accounts() {
         <p className="mt-2">There are no Accounts yet. An Account is added the first time you import a file for it, or below for a credit card, whose bank prints no account number.</p>
       ) : (
         <div className="mt-4">
+          {sortable && <p className="mb-3">This order is used wherever Accounts are listed. To change it, drag an Account by its handle, or choose Move up or Move down in its Actions menu.</p>}
+          <Sortable enabled={sortable} ids={ids} disabled={move.isPending} onReorder={dropAccount}>
           <ResponsiveTable
+            RowElement={sortable ? SortableRow : undefined}
             caption="Accounts"
             columns={columns}
             rows={accounts}
@@ -115,10 +189,21 @@ function Accounts() {
               }
             }
           />
+          </Sortable>
         </div>
       )}
       {me?.role === 'admin' && <AddCardAccount />}
     </>
+  )
+}
+
+/** The drag frame around the table when the Admin can reorder (#45), as on the Rules page; nothing around it otherwise. */
+function Sortable({ enabled, ids, disabled, onReorder, children }: { enabled: boolean; ids: number[]; disabled: boolean; onReorder: (id: number, overId: number) => void; children: ReactNode }) {
+  if (!enabled) return children
+  return (
+    <SortableFrame ids={ids} disabled={disabled} onReorder={onReorder} announcements={dragAnnouncements(ids, 'Account')} instructions={dragInstructions('Account')} roleDescription={dragRole('Account')}>
+      {children}
+    </SortableFrame>
   )
 }
 

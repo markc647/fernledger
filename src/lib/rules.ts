@@ -100,24 +100,26 @@ export function inOrder<T extends { id: number }>(rules: T[], ids: number[]): T[
 }
 
 /** What a handle is called to a screen reader, in place of dnd-kit's "sortable" (its `aria-roledescription`): "movable Rule, Drag to reorder Rule 3, button". */
-export const DRAG_ROLE = 'movable Rule'
+export const dragRole = (noun = 'Rule') => `movable ${noun}`
+export const DRAG_ROLE = dragRole()
 
-/** How to pick a Rule up, read to a screen reader with the handle (dnd-kit's `screenReaderInstructions`). */
-export const DRAG_INSTRUCTIONS =
-  'To move a Rule, press Space or Enter on its handle. Use the up and down arrow keys to choose its new place, then press Space or Enter to drop it. Press Escape to cancel.'
+/** How to pick a Rule (or the `noun` given: an Account on the Accounts screen) up, read to a screen reader with the handle (dnd-kit's `screenReaderInstructions`). */
+export const dragInstructions = (noun = 'Rule') =>
+  `To move a${/^[AEIOU]/.test(noun) ? 'n' : ''} ${noun}, press Space or Enter on its handle. Use the up and down arrow keys to choose its new place, then press Space or Enter to drop it. Press Escape to cancel.`
+export const DRAG_INSTRUCTIONS = dragInstructions()
 
 type Dragged = { id: string | number }
 
-/** What a screen reader is told as a Rule is dragged, in dnd-kit's shape (`accessibility.announcements`). `ids` are the Rules in the order they are shown. */
-export function dragAnnouncements(ids: number[]) {
+/** What a screen reader is told as a Rule (or the `noun` given) is dragged, in dnd-kit's shape (`accessibility.announcements`). `ids` are the Rules in the order they are shown. */
+export function dragAnnouncements(ids: number[], noun = 'Rule') {
   const place = (item: Dragged) => ids.indexOf(Number(item.id)) + 1
   const of = `of ${ids.length}`
   return {
-    onDragStart: ({ active }: { active: Dragged }) => `Picked up Rule ${place(active)} ${of}.`,
+    onDragStart: ({ active }: { active: Dragged }) => `Picked up ${noun} ${place(active)} ${of}.`,
     onDragOver: ({ active, over }: { active: Dragged; over: Dragged | null }) =>
-      over ? `Rule ${place(active)} is over position ${place(over)} ${of}.` : `Rule ${place(active)} is not over a position.`,
+      over ? `${noun} ${place(active)} is over position ${place(over)} ${of}.` : `${noun} ${place(active)} is not over a position.`,
     onDragEnd: ({ active, over }: { active: Dragged; over: Dragged | null }) =>
-      over && over.id !== active.id ? `Dropped Rule ${place(active)} in position ${place(over)} ${of}.` : `Dropped Rule ${place(active)}. It stays in position ${place(active)} ${of}.`,
-    onDragCancel: ({ active }: { active: Dragged }) => `Moving Rule ${place(active)} was cancelled. It is still in position ${place(active)} ${of}.`,
+      over && over.id !== active.id ? `Dropped ${noun} ${place(active)} in position ${place(over)} ${of}.` : `Dropped ${noun} ${place(active)}. It stays in position ${place(active)} ${of}.`,
+    onDragCancel: ({ active }: { active: Dragged }) => `Moving ${noun} ${place(active)} was cancelled. It is still in position ${place(active)} ${of}.`,
   }
 }

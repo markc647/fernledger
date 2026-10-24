@@ -1,6 +1,12 @@
 import * as z from 'zod/mini'
 import { isRealDate } from './dates'
 
+/**
+ * The order Accounts are listed in everywhere (#45): the Admin's order from the Accounts screen, then any Account with no
+ * position yet (none before the first reorder, or one added since) by name. `a` is the query's alias for `accounts`.
+ */
+export const accountOrder = (a: string) => `${a}.position IS NULL, ${a}.position, ${a}.name COLLATE NOCASE, ${a}.id`
+
 /** An Account's display name, as the Admin types it (trimmed, 1 to 60 characters). */
 export const accountName = z.string().check(z.trim(), z.minLength(1), z.maxLength(60))
 
