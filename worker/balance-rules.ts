@@ -64,8 +64,20 @@ export function syncBalance(reported: ReportedBalance, complete: boolean): { bal
   if (!complete) return { skipped: 'incomplete' }
   const gap = Math.abs(Date.parse(reported.akahuRefreshedTransactionsAt ?? '') - Date.parse(reported.akahuRefreshedBalanceAt))
   if (!(gap <= REFRESH_GAP_MS)) return { skipped: 'refreshed-apart' }
-  const bankCents = reported.akahuType === 'CREDITCARD' ? -reported.akahuBalanceCurrentCents : reported.akahuBalanceCurrentCents
-  return { balance: { asOfDate: nzDate(new Date(reported.akahuRefreshedBalanceAt)), bankCents } }
+  return { balance: { asOfDate: nzDate(new Date(reported.akahuRefreshedBalanceAt)), bankCents: ledgerCents(reported.akahuType, reported.akahuBalanceCurrentCents) } }
+}
+
+/** Akahu's `balance.current` as the ledger counts it: a credit card's is what is owed, so it is money out (ADR 0014). */
+export const ledgerCents = (akahuType: string | null, currentCents: number) => (akahuType === 'CREDITCARD' ? -currentCents : currentCents)
+
+/**
+ * Akahu's balance to show, unchecked, for a linked Account that has no bank balance yet (#44), or null. Display only: it is not
+ * recorded, so nothing is checked against it, and the Account's first recorded balance replaces it. Not one in another currency.
+ */
+export function uncheckedBalance(reported: Pick<ReportedBalance, 'akahuType' | 'akahuBalanceCurrency' | 'akahuBalanceCurrentCents' | 'akahuRefreshedBalanceAt'>) {
+  if (reported.akahuBalanceCurrentCents === null || reported.akahuRefreshedBalanceAt === null) return null
+  if (reported.akahuBalanceCurrency !== null && reported.akahuBalanceCurrency !== 'NZD') return null
+  return { cents: ledgerCents(reported.akahuType, reported.akahuBalanceCurrentCents), asOfDate: nzDate(new Date(reported.akahuRefreshedBalanceAt)) }
 }
 
 export type BalanceRow = {

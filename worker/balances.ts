@@ -4,7 +4,7 @@ import { isoDate } from './account-fields'
 import { syncedInLast24Hours } from './akahu-sync'
 import type { AppEnv } from './app-env'
 import { UNCOUNTED_SQL } from './balance-check'
-import type { BalanceStatus } from './balance-rules'
+import { type BalanceStatus, uncheckedBalance } from './balance-rules'
 import { pathId, validate } from './validate'
 
 // Read-only, so every Member can use these; the guard in app.ts already refuses a change from anyone but the Admin.
@@ -21,6 +21,8 @@ export const CURRENT = `
                                   WHERE t.account_id = a.id AND t.date >= b.as_of_date AND (t.date > b.as_of_date OR t.id > b.through_transaction_id)), 0) AS balanceCents,
          MAX(b.as_of_date, COALESCE((SELECT MAX(t.date) FROM transactions t WHERE t.account_id = a.id AND t.date >= b.as_of_date), b.as_of_date)) AS asOfDate,
          a.cutover_date AS cutoverDate, a.akahu_synced_at AS akahuSyncedAt, a.akahu_account_id IS NOT NULL AS linkedToAkahu,
+         a.akahu_type AS akahuType, a.akahu_balance_currency AS akahuBalanceCurrency, a.akahu_balance_current_cents AS akahuBalanceCurrentCents,
+         a.akahu_refreshed_balance_at AS akahuRefreshedBalanceAt,
          (SELECT status FROM balance_checks WHERE account_id = a.id ORDER BY as_of_date DESC LIMIT 1) AS latestStatus
   FROM accounts a LEFT JOIN balance_checks b ON b.id = (${ANCHOR_ID})
   ORDER BY a.name COLLATE NOCASE, a.id`
@@ -67,9 +69,18 @@ type CurrentBalanceRow = {
   akahuSyncedAt: string | null
   /** 1 when the Account is linked to Akahu (SQLite has no boolean). */
   linkedToAkahu: number
+  /** What Akahu last said of the balance, read to give `unchecked` and not sent. */
+  akahuType: string | null
+  akahuBalanceCurrency: string | null
+  akahuBalanceCurrentCents: number | null
+  akahuRefreshedBalanceAt: string | null
 }
-/** One Account of GET /api/balances. */
-export type CurrentBalance = Omit<CurrentBalanceRow, 'akahuSyncedAt' | 'linkedToAkahu'> & { syncedInLast24Hours: boolean; linked: boolean }
+type AkahuFields = 'akahuSyncedAt' | 'linkedToAkahu' | 'akahuType' | 'akahuBalanceCurrency' | 'akahuBalanceCurrentCents' | 'akahuRefreshedBalanceAt'
+/**
+ * One Account of GET /api/balances. `unchecked` is Akahu's balance for a linked Account with no bank balance yet, shown until a
+ * Sync records one (#44): never counted in a total, a history or a Balance Check.
+ */
+export type CurrentBalance = Omit<CurrentBalanceRow, AkahuFields> & { syncedInLast24Hours: boolean; linked: boolean; unchecked: { cents: number; asOfDate: string } | null }
 type HistoryPoint = { date: string; balanceCents: number }
 
 export const balances = new Hono<AppEnv>()
@@ -78,7 +89,13 @@ export const balances = new Hono<AppEnv>()
     const { results } = await c.env.DB.prepare(CURRENT).all<CurrentBalanceRow>()
     // Whether that was in the last 24 hours is worked out here, on the Worker's clock (akahu-sync.ts), for the Sync column of the Summary and the Dashboard.
     const now = new Date()
-    const accounts: CurrentBalance[] = results.map(({ akahuSyncedAt, linkedToAkahu, ...account }) => ({ ...account, syncedInLast24Hours: syncedInLast24Hours(akahuSyncedAt, now), linked: linkedToAkahu === 1 }))
+    const accounts: CurrentBalance[] = results.map(({ akahuSyncedAt, linkedToAkahu, akahuType, akahuBalanceCurrency, akahuBalanceCurrentCents, akahuRefreshedBalanceAt, ...account }) => ({
+      ...account,
+      syncedInLast24Hours: syncedInLast24Hours(akahuSyncedAt, now),
+      linked: linkedToAkahu === 1,
+      unchecked:
+        linkedToAkahu === 1 && account.balanceCents === null ? uncheckedBalance({ akahuType, akahuBalanceCurrency, akahuBalanceCurrentCents, akahuRefreshedBalanceAt }) : null,
+    }))
     return c.json({ accounts })
   })
   // One Account's balance at the end of each day it had Transactions, oldest first, worked backwards from its latest

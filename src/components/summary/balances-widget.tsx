@@ -66,7 +66,13 @@ export function BalancesWidget() {
       header: 'Balance',
       align: 'end',
       cell: (row) =>
-        row.balanceCents === null ? (
+        row.balanceCents === null && row.unchecked !== null ? (
+          // Akahu's figure for a linked Account with no bank balance yet, until a Sync records one (#44).
+          <>
+            <Amount cents={row.unchecked.cents} balance />
+            <span className="block text-muted-foreground">From Akahu, not checked yet. Compare it with your bank: the nightly Sync confirms it.</span>
+          </>
+        ) : row.balanceCents === null ? (
           <>
             <span>Not known yet</span>
             {row.linked ? (
@@ -79,7 +85,11 @@ export function BalancesWidget() {
           <Amount cents={row.balanceCents} balance />
         ),
     },
-    { key: 'asOf', header: 'As of', cell: (row) => (row.asOfDate === null ? noBalanceReason(row.latestStatus) : formatDate(row.asOfDate)) },
+    {
+      key: 'asOf',
+      header: 'As of',
+      cell: (row) => (row.asOfDate !== null ? formatDate(row.asOfDate) : row.unchecked !== null ? formatDate(row.unchecked.asOfDate) : noBalanceReason(row.latestStatus)),
+    },
     ...(checkedOf ? [{ key: 'checked', header: 'Checked', className: '[overflow-wrap:normal]', cell: (row: CurrentBalance) => <CheckedCell checked={checkedOf(row.accountId)} /> }] : []),
     ...(syncSetUp
       ? [

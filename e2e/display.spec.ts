@@ -681,8 +681,8 @@ test.describe('zoom', () => {
       route.fulfill({
         json: {
           accounts: [
-            { accountId: 1, accountName: longName, balanceCents: -123456789, asOfDate: '2026-10-08', cutoverDate: null, latestStatus: 'differs', syncedInLast24Hours: false },
-            { accountId: 2, accountName: 'Example savings', balanceCents: null, asOfDate: null, cutoverDate: '2026-10-01', latestStatus: null, syncedInLast24Hours: true },
+            { accountId: 1, accountName: longName, balanceCents: -123456789, asOfDate: '2026-10-08', cutoverDate: null, latestStatus: 'differs', syncedInLast24Hours: false, unchecked: null },
+            { accountId: 2, accountName: 'Example savings', balanceCents: null, asOfDate: null, cutoverDate: '2026-10-01', latestStatus: null, syncedInLast24Hours: true, unchecked: null },
           ],
         },
       }),

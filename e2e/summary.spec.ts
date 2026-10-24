@@ -258,6 +258,16 @@ test.describe('the Balances table: Checked and Sync', () => {
     await expect(region.getByText('come from the bank link')).toHaveCount(0)
   })
 
+  test("shows Akahu's balance for a linked Account until a Sync checks one, and says so", async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    const card = { ...stubAccount(2, 'Example credit card', 0, true), balanceCents: null, asOfDate: null, cutoverDate: '2026-10-21', latestStatus: null, unchecked: { cents: -126_841, asOfDate: '2026-10-23' } }
+    const region = await open(page, { syncSetUp: true, balances: [stubAccount(1, 'Example everyday', 123_400, true), card, stubAccount(3, 'Example savings', 5_000_000)], checks: { differences: [], accounts: [] } })
+    await expect(row(region, 'Example credit card')).toContainText('−$1,268.41')
+    await expect(row(region, 'Example credit card')).toContainText('From Akahu, not checked yet. Compare it with your bank: the nightly Sync confirms it.')
+    await expect(row(region, 'Example credit card')).toContainText('23 Oct 2026')
+    await expect(row(region, 'Example credit card')).not.toContainText('Not known yet')
+  })
+
   test('shows both as labelled rows of the Account\'s card on a phone', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.setViewportSize({ width: 390, height: 844 })
