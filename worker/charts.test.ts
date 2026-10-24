@@ -1,6 +1,6 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from './index'
 import { EVERY_DATE, MAX_NET_WORTH_ACCOUNTS, type NetWorth, type NetWorthRange } from './net-worth'
 import { monthEnd, monthsBefore, monthStart, nzMonth } from './months'
@@ -31,7 +31,7 @@ async function call(path: string, opts: { who?: Who; method?: string; body?: unk
  * (D1 reports them with the result), in the order the statements finished, whether they ran alone or in a batch. ADR 0004 allows 50 statements to an
  * invocation and bills rows read.
  */
-async function measured(path: string) {
+async function measured(path: string, who: 'admin' | 'member' = 'admin') {
   const watched = { prepared: [] as string[], reads: [] as number[] }
   const rowsRead = (result: { meta: unknown }) => (result.meta as { rows_read: number }).rows_read
   const real = new WeakMap<object, D1PreparedStatement>()
@@ -74,7 +74,7 @@ async function measured(path: string) {
     },
   })
   const ctx = createExecutionContext()
-  const res = await worker.fetch!(new Request(`${origin}${path}`, { headers: { Cookie: 'fernledger_dev_as=member' } }) as never, { ...env, DB: db }, ctx)
+  const res = await worker.fetch!(new Request(`${origin}${path}`, { headers: { Cookie: `fernledger_dev_as=${who}` } }) as never, { ...env, DB: db }, ctx)
   await waitOnExecutionContext(ctx)
   return { res, watched }
 }
@@ -103,7 +103,8 @@ const netWorth = async (range: NetWorthRange = 'all', who: Who = 'member'): Prom
   expect(res.status).toBe(200)
   return res.json()
 }
-const spending = async (query: string, who: Who = 'member'): Promise<SpendingByCategory> => {
+/** Spending by Category, as the Admin unless it says: a Member reads it only for a kept Report's dates. */
+const spending = async (query: string, who: Who = 'admin'): Promise<SpendingByCategory> => {
   const res = await call(`/api/charts/spending?${query}`, { who })
   expect(res.status, query).toBe(200)
   return res.json()
@@ -114,7 +115,7 @@ const historyOf = async (number: string): Promise<Point[]> => ((await (await cal
 const balanceOn = (points: Point[], opening: number, date: string) => points.filter((p) => p.date <= date).at(-1)?.balanceCents ?? opening
 
 beforeEach(async () => {
-  await env.DB.batch(['budgets', 'balance_checks', 'transactions', 'accounts', 'change_log'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch(['budgets', 'balance_checks', 'transactions', 'accounts', 'change_log', 'member_read_usage'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
   await env.DB.prepare('UPDATE categories SET removed_at = NULL').run()
 })
 
@@ -307,16 +308,21 @@ describe('net worth\'s cost (ADR 0004)', () => {
     await env.DB.batch(Array.from({ length: count }, (_, i) => env.DB.prepare('INSERT INTO accounts (account_number, name) VALUES (?, ?)').bind(`99-9999-9999999-${String(i).padStart(2, '0')}`, `Example account ${i}`)))
   }
 
-  it('uses one statement for the list and one for each Account: 50 with the most Accounts it reads, which the free plan allows', async () => {
+  it('uses one statement for the list and one for each Account, and with the most Accounts it reads a request from a Member stays within the 50 the free plan allows', async () => {
     await addAccounts(MAX_NET_WORTH_ACCOUNTS)
 
-    const { res, watched } = await measured('/api/charts/net-worth?range=24-months')
+    // The draw charges this small read, so the request runs the limit's check and its charge: the most queries a Member's request adds.
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation(((words: Uint32Array) => words.fill(0)) as never)
+    const { res, watched } = await measured('/api/charts/net-worth?range=24-months', 'member')
+    vi.restoreAllMocks()
 
     const body = (await res.json()) as NetWorth
     expect(res.status).toBe(200)
     expect(body.tooManyAccounts).toBeNull()
     expect(body.notCounted).toHaveLength(MAX_NET_WORTH_ACCOUNTS) // none has a balance
-    expect(watched.prepared).toHaveLength(1 + MAX_NET_WORTH_ACCOUNTS)
+    const limit = watched.prepared.filter((sql) => sql.includes('member_read_usage')) // the Members' daily limit: its check, and a charge when the request read enough
+    expect(limit).toHaveLength(2)
+    expect(watched.prepared).toHaveLength(1 + MAX_NET_WORTH_ACCOUNTS + 2)
     expect(watched.prepared.length).toBeLessThanOrEqual(50)
   })
 
@@ -586,6 +592,7 @@ describe('spending by Category', () => {
       ['from=2026-10-31&to=2026-10-01', 'to'],
       ['from=2026-02-30&to=2026-03-01', 'from'],
       ['from=2026-10-01&to=EXAMPLE-SHOP-NAME', 'to'],
+      ['from=2024-10-01&to=2026-10-31', 'to'], // 25 months: one more than a Report covers
     ]
     for (const [query, field] of cases) {
       const res = await call(`/api/charts/spending?${query}`)
@@ -596,12 +603,21 @@ describe('spending by Category', () => {
     }
   })
 
-  it('is refused for a stranger, readable by a Member and the Admin, and not writable by anyone', async () => {
+  it('is refused for a stranger, readable by the Admin, by a Member only for the dates of a kept Spending by Category Report of every Account, and not writable by anyone', async () => {
     await add(accountA, '2026-10-02', -4000, { override: 'Groceries' })
+    const keep = (from: string, to: string, accountId: number | null = null) =>
+      env.DB.prepare("INSERT INTO kept_reports (report, account_id, from_date, to_date, made_by) VALUES ('spending', ?, ?, ?, 'admin@example.com')").bind(accountId, from, to).run()
 
     expect((await call('/api/charts/spending?period=this-month', { who: null })).status).toBe(401)
-    expect(figures(await spending('from=2026-10-01&to=2026-10-31', 'member'))).toEqual([['Groceries', 4000]])
     expect(figures(await spending('from=2026-10-01&to=2026-10-31', 'admin'))).toEqual([['Groceries', 4000]])
+    const refused = await call('/api/charts/spending?from=2026-10-01&to=2026-10-31', { who: 'member' })
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toEqual({ error: 'Only the Admin makes Reports. This one has not been made.' })
+    await keep('2026-10-01', '2026-10-31', accountA) // one Account's Report is not the chart of every Account
+    await keep('2026-10-01', '2026-10-30')
+    expect((await call('/api/charts/spending?from=2026-10-01&to=2026-10-31', { who: 'member' })).status).toBe(403)
+    await keep('2026-10-01', '2026-10-31')
+    expect(figures(await spending('from=2026-10-01&to=2026-10-31', 'member'))).toEqual([['Groceries', 4000]])
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
       expect((await call('/api/charts/spending?period=this-month', { who: 'member', method, body: {} })).status, method).toBe(403)
     }
@@ -625,7 +641,7 @@ describe('spending by Category\'s cost (ADR 0004)', () => {
 
   it('uses one statement however long the dates are, and reads the dates asked for and not the history around them', async () => {
     const month = await measured('/api/charts/spending?from=2026-04-01&to=2026-04-30')
-    const year = await measured('/api/charts/spending?from=2000-01-01&to=2100-12-31')
+    const year = await measured('/api/charts/spending?from=2025-01-01&to=2026-12-31') // the most months it takes, holding every Transaction
 
     expect(month.res.status).toBe(200)
     expect(year.res.status).toBe(200)

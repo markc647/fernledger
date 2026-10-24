@@ -63,7 +63,7 @@ test.describe('About your data', () => {
     )
   })
 
-  test('lists everything the database holds: Accounts, Transactions, Balances, Categories, the Change Log, sign-in, Settings', async ({ page, context }) => {
+  test('lists everything the database holds: Accounts, Transactions, Balances, Categories, the Change Log, sign-in, the daily read counts, Settings', async ({ page, context }) => {
     await signInAs(context, 'member')
     await page.goto('/about-your-data')
     const held = section(page, 'What is held')
@@ -75,8 +75,11 @@ test.describe('About your data', () => {
       'Categories:',
       'The Change Log:',
       'Who may sign in:',
+      "Members' reads today:",
       'Settings:',
     ])
+    // The daily limit's counts are kept under a code, never a Member's email address (worker/member-read-limit.ts).
+    await expect(held.getByRole('listitem').filter({ hasText: "Members' reads today:" })).toContainText("a code worked out from the day and the Member's email address, not the address itself")
     await expect(held.getByRole('listitem').filter({ hasText: 'Balances:' })).toContainText('balance a bank reported')
     // The Change Log keeps values, Notes included, and is where the Admin's email address is held.
     await expect(held.getByRole('listitem').filter({ hasText: 'The Change Log:' })).toContainText('often with the values from before and after')

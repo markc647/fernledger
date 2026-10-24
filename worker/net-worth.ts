@@ -12,7 +12,7 @@ import { REPORT_HISTORY, type HistoryRow } from './report-balances'
 //
 // A range narrows what is returned, not what is read: balance history is worked out from every Transaction of an Account whatever dates are asked for, so
 // the request reads each Transaction about six times for any range (ADR 0004; charts.test.ts pins it). It takes one statement for the list of Accounts and one
-// for each Account's history, so 1 + N of the 50 D1 queries; more than MAX_NET_WORTH_ACCOUNTS Accounts are refused, with a flag the page words, rather
+// for each Account's history, so 1 + N of the 50 D1 queries (2 more for a Member: member-read-limit.ts); more than MAX_NET_WORTH_ACCOUNTS Accounts are refused, with a flag the page words, rather
 // than a total of only some of them.
 
 /** The ranges a request can ask for, each ending with this month: the last 24 months, the last 5 years, or every month there is. */
@@ -28,8 +28,8 @@ export const DEFAULT_NET_WORTH_RANGE = '24-months' satisfies NetWorthRange
 /** The query string: the range, which a refusal names. */
 export const netWorthQuery = z.object({ range: z.optional(z.enum(NET_WORTH_RANGES)) })
 
-/** Accounts a request reads: 1 statement for the list and 1 for each Account's history must stay within the 50 D1 queries of one invocation (ADR 0004). */
-export const MAX_NET_WORTH_ACCOUNTS = 49
+/** Accounts a request reads: 1 statement for the list, 1 for each Account's history and the 2 of the Members' daily limit (member-read-limit.ts) must stay within the 50 D1 queries of one invocation (ADR 0004). */
+export const MAX_NET_WORTH_ACCOUNTS = 47
 
 /** REPORT_HISTORY takes the dates it picks months from; these are every date, so a range that is all begins before any Transaction and ends after every one. */
 export const EVERY_DATE = { from: '0000-01-01', to: '9999-12-31' }

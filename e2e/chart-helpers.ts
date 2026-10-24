@@ -2,7 +2,7 @@ import type { Page, Request } from '@playwright/test'
 import { expect } from './fixtures'
 
 // What a spec needs to look at the two charts with answers of its own, whatever the shared database holds: net worth (the Net worth page) which the Worker refuses for having more
-// than 49 Accounts (worker/net-worth.ts) and then draws nothing, and spending by Category (the Spending by Category Report), whose bars are drawn from the Report's own answer. The specs
+// than 47 Accounts (worker/net-worth.ts) and then draws nothing, and spending by Category (the Spending by Category Report), whose bars are drawn from the Report's own answer. The specs
 // that look at the charts stub the answer and wait for the picture (dashboard.spec.ts, display.spec.ts, shell.spec.ts, report-spending.spec.ts).
 
 export const NET_WORTH_PATH = '/reports/net-worth'

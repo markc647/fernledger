@@ -17,7 +17,7 @@ const darkClass = (dark: boolean) => (dark ? /dark/ : /^(?!.*dark)/)
 for (const { role, path, heading } of pages) {
   test(`${heading} page as ${role} has no WCAG 2.2 AA violations`, async ({ page, context }) => {
     await signInAs(context, role)
-    // The Net worth page and the Spending by Category Report are where the charts are, and the Worker refuses to add up net worth for more than 49 Accounts, which the specs that share
+    // The Net worth page and the Spending by Category Report are where the charts are, and the Worker refuses to add up net worth for more than 47 Accounts, which the specs that share
     // this database can reach. So the answers are stubbed and the charts drawn before the scan (net worth when its button is pressed), and it scans the pictures and not the refusal that a
     // long run of specs would put in their place.
     if (path === NET_WORTH_PATH) await stubNetWorth(page)

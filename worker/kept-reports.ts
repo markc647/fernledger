@@ -90,7 +90,7 @@ export function requestedChoices(report: ReportId, params: URLSearchParams): Cho
 }
 
 /** Whether a Report with these choices has been kept, for a request that makes them: the kept Report is the one asked for, or (for a Report that asks for its Accounts or Categories one at a time) one of everything. */
-async function isKept(db: D1Database, report: ReportId, ask: Choices) {
+export async function isKept(db: D1Database, report: ReportId, ask: Choices) {
   const shape = SHAPES[report]
   const binds: (string | number | null)[] = [report, ask.to, ask.from]
   let account = 'account_id IS NULL'
