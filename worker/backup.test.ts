@@ -471,12 +471,24 @@ describe('restoring a backup', () => {
     expect(() => insertStatements(table, '{"n":9007199254740993}\n', 'p')).toThrow(BackupFormatError)
   })
 
-  it('refuses a row too long for one D1 statement, naming the line and not the value', () => {
+  it('writes text holding BEGIN or COMMIT, in any case, as hex, and all other text as a quoted literal', () => {
+    const table = { name: 't', createSql: '', columns: ['s'], rows: 1, parts: [] }
+    const sql = (s: string) => insertStatements(table, JSON.stringify({ s }) + '\n', 'p')[0]!
+
+    expect(sql("O'Brien; -- line\none")).toBe(`INSERT INTO "t" ("s") VALUES ('O''Brien; -- line' || char(10) || 'one');`)
+    for (const s of ['BEGIN TRANSACTION', 'REF COMMIT; PAYEE', 'begin', 'Commit to it']) {
+      expect(sql(s), s).toBe(`INSERT INTO "t" ("s") VALUES (CAST(X'${[...new TextEncoder().encode(s)].map((b) => b.toString(16).padStart(2, '0')).join('')}' AS TEXT));`)
+    }
+  })
+
+  it('refuses a row whose hex makes it too long for one D1 statement, naming the line and not the value, and writes a long quoted one as before', () => {
     const table = { name: 't', createSql: '', columns: ['s'], rows: 2, parts: [] }
-    const fits = 'A'.repeat((MAX_STATEMENT_BYTES - 100) / 2) // hex doubles it
-    const tooLong = 'A'.repeat(MAX_STATEMENT_BYTES / 2)
+    const fits = 'BEGIN '.padEnd((MAX_STATEMENT_BYTES - 100) / 2, 'A') // hex doubles it
+    const tooLong = 'BEGIN '.padEnd(MAX_STATEMENT_BYTES / 2, 'A')
+    const longQuoted = 'A'.repeat(MAX_STATEMENT_BYTES - 1_000) // well past half the limit, which hex would double past it
 
     expect(insertStatements(table, JSON.stringify({ s: fits }) + '\n', 'p')).toHaveLength(1)
+    expect(insertStatements(table, JSON.stringify({ s: longQuoted }) + '\n', 'p')[0]).toContain(`'${longQuoted}'`)
     expect(() => insertStatements(table, `${JSON.stringify({ s: fits })}\n${JSON.stringify({ s: tooLong })}\n`, 'p')).toThrow(
       new BackupFormatError('Part p line 2 is too long to restore as one D1 statement.'),
     )

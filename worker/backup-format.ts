@@ -81,13 +81,18 @@ const lines = (ndjson: string) => ndjson.split('\n').filter((line) => line !== '
 
 type Cell = string | null | { $number: string } | { $blob: string }
 
-// Text as hex, so none of it reaches the SQL source. Wrangler rewrites a --file as plain text before running
-// it (it deletes the first 'BEGIN TRANSACTION;' and 'COMMIT;' anywhere, quoted or not, and refuses a file
-// still holding 'BEGIN TRANSACTION'), and D1's local runner can read a file one line per statement, so any
-// text written as a quoted literal can be changed or split by the loader. Hex is only 0-9 and A-F.
+// Wrangler rewrites a --file as plain text before running it: it deletes the first 'BEGIN TRANSACTION;' and 'COMMIT;' anywhere, quoted or
+// not, and refuses a file still holding 'BEGIN TRANSACTION'. Text holding either word, in any case, is written as hex, so none of it reaches
+// the SQL source. Hex is twice the text's UTF-8 bytes, so all other text stays a quoted literal and keeps the room it has in a statement.
+const NEEDS_HEX = /BEGIN|COMMIT/i
+
+// A quoted literal has no raw line breaks in it: D1's local runner can read a file one line per statement, so a Transaction note
+// containing a newline must not split an INSERT.
 function textLiteral(value: string): string {
-  const hex = [...new TextEncoder().encode(value)].map((b) => b.toString(16).padStart(2, '0')).join('')
-  return `CAST(X'${hex}' AS TEXT)`
+  if (NEEDS_HEX.test(value)) return `CAST(X'${[...new TextEncoder().encode(value)].map((b) => b.toString(16).padStart(2, '0')).join('')}' AS TEXT)`
+  const pieces = value.split(/(\r|\n)/).filter((piece) => piece !== '')
+  if (pieces.length === 0) return "''"
+  return pieces.map((piece) => (piece === '\n' ? 'char(10)' : piece === '\r' ? 'char(13)' : `'${piece.replaceAll("'", "''")}'`)).join(' || ')
 }
 
 const NUMBER_TEXT = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/
@@ -111,12 +116,14 @@ function literal(value: Cell | undefined, where: string): string {
 const keepNumberText = (_key: string, value: unknown, context?: { source?: string }) =>
   typeof value === 'number' ? { $number: context?.source ?? String(value) } : value
 
-/** D1's limit on one statement. Hex makes a row's text twice its UTF-8 bytes, so a row with more than about 50 KB of text can't be one INSERT. */
+/** D1's limit on one statement. */
 export const MAX_STATEMENT_BYTES = 100_000
 
 /**
- * One INSERT per row (D1 limits a statement to 100 KB and the bound parameters of one to 100). A row too long for one statement is refused here,
- * so restore.mjs, which writes every part's SQL before it loads any, stops before the database is touched rather than part way.
+ * One INSERT per row (D1 limits a statement to 100 KB and the bound parameters of one to 100). A row with text written as hex (`textLiteral`)
+ * that makes it too long for one statement is refused here, so restore.mjs, which writes every part's SQL before it loads any, stops before
+ * the database is touched rather than part way. Such a row could never be restored: its words would have been changed or refused as a
+ * quoted literal. Any other row is written as it was before hex, whatever its length.
  */
 export function insertStatements(entry: ManifestTable, ndjson: string, partKey: string): string[] {
   const columns = entry.columns.map(quote).join(', ')
@@ -133,7 +140,8 @@ export function insertStatements(entry: ManifestTable, ndjson: string, partKey: 
       return literal(row[c], where)
     })
     const statement = `INSERT INTO ${quote(entry.name)} (${columns}) VALUES (${values.join(', ')});`
-    if (new TextEncoder().encode(statement).byteLength > MAX_STATEMENT_BYTES) throw new BackupFormatError(`${where} is too long to restore as one D1 statement.`)
+    const hex = entry.columns.some((c) => typeof row[c] === 'string' && NEEDS_HEX.test(row[c]))
+    if (hex && new TextEncoder().encode(statement).byteLength > MAX_STATEMENT_BYTES) throw new BackupFormatError(`${where} is too long to restore as one D1 statement.`)
     return statement
   })
 }
