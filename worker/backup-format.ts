@@ -81,12 +81,13 @@ const lines = (ndjson: string) => ndjson.split('\n').filter((line) => line !== '
 
 type Cell = string | null | { $number: string } | { $blob: string }
 
-// A SQL string literal with no raw line breaks in it: D1's local runner can read a file one line per
-// statement, so a Transaction note containing a newline must not split an INSERT.
+// Text as hex, so none of it reaches the SQL source. Wrangler rewrites a --file as plain text before running
+// it (it deletes the first 'BEGIN TRANSACTION;' and 'COMMIT;' anywhere, quoted or not, and refuses a file
+// still holding 'BEGIN TRANSACTION'), and D1's local runner can read a file one line per statement, so any
+// text written as a quoted literal can be changed or split by the loader. Hex is only 0-9 and A-F.
 function textLiteral(value: string): string {
-  const pieces = value.split(/(\r|\n)/).filter((piece) => piece !== '')
-  if (pieces.length === 0) return "''"
-  return pieces.map((piece) => (piece === '\n' ? 'char(10)' : piece === '\r' ? 'char(13)' : `'${piece.replaceAll("'", "''")}'`)).join(' || ')
+  const hex = [...new TextEncoder().encode(value)].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return `CAST(X'${hex}' AS TEXT)`
 }
 
 const NUMBER_TEXT = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/

@@ -2,6 +2,7 @@
 // Worker's own backup code, restore it with scripts/restore.mjs into a second database, and compare.
 // SQLite (node:sqlite) stands in for D1 and a folder for R2; a fake Wrangler connects the script to both.
 // Nothing here touches Cloudflare. (worker/backup.test.ts covers the Worker against real local D1 and R2.)
+// One test loads the parts with the real `wrangler d1 execute --local --file`, since that loader rewrites the file.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -10,6 +11,7 @@ import { dirname, join, resolve } from 'node:path'
 import { after, test } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { continueBackup, startBackup } from '../worker/backup.ts'
+import { insertStatements, parseManifest } from '../worker/backup-format.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const cleanup = []
@@ -421,4 +423,49 @@ test('restore will not clear the starter Categories while a table that refers to
   assert.match(r.out, /already has rows in transactions/)
   assert.deepEqual(r.loads, [])
   assert.equal(target.prepare('SELECT count(*) AS n FROM categories').get().n, 23)
+})
+
+test('every text a backup holds comes back exactly through the real `wrangler d1 execute --local --file`', async () => {
+  // Wrangler edits a --file as plain text before running it, so these are the kinds of text it could reach: its own
+  // transaction words, statement and comment syntax, quotes, line breaks, every ASCII character and some that aren't.
+  const values = [
+    'REF COMMIT; PAYEE',
+    'BEGIN TRANSACTION; DUMMY',
+    'BEGIN TRANSACTION',
+    'begin transaction; commit;',
+    "O'Brien \"quoted\"; DROP TABLE settings; -- /* not a comment */",
+    'Line one\r\nLine two\rLine three\n',
+    'Café ☕ Māori ā 𝄞',
+    Array.from({ length: 127 }, (_, i) => String.fromCharCode(i + 1)).join(''),
+    '',
+  ]
+  const dir = tempDir()
+  const bucketDir = join(dir, 'bucket')
+  const source = newDatabase(join(dir, 'source.sqlite'))
+  const insert = source.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
+  values.forEach((v, i) => insert.run(`key ${i}: ${v}`, v))
+  await backUp(source, bucketDir, Date.parse('2026-10-11T15:00:00Z'))
+
+  const persist = join(dir, 'd1')
+  const wrangler = (...args) => {
+    const r = spawnSync(process.execPath, [join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js'), 'd1', ...args, '--local', '--persist-to', persist], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
+    })
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+    return r.stdout
+  }
+  wrangler('migrations', 'apply', 'DB')
+  const manifest = parseManifest(readFileSync(join(bucketDir, 'backups', '2026-10-12', 'manifest.json'), 'utf8'))
+  const table = manifest.tables.find((t) => t.name === 'settings')
+  for (const [i, part] of table.parts.entries()) {
+    const file = join(dir, `part-${i}.sql`)
+    writeFileSync(file, insertStatements(table, readFileSync(join(bucketDir, part.key), 'utf8'), part.key).join('\n') + '\n')
+    wrangler('execute', 'DB', '--file', file)
+  }
+
+  const query = 'SELECT key, value, typeof(value) AS type FROM settings ORDER BY key'
+  const [{ results }] = JSON.parse(wrangler('execute', 'DB', '--json', '--command', query))
+  assert.deepEqual(results, source.prepare(query).all().map((r) => ({ ...r })))
 })
