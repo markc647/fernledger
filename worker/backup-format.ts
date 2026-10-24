@@ -111,7 +111,13 @@ function literal(value: Cell | undefined, where: string): string {
 const keepNumberText = (_key: string, value: unknown, context?: { source?: string }) =>
   typeof value === 'number' ? { $number: context?.source ?? String(value) } : value
 
-/** One INSERT per row (D1 limits a statement to 100 KB and the bound parameters of one to 100). */
+/** D1's limit on one statement. Hex makes a row's text twice its UTF-8 bytes, so a row with more than about 50 KB of text can't be one INSERT. */
+export const MAX_STATEMENT_BYTES = 100_000
+
+/**
+ * One INSERT per row (D1 limits a statement to 100 KB and the bound parameters of one to 100). A row too long for one statement is refused here,
+ * so restore.mjs, which writes every part's SQL before it loads any, stops before the database is touched rather than part way.
+ */
 export function insertStatements(entry: ManifestTable, ndjson: string, partKey: string): string[] {
   const columns = entry.columns.map(quote).join(', ')
   return lines(ndjson).map((line, i) => {
@@ -126,7 +132,9 @@ export function insertStatements(entry: ManifestTable, ndjson: string, partKey: 
       if (!Object.hasOwn(row, c)) throw new BackupFormatError(`${where} is missing column ${c}.`)
       return literal(row[c], where)
     })
-    return `INSERT INTO ${quote(entry.name)} (${columns}) VALUES (${values.join(', ')});`
+    const statement = `INSERT INTO ${quote(entry.name)} (${columns}) VALUES (${values.join(', ')});`
+    if (new TextEncoder().encode(statement).byteLength > MAX_STATEMENT_BYTES) throw new BackupFormatError(`${where} is too long to restore as one D1 statement.`)
+    return statement
   })
 }
 

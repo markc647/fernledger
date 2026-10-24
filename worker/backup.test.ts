@@ -2,7 +2,7 @@ import { createScheduledController } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BACKUP_CRON, BACKUP_STATE_KEY, CHUNK_BYTES, INVOCATION_BYTES } from './backup'
-import { BackupFormatError, checkPart, insertStatements, loadOrder, parseManifest, type Manifest } from './backup-format'
+import { BackupFormatError, checkPart, insertStatements, loadOrder, MAX_STATEMENT_BYTES, parseManifest, type Manifest } from './backup-format'
 import worker from './index'
 import { BACKUP_CHUNKS, CRON_CHUNKS, cronQueries } from './rule-rerun'
 
@@ -469,6 +469,17 @@ describe('restoring a backup', () => {
     const table = { name: 't', createSql: '', columns: ['n'], rows: 1, parts: [] }
 
     expect(() => insertStatements(table, '{"n":9007199254740993}\n', 'p')).toThrow(BackupFormatError)
+  })
+
+  it('refuses a row too long for one D1 statement, naming the line and not the value', () => {
+    const table = { name: 't', createSql: '', columns: ['s'], rows: 2, parts: [] }
+    const fits = 'A'.repeat((MAX_STATEMENT_BYTES - 100) / 2) // hex doubles it
+    const tooLong = 'A'.repeat(MAX_STATEMENT_BYTES / 2)
+
+    expect(insertStatements(table, JSON.stringify({ s: fits }) + '\n', 'p')).toHaveLength(1)
+    expect(() => insertStatements(table, `${JSON.stringify({ s: fits })}\n${JSON.stringify({ s: tooLong })}\n`, 'p')).toThrow(
+      new BackupFormatError('Part p line 2 is too long to restore as one D1 statement.'),
+    )
   })
 
   it('refuses a manifest whose part keys leave the backup it names', async () => {
