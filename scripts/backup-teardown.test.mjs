@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 import { after, test } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { downloadBackup, localPath } from './backup-run.mjs'
+import { SMOKE_ENV } from './smoke.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const cleanup = []
@@ -120,6 +121,7 @@ function run(script, args, env, input) {
   const base = { ...process.env }
   delete base.REGION
   delete base.CLOUDFLARE_ACCOUNT_ID
+  for (const name of SMOKE_ENV) delete base[name] // a Deployer's smoke token must never send a test's deploy to the live site
   const r = spawnSync(process.execPath, [resolve(root, 'scripts', script), ...args], { cwd: root, encoding: 'utf8', env: { ...base, ...env }, input: input ?? '', timeout: 120_000 })
   return { status: r.status, out: r.stdout + r.stderr }
 }
