@@ -255,6 +255,7 @@ test.describe('the Balances table: Checked and Sync', () => {
     // Mark's Account is linked, so it is not waiting for syncing to start; and one that is not linked still is.
     await expect(row(region, 'Example savings')).toContainText('Not known yet')
     await expect(row(region, 'Example savings')).toContainText('Waiting for a balance from Akahu.')
+    await expect(region.getByText('A balance from Akahu is shown')).toHaveCount(0)
     await expect(region.getByText('come from the bank link')).toHaveCount(0)
   })
 
@@ -263,7 +264,8 @@ test.describe('the Balances table: Checked and Sync', () => {
     const card = { ...stubAccount(2, 'Example credit card', 0, true), balanceCents: null, asOfDate: null, cutoverDate: '2026-10-21', latestStatus: null, unchecked: { cents: -126_841, asOfDate: '2026-10-23' } }
     const region = await open(page, { syncSetUp: true, balances: [stubAccount(1, 'Example everyday', 123_400, true), card, stubAccount(3, 'Example savings', 5_000_000)], checks: { differences: [], accounts: [] } })
     await expect(row(region, 'Example credit card')).toContainText('−$1,268.41')
-    await expect(row(region, 'Example credit card')).toContainText('From Akahu, not checked yet. Compare it with your bank: the nightly Sync confirms it.')
+    await expect(row(region, 'Example credit card')).toContainText('From Akahu, not checked yet.')
+    await expect(region).toContainText('A balance from Akahu is shown until the nightly Sync checks it. Compare it with your bank.')
     await expect(row(region, 'Example credit card')).toContainText('23 Oct 2026')
     await expect(row(region, 'Example credit card')).not.toContainText('Not known yet')
   })

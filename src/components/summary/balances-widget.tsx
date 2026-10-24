@@ -70,7 +70,7 @@ export function BalancesWidget() {
           // Akahu's figure for a linked Account with no bank balance yet, until a Sync records one (#44).
           <>
             <Amount cents={row.unchecked.cents} balance />
-            <span className="block text-muted-foreground">From Akahu, not checked yet. Compare it with your bank: the nightly Sync confirms it.</span>
+            <span className="block text-muted-foreground">From Akahu, not checked yet.</span>
           </>
         ) : row.balanceCents === null ? (
           <>
@@ -125,6 +125,10 @@ export function BalancesWidget() {
             columns={columns}
             look="in-card"
           />
+          {/* Said once under the table, not in the cell, which it would widen until the other columns wrap. */}
+          {accounts.some((row) => row.balanceCents === null && row.unchecked !== null) && (
+            <p className="mt-3 text-muted-foreground">A balance from Akahu is shown until the nightly Sync checks it. Compare it with your bank.</p>
+          )}
         </>
       )}
     </DashboardCard>
