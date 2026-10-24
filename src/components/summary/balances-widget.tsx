@@ -62,6 +62,23 @@ export function BalancesWidget() {
   const columns: Column<CurrentBalance>[] = [
     { key: 'account', header: 'Account', className: '[overflow-wrap:break-word]', cell: (row) => row.accountName },
     {
+      key: 'asOf',
+      header: 'As of',
+      cell: (row) => (row.asOfDate !== null ? formatDate(row.asOfDate) : row.unchecked !== null ? formatDate(row.unchecked.asOfDate) : noBalanceReason(row.latestStatus)),
+    },
+    ...(checkedOf ? [{ key: 'checked', header: 'Checked', className: '[overflow-wrap:normal]', cell: (row: CurrentBalance) => <CheckedCell checked={checkedOf(row.accountId)} /> }] : []),
+    ...(syncSetUp
+      ? [
+          {
+            key: 'sync',
+            header: 'Sync',
+            className: '[overflow-wrap:normal]',
+            cell: (row: CurrentBalance) => (row.syncedInLast24Hours ? <Status tone="success">Synced</Status> : <Status tone="danger">Not Synced</Status>),
+          },
+        ]
+      : []),
+    // Last, as the money is on every other table: a figure at the right edge, where the eye looks for it.
+    {
       key: 'balance',
       header: 'Balance',
       align: 'end',
@@ -85,22 +102,6 @@ export function BalancesWidget() {
           <Amount cents={row.balanceCents} balance />
         ),
     },
-    {
-      key: 'asOf',
-      header: 'As of',
-      cell: (row) => (row.asOfDate !== null ? formatDate(row.asOfDate) : row.unchecked !== null ? formatDate(row.unchecked.asOfDate) : noBalanceReason(row.latestStatus)),
-    },
-    ...(checkedOf ? [{ key: 'checked', header: 'Checked', className: '[overflow-wrap:normal]', cell: (row: CurrentBalance) => <CheckedCell checked={checkedOf(row.accountId)} /> }] : []),
-    ...(syncSetUp
-      ? [
-          {
-            key: 'sync',
-            header: 'Sync',
-            className: '[overflow-wrap:normal]',
-            cell: (row: CurrentBalance) => (row.syncedInLast24Hours ? <Status tone="success">Synced</Status> : <Status tone="danger">Not Synced</Status>),
-          },
-        ]
-      : []),
   ]
 
   return (
