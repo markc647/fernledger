@@ -18,10 +18,12 @@ import { utcDay } from './rule-rerun'
 //   so requests sent together can't all pass on the same tally, and the most a limit is passed by is about one request. Once answered, the
 //   hold is settled to what the request read (CHARGE_FROM_ROWS at the least, so every dear request counts towards the limits however few
 //   Transactions there are). That is two rows written a dear request, at most 2 * MEMBER_DAILY_READS / CHARGE_FROM_ROWS a day.
-// - Any other request reads a few rows or a page. Before it runs, the tally is read, and the request refused if a limit has been reached.
-//   Once answered, it is charged what it read from CHARGE_FROM_ROWS up; below that, CHARGE_FROM_ROWS with the chance rows / CHARGE_FROM_ROWS,
-//   and otherwise nothing: the same on average, so many small reads reach the limit as surely as a few large ones, while these charges write
-//   at most about MEMBER_DAILY_READS / CHARGE_FROM_ROWS rows a day. Requests sent together can each pass the check, by a page each at most.
+// - Any other request is checked and charged without a hold. Most read a few rows or a page; kept Reports, Budget vs actual and the CSV
+//   export read more (a kept Report of a whole history about twice the Transactions), but are not dear here. Before it runs, the tally is read,
+//   and the request refused if a limit has been reached. Once answered, it is charged what it read from CHARGE_FROM_ROWS up; below that,
+//   CHARGE_FROM_ROWS with the chance rows / CHARGE_FROM_ROWS, and otherwise nothing: the same on average, so many small reads reach the limit
+//   as surely as a few large ones, while these charges write at most about MEMBER_DAILY_READS / CHARGE_FROM_ROWS rows a day. Requests sent
+//   together can each pass the check, so a limit can be passed by one such request's cost for each one sent together.
 // - A refused request is a 429 and writes nothing. Either way a Member's request runs two D1 queries more than the route's (one when a
 //   cheap one isn't charged), of the 50 an invocation may run (ADR 0004).
 
@@ -57,7 +59,7 @@ export function readsPerTransaction(path: string, params: URLSearchParams): numb
   if (path !== '/api/transactions') return 0
   const sort = params.get('sort') ?? 'date'
   const count = params.get('count')
-  const counts = count === 'true' || count === 'only' || (count === null && (params.get('offset') ?? '0') === '0')
+  const counts = count === 'true' || count === 'only' || (count === null && Number(params.get('offset') ?? 0) === 0) // as the route reads it: offset=00 is the first page
   return (sort === 'date' ? 0 : 4) + ((params.get('text') ?? '').trim() === '' ? 0 : 2) + (counts ? 1 : 0)
 }
 
@@ -75,8 +77,8 @@ const RESERVE = `INSERT INTO member_read_usage (member_key, usage_day, rows_read
     AND (SELECT COALESCE(SUM(rows_read), 0) FROM member_read_usage WHERE usage_day = ?1 AND member_key = ?2) < ?6
   ON CONFLICT (member_key) DO UPDATE SET rows_read = rows_read + excluded.rows_read
   RETURNING ${HOLD} AS hold`
-// Charges ?3 to the day the reads finished (?1, the key ?2), less the hold (?4) when that is the day it was reserved on (the same key). A hold
-// reserved on the day before stays on that day's row, which the trigger clears.
+// Charges ?3 to the day the reads finished (?1, the key ?2), less the hold (?4): the hold when that is the day it was reserved on (the same
+// key), and 0 when not, since a hold reserved on the day before is on that day's row, which the trigger clears, and not on this one.
 const SETTLE = `INSERT INTO member_read_usage (member_key, usage_day, rows_read) VALUES (?2, ?1, ?3)
   ON CONFLICT (member_key) DO UPDATE SET rows_read = MAX(0, rows_read + excluded.rows_read - ?4)`
 
@@ -146,7 +148,7 @@ export const memberReadLimit = createMiddleware<AppEnv>(async (c, next) => {
     const finishedKey = finished === day ? key : await memberKey(finished, member.email)
     const charge = hold > 0 ? Math.max(tally.rows, CHARGE_FROM_ROWS) : chargeFor(tally.rows)
     try {
-      if (hold > 0) await db.prepare(SETTLE).bind(finished, finishedKey, charge, hold).run()
+      if (hold > 0) await db.prepare(SETTLE).bind(finished, finishedKey, charge, finished === day ? hold : 0).run()
       else if (charge > 0) await db.prepare(CHARGE).bind(finished, finishedKey, charge).run()
     } catch (error) {
       logEvent('request.member-read-charge-failed', { error })

@@ -102,6 +102,7 @@ describe('which requests are dear', () => {
     expect(per('/api/charts/spending', 'period=this-month')).toBe(4)
     expect(per('/api/transactions')).toBe(1) // the first page counts
     expect(per('/api/transactions', 'offset=200')).toBe(0)
+    expect(per('/api/transactions', 'offset=00')).toBe(1) // the route reads it as the first page, which counts
     expect(per('/api/transactions', 'count=false')).toBe(0)
     expect(per('/api/transactions', 'count=only')).toBe(1)
     expect(per('/api/transactions', 'count=false&text=EXAMPLE')).toBe(2)
@@ -223,6 +224,14 @@ describe('the Members\' daily limit', () => {
     expect(await charged('member')).toBe(await holdOf(6)) // the hold: net worth's 6 reads for each Transaction
   })
 
+  it('still answers a cheap read whose charge fails', async () => {
+    drawWith(() => 0) // the draw charges it
+    const failing = withDb((target, sql) => (sql.includes('VALUES (?2, ?1, ?3)') ? ({ bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } as never) : target.prepare(sql)))
+
+    expect((await fetchWith(failing, CHEAP, 'member')).status).toBe(200)
+    expect(await usage()).toEqual([])
+  })
+
   it('settles a dear request to exactly what it read', async () => {
     const tally = { rows: 0 }
     await fetchWith(countingReads(env.DB, tally), DEAR, 'admin') // the Admin's request reads what the route reads, and is never charged
@@ -233,23 +242,50 @@ describe('the Members\' daily limit', () => {
     expect(await charged('member')).toBe(tally.rows)
   })
 
-  it('charges a request to the UTC day its reads finished, not the day it began', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-10-25T23:59:59.900Z'))
+  describe('a request that runs across 00:00 UTC', () => {
     // The clock passes 00:00 UTC while the route reads.
-    const midnight = withDb((target, sql) => {
-      if (!sql.includes('member_read_usage')) vi.setSystemTime(new Date('2026-10-26T00:00:00.100Z'))
-      return target.prepare(sql)
+    const acrossMidnight = async (path: string) => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-25T23:59:59.900Z'))
+      const midnight = withDb((target, sql) => {
+        if (!sql.includes('member_read_usage')) vi.setSystemTime(new Date('2026-10-26T00:00:00.100Z'))
+        return target.prepare(sql)
+      })
+      try {
+        return await fetchWith(midnight, path, 'member')
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+    const reads = async (path: string) => {
+      const tally = { rows: 0 }
+      await fetchWith(countingReads(env.DB, tally), path, 'admin')
+      return tally.rows
+    }
+
+    it('charges a dear one to the day its reads finished, and the hold on the day before goes with that day', async () => {
+      const read = await reads(DEAR)
+
+      expect((await acrossMidnight(DEAR)).status).toBe(200)
+      const rows = await usage()
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toEqual({ usage_day: '2026-10-26', member_key: await memberKey('2026-10-26', EMAIL.member), rows_read: read })
     })
 
-    const res = await fetchWith(midnight, DEAR, 'member')
-    vi.useRealTimers()
+    it('takes nothing off what the new day has already charged the Member', async () => {
+      const read = await reads(DEAR)
+      await seed(await memberKey('2026-10-26', EMAIL.member), '2026-10-26', 5_000) // another request already charged on the 26th
 
-    expect(res.status).toBe(200)
-    const rows = await usage()
-    expect(rows).toHaveLength(1) // the hold on the 25th was cleared with the 25th
-    expect(rows[0]).toMatchObject({ usage_day: '2026-10-26', member_key: await memberKey('2026-10-26', EMAIL.member) })
-    expect(rows[0]!.rows_read).toBeGreaterThan(CHARGE_FROM_ROWS)
+      expect((await acrossMidnight(DEAR)).status).toBe(200)
+      expect((await usage()).find((r) => r.usage_day === '2026-10-26')).toMatchObject({ rows_read: 5_000 + read })
+    })
+
+    it('charges a cheap one to the day its reads finished', async () => {
+      drawWith(() => 0) // the draw charges it
+
+      expect((await acrossMidnight(CHEAP)).status).toBe(200)
+      expect(await usage()).toEqual([{ usage_day: '2026-10-26', member_key: await memberKey('2026-10-26', EMAIL.member), rows_read: CHARGE_FROM_ROWS }])
+    })
   })
 
   describe('requests sent together', () => {
