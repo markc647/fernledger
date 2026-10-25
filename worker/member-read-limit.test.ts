@@ -1,7 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CHARGE_FROM_ROWS, chargeFor, countingReads, readsPerTransaction, EACH_MEMBER_DAILY_READS, MEMBER_DAILY_READS, MEMBER_LIMIT_REACHED, memberKey } from './member-read-limit'
+import { CHARGE_FROM_ROWS, chargeFor, countingReads, OFFSET_FROM, pageRows, readsPerTransaction, EACH_MEMBER_DAILY_READS, MEMBER_DAILY_READS, MEMBER_LIMIT_REACHED, memberKey } from './member-read-limit'
 import worker from './index'
 import { utcDay } from './rule-rerun'
 
@@ -29,6 +29,10 @@ const DEAR_ROUTES = [
   { path: `/api/charts/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
   { path: '/api/transactions?sort=amount', perTransaction: 5 },
   { path: '/api/transactions?text=EXAMPLE', perTransaction: 3 },
+  // Filters that match nothing here (every Transaction has a Category and none is a Transfer), so the date index is walked to the end.
+  { path: '/api/transactions?count=false&uncategorised=true', perTransaction: 4 },
+  { path: '/api/transactions?count=false&transfers=only', perTransaction: 4 },
+  { path: '/api/transactions?uncategorised=true', perTransaction: 5 },
   { path: `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 9 },
   { path: `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
   { path: `/api/reports/income-vs-spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
@@ -145,6 +149,10 @@ describe('which requests are dear', () => {
     expect(per('/api/transactions', 'count=false&text=%20%20')).toBe(0)
     expect(per('/api/transactions', 'count=false&sort=amount')).toBe(4)
     expect(per('/api/transactions', 'sort=date&offset=200')).toBe(0)
+    expect(per('/api/transactions', 'count=false&uncategorised=true')).toBe(4) // tested on each row the date index passes
+    expect(per('/api/transactions', 'count=false&categoryId=3')).toBe(4)
+    expect(per('/api/transactions', 'count=false&transfers=only')).toBe(4)
+    expect(per('/api/transactions', 'count=false&accountId=1')).toBe(0) // an Account's own index
     expect(per('/api/categories')).toBe(0)
     expect(per('/api/transactions/pending')).toBe(0)
     expect(per('/api/transactions/export.csv')).toBe(9)
@@ -170,6 +178,52 @@ describe('which requests are dear', () => {
     expect(tally.rows).toBeGreaterThan(TRANSACTIONS / 4) // it read the seeded history, not an empty answer
     expect(tally.rows).toBeLessThanOrEqual(perTransaction * TRANSACTIONS)
   })
+})
+
+describe('a Transaction list page far in', () => {
+  const rows = (path: string, query = '') => pageRows(path, new URLSearchParams(query)).rows
+  const FAR = `/api/transactions?count=false&offset=${OFFSET_FROM}&limit=200`
+
+  it('counts the rows it skips and shows, from OFFSET_FROM on, read as the route reads them', () => {
+    expect(rows('/api/transactions', `offset=${OFFSET_FROM - 1}`)).toBe(0)
+    expect(rows('/api/transactions', `offset=${OFFSET_FROM}`)).toBe(OFFSET_FROM + 50) // the default page
+    expect(rows('/api/transactions', 'offset=1000&limit=200')).toBe(1_200)
+    expect(rows('/api/transactions', 'offset=1000&limit=5000')).toBe(1_200) // the route's largest page is 200
+    expect(rows('/api/transactions', 'offset=01000')).toBe(1_050)
+    expect(rows('/api/transactions', 'offset=lots')).toBe(0) // the route refuses it, reading nothing
+    expect(rows('/api/transactions', 'offset=1e3')).toBe(0)
+    expect(rows('/api/transactions', 'offset=Infinity')).toBe(0)
+    expect(rows('/api/transactions', 'offset=1000&limit=0')).toBe(1_001) // the route's smallest page is 1
+    expect(rows('/api/transactions/export.csv', 'offset=5000')).toBe(0)
+  })
+
+  // Measured as in 'holds enough': the page reads within 2 for each row it skips and shows, the offset capped at the Transactions there are.
+  it.each([FAR, '/api/transactions?count=false&offset=1100&limit=100', '/api/transactions?count=false&offset=5000&limit=200'])('holds enough for %s', async (path) => {
+    const url = new URL(path, origin)
+    const tally = { rows: 0 }
+    const res = await fetchWith(countingReads(env.DB, tally), path, 'admin')
+    const page = pageRows(url.pathname, url.searchParams)
+
+    expect(res.status).toBe(200)
+    expect(tally.rows).toBeGreaterThan(OFFSET_FROM / 2) // it walked the rows, not an empty answer
+    expect(tally.rows).toBeLessThanOrEqual(2 * Math.min(page.rows, TRANSACTIONS + page.limit))
+    expect(tally.rows).toBeGreaterThan(Math.min(page.rows, TRANSACTIONS)) // so a hold of 1 a row would fall short
+  })
+
+  it('caps the hold at a page past the last Transaction, so a huge offset holds no more than it can read', async () => {
+    expect((await fetchWith(failingCharges(), '/api/transactions?count=false&offset=999999999', 'member')).status).toBe(200)
+    expect(await charged('member')).toBe(2 * (TRANSACTIONS + 50)) // the hold, kept as the settling failed: a page past the last row
+  })
+
+  it('lets at most one past a limit when they are sent together', async () => {
+    await seed(await memberKey(today(), EMAIL.member), today(), EACH_MEMBER_DAILY_READS - 1)
+
+    const statuses = await Promise.all(Array.from({ length: 8 }, () => fetchWith(env.DB, FAR, 'member').then((res) => res.status)))
+
+    expect(statuses.filter((status) => status === 200)).toHaveLength(1)
+    expect(statuses.filter((status) => status === 429)).toHaveLength(7)
+  })
+
 })
 
 describe('charging a small read by chance', () => {
