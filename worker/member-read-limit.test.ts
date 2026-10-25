@@ -21,24 +21,23 @@ const seed = (key: string, day: string, rows: number) => env.DB.prepare('INSERT 
 // A cheap read (the Categories, a few dozen rows) and a dear one (net worth reads every Transaction several times; ADR 0004).
 const CHEAP = '/api/categories'
 const DEAR = '/api/charts/net-worth?range=all'
-const TRANSACTIONS = 400
+const TRANSACTIONS = 1_200 // more than one chunk of the CSV export (EXPORT_CHUNK_ROWS), so its sizing is measured
 const YEAR = { from: '2025-10-01', to: '2026-09-30' } // the dates the Transactions below are in
 // Every dear route, as a Member would ask it, with its reads for each Transaction.
 const DEAR_ROUTES = [
-  { path: DEAR, perTransaction: 6 },
+  { path: DEAR, perTransaction: 8 },
   { path: `/api/charts/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
   { path: '/api/transactions?sort=amount', perTransaction: 5 },
   { path: '/api/transactions?text=EXAMPLE', perTransaction: 3 },
-  { path: `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
-  { path: `/api/reports/transactions?accountId=ACCOUNT&from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
+  { path: `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 9 },
   { path: `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
   { path: `/api/reports/income-vs-spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
   { path: `/api/reports/loans?categoryId=LOANS&to=${YEAR.to}`, perTransaction: 11 },
-  { path: `/api/reports/balances?accountId=ACCOUNT&from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 6 },
+  { path: `/api/reports/balances?accountId=ACCOUNT&from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 8 },
   { path: `/api/reports/budget-vs-actual?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
   { path: '/api/budgets/vs-actual?month=2026-03', perTransaction: 4 },
 ]
-/** The hold a dear request reserves: its reads for each Transaction times the highest Transaction ID (IDs go on rising across this file's tests). */
+/** The hold a dear request reserves: its reads for each Transaction times the highest Transaction ID (the count here, as beforeEach starts the IDs again). */
 const holdOf = async (perTransaction: number) =>
   perTransaction * (await env.DB.prepare('SELECT MAX(id) AS id FROM transactions').first<{ id: number }>())!.id
 
@@ -62,6 +61,10 @@ async function historyForReports() {
   ])
   return (path: string) => path.replace('ACCOUNT', String(ids.account)).replace('LOANS', String(ids.loans))
 }
+
+/** D1 whose charges (a cheap request's and a dear one's settling, which share their VALUES) fail, as when D1's daily writes are gone. */
+const failingCharges = () =>
+  withDb((target, sql) => (sql.includes('VALUES (?2, ?1, ?3)') ? ({ bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } as never) : target.prepare(sql)))
 
 /** D1 whose `prepare` goes through `prepare(target, sql)`. */
 const withDb = (prepare: (target: D1Database, sql: string) => D1PreparedStatement) =>
@@ -92,7 +95,10 @@ afterEach(() => vi.restoreAllMocks())
 
 beforeEach(async () => {
   drawWith(() => NEVER) // so a test that does not draw on purpose sees no small read charged
-  await env.DB.batch(['member_read_usage', 'kept_reports', 'budgets', 'balance_checks', 'transactions', 'accounts'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch([
+    ...['member_read_usage', 'kept_reports', 'budgets', 'balance_checks', 'transactions', 'accounts'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
+    env.DB.prepare("DELETE FROM sqlite_sequence WHERE name = 'transactions'"), // so the highest ID is the count, as in a database never cleared
+  ])
   await env.DB.prepare("INSERT INTO accounts (name, account_number) VALUES ('Example everyday', '99-9999-9999999-99')").run()
   await env.DB.prepare(
     `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${TRANSACTIONS})
@@ -128,7 +134,7 @@ describe('which requests are dear', () => {
   it('holds by the reads for each Transaction for net worth, the other charts and a Transaction list that searches, sorts or counts', () => {
     const per = (path: string, query = '') => readsPerTransaction(path, new URLSearchParams(query))
 
-    expect(per('/api/charts/net-worth', 'range=all')).toBe(6)
+    expect(per('/api/charts/net-worth', 'range=all')).toBe(8)
     expect(per('/api/charts/spending', 'period=this-month')).toBe(4)
     expect(per('/api/transactions')).toBe(1) // the first page counts
     expect(per('/api/transactions', 'offset=200')).toBe(0)
@@ -141,17 +147,19 @@ describe('which requests are dear', () => {
     expect(per('/api/transactions', 'sort=date&offset=200')).toBe(0)
     expect(per('/api/categories')).toBe(0)
     expect(per('/api/transactions/pending')).toBe(0)
-    expect(per('/api/transactions/export.csv')).toBe(4)
+    expect(per('/api/transactions/export.csv')).toBe(9)
+    expect(per('/api/reports/transactions')).toBe(0) // a page through its index
     expect(per('/api/reports/spending')).toBe(4)
     expect(per('/api/reports/loans')).toBe(11)
-    expect(per('/api/reports/balances')).toBe(6)
+    expect(per('/api/reports/balances')).toBe(8)
     expect(per('/api/budgets/vs-actual')).toBe(4)
     expect(per('/api/budgets')).toBe(0)
     expect(per('/api/reports/some-new-report')).toBe(11) // a Report not in the list is held as the dearest
     expect(per('/api/charts/some-new-chart')).toBe(11)
   })
 
-  // Every dear route's reads, measured, are within its hold: otherwise requests sent together could pass a limit by the difference.
+  // Every dear route's reads, measured, are within its reads for each Transaction times the number of Transactions (not the highest ID, which
+  // only makes a hold larger): otherwise requests sent together could pass a limit by the difference.
   it.each(DEAR_ROUTES.map((r) => [r.path, r.perTransaction]))('holds enough for %s', async (path, perTransaction) => {
     const url = new URL((await historyForReports())(path), origin)
     const tally = { rows: 0 }
@@ -159,8 +167,8 @@ describe('which requests are dear', () => {
 
     expect(res.status, await res.clone().text()).toBe(200)
     expect(readsPerTransaction(url.pathname, url.searchParams)).toBe(perTransaction)
-    expect(tally.rows).toBeGreaterThan(0)
-    expect(tally.rows).toBeLessThanOrEqual(await holdOf(perTransaction))
+    expect(tally.rows).toBeGreaterThan(TRANSACTIONS / 4) // it read the seeded history, not an empty answer
+    expect(tally.rows).toBeLessThanOrEqual(perTransaction * TRANSACTIONS)
   })
 })
 
@@ -268,15 +276,15 @@ describe('the Members\' daily limit', () => {
   })
 
   it('still answers a dear read whose settling fails, and keeps its hold charged so the limits still hold', async () => {
-    const failing = withDb((target, sql) => (sql.includes('VALUES (?2, ?1, ?3)') ? ({ bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } as never) : target.prepare(sql)))
+    const failing = failingCharges()
 
     expect((await fetchWith(failing, DEAR, 'member')).status).toBe(200)
-    expect(await charged('member')).toBe(await holdOf(6)) // the hold: net worth's 6 reads for each Transaction
+    expect(await charged('member')).toBe(await holdOf(8)) // the hold: net worth's 8 reads for each Transaction
   })
 
   it('still answers a cheap read whose charge fails', async () => {
     drawWith(() => 0) // the draw charges it
-    const failing = withDb((target, sql) => (sql.includes('VALUES (?2, ?1, ?3)') ? ({ bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } as never) : target.prepare(sql)))
+    const failing = failingCharges()
 
     expect((await fetchWith(failing, CHEAP, 'member')).status).toBe(200)
     expect(await usage()).toEqual([])
@@ -286,7 +294,7 @@ describe('the Members\' daily limit', () => {
     beforeEach(() => env.DB.prepare('DELETE FROM transactions').run())
 
     it('holds CHARGE_FROM_ROWS at the least, and keeps it when settling fails', async () => {
-      const failing = withDb((target, sql) => (sql.includes('VALUES (?2, ?1, ?3)') ? ({ bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } as never) : target.prepare(sql)))
+      const failing = failingCharges()
 
       expect((await fetchWith(failing, DEAR, 'member')).status).toBe(200)
       expect(await charged('member')).toBe(CHARGE_FROM_ROWS)
@@ -318,7 +326,7 @@ describe('the Members\' daily limit', () => {
 
     expect((await call(DEAR, 'member')).status).toBe(200)
     expect(tally.rows).toBeGreaterThan(CHARGE_FROM_ROWS)
-    expect(tally.rows).not.toBe(await holdOf(6)) // so the charge below is the reads, not the hold
+    expect(tally.rows).not.toBe(await holdOf(8)) // so the charge below is the reads, not the hold
     expect(await charged('member')).toBe(tally.rows)
   })
 
@@ -399,8 +407,9 @@ describe('the Members\' daily limit', () => {
       },
     )
 
-    it.each([DEAR, '/api/transactions?sort=amount', `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`, `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`])('let at most one past all Members\' limit: %s', async (path) => {
+    it.each([DEAR, '/api/transactions?sort=amount', `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`, `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`, `/api/reports/budget-vs-actual?from=${YEAR.from}&to=${YEAR.to}`, '/api/budgets/vs-actual?month=2026-03'])('let at most one past all Members\' limit: %s', async (path) => {
       await keep('spending')
+      await keep('budget-vs-actual')
       const tally = { rows: 0 }
       await fetchWith(countingReads(env.DB, tally), path, 'admin')
       await seed('another member', today(), MEMBER_DAILY_READS - 1)
@@ -408,7 +417,9 @@ describe('the Members\' daily limit', () => {
       const statuses = await together(path, 'member')
 
       expect(statuses.filter((s) => s === 200)).toHaveLength(1)
-      expect(await charged('member')).toBe(Math.max(tally.rows, CHARGE_FROM_ROWS)) // one request's reads (1,000 at the least): the refused ones' holds were never added
+      // One request's reads (1,000 at the least, and a row or two more for a Member's kept-Report check): the refused ones' holds were never added.
+      expect(await charged('member')).toBeGreaterThanOrEqual(Math.max(tally.rows, CHARGE_FROM_ROWS))
+      expect(await charged('member')).toBeLessThanOrEqual(Math.max(tally.rows, CHARGE_FROM_ROWS) + 3)
     })
 
     it('all pass, and are all charged, while well under the limits', async () => {

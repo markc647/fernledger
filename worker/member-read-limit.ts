@@ -12,17 +12,18 @@ import { utcDay } from './rule-rerun'
 // - Each Member GET under /api/* runs on a copy of the D1 binding that adds up the `meta.rows_read` D1 reports for each statement, and is
 //   charged to the tally (member_read_usage, 5001_member_read_usage.sql) of the UTC day its reads finished. The table's trigger clears
 //   earlier days on a Member's first row of the day.
-// - A dear request (`readsPerTransaction`: net worth and the other charts, the Reports, Budget vs actual, the CSV export, and a Transaction
-//   list that searches text, sorts by other than date or counts) reads every Transaction, or every one in its dates, one or more times. Before it runs, one statement reserves a hold sized by that and by the
+// - A dear request (`readsPerTransaction`: net worth and the other charts, the Reports but the Transactions Report, Budget vs actual, the
+//   CSV export, and a Transaction list that searches text, sorts by other than date or counts) reads every Transaction, or every one in its dates, one or more times. Before it runs, one statement reserves a hold sized by that and by the
 //   number of Transactions (their highest ID, one row to read), and only if neither limit has been reached: a single statement is atomic,
 //   so requests sent together can't all pass on the same tally, and the most a limit is passed by is about one request. Once answered, the
 //   hold is settled to what the request read (CHARGE_FROM_ROWS at the least, so every dear request counts towards the limits however few
 //   Transactions there are). That is two rows written a dear request, at most 2 * MEMBER_DAILY_READS / CHARGE_FROM_ROWS a day.
-// - Any other request reads a few rows or a page, and is checked and charged without a hold. Before it runs, the tally is read, and the
-//   request refused if a limit has been reached. Once answered, it is charged what it read from CHARGE_FROM_ROWS up; below that,
+// - Any other request is checked and charged without a hold. Most read a few rows or a page; a few read about one pass over an Account's
+//   Transactions or more and are not dear here (an Account's balance history, the current balances, an Account's count of imported rows, a
+//   list page far into the Transactions). Before it runs, the tally is read, and the request refused if a limit has been reached. Once answered, it is charged what it read from CHARGE_FROM_ROWS up; below that,
 //   CHARGE_FROM_ROWS with the chance rows / CHARGE_FROM_ROWS, and otherwise nothing: the same on average, so many small reads reach the limit
 //   as surely as a few large ones, while these charges write at most about MEMBER_DAILY_READS / CHARGE_FROM_ROWS rows a day. Requests sent
-//   together can each pass the check, by a page each at most.
+//   together can each pass the check, by that request's reads each.
 // - A refused request is a 429 and writes nothing. Either way a Member's request runs two D1 queries more than the route's (one when a
 //   cheap one isn't charged), of the 50 an invocation may run (ADR 0004).
 
@@ -50,22 +51,23 @@ export const MEMBER_LIMIT_REACHED = { error: 'Daily limit reached', reason: 'mem
 
 /**
  * How many times each dear route reads a Transaction, at most (ADR 0004; member-read-limit.test.ts measures each against it). Balance history
- * (net worth, the balances Report) is about 6; the Loans Report reads a loan for every page and again for its opening balance, about 11.
+ * (net worth, the balances Report) is about 6, measured up to 7 with Overrides and a balance check, so 8; the Loans Report reads a loan for every
+ * page and again for its opening balance, about 11; the CSV export about 7 (transaction-export.test.ts), measured up to 8.3, so 9. The Transactions Report reads a page through its index, not every Transaction, so it is 0.
  */
 const READS_PER_TRANSACTION: Record<string, number> = {
-  '/api/charts/net-worth': 6,
+  '/api/charts/net-worth': 8,
   '/api/charts/spending': 4,
-  '/api/reports/transactions': 4,
+  '/api/reports/transactions': 0,
   '/api/reports/spending': 4,
   '/api/reports/income-vs-spending': 4,
   '/api/reports/loans': 11,
-  '/api/reports/balances': 6,
+  '/api/reports/balances': 8,
   '/api/reports/budget-vs-actual': 4,
   '/api/budgets/vs-actual': 4,
-  '/api/transactions/export.csv': 4,
+  '/api/transactions/export.csv': 9,
 }
 /** A chart or Report not in the list is held as the dearest, so a new one is never cheap by mistake. */
-const UNLISTED_READS = 11
+const UNLISTED_READS = Math.max(...Object.values(READS_PER_TRANSACTION))
 
 /**
  * How many times a dear request reads each Transaction, at most, and 0 for a cheap one. The query string is read as sent: the route validates
