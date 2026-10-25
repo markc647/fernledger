@@ -82,19 +82,17 @@ const lines = (ndjson: string) => ndjson.split('\n').filter((line) => line !== '
 type Cell = string | null | { $number: string } | { $blob: string }
 
 // Wrangler rewrites a --file as plain text before running it: it deletes the first 'BEGIN TRANSACTION;' and 'COMMIT;' anywhere, quoted or
-// not, and refuses a file still holding 'BEGIN TRANSACTION'. Text holding either word, in any case, or a control character other than tab
-// and the line breaks (NUL among them, which can end the text a loader reads), is written as hex, so none of it reaches the SQL source. Hex
-// is twice the text's UTF-8 bytes, so all other text stays a quoted literal and keeps the room it has in a statement.
+// not, and refuses a file still holding 'BEGIN TRANSACTION'. Text holding either word, in any case, or any control character but a tab, is
+// written as hex, so none of it reaches the SQL source. That includes NUL, which can end the text a loader reads, and CR and LF: D1's local
+// runner can read a file one line per statement, and a line break written as `|| char(10) ||` makes a term of the expression for each, past
+// SQLite's depth of 100 at about 50 of them (audit run 4). Hex is twice the text's UTF-8 bytes, so all other text stays a quoted literal and
+// keeps the room it has in a statement.
 // eslint-disable-next-line no-control-regex -- the control characters are what it looks for
-const NEEDS_HEX = /BEGIN|COMMIT|[\u0000-\u0008\u000b\u000c\u000e-\u001f]/i
+const NEEDS_HEX = /BEGIN|COMMIT|[\u0000-\u0008\u000a-\u001f]/i
 
-// A quoted literal has no raw line breaks in it: D1's local runner can read a file one line per statement, so a Transaction note
-// containing a newline must not split an INSERT.
 function textLiteral(value: string): string {
   if (NEEDS_HEX.test(value)) return `CAST(X'${[...new TextEncoder().encode(value)].map((b) => b.toString(16).padStart(2, '0')).join('')}' AS TEXT)`
-  const pieces = value.split(/(\r|\n)/).filter((piece) => piece !== '')
-  if (pieces.length === 0) return "''"
-  return pieces.map((piece) => (piece === '\n' ? 'char(10)' : piece === '\r' ? 'char(13)' : `'${piece.replaceAll("'", "''")}'`)).join(' || ')
+  return `'${value.replaceAll("'", "''")}'`
 }
 
 const NUMBER_TEXT = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/

@@ -170,6 +170,28 @@ export const akahuTokens = (env: Pick<Env, 'AKAHU_APP_TOKEN' | 'AKAHU_USER_TOKEN
   return appToken && userToken ? { appToken, userToken } : null
 }
 
+/** The most characters of any text Fernledger keeps from Akahu. A description or name is tens of characters; this leaves room and keeps a backup's rows small enough to restore. */
+export const AKAHU_TEXT_LIMIT = 1_000
+
+/**
+ * Akahu's answer with every text made well-formed (a lone UTF-16 surrogate, which JSON allows, becomes U+FFFD, as it would anyway on the way
+ * into D1 and back out of a backup, so two IDs can't come back the same) and cut to AKAHU_TEXT_LIMIT characters. Text cut is counted and
+ * logged, never shown. The paging cursor is left alone: it goes back to Akahu as it came.
+ */
+export function boundedText(value: unknown, cut = { count: 0 }): unknown {
+  if (typeof value === 'string') {
+    const whole = value.toWellFormed()
+    if (whole.length <= AKAHU_TEXT_LIMIT) return whole
+    cut.count += 1
+    return whole.slice(0, AKAHU_TEXT_LIMIT).toWellFormed() // a cut through a surrogate pair leaves half of it
+  }
+  if (Array.isArray(value)) return value.map((item) => boundedText(item, cut))
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, key === 'cursor' ? item : boundedText(item, cut)]))
+  }
+  return value
+}
+
 /** One GET to Akahu, parsed against `shape`, or why it could not be (logged). */
 async function get<T>(path: string, tokens: AkahuTokens, shape: z.ZodMiniType<T>): Promise<AkahuResult<T>> {
   // A timer rather than AbortSignal.timeout, so a test can move it (a faked clock does not move that one), as d1-usage.ts does.
@@ -183,7 +205,9 @@ async function get<T>(path: string, tokens: AkahuTokens, shape: z.ZodMiniType<T>
       redirect: 'manual',
     })
     if (!res.ok) return failed(res.status === 401 || res.status === 403 ? 'refused' : 'unreachable', { status: res.status })
-    const parsed = z.safeParse(shape, await res.json())
+    const cut = { count: 0 }
+    const parsed = z.safeParse(shape, boundedText(await res.json(), cut))
+    if (cut.count > 0) logEvent('akahu.text-cut', { count: cut.count })
     return parsed.success ? { ok: true, value: parsed.data } : failed('unreadable')
   } catch (error) {
     // A body that is not JSON is Akahu answering badly; anything else (no network, the time limit) is the call failing.
