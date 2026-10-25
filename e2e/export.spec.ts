@@ -131,12 +131,12 @@ test('says what a saved file leaves unprotected, always, and warns of the cap on
   await expect(explanation.getByRole('link', { name: "what it can't protect against" })).toHaveAttribute('href', 'https://github.com/markc647/fernledger#what-it-cant-protect-against')
 })
 
-// The link is followed by the browser itself and not through the API client, so once Access's session has run out it would save Access's sign-in page as the CSV file. The sign-in is
-// checked through the client first (src/components/transaction-export.tsx): the banner says so, and nothing is asked for or saved until the next press works.
+// Followed by the browser, the link would save Access's sign-in page as the CSV file once Access's session has run out. So the file is fetched through the API client
+// (src/components/transaction-export.tsx): the banner says so, and nothing is saved until the next press works. Access answers every request with its redirect then.
 test('Download CSV saves no file when the sign-in has expired, says so, and saves it once signed in again', async ({ page, context }) => {
   await signInAs(context, 'member')
   let expired = false
-  await page.route('**/api/me', (route) => (expired ? accessRedirect(route) : route.fallback()))
+  await page.route('**/api/**', (route) => (expired ? accessRedirect(route) : route.fallback()))
   let saved = 0
   page.on('download', () => saved++)
   await page.goto('/export')
@@ -154,7 +154,38 @@ test('Download CSV saves no file when the sign-in has expired, says so, and save
   const [file] = await Promise.all([page.waitForEvent('download'), link.click()])
   expect(file.suggestedFilename()).toMatch(/\.csv$/)
   expect(saved).toBe(1)
-  await expect(page.getByRole('alert').filter({ hasText: 'sign-in' })).toHaveCount(0) // who is signed in worked, and the banner went
+  await expect(page.getByRole('alert').filter({ hasText: 'sign-in' })).toHaveCount(0) // the export worked, and the banner went
+})
+
+// Followed by the browser, the link would save the Worker's refusal as the file when a Member is busy or past the Members' daily read limit (#58). Through the API client a busy
+// Member's export waits its turn, and the day's limit puts its banner up. The Worker's answers are stubbed (worker/member-read-limit.ts).
+test.describe("the Members' daily read limit", () => {
+  test.use({ expectedStatuses: [429] }) // the day's limit the test stubs; the busy answer is allowed anyway
+
+  test("Download CSV waits its turn while a Member is busy, and saves nothing past the Members' daily read limit", async ({ page, context }) => {
+    await signInAs(context, 'member')
+    const refusals: Array<{ error: string; reason: string }> = [{ error: 'Too many requests at once', reason: 'member-busy' }]
+    await page.route(/\/api\/transactions\/export\.csv/, (route) => {
+      const refusal = refusals.shift()
+      return refusal ? route.fulfill({ status: 429, json: refusal }) : route.fallback()
+    })
+    let saved = 0
+    page.on('download', () => saved++)
+    await page.goto('/export')
+    const link = page.getByRole('link', { name: 'Download CSV' })
+    await expect(page.locator('#filter-download-count')).toContainText('Transaction')
+
+    const [file] = await Promise.all([page.waitForEvent('download'), link.click()])
+    expect(file.suggestedFilename()).toMatch(/^fernledger-transactions.*\.csv$/)
+    expect(readFileSync((await file.path())!, 'utf8')).not.toContain('member-busy')
+    await expect(page.getByRole('alert')).toHaveCount(0)
+
+    refusals.push({ error: 'Daily limit reached', reason: 'member-reads' })
+    await link.click()
+    await expect(page.getByRole('alert').filter({ hasText: "Today's limit on Members' reads has been reached" })).toBeVisible()
+    await page.waitForLoadState('networkidle')
+    expect(saved).toBe(1) // the refusal is not saved as the CSV
+  })
 })
 
 test('an address naming no such Account or Category, or a range that runs backwards, says so and has no file to download', async ({ page, context }) => {

@@ -1,27 +1,40 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import type { MouseEvent } from 'react'
+import { useState, type MouseEvent } from 'react'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { api } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
+import { reasonOf } from '@/lib/me'
+import { dayLimitReached } from '@/lib/member-busy'
 import { accountsQuery, categoriesQuery, transactionCountQuery } from '@/lib/queries'
 import { sessionProblem } from '@/lib/session'
 import { EXPORT_MAX_ROWS, exportPath, searchProblem, type TransactionSearch } from '@/lib/transaction-search'
 
+/** What pressing Download CSV came to, when the page has something to say about it. An expired sign-in and the day's limit have banners of their own. */
+type SaveProblem = 'busy' | 'failed'
+
 /**
- * Saves the file the link is for, once the sign-in is known to be good. A link is followed by the browser itself and not through the API client, so when Access's session has run out
- * it would save Access's sign-in page as the CSV file. So the sign-in is checked through the client first (src/lib/session.ts), which puts the banner up if it has expired, and
- * nothing is saved then. A click with a modifier (a new tab, Save link as) is the browser's own.
+ * Saves the file the link is for, through the API client's `fetch` (src/lib/api.ts) rather than by following the link, which the browser would do outside the client. Followed,
+ * the link would save Access's sign-in page as the CSV file when Access's session has run out, and the Worker's refusal when a Member is busy or past the Members' daily read
+ * limit. Through the client an expired sign-in puts its banner up (src/lib/session.ts), a busy Member's request waits its turn, and the day's limit puts its banner up
+ * (src/lib/member-busy.ts); nothing is saved then. It is still one request when nothing is wrong. The file keeps the name the Worker gives it. A click with a modifier (a new
+ * tab, Save link as) is the browser's own.
  */
-async function saveIfSignedIn(event: MouseEvent<HTMLAnchorElement>) {
-  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+async function saveThroughClient(event: MouseEvent<HTMLAnchorElement>): Promise<SaveProblem | null> {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return null
   event.preventDefault()
-  const href = event.currentTarget.href
-  await api.me.$get().catch(() => undefined)
-  if (sessionProblem() !== null) return
+  const res = await apiFetch(event.currentTarget.href).catch(() => null)
+  if (res === null) return 'failed'
+  if (!res.ok) {
+    if (sessionProblem() !== null || dayLimitReached()) return null
+    return (await reasonOf(res)) === 'member-busy' ? 'busy' : 'failed'
+  }
+  const url = URL.createObjectURL(await res.blob())
   const link = document.createElement('a')
-  link.href = href
-  link.download = ''
+  link.href = url
+  link.download = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? ''
   link.click()
+  setTimeout(() => URL.revokeObjectURL(url)) // after the click has handed the file to the browser
+  return null
 }
 
 /**
@@ -41,6 +54,17 @@ export function TransactionExport({ search, onSearch }: { search: TransactionSea
   // While nothing is searched for, the previous search's count is kept as a placeholder, and is not this search's.
   const matching = searchable ? total : undefined
   const tooMany = matching !== undefined && matching > EXPORT_MAX_ROWS
+  const [saving, setSaving] = useState(false)
+  const [saveProblem, setSaveProblem] = useState<SaveProblem | null>(null)
+  const save = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (saving) return event.preventDefault()
+    setSaving(true)
+    setSaveProblem(null)
+    void saveThroughClient(event).then((problem) => {
+      setSaveProblem(problem)
+      setSaving(false)
+    })
+  }
   const describedBy = [matching !== undefined && 'filter-download-count', tooMany && 'filter-download-warning', 'filter-download-hint'].filter(Boolean).join(' ')
 
   return (
@@ -68,7 +92,7 @@ export function TransactionExport({ search, onSearch }: { search: TransactionSea
         actions={({ unapplied }) => (
           <>
             {!unapplied && searchable ? (
-              <a href={exportPath(search)} download onClick={(event) => void saveIfSignedIn(event)} className={buttonVariants({ variant: 'outline', size: 'touch' })} aria-describedby={describedBy}>
+              <a href={exportPath(search)} download onClick={save} className={buttonVariants({ variant: 'outline', size: 'touch' })} aria-describedby={describedBy}>
                 Download CSV
               </a>
             ) : (
@@ -96,6 +120,11 @@ export function TransactionExport({ search, onSearch }: { search: TransactionSea
           Fernledger couldn't count the Transactions that match. Reload the page to try again.
         </p>
       ) : null}
+      {saveProblem && (
+        <p role="alert" className="mt-4 font-medium">
+          {saveProblem === 'busy' ? 'Fernledger is still reading for you. Press Download CSV again in a moment.' : "The file couldn't be saved. Press Download CSV to try again."}
+        </p>
+      )}
     </>
   )
 }

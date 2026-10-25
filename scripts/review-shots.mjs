@@ -229,6 +229,21 @@ const syncRun = async (p) => {
   await button.click()
   await syncSection(p).getByText(/^Sync (finished|did not finish)/).waitFor({ timeout: 30_000 })
 }
+/** A Member's reads refused for the day's limit: the page again, so its reads meet the refusal. */
+async function dayLimitShown(page) {
+  await page.route(/\/api\/transactions\?/, (route) => route.fulfill({ status: 429, json: { error: 'Daily limit reached', reason: 'member-reads' } }))
+  await page.reload()
+  await page.getByRole('alert').filter({ hasText: "Today's limit on Members' reads" }).waitFor()
+}
+
+/** Download CSV while the Member stays busy: the client asks again for 10 s (src/lib/member-busy.ts), then the page says so. */
+async function exportBusy(page) {
+  await page.route(/\/api\/transactions\/export\.csv/, (route) => route.fulfill({ status: 429, json: { error: 'Too many requests at once', reason: 'member-busy' } }))
+  await page.locator('#filter-download-count').waitFor()
+  await page.getByRole('link', { name: 'Download CSV' }).click()
+  await page.getByRole('alert').filter({ hasText: 'still reading for you' }).waitFor({ timeout: 20_000 })
+}
+
 const SHOTS = [
   { name: 'dashboard', path: '/' },
   { name: 'transactions', path: '/transactions' },
@@ -262,6 +277,10 @@ const SHOTS = [
   { name: 'settings-account-link-chosen', path: '/settings', fullPage: false, akahu: true, before: accountLink },
   { name: 'change-log', path: '/change-log' },
   { name: 'summary-member', path: '/', role: 'member' },
+  // The Members' daily read limit and a busy Member (worker/member-read-limit.ts): the Worker's refusals are stubbed, so nothing has to read up to the limit.
+  { name: 'member-day-limit', path: '/transactions', role: 'member', fullPage: false, before: dayLimitShown },
+  { name: 'phone-member-day-limit', path: '/transactions', role: 'member', viewport: PHONE, fullPage: false, before: dayLimitShown },
+  { name: 'export-member-busy', path: '/export', role: 'member', fullPage: false, before: exportBusy },
   { name: 'dashboard-dark', path: '/', theme: 'dark' },
   { name: 'transactions-dark', path: '/transactions', theme: 'dark' },
   { name: 'phone-dashboard', path: '/', viewport: PHONE },
