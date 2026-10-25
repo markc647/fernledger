@@ -82,9 +82,11 @@ const lines = (ndjson: string) => ndjson.split('\n').filter((line) => line !== '
 type Cell = string | null | { $number: string } | { $blob: string }
 
 // Wrangler rewrites a --file as plain text before running it: it deletes the first 'BEGIN TRANSACTION;' and 'COMMIT;' anywhere, quoted or
-// not, and refuses a file still holding 'BEGIN TRANSACTION'. Text holding either word, in any case, is written as hex, so none of it reaches
-// the SQL source. Hex is twice the text's UTF-8 bytes, so all other text stays a quoted literal and keeps the room it has in a statement.
-const NEEDS_HEX = /BEGIN|COMMIT/i
+// not, and refuses a file still holding 'BEGIN TRANSACTION'. Text holding either word, in any case, or a control character other than tab
+// and the line breaks (NUL among them, which can end the text a loader reads), is written as hex, so none of it reaches the SQL source. Hex
+// is twice the text's UTF-8 bytes, so all other text stays a quoted literal and keeps the room it has in a statement.
+// eslint-disable-next-line no-control-regex -- the control characters are what it looks for
+const NEEDS_HEX = /BEGIN|COMMIT|[\u0000-\u0008\u000b\u000c\u000e-\u001f]/i
 
 // A quoted literal has no raw line breaks in it: D1's local runner can read a file one line per statement, so a Transaction note
 // containing a newline must not split an INSERT.
@@ -120,10 +122,9 @@ const keepNumberText = (_key: string, value: unknown, context?: { source?: strin
 export const MAX_STATEMENT_BYTES = 100_000
 
 /**
- * One INSERT per row (D1 limits a statement to 100 KB and the bound parameters of one to 100). A row with text written as hex (`textLiteral`)
- * that makes it too long for one statement is refused here, so restore.mjs, which writes every part's SQL before it loads any, stops before
- * the database is touched rather than part way. Such a row could never be restored: its words would have been changed or refused as a
- * quoted literal. Any other row is written as it was before hex, whatever its length.
+ * One INSERT per row (D1 limits a statement to 100 KB and the bound parameters of one to 100). A row too long for one statement, written as
+ * hex or not, is refused here, so restore.mjs, which writes every part's SQL before it loads any, stops before the database is touched
+ * rather than when D1 refuses it part way through.
  */
 export function insertStatements(entry: ManifestTable, ndjson: string, partKey: string): string[] {
   const columns = entry.columns.map(quote).join(', ')
@@ -140,8 +141,7 @@ export function insertStatements(entry: ManifestTable, ndjson: string, partKey: 
       return literal(row[c], where)
     })
     const statement = `INSERT INTO ${quote(entry.name)} (${columns}) VALUES (${values.join(', ')});`
-    const hex = entry.columns.some((c) => typeof row[c] === 'string' && NEEDS_HEX.test(row[c]))
-    if (hex && new TextEncoder().encode(statement).byteLength > MAX_STATEMENT_BYTES) throw new BackupFormatError(`${where} is too long to restore as one D1 statement.`)
+    if (new TextEncoder().encode(statement).byteLength > MAX_STATEMENT_BYTES) throw new BackupFormatError(`${where} is too long to restore as one D1 statement.`)
     return statement
   })
 }

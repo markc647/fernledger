@@ -471,27 +471,30 @@ describe('restoring a backup', () => {
     expect(() => insertStatements(table, '{"n":9007199254740993}\n', 'p')).toThrow(BackupFormatError)
   })
 
-  it('writes text holding BEGIN or COMMIT, in any case, as hex, and all other text as a quoted literal', () => {
+  it('writes text holding BEGIN or COMMIT, in any case, or a control character, as hex, and all other text as a quoted literal', () => {
     const table = { name: 't', createSql: '', columns: ['s'], rows: 1, parts: [] }
     const sql = (s: string) => insertStatements(table, JSON.stringify({ s }) + '\n', 'p')[0]!
 
     expect(sql("O'Brien; -- line\none")).toBe(`INSERT INTO "t" ("s") VALUES ('O''Brien; -- line' || char(10) || 'one');`)
-    for (const s of ['BEGIN TRANSACTION', 'REF COMMIT; PAYEE', 'begin', 'Commit to it']) {
+    expect(sql('Tab\there')).toBe(`INSERT INTO "t" ("s") VALUES ('Tab\there');`) // a tab and the line breaks are left to the quoted literal
+    for (const s of ['BEGIN TRANSACTION', 'REF COMMIT; PAYEE', 'begin', 'Commit to it', 'A\u0000B', 'bell\u0007', 'esc\u001b[0m', '\u000b\u000c']) {
       expect(sql(s), s).toBe(`INSERT INTO "t" ("s") VALUES (CAST(X'${[...new TextEncoder().encode(s)].map((b) => b.toString(16).padStart(2, '0')).join('')}' AS TEXT));`)
     }
   })
 
-  it('refuses a row whose hex makes it too long for one D1 statement, naming the line and not the value, and writes a long quoted one as before', () => {
+  it('refuses a row too long for one D1 statement, written as hex or not, naming the line and not the value', () => {
     const table = { name: 't', createSql: '', columns: ['s'], rows: 2, parts: [] }
-    const fits = 'BEGIN '.padEnd((MAX_STATEMENT_BYTES - 100) / 2, 'A') // hex doubles it
-    const tooLong = 'BEGIN '.padEnd(MAX_STATEMENT_BYTES / 2, 'A')
-    const longQuoted = 'A'.repeat(MAX_STATEMENT_BYTES - 1_000) // well past half the limit, which hex would double past it
+    const statement = (s: string) => insertStatements(table, JSON.stringify({ s }) + '\n', 'p')
+    const hexFits = 'BEGIN '.padEnd((MAX_STATEMENT_BYTES - 100) / 2, 'A') // hex doubles it
+    const quotedFits = 'A'.repeat(MAX_STATEMENT_BYTES - 100) // well past half the limit, which hex would double past it
 
-    expect(insertStatements(table, JSON.stringify({ s: fits }) + '\n', 'p')).toHaveLength(1)
-    expect(insertStatements(table, JSON.stringify({ s: longQuoted }) + '\n', 'p')[0]).toContain(`'${longQuoted}'`)
-    expect(() => insertStatements(table, `${JSON.stringify({ s: fits })}\n${JSON.stringify({ s: tooLong })}\n`, 'p')).toThrow(
-      new BackupFormatError('Part p line 2 is too long to restore as one D1 statement.'),
-    )
+    expect(statement(hexFits)[0]).toContain("CAST(X'")
+    expect(statement(quotedFits)[0]).toContain(`'${quotedFits}'`)
+    for (const tooLong of ['BEGIN '.padEnd(MAX_STATEMENT_BYTES / 2, 'A'), 'A'.repeat(MAX_STATEMENT_BYTES)]) {
+      expect(() => insertStatements(table, `${JSON.stringify({ s: quotedFits })}\n${JSON.stringify({ s: tooLong })}\n`, 'p')).toThrow(
+        new BackupFormatError('Part p line 2 is too long to restore as one D1 statement.'),
+      )
+    }
   })
 
   it('refuses a manifest whose part keys leave the backup it names', async () => {
