@@ -108,6 +108,8 @@ if (words[0] === 'r2') {
   try {
     if (args.includes('--file')) { db.exec('BEGIN;' + fs.readFileSync(value('--file'), 'utf8') + 'COMMIT;'); console.log(JSON.stringify([{ results: [] }])) }
     else {
+      // D1 refuses a compound SELECT of more than 5 terms, so this does too.
+      if (value('--command').split('UNION ALL').length > 5) { console.error('too many terms in compound SELECT'); process.exit(1) }
       // D1 answers SQLITE_AUTH to a pragma that reaches one of its own _cf_ tables, so this does too.
       const results = db.prepare(value('--command')).all().map((r) => ({ ...r }))
       if (/pragma_/i.test(value('--command')) && results.some((r) => Object.values(r).some((v) => typeof v === 'string' && v.startsWith('_cf_')))) {

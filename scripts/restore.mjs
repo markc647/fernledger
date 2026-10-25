@@ -11,11 +11,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BackupFormatError, checkPart, insertStatements, loadOrder, parseManifest, quote } from '../worker/backup-format.ts'
+import { ownTables, rowCounts } from './backup-run.mjs'
 import { ScriptError, confirmAccount, createRunner, main, readResourceNames } from './wrangler-cli.mjs'
 
-// The database's own tables, of `sqlite_master m`. D1 keeps tables of its own (`_cf_KV`, `_cf_METADATA`) and refuses with SQLITE_AUTH a query
-// that reads their columns or keys through a pragma, remotely and locally, so they are left out, as worker/backup.ts leaves them out of a backup.
-const OWN_TABLES = "m.type = 'table' AND m.name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND m.name NOT LIKE 'sqlite\\_%' ESCAPE '\\'"
+// The database's own tables, of `sqlite_master m`: D1 keeps tables of its own (`_cf_KV`) and refuses with SQLITE_AUTH a query that reads their
+// columns or keys through a pragma, remotely and locally.
+const OWN_TABLES = ownTables('m.')
 
 const args = process.argv.slice(2)
 const dryRun = args.includes('--dry-run')
@@ -80,8 +81,8 @@ await main(async () => {
     // A newer schema may have extra columns (migrations only add). A column the backup has and the target lacks would lose data.
     const lacking = manifest.tables.flatMap((t) => t.columns.filter((c) => !columns.get(t.name).has(c)).map((c) => `${t.name}.${c}`))
     if (lacking.length) throw new ScriptError(`Database "${database}" lacks ${lacking.join(', ')}, which the backup has. It is on an older schema: apply the migrations first.`)
-    const countSql = manifest.tables.map((t) => `SELECT '${t.name.replaceAll("'", "''")}' AS name, count(*) AS n FROM ${quote(t.name)}`).join(' UNION ALL ')
-    const counts = () => new Map(query(countSql).map((r) => [r.name, r.n]))
+    const count = rowCounts(manifest.tables.map((t) => t.name))
+    const counts = () => count.read(query(count.sql))
     // A migration may seed a table (the starter Categories), so a freshly migrated database isn't quite empty. If every other
     // table is empty, nothing the Admin did can be in the seeded ones (any Admin change leaves a Change Log row), so they hold
     // only the seed and the restore replaces them with the backup's own rows. A backup that predates the seeded table leaves
