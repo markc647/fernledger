@@ -13,6 +13,10 @@ import { join } from 'node:path'
 import { BackupFormatError, checkPart, insertStatements, loadOrder, parseManifest, quote } from '../worker/backup-format.ts'
 import { ScriptError, confirmAccount, createRunner, main, readResourceNames } from './wrangler-cli.mjs'
 
+// The database's own tables, of `sqlite_master m`. D1 keeps tables of its own (`_cf_KV`, `_cf_METADATA`) and refuses with SQLITE_AUTH a query
+// that reads their columns or keys through a pragma, remotely and locally, so they are left out, as worker/backup.ts leaves them out of a backup.
+const OWN_TABLES = "m.type = 'table' AND m.name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND m.name NOT LIKE 'sqlite\\_%' ESCAPE '\\'"
+
 const args = process.argv.slice(2)
 const dryRun = args.includes('--dry-run')
 const local = args.includes('--local')
@@ -65,7 +69,7 @@ await main(async () => {
 
     // The target must already have the schema, and be empty: a restore adds rows, it never overwrites any.
     const columns = new Map()
-    for (const { tbl, col } of query("SELECT m.name AS tbl, p.name AS col FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE m.type = 'table'")) {
+    for (const { tbl, col } of query(`SELECT m.name AS tbl, p.name AS col FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE ${OWN_TABLES}`)) {
       if (!columns.has(tbl)) columns.set(tbl, new Set())
       columns.get(tbl).add(col)
     }
@@ -83,7 +87,7 @@ await main(async () => {
     // only the seed and the restore replaces them with the backup's own rows. A backup that predates the seeded table leaves
     // the seed alone. Deleting seed rows can't break a foreign key: a table that refers to them must be empty too, even when
     // the backup doesn't include it.
-    const references = query("SELECT m.name AS tbl, f.\"table\" AS ref FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE m.type = 'table'").map((r) => [r.tbl, r.ref])
+    const references = query(`SELECT m.name AS tbl, f."table" AS ref FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE ${OWN_TABLES}`).map((r) => [r.tbl, r.ref])
     const notEmpty = [...counts()].filter(([name, n]) => n !== 0 && !SEEDED_TABLES.includes(name)).map(([name]) => name)
     const clearSeeded = manifest.tables.filter((t) => SEEDED_TABLES.includes(t.name) && counts().get(t.name) !== 0).map((t) => t.name)
     const referrers = new Set(references.filter(([table, ref]) => table !== ref && clearSeeded.includes(ref)).map(([table]) => table))

@@ -40,6 +40,8 @@ function newDatabase(file, without = []) {
   db.exec('CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY, name TEXT)')
   db.exec("INSERT INTO d1_migrations (name) VALUES ('0201_settings.sql'), ('0202_change_log.sql')")
   db.exec(extraTable)
+  // A table of D1's own, as every D1 database has: D1 refuses a query that reads its columns or keys (the stand-in Wrangler below says how).
+  db.exec('CREATE TABLE _cf_KV (key TEXT PRIMARY KEY, value BLOB)')
   return db
 }
 
@@ -105,7 +107,14 @@ if (words[0] === 'r2') {
   const db = new DatabaseSync(path.join(dir, words[2] + '.sqlite'))
   try {
     if (args.includes('--file')) { db.exec('BEGIN;' + fs.readFileSync(value('--file'), 'utf8') + 'COMMIT;'); console.log(JSON.stringify([{ results: [] }])) }
-    else console.log(JSON.stringify([{ results: db.prepare(value('--command')).all().map((r) => ({ ...r })) }]))
+    else {
+      // D1 answers SQLITE_AUTH to a pragma that reaches one of its own _cf_ tables, so this does too.
+      const results = db.prepare(value('--command')).all().map((r) => ({ ...r }))
+      if (/pragma_/i.test(value('--command')) && results.some((r) => Object.values(r).some((v) => typeof v === 'string' && v.startsWith('_cf_')))) {
+        console.error('not authorized: SQLITE_AUTH'); process.exit(1)
+      }
+      console.log(JSON.stringify([{ results }]))
+    }
   } catch (e) { console.error('SQL error'); process.exit(1) }
 } else { console.log('ok') }
 `
