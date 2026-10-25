@@ -9,6 +9,7 @@ declare namespace Cloudflare {
     AKAHU_USER_TOKEN?: string
     CF_ANALYTICS_TOKEN?: string // optional: the D1 usage bar is off without both of these (worker/features.ts). A Cloudflare account API token with Account Analytics Read only.
     CF_ACCOUNT_ID?: string // the Cloudflare account that token reads the D1 usage of
+    MEMBER_KEY_SECRET?: string // set by `npm run deploy` (scripts/deploy.mjs); without it the Members' read counts are keyed by a plain hash (worker/member-read-limit.ts memberKey)
   }
 }
 interface Env extends Cloudflare.Env {}

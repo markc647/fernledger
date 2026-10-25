@@ -55,8 +55,20 @@ export const D1_USAGE: Feature = {
   ],
 }
 
+/**
+ * The key the Members' read counts are kept under (worker/member-read-limit.ts `memberKey`). Nothing is switched off without it: the counts are
+ * kept under a plain hash, which someone holding a backup could link to a Member by trying the household's emails. `npm run deploy` sets it,
+ * so only a Worker deployed some other way is without it.
+ */
+export const MEMBER_KEY: Feature = {
+  id: 'member-key',
+  name: "Members' read count key",
+  the: true,
+  requires: [{ env: 'MEMBER_KEY_SECRET', what: "the key for the Members' read counts", how: 'Run npm run deploy, which sets the Worker secret MEMBER_KEY_SECRET.' }],
+}
+
 /** Every feature that can be switched off by missing configuration. A feature adds itself here. */
-export const FEATURES: Feature[] = [AKAHU_SYNC, D1_USAGE]
+export const FEATURES: Feature[] = [AKAHU_SYNC, D1_USAGE, MEMBER_KEY]
 
 const isSet = (value: unknown) => typeof value === 'string' && value.trim() !== ''
 

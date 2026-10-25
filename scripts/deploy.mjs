@@ -1,6 +1,7 @@
 // Deploys to the Cloudflare account you confirm: takes a complete backup, records a D1 restore point (bookmark),
 // applies remote migrations, deploys, runs the smoke check (scripts/smoke.mjs), then prints the bookmark with rollback instructions.
 // Usage: node scripts/deploy.mjs [--dry-run] [--yes] [--workers-dev-registered] [--skip-build] [--skip-backup]
+import { randomBytes } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { databaseHasTables, takeBackup } from './backup-run.mjs'
@@ -39,6 +40,29 @@ function rollbackInstructions(database, bookmark, accountId, backup) {
     '     This discards everything written since the bookmark. The free plan keeps restore points for 7 days.',
     '     In PowerShell, set the account first: $env:CLOUDFLARE_ACCOUNT_ID = "<account id>", then run the command without the prefix.',
   ].join('\n')
+}
+
+const MEMBER_KEY = 'MEMBER_KEY_SECRET'
+
+// The key the Members' read counts are kept under (worker/member-read-limit.ts `memberKey`), so a backup's rows can't be linked to a Member. It is made
+// here, so nobody chooses, sees or types it, and only when the Worker has none: a deploy never replaces it (rotating it is deleting it first, docs/setup.md).
+// The value goes to Wrangler on stdin. Without it the Worker keeps the counts under a plain hash and Settings says Setup needed, so a failure here is
+// said, and the deploy, which has worked, carries on.
+function ensureMemberKey(runner) {
+  const listed = runner.run(['secret', 'list', '--format', 'json'], { allowFailure: true, note: "is the key for the Members' read counts set?" })
+  if (runner.dry) return console.log(`Dry run: if the Worker has no ${MEMBER_KEY}, a real run makes a random one and sets it.`)
+  const again = `Run \`npm run deploy\` again to set it. Until then the Members' read counts are kept under a plain hash, and Settings says Setup needed.`
+  let names
+  try {
+    if (listed.status !== 0) throw new Error('secret list failed')
+    names = JSON.parse(listed.stdout.slice(listed.stdout.search(/[[{]/))).map((secret) => secret.name)
+  } catch {
+    return console.error(`Could not read the Worker's secrets, so ${MEMBER_KEY} was not checked. ${again}`)
+  }
+  if (names.includes(MEMBER_KEY)) return console.log(`${MEMBER_KEY} is set. Kept as it is.`)
+  const set = runner.run(['secret', 'put', MEMBER_KEY], { allowFailure: true, input: randomBytes(32).toString('hex'), note: 'a new random value, on stdin' })
+  if (set.status !== 0) return console.error(`Could not set ${MEMBER_KEY}. ${again}`)
+  console.log(`Set ${MEMBER_KEY}, the key for the Members' read counts: a random value nobody needs to know.`)
 }
 
 // The backup comes before the restore point and the migrations, and nothing has changed if it fails.
@@ -107,6 +131,7 @@ await main(async () => {
     return
   }
   console.log(dryRun ? '\nDry run only. Nothing was changed.' : '\nDeployed.')
+  ensureMemberKey(runner) // before the smoke check, as setting it deploys a new version
   const smokeFailed = await smoke()
   if (smokeFailed) process.exitCode = 1
   console.log(rollbackInstructions(database, bookmark, accountId, backup))

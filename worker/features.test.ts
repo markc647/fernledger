@@ -2,7 +2,7 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
-import { AKAHU_SYNC, D1_USAGE, requireFeature } from './features'
+import { AKAHU_SYNC, D1_USAGE, MEMBER_KEY, requireFeature } from './features'
 import worker from './index'
 
 // Fake token values, deliberately recognisable so a leak into a response is obvious.
@@ -61,7 +61,7 @@ describe('GET /api/features', () => {
     for (const as of ['admin', 'member'] as const) {
       const { res, body } = await getFeatures(as, { DB: database })
       expect(res.status, as).toBe(200)
-      expect(body.features.map((feature) => feature.id), as).toEqual([AKAHU_SYNC.id, D1_USAGE.id])
+      expect(body.features.map((feature) => feature.id), as).toEqual([AKAHU_SYNC.id, D1_USAGE.id, MEMBER_KEY.id])
     }
   })
 
@@ -123,6 +123,20 @@ describe('the D1 usage bar', () => {
     expect(akahu(body).message).not.toContain('setup.md')
     expect(akahu(body).message).toContain('to use Akahu Sync.')
     expect(akahu((await getFeatures('member')).body).message).toBe("Akahu Sync isn't set up yet.")
+  })
+
+  it("asks the Admin to run npm run deploy for the Members' read count key, and is on once it is set", async () => {
+    const key = (body: Features) => body.features.find((feature) => feature.id === MEMBER_KEY.id)!
+    expect(key((await getFeatures('admin')).body)).toEqual({
+      id: 'member-key',
+      name: "Members' read count key",
+      enabled: false,
+      message: "Setup needed: the key for the Members' read counts. Run npm run deploy, which sets the Worker secret MEMBER_KEY_SECRET.",
+    })
+    expect(key((await getFeatures('member')).body).message).toBe("The Members' read count key isn't set up yet.")
+    const { body, text } = await getFeatures('admin', { MEMBER_KEY_SECRET: 'member_key_SECRET_VALUE_1' })
+    expect(key(body)).toEqual({ id: 'member-key', name: "Members' read count key", enabled: true })
+    expect(text).not.toContain('SECRET_VALUE')
   })
 
   it('is on once both are set, and says nothing of their values', async () => {

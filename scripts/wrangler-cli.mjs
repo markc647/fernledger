@@ -86,13 +86,14 @@ export function createRunner({ dryRun, accountId, log = console.log }) {
       npm: (args) => log(`$ npm ${args.join(' ')}`),
     }
   }
-  function run(args, { note, allowFailure = false, show = false, quiet = false } = {}) {
+  // `input` is written to Wrangler's stdin: the one way a secret's value reaches it, never in its arguments (which are printed) or the environment.
+  function run(args, { note, allowFailure = false, show = false, quiet = false, input } = {}) {
     echo(args, note, quiet)
     const bin = wranglerBin()
     if (!existsSync(bin)) throw new ScriptError('Wrangler is not installed. Run `npm install`, then try again.')
     const env = { ...process.env, CI: 'true' }
     if (accountId) env.CLOUDFLARE_ACCOUNT_ID = accountId
-    const r = spawnSync(process.execPath, [bin, ...args], { cwd: root, encoding: 'utf8', env, maxBuffer: 256 * 1024 * 1024 })
+    const r = spawnSync(process.execPath, [bin, ...args], { cwd: root, encoding: 'utf8', env, input, maxBuffer: 256 * 1024 * 1024 })
     if (r.error) throw new ScriptError(`Could not start Wrangler (${r.error.code ?? 'unknown error'}). Run \`npm install\`, then try again.`)
     if (r.status !== 0 && !allowFailure) {
       const what = args.filter((a) => !a.startsWith('-')).join(' ')
