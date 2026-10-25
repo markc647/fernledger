@@ -380,9 +380,11 @@ async function advance(db: D1Database, job: JobRow): Promise<JobRow> {
   // now, and this request did no work (WALK checks the same thing).
   if (!advanced) return (await latestJob(db))!
   logEvent('rerun.step', { id: job.id, count: n })
-  // A short chunk, or one that reached the end, is the last. (If the job restarted with a different end meanwhile, only its own end counts.)
-  const lastChunk = next.cursor >= next.end_id || (n < size && next.end_id === job.end_id)
-  return lastChunk ? finish(db, next) : next
+  // A short chunk, or one that reached the end, is the last. Judged from the job as this step's own batch left it (`advanced`), not as read
+  // again with the tally (`next`): the Rules may have changed in between, sending the job back to the start with the same end, and finishing
+  // that job would pass FINISH's check (the job is at the place given) and leave every Transaction with the old Rules' results (#59).
+  const lastChunk = advanced.cursor >= advanced.end_id || (n < size && advanced.end_id === job.end_id)
+  return lastChunk ? finish(db, advanced) : next
 }
 
 /**

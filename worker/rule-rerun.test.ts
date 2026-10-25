@@ -1,6 +1,6 @@
 import { createScheduledController } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from './index'
 import { applyRulesStatement } from './rule-apply'
 import { BACKUP_CRON, BACKUP_STATE_KEY } from './backup'
@@ -756,6 +756,40 @@ describe('a small history', () => {
       await call(`/api/rules/${rules.fuel}`, { method: 'DELETE', body: {} })
 
       expect(await reruns()).toMatchObject([{ status: 'done', restarts: 0 }])
+    })
+
+    // #59: the last chunk's step saved its chunk, then the Rules changed (sending the job back to the start, with the same end), and only then
+    // did the step read the job again to decide whether it had finished. Deciding from the job as it now was, it finished the job that had
+    // just been sent back: at the start, so FINISH's check that the job was where the step left it passed. The Transactions kept results
+    // from the Rules as they were.
+    it('is not finished by the last chunk\'s step when the Rules change after that chunk is saved and before the step is done', async () => {
+      const { rules } = await runningAfterOneChunk()
+      await stepOk() // the next chunk is the last: 2,000 to 2,500 of N
+      let reached = false
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      // The step's own database, held back at the day's tally: the statement after its chunk and new place are saved.
+      const held = new Proxy(env.DB, {
+        get(target, property) {
+          if (property === 'prepare') {
+            return (sql: string) => {
+              if (!sql.includes('SET day_rows_read')) return target.prepare(sql)
+              return { bind: (...values: unknown[]) => ({ first: async () => ((reached = true), await gate, target.prepare(sql).bind(...values).first()) }) }
+            }
+          }
+          const value = Reflect.get(target, property)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
+
+      const lastStep = stepRerun(held)
+      await vi.waitFor(() => expect(reached).toBe(true))
+      await call(`/api/rules/${rules.fuel}`, { method: 'DELETE', body: {} }) // the Rules change: the job goes back to the start
+      release()
+
+      expect(await lastStep).toMatchObject({ status: 'running', doneRows: 0 }) // still to do with the new Rules, not finished
+      expect((await stepToEnd()).at(-1)).toMatchObject({ status: 'done', doneRows: N })
+      await expectSameAsFromScratch()
     })
 
     it('is finished by a request that was already running when the Rules changed only with the new Rules', async () => {
