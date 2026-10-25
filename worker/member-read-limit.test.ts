@@ -1,7 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CHARGE_FROM_ROWS, chargeFor, countingReads, OFFSET_FROM, pageRows, readsPerTransaction, EACH_MEMBER_DAILY_READS, MEMBER_DAILY_READS, MEMBER_LIMIT_REACHED, memberKey } from './member-read-limit'
+import { CHARGE_FROM_ROWS, chargeFor, countingReads, dearReads, HOLD_EXPIRY_MS, MEMBER_BUSY, MEMBER_MAX_IN_FLIGHT, OFFSET_FROM, pageRows, readsPerTransaction, EACH_MEMBER_DAILY_READS, MEMBER_DAILY_READS, MEMBER_LIMIT_REACHED, memberKey } from './member-read-limit'
 import worker from './index'
 import { utcDay } from './rule-rerun'
 
@@ -14,8 +14,9 @@ const call = (path: string, who: Who) => exports.default.fetch(new Request(`${or
 
 const today = () => utcDay(new Date())
 const usage = async () => (await env.DB.prepare('SELECT member_key, usage_day, rows_read FROM member_read_usage ORDER BY member_key').all()).results
+/** What counts towards a Member's limit today: what they were charged and what they still hold. */
 const charged = async (who: 'member' | 'other') =>
-  (await env.DB.prepare('SELECT rows_read FROM member_read_usage WHERE member_key = ?').bind(await memberKey(today(), EMAIL[who])).first<{ rows_read: number }>())?.rows_read ?? 0
+  (await env.DB.prepare('SELECT rows_read + held AS counted FROM member_read_usage WHERE member_key = ?').bind(await memberKey(today(), EMAIL[who])).first<{ counted: number }>())?.counted ?? 0
 const seed = (key: string, day: string, rows: number) => env.DB.prepare('INSERT INTO member_read_usage (member_key, usage_day, rows_read) VALUES (?, ?, ?)').bind(key, day, rows).run()
 
 // A cheap read (the Categories, a few dozen rows) and a dear one (net worth reads every Transaction several times; ADR 0004).
@@ -25,21 +26,29 @@ const TRANSACTIONS = 1_200 // more than one chunk of the CSV export (EXPORT_CHUN
 const YEAR = { from: '2025-10-01', to: '2026-09-30' } // the dates the Transactions below are in
 // Every dear route, as a Member would ask it, with its reads for each Transaction.
 const DEAR_ROUTES = [
-  { path: DEAR, perTransaction: 8 },
-  { path: `/api/charts/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
-  { path: '/api/transactions?sort=amount', perTransaction: 5 },
-  { path: '/api/transactions?text=EXAMPLE', perTransaction: 3 },
-  // Filters that match nothing here (every Transaction has a Category and none is a Transfer), so the date index is walked to the end.
-  { path: '/api/transactions?count=false&uncategorised=true', perTransaction: 4 },
-  { path: '/api/transactions?count=false&transfers=only', perTransaction: 4 },
-  { path: '/api/transactions?uncategorised=true', perTransaction: 5 },
-  { path: `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 9 },
-  { path: `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
-  { path: `/api/reports/income-vs-spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
+  { path: DEAR, perTransaction: 10 },
+  { path: `/api/charts/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 5 },
+  { path: '/api/transactions?sort=amount', perTransaction: 9 },
+  { path: '/api/transactions?text=NOTHING-MATCHES', perTransaction: 5 }, // every row tested, none found
+  // Uncategorised matches nothing here (every Transaction has a Rule's Category), so the date index is walked to the end with every join:
+  // the case of a filter few match. Transfers and the Category match a fifth and a half, so their pages are found early.
+  { path: '/api/transactions?count=false&uncategorised=true', perTransaction: 5 },
+  { path: '/api/transactions?count=false&transfers=only', perTransaction: 5 },
+  { path: '/api/transactions?uncategorised=true', perTransaction: 7 },
+  { path: `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 12 },
+  { path: `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 5 },
+  { path: `/api/reports/income-vs-spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 5 },
   { path: `/api/reports/loans?categoryId=LOANS&to=${YEAR.to}`, perTransaction: 11 },
-  { path: `/api/reports/balances?accountId=ACCOUNT&from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 8 },
-  { path: `/api/reports/budget-vs-actual?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
+  { path: `/api/reports/balances?accountId=ACCOUNT&from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 9 },
+  { path: `/api/reports/budget-vs-actual?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 5 },
   { path: '/api/budgets/vs-actual?month=2026-03', perTransaction: 4 },
+  { path: '/api/balances', perTransaction: 2 },
+  { path: '/api/balances/ACCOUNT/history', perTransaction: 7 },
+  { path: '/api/imports/imported/ACCOUNT', perTransaction: 2 },
+  { path: '/api/transactions?count=false&categoryId=CATEGORY', perTransaction: 5 },
+  { path: '/api/transactions?count=false&sort=amount', perTransaction: 7 },
+  { path: '/api/transactions?count=false&text=NOTHING-MATCHES', perTransaction: 3 },
+  { path: '/api/transactions?count=only', perTransaction: 2 },
 ]
 /** The hold a dear request reserves: its reads for each Transaction times the highest Transaction ID (the count here, as beforeEach starts the IDs again). */
 const holdOf = async (perTransaction: number) =>
@@ -57,18 +66,57 @@ async function fetchWith(db: D1Database, path: string, who: Who) {
  * Category. Gives back what turns a path's ACCOUNT and LOANS into those IDs.
  */
 async function historyForReports() {
-  const ids = (await env.DB.prepare("SELECT (SELECT id FROM accounts) AS account, (SELECT id FROM categories WHERE kind = 'loans' ORDER BY id LIMIT 1) AS loans, (SELECT id FROM categories WHERE kind = 'spending' ORDER BY id LIMIT 1) AS spending").first<{ account: number; loans: number; spending: number }>())!
+  // Every join a read can make, populated, since each costs a read a row: a Rule's Category on every Transaction, an Override on half (a Loans
+  // Category, so the Loans Report has a loan), a fifth of them in Transfer pairs across two Accounts, a balance check on each Account, a Budget,
+  // and a Change Log as long as the Transactions.
+  await env.DB.prepare("INSERT INTO accounts (name, account_number) VALUES ('Example savings', '99-9999-9999999-98')").run()
+  const ids = (await env.DB.prepare(
+    `SELECT (SELECT MIN(id) FROM accounts) AS account, (SELECT MAX(id) FROM accounts) AS other,
+       (SELECT id FROM categories WHERE kind = 'loans' ORDER BY id LIMIT 1) AS loans,
+       (SELECT id FROM categories WHERE kind = 'spending' ORDER BY id LIMIT 1) AS spending,
+       (SELECT id FROM categories WHERE kind = 'spending' ORDER BY id LIMIT 1 OFFSET 1) AS ruled`,
+  ).first<{ account: number; other: number; loans: number; spending: number; ruled: number }>())!
+  const rule = (await env.DB.prepare("INSERT INTO rules (position, text_contains, category_id) VALUES (1, 'EXAMPLE', ?) RETURNING id").bind(ids.ruled).first<{ id: number }>())!.id
   await env.DB.batch([
-    env.DB.prepare('UPDATE transactions SET override_category = CASE WHEN id % 2 = 0 THEN ?1 ELSE ?2 END').bind(ids.loans, ids.spending),
-    env.DB.prepare("INSERT INTO balance_checks (account_id, as_of_date, bank_cents, source, through_transaction_id, status) VALUES (?1, '2026-09-30', 123456, 'import', (SELECT MAX(id) FROM transactions), 'alone')").bind(ids.account),
+    env.DB.prepare('UPDATE transactions SET rule_id = ?1, rule_category = ?2, override_category = CASE WHEN id % 2 = 0 THEN ?3 END').bind(rule, ids.ruled, ids.loans),
+    env.DB.prepare('UPDATE transactions SET account_id = ?1, amount_cents = 100 WHERE id % 10 = 1').bind(ids.other),
+    env.DB.prepare('UPDATE transactions SET transfer_of = CASE WHEN id % 10 = 0 THEN id + 1 ELSE id - 1 END WHERE id % 10 IN (0, 1) AND id > 1 AND id < (SELECT MAX(id) FROM transactions)'),
+    ...[ids.account, ids.other].map((account) =>
+      env.DB.prepare("INSERT INTO balance_checks (account_id, as_of_date, bank_cents, source, through_transaction_id, status) VALUES (?1, '2025-10-02', 123456, 'import', (SELECT MIN(id) FROM transactions WHERE account_id = ?1), 'alone')").bind(account), // long before, so the current balances read every Transaction after it
+    ),
     env.DB.prepare("INSERT INTO budgets (category_id, effective_from_month, amount_cents) VALUES (?1, '2025-10', 50000)").bind(ids.spending),
+    env.DB.prepare(
+      `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${TRANSACTIONS})
+       INSERT INTO change_log (actor, type, summary) SELECT 'admin@example.com', 'transaction', 'Changed EXAMPLE ' || i FROM seq`,
+    ),
   ])
-  return (path: string) => path.replace('ACCOUNT', String(ids.account)).replace('LOANS', String(ids.loans))
+  return (path: string) => path.replace('ACCOUNT', String(ids.account)).replace('LOANS', String(ids.loans)).replace('CATEGORY', String(ids.ruled))
 }
 
 /** D1 whose charges (a cheap request's and a dear one's settling, which share their VALUES) fail, as when D1's daily writes are gone. */
 const failingCharges = () =>
-  withDb((target, sql) => (sql.includes('VALUES (?2, ?1, ?3)') ? ({ bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } as never) : target.prepare(sql)))
+  withDb((target, sql) =>
+    /^(INSERT INTO member_read_usage \(member_key, usage_day, rows_read\) VALUES|UPDATE member_read_usage|INSERT INTO member_read_usage \(member_key, usage_day, rows_read, held, held_count\)\s+SELECT \?2)/.test(sql)
+      ? ({ bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } as never)
+      : target.prepare(sql),
+  )
+
+/**
+ * D1 that holds back net worth's histories (one batch) until `release`, so requests can be kept in flight: `reserved` counts the requests
+ * that got as far as that batch, which is after the limit has let them in.
+ */
+function heldBack() {
+  const state = { reserved: 0, release: () => {} }
+  const gate = new Promise<void>((resolve) => (state.release = resolve))
+  const db = new Proxy(env.DB, {
+    get(target, property) {
+      if (property === 'batch') return async (statements: D1PreparedStatement[]) => (state.reserved++, await gate, target.batch(statements))
+      const value = Reflect.get(target, property)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  return { db, state }
+}
 
 /** D1 whose `prepare` goes through `prepare(target, sql)`. */
 const withDb = (prepare: (target: D1Database, sql: string) => D1PreparedStatement) =>
@@ -100,7 +148,8 @@ afterEach(() => vi.restoreAllMocks())
 beforeEach(async () => {
   drawWith(() => NEVER) // so a test that does not draw on purpose sees no small read charged
   await env.DB.batch([
-    ...['member_read_usage', 'kept_reports', 'budgets', 'balance_checks', 'transactions', 'accounts'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
+    env.DB.prepare('UPDATE member_read_usage SET held = 0'), // so 5002's trigger lets the rows go
+    ...['member_read_usage', 'kept_reports', 'budgets', 'balance_checks', 'transactions', 'rules', 'change_log', 'accounts'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
     env.DB.prepare("DELETE FROM sqlite_sequence WHERE name = 'transactions'"), // so the highest ID is the count, as in a database never cleared
   ])
   await env.DB.prepare("INSERT INTO accounts (name, account_number) VALUES ('Example everyday', '99-9999-9999999-99')").run()
@@ -134,36 +183,39 @@ describe('counting a Member\'s reads', () => {
   })
 })
 
+describe('the migration and the Worker', () => {
+  it('take holds as spent at the same age', () => {
+    const migration = (env as unknown as { TEST_MIGRATIONS: { name: string; queries: string[] }[] }).TEST_MIGRATIONS.find((m) => m.name.startsWith('5002_'))!
+    expect(migration.queries.join('\n')).toContain(`- ${HOLD_EXPIRY_MS}`)
+  })
+})
+
 describe('which requests are dear', () => {
   it('holds by the reads for each Transaction for net worth, the other charts and a Transaction list that searches, sorts or counts', () => {
     const per = (path: string, query = '') => readsPerTransaction(path, new URLSearchParams(query))
 
-    expect(per('/api/charts/net-worth', 'range=all')).toBe(8)
-    expect(per('/api/charts/spending', 'period=this-month')).toBe(4)
-    expect(per('/api/transactions')).toBe(1) // the first page counts
-    expect(per('/api/transactions', 'offset=200')).toBe(0)
-    expect(per('/api/transactions', 'offset=00')).toBe(1) // the route reads it as the first page, which counts
-    expect(per('/api/transactions', 'count=false')).toBe(0)
-    expect(per('/api/transactions', 'count=only')).toBe(1)
-    expect(per('/api/transactions', 'count=false&text=EXAMPLE')).toBe(2)
-    expect(per('/api/transactions', 'count=false&text=%20%20')).toBe(0)
-    expect(per('/api/transactions', 'count=false&sort=amount')).toBe(4)
-    expect(per('/api/transactions', 'sort=date&offset=200')).toBe(0)
-    expect(per('/api/transactions', 'count=false&uncategorised=true')).toBe(4) // tested on each row the date index passes
-    expect(per('/api/transactions', 'count=false&categoryId=3')).toBe(4)
-    expect(per('/api/transactions', 'count=false&transfers=only')).toBe(4)
-    expect(per('/api/transactions', 'count=false&accountId=1')).toBe(0) // an Account's own index
-    expect(per('/api/categories')).toBe(0)
-    expect(per('/api/transactions/pending')).toBe(0)
-    expect(per('/api/transactions/export.csv')).toBe(9)
-    expect(per('/api/reports/transactions')).toBe(0) // a page through its index
-    expect(per('/api/reports/spending')).toBe(4)
-    expect(per('/api/reports/loans')).toBe(11)
-    expect(per('/api/reports/balances')).toBe(8)
-    expect(per('/api/budgets/vs-actual')).toBe(4)
-    expect(per('/api/budgets')).toBe(0)
-    expect(per('/api/reports/some-new-report')).toBe(11) // a Report not in the list is held as the dearest
-    expect(per('/api/charts/some-new-chart')).toBe(11)
+    const dear = (path: string, query = '') => per(path, query) > 0
+    for (const path of ['/api/charts/net-worth', '/api/charts/spending', '/api/transactions/export.csv', '/api/reports/spending', '/api/reports/loans', '/api/reports/balances', '/api/budgets/vs-actual', '/api/balances', '/api/balances/7/history', '/api/imports/imported/7']) {
+      expect(dear(path), path).toBe(true)
+    }
+    for (const path of ['/api/categories', '/api/transactions/pending', '/api/reports/transactions', '/api/budgets', '/api/balances/7', '/api/imports/imported']) expect(dear(path), path).toBe(false)
+    // The list: dear when it searches, sorts by other than date, counts (the first page does) or filters by Category or Transfer.
+    expect(dear('/api/transactions')).toBe(true) // the first page counts
+    expect(dear('/api/transactions', 'offset=00')).toBe(true) // the route reads it as the first page
+    expect(dear('/api/transactions', 'offset=200')).toBe(false)
+    expect(dear('/api/transactions', 'count=false')).toBe(false)
+    expect(dear('/api/transactions', 'count=false&text=%20%20')).toBe(false)
+    expect(dear('/api/transactions', 'sort=date&offset=200')).toBe(false)
+    expect(dear('/api/transactions', 'count=false&accountId=1')).toBe(false) // an Account's own index
+    for (const query of ['count=only', 'count=false&text=EXAMPLE', 'count=false&sort=amount', 'count=false&uncategorised=true', 'count=false&categoryId=3', 'count=false&transfers=only']) {
+      expect(dear('/api/transactions', query), query).toBe(true)
+    }
+    // Its parts add up.
+    expect(per('/api/transactions', 'sort=amount&text=EXAMPLE')).toBe(per('/api/transactions', 'count=false&sort=amount') + per('/api/transactions', 'count=false&text=EXAMPLE') + per('/api/transactions', 'count=only'))
+    // A chart or Report not in the list is held as the dearest.
+    for (const path of DEAR_ROUTES.map((r) => new URL(r.path, origin).pathname).filter((p) => p !== '/api/transactions')) expect(per('/api/reports/some-new-report')).toBeGreaterThanOrEqual(per(path))
+    expect(per('/api/charts/some-new-chart')).toBe(per('/api/reports/some-new-report'))
+    expect(dearReads('/api/change-log', new URLSearchParams()).perEntry).toBeGreaterThan(0)
   })
 
   // Every dear route's reads, measured, are within its reads for each Transaction times the number of Transactions (not the highest ID, which
@@ -175,8 +227,22 @@ describe('which requests are dear', () => {
 
     expect(res.status, await res.clone().text()).toBe(200)
     expect(readsPerTransaction(url.pathname, url.searchParams)).toBe(perTransaction)
+
     expect(tally.rows).toBeGreaterThan(TRANSACTIONS / 4) // it read the seeded history, not an empty answer
     expect(tally.rows).toBeLessThanOrEqual(perTransaction * TRANSACTIONS)
+  })
+
+  it('holds enough for the Change Log, by its own size', async () => {
+    await historyForReports()
+    const tally = { rows: 0 }
+    const res = await fetchWith(countingReads(env.DB, tally), '/api/change-log', 'admin')
+    const entries = (await env.DB.prepare('SELECT COUNT(*) AS n FROM change_log').first<{ n: number }>())!.n
+
+    expect(res.status).toBe(200)
+    expect(dearReads('/api/change-log', new URLSearchParams())).toEqual({ perTransaction: 0, perEntry: 3 })
+
+    expect(tally.rows).toBeGreaterThan(entries)
+    expect(tally.rows).toBeLessThanOrEqual(3 * entries)
   })
 })
 
@@ -199,6 +265,7 @@ describe('a Transaction list page far in', () => {
 
   // Measured as in 'holds enough': the page reads within 2 for each row it skips and shows, the offset capped at the Transactions there are.
   it.each([FAR, '/api/transactions?count=false&offset=1100&limit=100', '/api/transactions?count=false&offset=5000&limit=200'])('holds enough for %s', async (path) => {
+    await historyForReports() // every join populated
     const url = new URL(path, origin)
     const tally = { rows: 0 }
     const res = await fetchWith(countingReads(env.DB, tally), path, 'admin')
@@ -206,13 +273,14 @@ describe('a Transaction list page far in', () => {
 
     expect(res.status).toBe(200)
     expect(tally.rows).toBeGreaterThan(OFFSET_FROM / 2) // it walked the rows, not an empty answer
-    expect(tally.rows).toBeLessThanOrEqual(2 * Math.min(page.rows, TRANSACTIONS + page.limit))
+
+    expect(tally.rows).toBeLessThanOrEqual(7 * Math.min(page.rows, TRANSACTIONS + page.limit))
     expect(tally.rows).toBeGreaterThan(Math.min(page.rows, TRANSACTIONS)) // so a hold of 1 a row would fall short
   })
 
   it('caps the hold at a page past the last Transaction, so a huge offset holds no more than it can read', async () => {
     expect((await fetchWith(failingCharges(), '/api/transactions?count=false&offset=999999999', 'member')).status).toBe(200)
-    expect(await charged('member')).toBe(2 * (TRANSACTIONS + 50)) // the hold, kept as the settling failed: a page past the last row
+    expect(await charged('member')).toBe(7 * (TRANSACTIONS + 50)) // the hold, kept as the settling failed: a page past the last row
   })
 
   it('lets at most one past a limit when they are sent together', async () => {
@@ -300,7 +368,7 @@ describe('the Members\' daily limit', () => {
     expect((await call(CHEAP, 'member')).status).toBe(429)
   })
 
-  it('adds up many small reads, charged by chance, until the Member is refused', async () => {
+  it('adds up many small reads, charged by chance, until the Member is refused', { timeout: 30_000 }, async () => {
     drawWith(seeded(42))
     await seed(await memberKey(today(), EMAIL.member), today(), EACH_MEMBER_DAILY_READS - 3 * CHARGE_FROM_ROWS + 1) // three charges from the limit
 
@@ -333,7 +401,7 @@ describe('the Members\' daily limit', () => {
     const failing = failingCharges()
 
     expect((await fetchWith(failing, DEAR, 'member')).status).toBe(200)
-    expect(await charged('member')).toBe(await holdOf(8)) // the hold: net worth's 8 reads for each Transaction
+    expect(await charged('member')).toBe(await holdOf(10)) // the hold: net worth's 10 reads for each Transaction
   })
 
   it('still answers a cheap read whose charge fails', async () => {
@@ -380,7 +448,7 @@ describe('the Members\' daily limit', () => {
 
     expect((await call(DEAR, 'member')).status).toBe(200)
     expect(tally.rows).toBeGreaterThan(CHARGE_FROM_ROWS)
-    expect(tally.rows).not.toBe(await holdOf(8)) // so the charge below is the reads, not the hold
+    expect(tally.rows).not.toBe(await holdOf(10)) // so the charge below is the reads, not the hold
     expect(await charged('member')).toBe(tally.rows)
   })
 
@@ -410,8 +478,43 @@ describe('the Members\' daily limit', () => {
 
       expect((await acrossMidnight(DEAR)).status).toBe(200)
       const rows = await usage()
-      expect(rows).toHaveLength(1)
-      expect(rows[0]).toEqual({ usage_day: '2026-10-26', member_key: await memberKey('2026-10-26', EMAIL.member), rows_read: read })
+      expect(rows.find((r) => r.usage_day === '2026-10-26')).toEqual({ usage_day: '2026-10-26', member_key: await memberKey('2026-10-26', EMAIL.member), rows_read: read })
+      // The 25th's row was kept while its hold was in flight; settling released the hold and then charged the 26th, whose first row cleared it.
+      expect(await env.DB.prepare("SELECT rows_read, held, held_count FROM member_read_usage WHERE usage_day = '2026-10-25'").all().then((r) => r.results)).toEqual([])
+    })
+
+    it('counts a hold still in flight from the day before in the new day\'s admission, and charges its reads to the new day', async () => {
+      const read = await reads(DEAR)
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-25T23:59:59.900Z'))
+      // Net worth's histories are one batch, held back here until the new day has been asked for.
+      let reserved = false
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      const held = new Proxy(env.DB, {
+        get(target, property) {
+          if (property === 'batch') return async (statements: D1PreparedStatement[]) => ((reserved = true), await gate, target.batch(statements))
+          const value = Reflect.get(target, property)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
+      try {
+        const inFlight = fetchWith(held, DEAR, 'member')
+        await vi.waitFor(() => expect(reserved).toBe(true))
+        vi.setSystemTime(new Date('2026-10-26T00:00:00.100Z'))
+        await seed(await memberKey('2026-10-26', EMAIL.member), '2026-10-26', EACH_MEMBER_DAILY_READS - CHARGE_FROM_ROWS) // the hold in flight makes up the rest
+
+        for (const path of [CHEAP, DEAR]) {
+          const refused = await fetchWith(env.DB, path, 'member')
+          expect(refused.status, path).toBe(429)
+          expect(await refused.json()).toEqual(MEMBER_LIMIT_REACHED)
+        }
+        release()
+        expect((await inFlight).status).toBe(200)
+      } finally {
+        vi.useRealTimers()
+      }
+      expect((await usage()).find((r) => r.usage_day === '2026-10-26')!.rows_read).toBe(EACH_MEMBER_DAILY_READS - CHARGE_FROM_ROWS + read)
     })
 
     it('takes nothing off what the new day has already charged the Member', async () => {
@@ -428,6 +531,80 @@ describe('the Members\' daily limit', () => {
       expect((await acrossMidnight(CHEAP)).status).toBe(200)
       expect(await usage()).toEqual([{ usage_day: '2026-10-26', member_key: await memberKey('2026-10-26', EMAIL.member), rows_read: CHARGE_FROM_ROWS }])
     })
+  })
+
+  it('takes holds older than HOLD_EXPIRY_MS as spent, so requests that never settled can\'t lock a Member out', async () => {
+    // Four holds whose requests never settled (cancelled, say), the last reserved just over a minute ago.
+    await env.DB.prepare('INSERT INTO member_read_usage (member_key, usage_day, rows_read, held, held_count, held_at) VALUES (?, ?, 0, 4000, 4, ?)')
+      .bind(await memberKey(today(), EMAIL.member), today(), Date.now() - HOLD_EXPIRY_MS - 1_000)
+      .run()
+    const tally = { rows: 0 }
+    await fetchWith(countingReads(env.DB, tally), DEAR, 'admin')
+
+    expect((await fetchWith(env.DB, DEAR, 'member')).status).toBe(200)
+    const row = await env.DB.prepare('SELECT rows_read, held, held_count FROM member_read_usage WHERE member_key = ?').bind(await memberKey(today(), EMAIL.member)).first()
+    expect(row).toEqual({ rows_read: 4000 + tally.rows, held: 0, held_count: 0 }) // the four charged as spent, and this one settled
+  })
+
+  it('corrects the charge of a request that settles after its hold was taken as spent, and leaves the holds that began since alone', async () => {
+    const reads = async () => {
+      const tally = { rows: 0 }
+      await fetchWith(countingReads(env.DB, tally), DEAR, 'admin')
+      return tally.rows
+    }
+    const read = await reads()
+    const row = async () => env.DB.prepare('SELECT rows_read, held, held_count FROM member_read_usage WHERE member_key = ?').bind(await memberKey(today(), EMAIL.member)).first()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const late = heldBack()
+      const first = fetchWith(late.db, DEAR, 'member')
+      await vi.waitFor(() => expect(late.state.reserved).toBe(1))
+      const hold = (await row())!.held as number
+      vi.setSystemTime(Date.now() + HOLD_EXPIRY_MS + 1_000) // the first is taken as spent by the next reservation
+      const next = heldBack()
+      const second = fetchWith(next.db, DEAR, 'member')
+      await vi.waitFor(() => expect(next.state.reserved).toBe(1))
+      expect(await row()).toEqual({ rows_read: hold, held: hold, held_count: 1 }) // the first charged as spent; the second held
+
+      late.state.release()
+      expect((await first).status).toBe(200)
+      expect(await row()).toEqual({ rows_read: read, held: hold, held_count: 1 }) // the first's charge corrected to its reads; the second still held
+      next.state.release()
+      expect((await second).status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(await row()).toEqual({ rows_read: 2 * read, held: 0, held_count: 0 })
+  })
+
+  it('takes a hold that never settled as spent a minute after it began, however often the Member asks in between', async () => {
+    const key = await memberKey(today(), EMAIL.member)
+    const row = () => env.DB.prepare('SELECT held, held_count FROM member_read_usage WHERE member_key = ?').bind(key).first()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const began = Date.now()
+      // One hold whose request never settled, reserved 50 seconds ago.
+      await env.DB.prepare('INSERT INTO member_read_usage (member_key, usage_day, rows_read, held, held_count, held_at) VALUES (?, ?, 0, 1000, 1, ?)').bind(key, today(), began - 50_000).run()
+
+      expect((await fetchWith(env.DB, DEAR, 'member')).status).toBe(200)
+      expect(await row()).toEqual({ held: 1000, held_count: 1 }) // still in flight: it began 50 seconds ago
+      vi.setSystemTime(began + 15_000)
+      expect((await fetchWith(env.DB, DEAR, 'member')).status).toBe(200)
+      expect(await row()).toEqual({ held: 0, held_count: 0 }) // 65 seconds: taken as spent, though the Member asked 15 seconds ago
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still counts young holds as in flight, so a fifth request waits its turn', async () => {
+    await env.DB.prepare('INSERT INTO member_read_usage (member_key, usage_day, rows_read, held, held_count, held_at) VALUES (?, ?, 0, 4000, 4, ?)')
+      .bind(await memberKey(today(), EMAIL.member), today(), Date.now() - 1_000)
+      .run()
+
+    const res = await fetchWith(env.DB, DEAR, 'member')
+    expect(res.status).toBe(429)
+    expect(await res.json()).toEqual(MEMBER_BUSY)
+    expect((await fetchWith(env.DB, CHEAP, 'member')).status).toBe(200) // a cheap request isn't leased
   })
 
   describe('requests sent together', () => {
@@ -447,11 +624,26 @@ describe('the Members\' daily limit', () => {
       '/api/budgets/vs-actual?month=2026-03',
       `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`,
       `/api/reports/budget-vs-actual?from=${YEAR.from}&to=${YEAR.to}`,
+      `/api/reports/income-vs-spending?from=${YEAR.from}&to=${YEAR.to}`,
+      `/api/reports/balances?accountId=ACCOUNT&from=${YEAR.from}&to=${YEAR.to}`,
+      `/api/reports/loans?categoryId=LOANS&to=${YEAR.to}`,
+      `/api/charts/spending?from=${YEAR.from}&to=${YEAR.to}`,
+      '/api/balances',
+      '/api/balances/ACCOUNT/history',
+      '/api/imports/imported/ACCOUNT',
+      '/api/change-log',
+      '/api/transactions?count=false&uncategorised=true',
+      '/api/transactions?count=false&categoryId=CATEGORY',
+      '/api/transactions?count=false&transfers=only',
     ])(
       'let at most one past one Member\'s limit: %s',
-      async (path) => {
+      async (template) => {
+        const path = (await historyForReports())(template)
         await keep('spending')
         await keep('budget-vs-actual')
+        await keep('income-vs-spending')
+        await keep('balances')
+        await env.DB.prepare("INSERT INTO kept_reports (report, from_date, to_date, made_by) VALUES ('loans', NULL, ?, 'admin@example.com')").bind(YEAR.to).run()
         await seed(await memberKey(today(), EMAIL.member), today(), EACH_MEMBER_DAILY_READS - 1)
 
         const statuses = await together(path, 'member')
@@ -476,12 +668,47 @@ describe('the Members\' daily limit', () => {
       expect(await charged('member')).toBeLessThanOrEqual(Math.max(tally.rows, CHARGE_FROM_ROWS) + 3)
     })
 
-    it('all pass, and are all charged, while well under the limits', async () => {
+    it('admit MEMBER_MAX_IN_FLIGHT of one Member\'s, well under the limits, and say the rest are busy, and charge only those admitted', async () => {
       const tally = { rows: 0 }
       await fetchWith(countingReads(env.DB, tally), DEAR, 'admin')
 
-      expect(await together(DEAR, 'member')).toEqual(Array(K).fill(200))
-      expect(await charged('member')).toBe(K * tally.rows)
+      // The ones let in are held in flight until the rest have been answered, so none settles early and frees a place.
+      const { db, state } = heldBack()
+      const sent = Array.from({ length: K }, () => fetchWith(db, DEAR, 'member'))
+      const busy = await Promise.all(sent.map((answer) => Promise.race([answer, new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000))])))
+      expect(busy.filter((r) => r !== null)).toHaveLength(K - MEMBER_MAX_IN_FLIGHT)
+      for (const r of busy.filter((r) => r !== null)) {
+        expect(r!.status).toBe(429)
+        expect(await r!.json()).toEqual(MEMBER_BUSY)
+      }
+      expect(state.reserved).toBe(MEMBER_MAX_IN_FLIGHT)
+      state.release()
+      const responses = await Promise.all(sent)
+      expect(responses.filter((r) => r.status === 200)).toHaveLength(MEMBER_MAX_IN_FLIGHT)
+      expect(await charged('member')).toBe(MEMBER_MAX_IN_FLIGHT * tally.rows)
+      expect(await together(DEAR, 'other')).toEqual(expect.arrayContaining([200])) // another Member has a lease of their own
+    })
+
+    it('pass a limit by no more than MEMBER_MAX_IN_FLIGHT requests\' reads, however many are sent', async () => {
+      const tally = { rows: 0 }
+      await fetchWith(countingReads(env.DB, tally), DEAR, 'admin')
+      const seeded = EACH_MEMBER_DAILY_READS - 1
+      await seed(await memberKey(today(), EMAIL.member), today(), seeded)
+
+      const statuses = await Promise.all(Array.from({ length: 3 * K }, () => fetchWith(env.DB, DEAR, 'member').then((res) => res.status)))
+
+      expect(statuses.filter((status) => status === 200).length).toBeLessThanOrEqual(MEMBER_MAX_IN_FLIGHT)
+      expect((await charged('member')) - EACH_MEMBER_DAILY_READS).toBeLessThanOrEqual(MEMBER_MAX_IN_FLIGHT * tally.rows) // with holds that cover them, one
+      expect((await charged('member')) - seeded).toBeLessThanOrEqual(tally.rows)
+    })
+
+    it('let them in again once the requests in flight have settled', async () => {
+      const tally = { rows: 0 }
+      await fetchWith(countingReads(env.DB, tally), DEAR, 'admin')
+      expect((await together(DEAR, 'member')).filter((status) => status === 200)).toHaveLength(MEMBER_MAX_IN_FLIGHT)
+
+      for (let i = 0; i < K; i++) expect((await fetchWith(env.DB, DEAR, 'member')).status).toBe(200) // one at a time, so never more than one in flight
+      expect(await charged('member')).toBe((MEMBER_MAX_IN_FLIGHT + K) * tally.rows)
     })
   })
 

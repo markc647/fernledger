@@ -115,7 +115,10 @@ const historyOf = async (number: string): Promise<Point[]> => ((await (await cal
 const balanceOn = (points: Point[], opening: number, date: string) => points.filter((p) => p.date <= date).at(-1)?.balanceCents ?? opening
 
 beforeEach(async () => {
-  await env.DB.batch(['budgets', 'balance_checks', 'transactions', 'accounts', 'change_log', 'member_read_usage'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch([
+    env.DB.prepare('UPDATE member_read_usage SET held = 0'), // so 5002's trigger lets the rows go
+    ...['budgets', 'balance_checks', 'transactions', 'accounts', 'change_log', 'member_read_usage'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
+  ])
   await env.DB.prepare('UPDATE categories SET removed_at = NULL').run()
 })
 

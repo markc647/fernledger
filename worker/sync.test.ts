@@ -1,7 +1,7 @@
 import { createScheduledController } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AKAHU_API, MAX_PAGES } from './akahu'
+import { AKAHU_API, AKAHU_TEXT_LIMIT, boundedText, MAX_PAGES } from './akahu'
 import worker from './index'
 import { toCents } from './akahu-details'
 import { ACCOUNTS_PER_RUN, hasBankTime, MAX_QUERIES, MAX_WINDOW_DAYS, QUERIES_PER_ACCOUNT, RUN_QUERIES, RECHECK_DAYS, syncAll, SYNC_CRON, windowEnd, windowStart } from './sync'
@@ -394,6 +394,20 @@ describe('the daily Sync', () => {
 
     // The first Transaction is still there: not being in a partial answer is not evidence that Akahu withdrew it.
     expect((await rows()).map((r) => r.akahu_id)).toContain('trans_0000000000000000001')
+  })
+
+  it('keeps at most AKAHU_TEXT_LIMIT characters of any text, says how many were cut, and keeps text well-formed', async () => {
+    // Long enough that, holding "begin", its row would be too long to restore as hex (backup-format.ts).
+    const long = 'EXAMPLE begin '.padEnd(50_000, 'X')
+    stubAkahu(() => onePage([transaction({ description: long, meta: { reference: 'REF\ud800ONE' } })]))
+    await runSync()
+
+    const stored = (await env.DB.prepare('SELECT description, bank_memo, bank_reference FROM transactions WHERE akahu_id IS NOT NULL').first<{ description: string; bank_memo: string; bank_reference: string }>())!
+    expect(stored.description).toBe(long.slice(0, AKAHU_TEXT_LIMIT))
+    expect(stored.bank_memo).toBe(long.slice(0, AKAHU_TEXT_LIMIT))
+    expect(stored.bank_reference).toBe('REF\ufffdONE') // a lone surrogate, which JSON allows, is made well-formed
+    expect(logged.join('\n')).toMatch(/"event":"akahu.text-cut","count":1\b/)
+    expect(logged.join('\n')).not.toContain('EXAMPLE begin') // the text itself is never logged
   })
 
   it('never removes an imported Transaction, whatever Akahu returns', async () => {
@@ -1382,5 +1396,25 @@ describe('a long backlog', () => {
     await runSync()
 
     expect(await count()).toBe(1)
+  })
+})
+
+describe('the text kept from Akahu', () => {
+  it('cuts every text to AKAHU_TEXT_LIMIT, counting each, and leaves the paging cursor as it came', () => {
+    const cut = { count: 0 }
+    const long = 'A'.repeat(AKAHU_TEXT_LIMIT + 1)
+    const answer = boundedText({ items: [{ description: long, merchant: { name: long }, amount: -1, nested: [long, 'short'] }], cursor: { next: long } }, cut)
+
+    expect(answer).toEqual({ items: [{ description: long.slice(0, -1), merchant: { name: long.slice(0, -1) }, amount: -1, nested: [long.slice(0, -1), 'short'] }], cursor: { next: long } })
+    expect(cut.count).toBe(3)
+  })
+
+  it('never leaves half a surrogate pair where it cuts', () => {
+    const text = 'A'.repeat(AKAHU_TEXT_LIMIT - 1) + '\u{1F33F}' // the fern is two UTF-16 units, the cut falls between them
+    const kept = boundedText(text) as string
+
+    expect(kept).toHaveLength(AKAHU_TEXT_LIMIT)
+    expect(kept.isWellFormed()).toBe(true)
+    expect(kept.endsWith('\ufffd')).toBe(true)
   })
 })

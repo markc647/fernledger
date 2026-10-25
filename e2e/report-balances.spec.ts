@@ -376,6 +376,37 @@ test.describe('on screen', () => {
     await expect(page).toHaveTitle(`Fernledger – Balances over time – All Accounts – ${dateText(`${start}-01-01`)} to ${dateText(`${end}-12-31`)}`)
   })
 
+  test.describe('with more Accounts than a Member may have requests in flight', () => {
+    test('as a Member, lists every Account: past the requests a Member may have in flight, the rest wait their turn', async ({ page, context, baseURL }, testInfo) => {
+      const { start, end } = dataFor(testInfo.project.name)
+      await seed(context, baseURL!, testInfo.project.name)
+      // With these, more Accounts than the Members' daily read limit lets one Member have in flight at once (MEMBER_MAX_IN_FLIGHT, 4): one request each.
+      const extra = testInfo.project.name === 'dark' ? ['99-9999-9999999-13', '99-9999-9999999-14', '99-9999-9999999-15'] : ['99-9999-9999999-10', '99-9999-9999999-11', '99-9999-9999999-12']
+      for (const [i, number] of extra.entries()) {
+        await importRows(context, baseURL!, {
+          account: { number, name: `Balances extra ${testInfo.project.name} ${i}` },
+          from: `${start}-01-01`,
+          to: `${start}-01-31`,
+          ledger: { date: `${start}-01-31`, cents: 10_000 },
+          rows: [{ date: `${start}-01-12`, uniqueId: `BALX${start}${i}`, payee: 'EXAMPLE SHOP', amountCents: -100 }],
+        })
+      }
+      const accounts = (await (await context.request.get('/api/accounts')).json()) as { name: string; accountNumber: string }[]
+      expect(accounts.length).toBeGreaterThan(5)
+      await signInToOpen(context, baseURL, 'member', { report: 'balances', from: `${start}-01-01`, to: `${end}-12-31` })
+      const answers: number[] = []
+      page.on('response', (res) => {
+        if (new URL(res.url()).pathname === '/api/reports/balances') answers.push(res.status())
+      })
+      await page.goto(`/reports/balances?from=${start}-01-01&to=${end}-12-31`)
+
+      for (const account of accounts) await expect(article(page).getByRole('heading', { level: 2, name: `${account.name} (${account.accountNumber})` })).toBeVisible()
+      await expect(page.getByRole('alert')).toHaveCount(0)
+      expect(answers).toContain(429) // some were told to wait their turn, and were asked again
+      expect(answers.filter((status) => status === 200)).toHaveLength(accounts.length)
+    })
+  })
+
   for (const role of ['admin', 'member'] as const) {
     test(`has no WCAG 2.2 AA violations as ${role === 'admin' ? 'the Admin' : 'a Member, who opens the Report the Admin kept'}, with a difference to list`, async ({ page, context, baseURL }, testInfo) => {
       const { start, end, cheque } = dataFor(testInfo.project.name)

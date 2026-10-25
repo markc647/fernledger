@@ -475,9 +475,10 @@ describe('restoring a backup', () => {
     const table = { name: 't', createSql: '', columns: ['s'], rows: 1, parts: [] }
     const sql = (s: string) => insertStatements(table, JSON.stringify({ s }) + '\n', 'p')[0]!
 
-    expect(sql("O'Brien; -- line\none")).toBe(`INSERT INTO "t" ("s") VALUES ('O''Brien; -- line' || char(10) || 'one');`)
-    expect(sql('Tab\there')).toBe(`INSERT INTO "t" ("s") VALUES ('Tab\there');`) // a tab and the line breaks are left to the quoted literal
-    for (const s of ['BEGIN TRANSACTION', 'REF COMMIT; PAYEE', 'begin', 'Commit to it', 'A\u0000B', 'bell\u0007', 'esc\u001b[0m', '\u000b\u000c']) {
+    expect(sql("O'Brien; -- line one")).toBe(`INSERT INTO "t" ("s") VALUES ('O''Brien; -- line one');`)
+    expect(sql('')).toBe(`INSERT INTO "t" ("s") VALUES ('');`)
+    expect(sql('Tab\there')).toBe(`INSERT INTO "t" ("s") VALUES ('Tab\there');`) // a tab is left to the quoted literal
+    for (const s of ['BEGIN TRANSACTION', 'REF COMMIT; PAYEE', 'begin', 'Commit to it', 'A\u0000B', 'bell\u0007', 'esc\u001b[0m', '\u000b\u000c', 'line\none', 'CR\r', 'x\n'.repeat(50)]) {
       expect(sql(s), s).toBe(`INSERT INTO "t" ("s") VALUES (CAST(X'${[...new TextEncoder().encode(s)].map((b) => b.toString(16).padStart(2, '0')).join('')}' AS TEXT));`)
     }
   })

@@ -437,6 +437,8 @@ test('every text a backup holds comes back exactly through the real `wrangler d1
     "O'Brien \"quoted\"; DROP TABLE settings; -- /* not a comment */",
     'Line one\r\nLine two\rLine three\n',
     'NUL\u0000inside, and a bell\u0007',
+    'EXAMPLE LINE\n'.repeat(50), // 50 line breaks: as || char(10) || terms, past SQLite's expression depth of 100
+    'EXAMPLE LINE\r\n'.repeat(40),
     'Café ☕ Māori ā 𝄞',
     Array.from({ length: 128 }, (_, i) => String.fromCharCode(i)).join(''), // every ASCII character, NUL included
     '',
