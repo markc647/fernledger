@@ -78,12 +78,16 @@ const OWN_TABLES = ownTables()
 
 /**
  * One query giving each of `names`' row counts, and how to read its one row back as a Map. A column of a subquery each, not a SELECT each
- * joined by UNION ALL: D1 refuses a compound SELECT of more than 5 terms ("too many terms in compound SELECT").
+ * joined by UNION ALL: D1 refuses a compound SELECT of more than 5 terms ("too many terms in compound SELECT"). A column each, so it holds
+ * for as many tables as D1 allows result columns (about 100; a backup has 13).
  */
-export const rowCounts = (names) => ({
-  sql: `SELECT ${names.map((name, i) => `(SELECT count(*) FROM ${quote(name)}) AS c${i}`).join(', ')}`,
-  read: (rows) => new Map(names.map((name, i) => [name, rows[0]?.[`c${i}`]])),
-})
+export const rowCounts = (names) => {
+  if (!names.length) throw new ScriptError('There are no tables to count.') // `SELECT ` alone is not SQL; both callers have a table at least
+  return {
+    sql: `SELECT ${names.map((name, i) => `(SELECT count(*) FROM ${quote(name)}) AS c${i}`).join(', ')}`,
+    read: (rows) => new Map(names.map((name, i) => [name, rows[0]?.[`c${i}`]])),
+  }
+}
 
 const queryRows = (runner, database, sql) => {
   const result = runner.json(['d1', 'execute', database, '--remote', '--json', '--command', sql], { quiet: true })
