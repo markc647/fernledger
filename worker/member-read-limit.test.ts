@@ -29,6 +29,10 @@ const DEAR_ROUTES = [
   { path: `/api/charts/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
   { path: '/api/transactions?sort=amount', perTransaction: 5 },
   { path: '/api/transactions?text=EXAMPLE', perTransaction: 3 },
+  // Filters that match nothing here (every Transaction has a Category and none is a Transfer), so the date index is walked to the end.
+  { path: '/api/transactions?count=false&uncategorised=true', perTransaction: 4 },
+  { path: '/api/transactions?count=false&transfers=only', perTransaction: 4 },
+  { path: '/api/transactions?uncategorised=true', perTransaction: 5 },
   { path: `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 9 },
   { path: `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
   { path: `/api/reports/income-vs-spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
@@ -145,6 +149,10 @@ describe('which requests are dear', () => {
     expect(per('/api/transactions', 'count=false&text=%20%20')).toBe(0)
     expect(per('/api/transactions', 'count=false&sort=amount')).toBe(4)
     expect(per('/api/transactions', 'sort=date&offset=200')).toBe(0)
+    expect(per('/api/transactions', 'count=false&uncategorised=true')).toBe(4) // tested on each row the date index passes
+    expect(per('/api/transactions', 'count=false&categoryId=3')).toBe(4)
+    expect(per('/api/transactions', 'count=false&transfers=only')).toBe(4)
+    expect(per('/api/transactions', 'count=false&accountId=1')).toBe(0) // an Account's own index
     expect(per('/api/categories')).toBe(0)
     expect(per('/api/transactions/pending')).toBe(0)
     expect(per('/api/transactions/export.csv')).toBe(9)
@@ -183,6 +191,9 @@ describe('a Transaction list page far in', () => {
     expect(rows('/api/transactions', 'offset=1000&limit=5000')).toBe(1_200) // the route's largest page is 200
     expect(rows('/api/transactions', 'offset=01000')).toBe(1_050)
     expect(rows('/api/transactions', 'offset=lots')).toBe(0) // the route refuses it, reading nothing
+    expect(rows('/api/transactions', 'offset=1e3')).toBe(0)
+    expect(rows('/api/transactions', 'offset=Infinity')).toBe(0)
+    expect(rows('/api/transactions', 'offset=1000&limit=0')).toBe(1_001) // the route's smallest page is 1
     expect(rows('/api/transactions/export.csv', 'offset=5000')).toBe(0)
   })
 

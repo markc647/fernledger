@@ -14,7 +14,8 @@ import { DEFAULT_LIMIT, MAX_LIMIT } from './transaction-search'
 //   charged to the tally (member_read_usage, 5001_member_read_usage.sql) of the UTC day its reads finished. The table's trigger clears
 //   earlier days on a Member's first row of the day.
 // - A dear request (`readsPerTransaction`: net worth and the other charts, the Reports but the Transactions Report, Budget vs actual, the
-//   CSV export, and a Transaction list that searches text, sorts by other than date, counts, or asks for a page from OFFSET_FROM on) reads every Transaction, or every one in its dates, one or more times. Before it runs, one statement reserves a hold sized by that and by the
+//   CSV export, and a Transaction list that searches text, sorts by other than date, counts, filters by Category or Transfer, or asks for a
+//   page from OFFSET_FROM on) reads every Transaction, or every one in its dates, one or more times, or the rows it skips. Before it runs, one statement reserves a hold sized by that and by the
 //   number of Transactions (their highest ID, one row to read), and only if neither limit has been reached: a single statement is atomic,
 //   so requests sent together can't all pass on the same tally, and the most a limit is passed by is about one request. Once answered, the
 //   hold is settled to what the request read (CHARGE_FROM_ROWS at the least, so every dear request counts towards the limits however few
@@ -80,8 +81,17 @@ export function readsPerTransaction(path: string, params: URLSearchParams): numb
   if (path !== '/api/transactions') return 0
   const sort = params.get('sort') ?? 'date'
   const count = params.get('count')
-  const counts = count === 'true' || count === 'only' || (count === null && Number(params.get('offset') ?? 0) === 0) // as the route reads it: offset=00 is the first page
-  return (sort === 'date' ? 0 : 4) + ((params.get('text') ?? '').trim() === '' ? 0 : 2) + (counts ? 1 : 0)
+  const counts = count === 'true' || count === 'only' || (count === null && (pagingNumber(params, 'offset') ?? 0) === 0) // offset=00 is the first page
+  // A Category, Uncategorised or Transfer filter is tested on each row the date index passes, until a page of matches is found: when few
+  // match, that is every Transaction, two to four reads each (the Category joins; transaction-search.ts `paging`).
+  const filtered = ['categoryId', 'uncategorised', 'transfers'].some((name) => params.has(name))
+  return (sort === 'date' ? 0 : 4) + ((params.get('text') ?? '').trim() === '' ? 0 : 2) + (counts ? 1 : 0) + (filtered ? 4 : 0)
+}
+
+/** A paging number as the route reads it (transaction-search.ts `digits`): up to nine digits, or nothing when it is absent or one the route refuses. */
+function pagingNumber(params: URLSearchParams, name: string): number | undefined {
+  const raw = params.get(name)
+  return raw !== null && /^\d{1,9}$/.test(raw) ? Number(raw) : undefined
 }
 
 /** A Transaction list page this far in or further is dear: the list pages by OFFSET, so it reads every row it skips. */
@@ -95,8 +105,8 @@ const READS_PER_PAGE_ROW = 2
  * the last row reads them all and no more.
  */
 export function pageRows(path: string, params: URLSearchParams): { rows: number; limit: number } {
-  const offset = Number(params.get('offset') ?? 0)
-  const limit = Math.min(Math.max(Number(params.get('limit') ?? DEFAULT_LIMIT) || DEFAULT_LIMIT, 1), MAX_LIMIT)
+  const offset = pagingNumber(params, 'offset') ?? 0
+  const limit = Math.min(Math.max(pagingNumber(params, 'limit') ?? DEFAULT_LIMIT, 1), MAX_LIMIT)
   return path === '/api/transactions' && offset >= OFFSET_FROM ? { rows: offset + limit, limit } : { rows: 0, limit }
 }
 
