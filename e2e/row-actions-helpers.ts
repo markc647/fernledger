@@ -22,6 +22,17 @@ export const OPEN_MENU = '[data-slot="dropdown-menu-content"]'
 /** The open menu's item by its words. */
 export const menuAction = (page: Page, action: string) => page.getByRole('menuitem', { name: action, exact: true })
 
+/**
+ * Waits, after Space has picked a row up by its drag handle (the "Picked up" announcement is said), until an arrow key will move it, as a
+ * person's next key would. dnd-kit's KeyboardSensor starts listening for keys in a `setTimeout` after the pick-up (node_modules/@dnd-kit/core,
+ * `attach`), so a key pressed before that task runs is lost, and it moves a row by where the rows were last measured, which takes a frame
+ * drawn. Timers of the same delay run in order, so a timeout set now runs after the sensor's; then two frames go by. Without this, an arrow
+ * key straight after the announcement was lost now and then on a busy machine, and in every run on CI for a Rule with a transform.
+ */
+export async function readyToMove(page: Page) {
+  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))))
+}
+
 /** Opens the row's menu. (While it is open the rest of the page is hidden from a screen reader, the button too, so it is no longer found by its role: ask the menu.) */
 export async function openActions(button: Locator) {
   await button.click()

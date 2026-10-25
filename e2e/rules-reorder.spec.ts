@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test'
 import { expect, noAxeViolations, settle, test } from './fixtures'
 import { pageOrder, ruleActions, ruleGrip, ruleIds, runningJob, withRules } from './rule-helpers'
-import { menuAction, OPEN_MENU, openActions } from './row-actions-helpers'
+import { menuAction, OPEN_MENU, openActions, readyToMove } from './row-actions-helpers'
 
 // Putting the Rules in order by dragging (src/components/sortable-rows.tsx): with a mouse, with a finger, and with the keyboard, and what the page does when the Worker does not take the order.
 // The Rules page's other specs, and the Move up and Move down items of the Actions menu (the way to do it without dragging), are in rules.spec.ts. A spec works only with the Rules it makes,
@@ -102,6 +102,7 @@ test('the Admin moves a Rule with the keyboard, hears where it is, and can chang
     await expect(status(page, /Picked up/)).toHaveText(`Picked up Rule ${number(b)} of ${total}.`)
     await expect(page.locator('tr[data-dragging="true"]')).toHaveCount(1)
     await noAxeViolations(page) // in the middle of a move, with its words in the page
+    await readyToMove(page)
     await page.keyboard.press('ArrowDown')
     await expect(status(page, /is over position/)).toHaveText(`Rule ${number(b)} is over position ${number(c)} of ${total}.`)
     await page.keyboard.press('Space')
@@ -119,9 +120,7 @@ test('the Admin moves a Rule with the keyboard, hears where it is, and can chang
     const now = number(c) // it is where the third was
     await page.keyboard.press('Space')
     await expect(status(page, /Picked up/)).toHaveText(`Picked up Rule ${now} of ${total}.`)
-    // An arrow key pressed in the moments after the announcement can move nothing: dnd-kit is not ready for it until a frame has been drawn (a Rule that has a transform of its own does not say so: 4 of 8
-    // runs lost the key with one). So a frame, and another, go by first, as a person's next key would; without this the key was lost in most runs, and on CI in all of them.
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    await readyToMove(page) // an arrow key pressed in the moments after the announcement can move nothing
     await page.keyboard.press('ArrowUp')
     await expect(status(page, /is over position/)).toHaveText(`Rule ${now} is over position ${now - 1} of ${total}.`)
     await page.keyboard.press('Escape')

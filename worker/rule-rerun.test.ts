@@ -1,6 +1,6 @@
 import { createScheduledController } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from './index'
 import { applyRulesStatement } from './rule-apply'
 import { BACKUP_CRON, BACKUP_STATE_KEY } from './backup'
@@ -58,6 +58,27 @@ async function stepOk() {
   return ((await res.json()) as { job: Job }).job
 }
 /** Steps until the job is done, returning each step's answer. */
+/**
+ * D1 for a step of its own, held back at the first statement whose SQL holds `sql`, when it is run by `method`, until `release`: so a
+ * test can change the Rules at a known place in the step, and not leave it to timing.
+ */
+function heldAt(sql: string, method: 'first' | 'all') {
+  let reached = false
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  const db = new Proxy(env.DB, {
+    get(target, property) {
+      if (property === 'prepare') {
+        return (text: string) =>
+          text.includes(sql) ? { bind: (...values: unknown[]) => ({ [method]: async () => ((reached = true), await gate, target.prepare(text).bind(...values)[method]()) }) } : target.prepare(text)
+      }
+      const value = Reflect.get(target, property)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  return { db, reached: () => reached, release: () => release() }
+}
+
 async function stepToEnd(limit = 100) {
   const jobs: Job[] = []
   for (let i = 0; i < limit; i++) {
@@ -758,12 +779,38 @@ describe('a small history', () => {
       expect(await reruns()).toMatchObject([{ status: 'done', restarts: 0 }])
     })
 
+    // #59: the last chunk's step saved its chunk, then the Rules changed (sending the job back to the start, with the same end), and only then
+    // did the step read the job again to decide whether it had finished. Deciding from the job as it now was, it finished the job that had
+    // just been sent back: at the start, so FINISH's check that the job was where the step left it passed. The Transactions kept results
+    // from the Rules as they were.
+    it('is not finished by the last chunk\'s step when the Rules change after that chunk is saved and before the step is done', async () => {
+      const { rules } = await runningAfterOneChunk()
+      await stepOk() // the next chunk is the last: 2,000 to 2,500 of N
+      const held = heldAt('SET day_rows_read', 'first') // the day's tally: after its chunk and new place are saved
+
+      const lastStep = stepRerun(held.db)
+      await vi.waitFor(() => expect(held.reached()).toBe(true))
+      await call(`/api/rules/${rules.fuel}`, { method: 'DELETE', body: {} }) // the Rules change: the job goes back to the start
+      held.release()
+
+      expect(await lastStep).toMatchObject({ status: 'running', doneRows: 0 }) // still to do with the new Rules, not finished
+      expect((await stepToEnd()).at(-1)).toMatchObject({ status: 'done', doneRows: N })
+      await expectSameAsFromScratch()
+    })
+
+    // Held at a known place, not left to timing: under load the job could finish before the change, and a change after a job has
+    // finished restarts nothing (by design), so the comparison below would fail for that reason alone (#59).
     it('is finished by a request that was already running when the Rules changed only with the new Rules', async () => {
       const { rules } = await runningAfterOneChunk()
+      const held = heldAt('WITH size AS', 'all') // the end of its chunk: it has read the job, and saved nothing
 
-      await Promise.all([step(), call(`/api/rules/${rules.fuel}`, { method: 'DELETE', body: {} }), step()])
-      await stepToEnd()
+      const running = stepRerun(held.db)
+      await vi.waitFor(() => expect(held.reached()).toBe(true))
+      await call(`/api/rules/${rules.fuel}`, { method: 'DELETE', body: {} })
+      held.release()
 
+      expect(await running).toMatchObject({ status: 'running', doneRows: 0, restarts: 1 }) // it found the job sent back, and did nothing
+      expect((await stepToEnd()).at(-1)).toMatchObject({ status: 'done', doneRows: N, restarts: 1 })
       await expectSameAsFromScratch()
     })
   })

@@ -240,10 +240,11 @@ const TALLY = `
   WHERE id = ?1
   RETURNING ${COLUMNS}`
 
-// Ends a job, if nothing has moved it since this request saw it (?2 its place, ?3 where it ends).
+// Ends a job, if nothing has moved it since this request saw it (?2 its place, ?3 where it ends, ?4 how often it had gone back to the start:
+// a job sent back and walked to the same place again by other steps is ended by them, with its own counts).
 const FINISH = `
   UPDATE data_migration_progress SET status = 'done', finished_at = ${NOW}, updated_at = ${NOW}
-  WHERE id = ?1 AND status = 'running' AND cursor = ?2 AND end_id = ?3`
+  WHERE id = ?1 AND status = 'running' AND cursor = ?2 AND end_id = ?3 AND restarts = ?4`
 
 // The Admin ends a job early.
 const STOP = `
@@ -343,7 +344,7 @@ async function finish(db: D1Database, job: JobRow): Promise<JobRow> {
   // Recorded for the Admin who started it, who is not necessarily who (or what) is running the last step: a cron run is nobody.
   // The entry is written only if this request is the one that ended the job: not if another got there first, and not if the job
   // went back to the start (the Rules changed) after this request read it.
-  const [ended] = await recordChange(db, db.prepare(FINISH).bind(job.id, job.cursor, job.end_id), {
+  const [ended] = await recordChange(db, db.prepare(FINISH).bind(job.id, job.cursor, job.end_id, job.restarts), {
     actor: { email: job.started_by, role: 'admin' },
     type: 'rule',
     summary: `Finished applying the Rules to all Transactions: ${countsSentence(job)}`,
@@ -380,9 +381,11 @@ async function advance(db: D1Database, job: JobRow): Promise<JobRow> {
   // now, and this request did no work (WALK checks the same thing).
   if (!advanced) return (await latestJob(db))!
   logEvent('rerun.step', { id: job.id, count: n })
-  // A short chunk, or one that reached the end, is the last. (If the job restarted with a different end meanwhile, only its own end counts.)
-  const lastChunk = next.cursor >= next.end_id || (n < size && next.end_id === job.end_id)
-  return lastChunk ? finish(db, next) : next
+  // A short chunk, or one that reached the end, is the last. Judged from the job as this step's own batch left it (`advanced`), not as read
+  // again with the tally (`next`): the Rules may have changed in between, sending the job back to the start with the same end, and finishing
+  // that job would pass FINISH's check (the job is at the place given) and leave every Transaction with the old Rules' results (#59).
+  const lastChunk = advanced.cursor >= advanced.end_id || (n < size && advanced.end_id === job.end_id)
+  return lastChunk ? finish(db, advanced) : next
 }
 
 /**
