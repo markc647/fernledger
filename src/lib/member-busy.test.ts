@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BUSY_GIVE_UP_MS, busyRetryingFetch } from './member-busy'
+import { BUSY_GIVE_UP_MS, busyRetryingFetch, dayLimitReached, dayLimitResets } from './member-busy'
 
 const busy = () => Response.json({ error: 'Too many requests at once', reason: 'member-busy' }, { status: 429 })
 const limit = () => Response.json({ error: 'Daily limit reached', reason: 'member-reads' }, { status: 429 })
@@ -54,5 +54,25 @@ describe('asking again while the Member is busy', () => {
     const { inner, calls } = answering(busy)
     await busyRetryingFetch(inner)('/api/settings', { method: 'PATCH', body: '{}' })
     expect(calls).toHaveLength(1)
+  })
+})
+
+describe("the Members' daily read limit", () => {
+  it('is noted for the UTC day a request meets it, and not by other answers', async () => {
+    const now = Date.parse('2026-10-26T23:59:00Z')
+    await busyRetryingFetch(answering(ok, () => new Response('not JSON', { status: 429 })).inner)('/api/transactions')
+    expect(dayLimitReached(now)).toBe(false)
+
+    vi.useFakeTimers({ now, toFake: ['Date'] })
+    await busyRetryingFetch(answering(limit).inner)('/api/transactions')
+    vi.useRealTimers()
+    expect(dayLimitReached(now)).toBe(true)
+    expect(dayLimitReached(Date.parse('2026-10-27T00:00:00Z'))).toBe(false) // it starts again at 00:00 UTC
+  })
+
+  it('starts again at 00:00 UTC, said as New Zealand time and day', () => {
+    expect(dayLimitResets(Date.parse('2026-10-26T21:00:00Z'))).toBe('1:00 pm today') // 10 am NZDT
+    expect(dayLimitResets(Date.parse('2026-10-27T01:00:00Z'))).toBe('1:00 pm tomorrow') // 2 pm NZDT
+    expect(dayLimitResets(Date.parse('2026-06-15T23:30:00Z'))).toBe('12:00 pm today') // 11:30 am NZST
   })
 })

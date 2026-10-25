@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { busyRetryingFetch } from './member-busy'
 import { isAccessRedirect, retryAtMost, sessionAwareFetch, sessionProblem, signInAgainUrl, withoutSignInParam } from './session'
 
 // A call that is answered with `status` (and `answer`), recording what it was asked with.
@@ -109,6 +110,12 @@ describe('retryAtMost', () => {
       await answering(200).fetch('/api/me')
       expect(retryAtMost(3)(0)).toBe(true)
     }
+  })
+
+  it("allows none once a read has met the Members' daily read limit", async () => {
+    expect(retryAtMost(3)(0)).toBe(true)
+    await busyRetryingFetch(async () => Response.json({ error: 'Daily limit reached', reason: 'member-reads' }, { status: 429 }))('/api/transactions')
+    expect(retryAtMost(3)(0)).toBe(false)
   })
 })
 

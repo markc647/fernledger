@@ -447,3 +447,22 @@ test.describe('Add to Home Screen', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------------------------------------------
+// The Members' daily read limit (#46)
+
+test.describe("the Members' daily read limit", () => {
+  test.use({ expectedStatuses: [429] }) // the refusals the test stubs
+
+  test("a Member's page says when it has been reached, and when it starts again", async ({ page, context }) => {
+    await signInAs(context, 'member')
+    // The Worker's answer past the limit (worker/member-read-limit.ts MEMBER_LIMIT_REACHED), stubbed rather than reading up to the real limit.
+    await page.route(/\/api\/transactions\?/, (route) => route.fulfill({ status: 429, json: { error: 'Daily limit reached', reason: 'member-reads' } }))
+    await page.goto('/transactions')
+    const banner = page.getByRole('alert').filter({ hasText: "Today's limit on Members' reads has been reached" })
+    await expect(banner).toBeVisible()
+    await expect(banner).toContainText(/It starts again at (1|12):00 pm (today|tomorrow) \(New Zealand time\)\./) // 00:00 UTC: 1 pm NZDT, 12 pm NZST
+    await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible() // the shell and the page are still there
+    await noAxeViolations(page)
+  })
+})

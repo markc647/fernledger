@@ -102,6 +102,9 @@ const timeOfDay = (moment: Date) => {
   return `${part.hour}:${part.minute} ${part.dayPeriod.toLowerCase()}`
 }
 
+/** A moment as its NZ time of day: "1:00 pm". Always Pacific/Auckland. */
+export const formatNzTime = (instant: Date | number) => timeOfDay(new Date(instant))
+
 /**
  * Whether a stored instant can be shown at all: text about something the app may hold no time for — or that an answer from before
  * that time was stored leaves out — asks this and drops its clause, rather than failing the page on a date that is not one.

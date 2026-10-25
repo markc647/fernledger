@@ -3,12 +3,14 @@ import { createRootRouteWithContext, Outlet, useRouter, useRouterState } from '@
 import { useCallback, useEffect, useState } from 'react'
 import { useAllowanceOn } from '@/components/allowance-bar'
 import { AppSidebar } from '@/components/app-sidebar'
+import { DayLimitBanner } from '@/components/day-limit-banner'
 import { DevIdentitySwitcher } from '@/components/dev-identity-switcher'
 import { SessionBanner, SessionProblemPage } from '@/components/session-problem'
 import { SiteHeader } from '@/components/site-header'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { deviceStorage } from '@/lib/device-storage'
 import { meQuery } from '@/lib/me'
+import { useDayLimitReached } from '@/lib/member-busy'
 import { navSections, trailFor } from '@/lib/nav'
 import { useSessionProblem } from '@/lib/session'
 import { FALLBACK_APP_TITLE, settingsQuery } from '@/lib/settings'
@@ -26,6 +28,7 @@ const focusStyle = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus
 function Layout() {
   const { data: me, error: meError } = useQuery(meQuery)
   const sessionProblem = useSessionProblem()
+  const dayLimitReached = useDayLimitReached()
   const allowance = useAllowanceOn(me?.role === 'admin')
   // Until the title arrives the sidebar's title is blank rather than flashing "Fernledger" over the Admin's own title.
   // The Settings screen writes its saved Settings into this same query, so the sidebar changes without a reload.
@@ -93,6 +96,7 @@ function Layout() {
               ) : (
                 <>
                   {sessionProblem && <SessionBanner problem={sessionProblem} />}
+                  {dayLimitReached && <DayLimitBanner />}
                   <Outlet />
                 </>
               )}

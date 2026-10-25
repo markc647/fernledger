@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { dayLimitReached } from './member-busy'
 
 // What the page knows of the visitor's sign-in, learned from the API calls it makes. Cloudflare Access sits in front of the whole app (ADR 0002). When its session runs out it
 // answers every request, API calls included, with a redirect to its sign-in page on another host, which the page's Content Security Policy refuses to follow (`connect-src
@@ -65,8 +66,8 @@ export const sessionAwareFetch =
     return res
   }
 
-/** For a read's `retry`: up to `times` more tries, and none once the sign-in is known to be gone, which asking again would only meet again. */
-export const retryAtMost = (times: number) => (failures: number) => failures < times && problem === null
+/** For a read's `retry`: up to `times` more tries, and none once the sign-in is known to be gone or the Members' daily read limit is reached, which asking again would only meet again. */
+export const retryAtMost = (times: number) => (failures: number) => failures < times && problem === null && !dayLimitReached()
 
 /** The query Fernledger adds when it sends the visitor to sign in again, and removes once the page has loaded. Its value only has to be new each time. */
 const SIGN_IN_PARAM = '_signin'
