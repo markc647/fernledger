@@ -186,6 +186,18 @@ test.describe("the Members' daily read limit", () => {
     await page.waitForLoadState('networkidle')
     expect(saved).toBe(1) // the refusal is not saved as the CSV
   })
+
+  test('Download CSV says so when the file could not be had, and saves nothing', async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.route(/\/api\/transactions\/export\.csv/, (route) => route.fulfill({ status: 429, json: { error: 'Daily limit reached' } })) // the free plan's own limit, not a Member's
+    let saved = 0
+    page.on('download', () => saved++)
+    await page.goto('/export')
+    await expect(page.locator('#filter-download-count')).toContainText('Transaction')
+    await page.getByRole('link', { name: 'Download CSV' }).click()
+    await expect(page.getByRole('alert').filter({ hasText: "The file couldn't be saved. Press Download CSV to try again." })).toBeVisible()
+    expect(saved).toBe(0) // the alert comes after the answer, and nothing is saved from a refusal
+  })
 })
 
 test('an address naming no such Account or Category, or a range that runs backwards, says so and has no file to download', async ({ page, context }) => {

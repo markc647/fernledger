@@ -107,6 +107,7 @@ export function TransactionExport({ search, onSearch }: { search: TransactionSea
                   {matching.toLocaleString('en-NZ')} {matching === 1 ? 'Transaction matches' : 'Transactions match'}
                 </span>
               )}
+              {saving && <span className="ms-3 text-muted-foreground">Getting the file…</span>}
             </span>
           </>
         )}

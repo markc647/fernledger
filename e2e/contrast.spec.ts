@@ -692,3 +692,16 @@ test.describe('colour contrast of the main pages', { tag: '@theme' }, () => {
     await expect(scanner(page, testInfo.project.name, '/styleguide', 'admin')()).rejects.toThrow('color-contrast')
   })
 })
+
+// The notice a Member's page shows once a read is refused for the Members' daily read limit (src/components/day-limit-banner.tsx), on its own because the refusal is stubbed.
+test.describe("colour contrast of the Members' daily read limit notice", { tag: '@theme' }, () => {
+  test.use({ expectedStatuses: [429] }) // the refusals the test stubs
+
+  test('/transactions with the notice has no colour contrast violations, as a Member', async ({ page, context }, testInfo) => {
+    await signInAs(context, 'member')
+    await page.route(/\/api\/transactions\?/, (route) => route.fulfill({ status: 429, json: { error: 'Daily limit reached', reason: 'member-reads' } }))
+    await page.goto('/transactions')
+    await expect(page.getByRole('alert').filter({ hasText: "Today's limit on Members' reads has been reached" })).toBeVisible()
+    await scanner(page, testInfo.project.name, '/transactions', 'member')("with the day's limit notice")
+  })
+})
