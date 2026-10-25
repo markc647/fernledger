@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
-import { actionsButton, chooseAction } from './row-actions-helpers'
+import { actionsButton, chooseAction, readyToMove } from './row-actions-helpers'
 
 // The Admin's order of Accounts (#45), changed on the Accounts screen as the Rules page changes the order of Rules. The Accounts are
 // stubbed: the light and dark projects and the other specs share one local database, and a real reorder would move their Accounts too.
@@ -52,6 +52,7 @@ test('the Admin drags an Account by its handle from the keyboard, and is told ea
   await handle.focus()
   await page.keyboard.press('Space')
   await expect(page.getByRole('status').filter({ hasText: 'Picked up Account 1 of 3.' })).toBeVisible()
+  await readyToMove(page) // the arrow key is lost if pressed before dnd-kit listens for it (#51)
   await page.keyboard.press('ArrowDown')
   await expect(page.getByRole('status').filter({ hasText: 'Account 1 is over position 2 of 3.' })).toBeVisible()
   await page.keyboard.press('Space')
