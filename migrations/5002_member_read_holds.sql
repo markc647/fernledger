@@ -2,9 +2,9 @@
 --
 --   held        rows held by this Member's requests reserved on this row's day and not yet settled
 --   held_count  how many of them: at most MEMBER_MAX_IN_FLIGHT may be in flight at once
---   held_at     when the last of them was reserved, ms since the epoch (the Worker's clock). Once it is HOLD_EXPIRY_MS old the holds are
---               taken as spent by requests that never settled (cancelled, say): the next reservation charges them, and they no longer
---               count as in flight, so a Member can't be locked out by them
+--   held_at     when the oldest of them was reserved, ms since the epoch (the Worker's clock). Once it is HOLD_EXPIRY_MS old the holds are
+--               taken as spent by requests that never settled (cancelled, say): the next reservation charges them and starts again, and they
+--               no longer count as in flight, so a Member can't be locked out by them, however busy
 --
 -- 5001_member_read_usage.sql's trigger deletes earlier days' rows on a Member's first row of the day. The trigger below keeps a row while
 -- its holds are young, against the newest hold anyone has made (the table's own clock), so a request reserved before 00:00 UTC and still in

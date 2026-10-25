@@ -584,7 +584,8 @@ describe('the filters are the list\'s', () => {
   })
 
   it('keeps something for each case that is not nothing, so the comparison above means something', async () => {
-    const counts = await Promise.all(cases.map(async ([, query]) => (await download(query())).rows.length))
+    const counts: number[] = []
+    for (const [, query] of cases) counts.push((await download(query())).rows.length) // in turn: a Member may have only a few dear requests in flight
     expect(counts).toEqual([6, 3, 2, 3, 4, 3, 3, 1, 1, 3, 2, 1, 6, 0])
   })
 })

@@ -175,19 +175,19 @@ export const AKAHU_TEXT_LIMIT = 1_000
 
 /**
  * Akahu's answer with every text made well-formed (a lone UTF-16 surrogate, which JSON allows, becomes U+FFFD, as it would anyway on the way
- * into D1 and back out of a backup, so two IDs can't come back the same) and cut to AKAHU_TEXT_LIMIT characters. Text cut is counted and
- * logged, never shown. The paging cursor is left alone: it goes back to Akahu as it came.
+ * into D1, so what is stored is what a backup gives back) and cut to AKAHU_TEXT_LIMIT characters. Text cut is counted and logged, never
+ * shown. The paging cursor (the answer's own `cursor`) is left alone: it goes back to Akahu as it came.
  */
-export function boundedText(value: unknown, cut = { count: 0 }): unknown {
+export function boundedText(value: unknown, cut = { count: 0 }, top = true): unknown {
   if (typeof value === 'string') {
     const whole = value.toWellFormed()
     if (whole.length <= AKAHU_TEXT_LIMIT) return whole
     cut.count += 1
     return whole.slice(0, AKAHU_TEXT_LIMIT).toWellFormed() // a cut through a surrogate pair leaves half of it
   }
-  if (Array.isArray(value)) return value.map((item) => boundedText(item, cut))
+  if (Array.isArray(value)) return value.map((item) => boundedText(item, cut, false))
   if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, key === 'cursor' ? item : boundedText(item, cut)]))
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, top && key === 'cursor' ? item : boundedText(item, cut, false)]))
   }
   return value
 }

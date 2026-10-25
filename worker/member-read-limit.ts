@@ -23,7 +23,9 @@ import { DEFAULT_LIMIT, MAX_LIMIT } from './transaction-search'
 //   are short of what they read. Once answered, the hold is settled to what the request read (CHARGE_FROM_ROWS at the least, so every dear
 //   request counts towards the limits however few rows there are). That is two rows written a dear request, three across 00:00 UTC.
 // - A request past the lease is a 429 `member-busy`, which the browser tries again shortly (src/lib/member-busy.ts). A hold whose request
-//   never settles (cancelled, say) is taken as spent after HOLD_EXPIRY_MS: the next reservation charges it, and it stops counting as in flight.
+//   never settles (cancelled, say) is taken as spent once the oldest of the row's holds is HOLD_EXPIRY_MS old: the next reservation charges
+//   them all and starts again, so they stop counting as in flight however busy the Member is. A request that then settles finds it was
+//   (the row's `held_at`, when its holds began, is no longer the one it reserved under) and corrects its charge from its hold to its reads.
 // - A hold reserved before 00:00 UTC stays on its own day's row, which 5002_member_read_holds.sql keeps while the hold is young, and the new
 //   day's admission counts it. Its settling charges the new day, the day its reads finished, and releases the hold from the day before.
 // - Any other request is checked and charged without a hold, and is not leased. It reads a few rows or a page. Before it runs, the tally and
@@ -42,7 +44,7 @@ export const EACH_MEMBER_DAILY_READS = 1_000_000
 export const CHARGE_FROM_ROWS = 1_000
 /** A Member's dear requests in flight at once: enough for a page's own requests sent together (the balances Report's, one for each Account, wait their turn). */
 export const MEMBER_MAX_IN_FLIGHT = 4
-/** A hold this old whose request has not settled is taken as spent: no request a Member makes runs for a minute. 5002_member_read_holds.sql has the same figure. */
+/** Holds whose requests began this long ago and have not settled are taken as spent: no request a Member makes runs for a minute. 5002_member_read_holds.sql has the same figure (a test holds them together). */
 export const HOLD_EXPIRY_MS = 60_000
 
 /**
@@ -147,42 +149,53 @@ export function pageRows(path: string, params: URLSearchParams): { rows: number;
 }
 
 // What counts towards the limits now, for ?1 the UTC day, ?2 the Member's key for it, ?3 their key for the day before, ?4 the time (ms): the
-// day's reads and every hold reserved on it, and the day before's holds while they are young (in flight across 00:00 UTC). `in_flight` is
-// the Member's young holds, on either day.
+// day's reads and every hold reserved on it, and the day before's holds while they are young (in flight across 00:00 UTC). `IN_FLIGHT` is
+// the Member's young holds, on either day. A row's holds are young while the oldest of them, `held_at`, is.
 const YOUNG = `held_at >= ?4 - ${HOLD_EXPIRY_MS}`
 const COUNTED = `CASE WHEN usage_day = ?1 THEN rows_read + held WHEN ${YOUNG} THEN held ELSE 0 END`
 const EVERYONE = `(SELECT COALESCE(SUM(${COUNTED}), 0) FROM member_read_usage)`
 const MINE = `(SELECT COALESCE(SUM(${COUNTED}), 0) FROM member_read_usage WHERE member_key IN (?2, ?3))`
 const IN_FLIGHT = `(SELECT COALESCE(SUM(CASE WHEN ${YOUNG} THEN held_count ELSE 0 END), 0) FROM member_read_usage WHERE member_key IN (?2, ?3))`
-const STATE = `SELECT ${EVERYONE} AS everyone, ${MINE} AS mine, ${IN_FLIGHT} AS in_flight`
+const STATE = `SELECT ${EVERYONE} AS everyone, ${MINE} AS mine`
 // A cheap request's charge: ?3 to the day its reads finished (?1, the key ?2).
 const CHARGE = `INSERT INTO member_read_usage (member_key, usage_day, rows_read) VALUES (?2, ?1, ?3)
   ON CONFLICT (member_key) DO UPDATE SET rows_read = rows_read + excluded.rows_read`
 // The hold: ?5 reads for each Transaction and ?11 for each Change Log entry, and READS_PER_PAGE_ROW for each of a list page's ?6 rows
 // skipped and shown (`pageRows`; ?7 its page), capped at the highest ID and a page, CHARGE_FROM_ROWS (?8) at the least. Added only while
-// neither limit (?9 everyone, ?10 one Member) has been reached and fewer than ?12 of the Member's holds are in flight, and handed back; no
-// row comes back otherwise. Holds on the row older than HOLD_EXPIRY_MS are charged as spent first. SET reads the row as it was.
+// neither limit (?9 everyone, ?10 one Member) has been reached and fewer than ?12 of the Member's holds are in flight, and handed back with
+// `held_at`, which its settling names; no row comes back otherwise. A row with no holds, or whose holds began HOLD_EXPIRY_MS ago, starts
+// again at this one: what it held is charged as spent. SET reads the row as it was, and RETURNING the row as it is now.
 const HIGHEST_ID = `COALESCE((SELECT MAX(id) FROM transactions), 0)`
 const HIGHEST_ENTRY = `COALESCE((SELECT MAX(id) FROM change_log), 0)`
 const HOLD = `MAX(?8, ?5 * ${HIGHEST_ID} + ?11 * ${HIGHEST_ENTRY} + ${READS_PER_PAGE_ROW} * MIN(?6, ${HIGHEST_ID} + ?7))`
-const STALE = `held_at < ?4 - ${HOLD_EXPIRY_MS}`
+const STARTS_AGAIN = `(held_count = 0 OR held_at IS NULL OR held_at < ?4 - ${HOLD_EXPIRY_MS})`
 const RESERVE = `INSERT INTO member_read_usage (member_key, usage_day, rows_read, held, held_count, held_at)
   SELECT ?2, ?1, 0, ${HOLD}, 1, ?4
   WHERE ${EVERYONE} < ?9 AND ${MINE} < ?10 AND ${IN_FLIGHT} < ?12
   ON CONFLICT (member_key) DO UPDATE SET
-    rows_read = rows_read + CASE WHEN ${STALE} THEN held ELSE 0 END,
-    held = CASE WHEN ${STALE} THEN 0 ELSE held END + excluded.held,
-    held_count = CASE WHEN ${STALE} THEN 0 ELSE held_count END + 1,
-    held_at = ?4
-  RETURNING ${HOLD} AS hold`
-// Settling on the day it was reserved: ?3 charged and the hold ?4 released, on the key ?2.
-const SETTLE = `UPDATE member_read_usage SET rows_read = rows_read + ?3, held = MAX(0, held - ?4), held_count = MAX(0, held_count - 1) WHERE member_key = ?2`
-// Settling on a later day: ?3 charged to the day the reads finished (?1, the key ?2), and the hold ?4 released from the row it was reserved on
-// (the key ?5), if that is still there, in one statement. SET reads the row as it was, and `excluded` is the row each SELECT gives.
+    rows_read = rows_read + CASE WHEN ${STARTS_AGAIN} THEN held ELSE 0 END,
+    held = CASE WHEN ${STARTS_AGAIN} THEN 0 ELSE held END + excluded.held,
+    held_count = CASE WHEN ${STARTS_AGAIN} THEN 0 ELSE held_count END + 1,
+    held_at = CASE WHEN ${STARTS_AGAIN} THEN ?4 ELSE held_at END
+  RETURNING ${HOLD} AS hold, held_at AS began`
+// Settling on the day it was reserved, on the key ?1: ?2 charged and the hold ?3 released, if the row's holds are still the ones that began
+// at ?4. If they started again since, the hold was charged as spent, so the charge is corrected from it (?3) to what was read (?2).
+const STILL_HELD = `held_at = ?4`
+const SETTLE = `UPDATE member_read_usage SET
+    rows_read = MAX(0, rows_read + ?2 - CASE WHEN ${STILL_HELD} THEN 0 ELSE ?3 END),
+    held = CASE WHEN ${STILL_HELD} THEN MAX(0, held - ?3) ELSE held END,
+    held_count = CASE WHEN ${STILL_HELD} THEN MAX(0, held_count - 1) ELSE held_count END
+  WHERE member_key = ?1`
+// Settling on a later day, in one statement: the hold ?4 released from the row it was reserved on (the key ?5; its charge corrected, as
+// SETTLE does, if its holds started again since ?6), if that is still there, and then ?3 charged to the day the reads finished (?1, the
+// key ?2). The day before's row comes first, so a first row of the new day, whose trigger clears earlier days, can't clear it before.
+// SET reads the row as it was, and `excluded` is the row each SELECT gives.
 const SETTLE_LATER = `INSERT INTO member_read_usage (member_key, usage_day, rows_read, held, held_count)
-  SELECT ?2, ?1, ?3, 0, 0
-  UNION ALL SELECT member_key, usage_day, 0, -?4, -1 FROM member_read_usage WHERE member_key = ?5
-  ON CONFLICT (member_key) DO UPDATE SET rows_read = rows_read + excluded.rows_read, held = MAX(0, held + excluded.held), held_count = MAX(0, held_count + excluded.held_count)`
+  SELECT member_key, usage_day, CASE WHEN held_at = ?6 THEN 0 ELSE -?4 END, CASE WHEN held_at = ?6 THEN -?4 ELSE 0 END, CASE WHEN held_at = ?6 THEN -1 ELSE 0 END
+    FROM member_read_usage WHERE member_key = ?5
+  UNION ALL SELECT ?2, ?1, ?3, 0, 0
+  ON CONFLICT (member_key) DO UPDATE SET
+    rows_read = MAX(0, rows_read + excluded.rows_read), held = MAX(0, held + excluded.held), held_count = MAX(0, held_count + excluded.held_count)`
 
 /** A Member's key for a day: no email is stored, and yesterday's key says nothing about today's. */
 export const memberKey = (day: string, email: string) => sha256Hex(new TextEncoder().encode(`${day}\n${email}`))
@@ -237,13 +250,14 @@ export const memberReadLimit = createMiddleware<AppEnv>(async (c, next) => {
   const state = () => db.prepare(STATE).bind(day, key, dayBefore, now).first<{ everyone: number; mine: number; in_flight: number }>()
   const overLimit = (s: { everyone: number; mine: number }) => s.everyone >= MEMBER_DAILY_READS || s.mine >= EACH_MEMBER_DAILY_READS
   let hold = 0
+  let began = 0
   if (reads.perTransaction > 0 || reads.perEntry > 0 || page.rows > 0) {
     const held = await db
       .prepare(RESERVE)
       .bind(day, key, dayBefore, now, reads.perTransaction, page.rows, page.limit, CHARGE_FROM_ROWS, MEMBER_DAILY_READS, EACH_MEMBER_DAILY_READS, reads.perEntry, MEMBER_MAX_IN_FLIGHT)
-      .first<{ hold: number }>()
+      .first<{ hold: number; began: number }>()
     if (!held) return overLimit((await state())!) ? refused() : busy()
-    hold = held.hold
+    ;({ hold, began } = held)
   } else if (overLimit((await state())!)) return refused()
   const tally = { rows: 0 }
   c.env = { ...c.env, DB: countingReads(db, tally) }
@@ -256,8 +270,8 @@ export const memberReadLimit = createMiddleware<AppEnv>(async (c, next) => {
     const finishedKey = finished === day ? key : await memberKey(finished, member.email)
     const charge = hold > 0 ? Math.max(tally.rows, CHARGE_FROM_ROWS) : chargeFor(tally.rows)
     try {
-      if (hold > 0 && finished === day) await db.prepare(SETTLE).bind(finished, key, charge, hold).run()
-      else if (hold > 0) await db.prepare(SETTLE_LATER).bind(finished, finishedKey, charge, hold, key).run()
+      if (hold > 0 && finished === day) await db.prepare(SETTLE).bind(key, charge, hold, began).run()
+      else if (hold > 0) await db.prepare(SETTLE_LATER).bind(finished, finishedKey, charge, hold, key, began).run()
       else if (charge > 0) await db.prepare(CHARGE).bind(finished, finishedKey, charge).run()
     } catch (error) {
       logEvent('request.member-read-charge-failed', { error })

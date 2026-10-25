@@ -17,7 +17,9 @@ const FAILED_REQUEST = /^Failed to load resource: the server responded with a st
  * Every test fails on any console error, uncaught error or Content-Security-Policy violation, so the UI is proven
  * to work under the real headers (public/_headers for assets, the Worker for /api) and not only in a dev server.
  * A test that expects a request to fail on purpose (a Transaction that doesn't exist) lists the status in
- * `test.use({ expectedStatuses: [404] })`; any other failed request still fails it. A test that makes something fail on purpose in a way that is not a status (a script
+ * `test.use({ expectedStatuses: [404] })`; any other failed request still fails it. A 429 `member-busy` is expected anywhere: the Members' daily read limit lets a Member have only a
+ * few dear requests in flight, so a Member's page that sends more together is told to wait its turn and asks again (src/lib/member-busy.ts), and the browser logs each. It is allowed
+ * only as many times as the Worker answered so. A test that makes something fail on purpose in a way that is not a status (a script
  * that cannot be fetched, which the browser and React both log) lists what it expects in `expectedConsoleErrors`, as pieces of the message (strings, because Playwright reads an array whose second item is an object as a fixture's value and its options).
  */
 export const test = base.extend<{ expectedStatuses: number[]; expectedConsoleErrors: string[] }>({
@@ -25,10 +27,16 @@ export const test = base.extend<{ expectedStatuses: number[]; expectedConsoleErr
   expectedConsoleErrors: [[], { option: true }],
   page: async ({ page, expectedStatuses, expectedConsoleErrors }, use) => {
     const problems: string[] = []
+    const busyLogged: string[] = []
+    const busyAnswers: Promise<boolean>[] = []
+    page.on('response', (res) => {
+      if (res.status() === 429) busyAnswers.push(res.json().then((body: { reason?: unknown }) => body.reason === 'member-busy', () => false))
+    })
     page.on('console', (message) => {
       if (message.type() !== 'error') return
       const failed = FAILED_REQUEST.exec(message.text())
       if (failed && expectedStatuses.includes(Number(failed[1]))) return
+      if (failed?.[1] === '429') return void busyLogged.push(`console: ${message.text()}`)
       if (expectedConsoleErrors.some((expected) => message.text().includes(expected))) return
       problems.push(`console: ${message.text()}`)
     })
@@ -43,7 +51,8 @@ export const test = base.extend<{ expectedStatuses: number[]; expectedConsoleErr
       })
     })
     await use(page)
-    expect(problems).toEqual([])
+    const busy = (await Promise.all(busyAnswers)).filter(Boolean).length
+    expect([...problems, ...busyLogged.slice(busy)]).toEqual([])
   },
 })
 

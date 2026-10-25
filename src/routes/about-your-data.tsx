@@ -65,7 +65,7 @@ function AboutYourData() {
             <strong className="font-semibold">Who may sign in:</strong> Cloudflare Access keeps the list of Members' email addresses. Fernledger doesn't keep a list of its own. It writes the Admin's email address into each Change Log entry, and into the record that lets a big change, such as applying the Rules to every Transaction, carry on in steps, and into the list of Reports the Admin has kept, as the one who last showed each. No page displays it there.
           </li>
           <li>
-            <strong className="font-semibold">Members' reads today:</strong> how much each Member has read from the database today, for the daily limit that keeps one Member from using up the free plan for everyone, and, while a Member's pages are still reading, how much they are expected to read, how many are reading, and when the last began. It is kept under a code worked out from the day and the Member's email address, not the address itself. Earlier days' counts are deleted when a later day's are first kept.
+            <strong className="font-semibold">Members' reads today:</strong> how much each Member has read from the database today, for the daily limit that keeps one Member from using up the free plan for everyone, and, while a Member's pages are still reading, how much they are expected to read, how many are reading, and when the last began. It is kept under a code worked out from the day and the Member's email address, not the address itself. Earlier days' counts are deleted when a later day's are first kept, once none of that day's pages is still reading.
           </li>
           <li>
             <strong className="font-semibold">Settings:</strong> the app title and the text on this page.

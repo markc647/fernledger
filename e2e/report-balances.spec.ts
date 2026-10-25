@@ -377,8 +377,6 @@ test.describe('on screen', () => {
   })
 
   test.describe('with more Accounts than a Member may have requests in flight', () => {
-    test.use({ expectedStatuses: [429] }) // the browser logs each 429 member-busy, which src/lib/member-busy.ts asks again
-
     test('as a Member, lists every Account: past the requests a Member may have in flight, the rest wait their turn', async ({ page, context, baseURL }, testInfo) => {
       const { start, end } = dataFor(testInfo.project.name)
       await seed(context, baseURL!, testInfo.project.name)

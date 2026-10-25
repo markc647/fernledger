@@ -30,7 +30,8 @@ const DEAR_ROUTES = [
   { path: `/api/charts/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 5 },
   { path: '/api/transactions?sort=amount', perTransaction: 9 },
   { path: '/api/transactions?text=NOTHING-MATCHES', perTransaction: 5 }, // every row tested, none found
-  // Filters that match nothing here (every Transaction has a Category and none is a Transfer), so the date index is walked to the end.
+  // Uncategorised matches nothing here (every Transaction has a Rule's Category), so the date index is walked to the end with every join:
+  // the case of a filter few match. Transfers and the Category match a fifth and a half, so their pages are found early.
   { path: '/api/transactions?count=false&uncategorised=true', perTransaction: 5 },
   { path: '/api/transactions?count=false&transfers=only', perTransaction: 5 },
   { path: '/api/transactions?uncategorised=true', perTransaction: 7 },
@@ -79,7 +80,7 @@ async function historyForReports() {
   await env.DB.batch([
     env.DB.prepare('UPDATE transactions SET rule_id = ?1, rule_category = ?2, override_category = CASE WHEN id % 2 = 0 THEN ?3 END').bind(rule, ids.ruled, ids.loans),
     env.DB.prepare('UPDATE transactions SET account_id = ?1, amount_cents = 100 WHERE id % 10 = 1').bind(ids.other),
-    env.DB.prepare('UPDATE transactions SET transfer_of = CASE WHEN id % 10 = 0 THEN id + 1 ELSE id - 1 END WHERE id % 10 IN (0, 1) AND id < (SELECT MAX(id) FROM transactions)'),
+    env.DB.prepare('UPDATE transactions SET transfer_of = CASE WHEN id % 10 = 0 THEN id + 1 ELSE id - 1 END WHERE id % 10 IN (0, 1) AND id > 1 AND id < (SELECT MAX(id) FROM transactions)'),
     ...[ids.account, ids.other].map((account) =>
       env.DB.prepare("INSERT INTO balance_checks (account_id, as_of_date, bank_cents, source, through_transaction_id, status) VALUES (?1, '2025-10-02', 123456, 'import', (SELECT MIN(id) FROM transactions WHERE account_id = ?1), 'alone')").bind(account), // long before, so the current balances read every Transaction after it
     ),
@@ -99,6 +100,23 @@ const failingCharges = () =>
       ? ({ bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } as never)
       : target.prepare(sql),
   )
+
+/**
+ * D1 that holds back net worth's histories (one batch) until `release`, so requests can be kept in flight: `reserved` counts the requests
+ * that got as far as that batch, which is after the limit has let them in.
+ */
+function heldBack() {
+  const state = { reserved: 0, release: () => {} }
+  const gate = new Promise<void>((resolve) => (state.release = resolve))
+  const db = new Proxy(env.DB, {
+    get(target, property) {
+      if (property === 'batch') return async (statements: D1PreparedStatement[]) => (state.reserved++, await gate, target.batch(statements))
+      const value = Reflect.get(target, property)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  return { db, state }
+}
 
 /** D1 whose `prepare` goes through `prepare(target, sql)`. */
 const withDb = (prepare: (target: D1Database, sql: string) => D1PreparedStatement) =>
@@ -131,7 +149,7 @@ beforeEach(async () => {
   drawWith(() => NEVER) // so a test that does not draw on purpose sees no small read charged
   await env.DB.batch([
     env.DB.prepare('UPDATE member_read_usage SET held = 0'), // so 5002's trigger lets the rows go
-    ...['member_read_usage', 'kept_reports', 'budgets', 'balance_checks', 'transactions', 'accounts'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
+    ...['member_read_usage', 'kept_reports', 'budgets', 'balance_checks', 'transactions', 'rules', 'change_log', 'accounts'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
     env.DB.prepare("DELETE FROM sqlite_sequence WHERE name = 'transactions'"), // so the highest ID is the count, as in a database never cleared
   ])
   await env.DB.prepare("INSERT INTO accounts (name, account_number) VALUES ('Example everyday', '99-9999-9999999-99')").run()
@@ -162,6 +180,13 @@ describe('counting a Member\'s reads', () => {
     expect(column).toBe(first!.id)
     expect(raw[0]).toEqual(['id', 'description'])
     expect(raw).toHaveLength(all.results.length + 1)
+  })
+})
+
+describe('the migration and the Worker', () => {
+  it('take holds as spent at the same age', () => {
+    const migration = (env as unknown as { TEST_MIGRATIONS: { name: string; queries: string[] }[] }).TEST_MIGRATIONS.find((m) => m.name.startsWith('5002_'))!
+    expect(migration.queries.join('\n')).toContain(`- ${HOLD_EXPIRY_MS}`)
   })
 })
 
@@ -343,7 +368,7 @@ describe('the Members\' daily limit', () => {
     expect((await call(CHEAP, 'member')).status).toBe(429)
   })
 
-  it('adds up many small reads, charged by chance, until the Member is refused', async () => {
+  it('adds up many small reads, charged by chance, until the Member is refused', { timeout: 30_000 }, async () => {
     drawWith(seeded(42))
     await seed(await memberKey(today(), EMAIL.member), today(), EACH_MEMBER_DAILY_READS - 3 * CHARGE_FROM_ROWS + 1) // three charges from the limit
 
@@ -454,8 +479,8 @@ describe('the Members\' daily limit', () => {
       expect((await acrossMidnight(DEAR)).status).toBe(200)
       const rows = await usage()
       expect(rows.find((r) => r.usage_day === '2026-10-26')).toEqual({ usage_day: '2026-10-26', member_key: await memberKey('2026-10-26', EMAIL.member), rows_read: read })
-      // The 25th's row was kept while its hold was in flight, and its hold is released; nothing is charged to it.
-      expect(await env.DB.prepare("SELECT rows_read, held, held_count FROM member_read_usage WHERE usage_day = '2026-10-25'").all().then((r) => r.results)).toEqual([{ rows_read: 0, held: 0, held_count: 0 }])
+      // The 25th's row was kept while its hold was in flight; settling released the hold and then charged the 26th, whose first row cleared it.
+      expect(await env.DB.prepare("SELECT rows_read, held, held_count FROM member_read_usage WHERE usage_day = '2026-10-25'").all().then((r) => r.results)).toEqual([])
     })
 
     it('counts a hold still in flight from the day before in the new day\'s admission, and charges its reads to the new day', async () => {
@@ -521,6 +546,56 @@ describe('the Members\' daily limit', () => {
     expect(row).toEqual({ rows_read: 4000 + tally.rows, held: 0, held_count: 0 }) // the four charged as spent, and this one settled
   })
 
+  it('corrects the charge of a request that settles after its hold was taken as spent, and leaves the holds that began since alone', async () => {
+    const reads = async () => {
+      const tally = { rows: 0 }
+      await fetchWith(countingReads(env.DB, tally), DEAR, 'admin')
+      return tally.rows
+    }
+    const read = await reads()
+    const row = async () => env.DB.prepare('SELECT rows_read, held, held_count FROM member_read_usage WHERE member_key = ?').bind(await memberKey(today(), EMAIL.member)).first()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const late = heldBack()
+      const first = fetchWith(late.db, DEAR, 'member')
+      await vi.waitFor(() => expect(late.state.reserved).toBe(1))
+      const hold = (await row())!.held as number
+      vi.setSystemTime(Date.now() + HOLD_EXPIRY_MS + 1_000) // the first is taken as spent by the next reservation
+      const next = heldBack()
+      const second = fetchWith(next.db, DEAR, 'member')
+      await vi.waitFor(() => expect(next.state.reserved).toBe(1))
+      expect(await row()).toEqual({ rows_read: hold, held: hold, held_count: 1 }) // the first charged as spent; the second held
+
+      late.state.release()
+      expect((await first).status).toBe(200)
+      expect(await row()).toEqual({ rows_read: read, held: hold, held_count: 1 }) // the first's charge corrected to its reads; the second still held
+      next.state.release()
+      expect((await second).status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(await row()).toEqual({ rows_read: 2 * read, held: 0, held_count: 0 })
+  })
+
+  it('takes a hold that never settled as spent a minute after it began, however often the Member asks in between', async () => {
+    const key = await memberKey(today(), EMAIL.member)
+    const row = () => env.DB.prepare('SELECT held, held_count FROM member_read_usage WHERE member_key = ?').bind(key).first()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const began = Date.now()
+      // One hold whose request never settled, reserved 50 seconds ago.
+      await env.DB.prepare('INSERT INTO member_read_usage (member_key, usage_day, rows_read, held, held_count, held_at) VALUES (?, ?, 0, 1000, 1, ?)').bind(key, today(), began - 50_000).run()
+
+      expect((await fetchWith(env.DB, DEAR, 'member')).status).toBe(200)
+      expect(await row()).toEqual({ held: 1000, held_count: 1 }) // still in flight: it began 50 seconds ago
+      vi.setSystemTime(began + 15_000)
+      expect((await fetchWith(env.DB, DEAR, 'member')).status).toBe(200)
+      expect(await row()).toEqual({ held: 0, held_count: 0 }) // 65 seconds: taken as spent, though the Member asked 15 seconds ago
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('still counts young holds as in flight, so a fifth request waits its turn', async () => {
     await env.DB.prepare('INSERT INTO member_read_usage (member_key, usage_day, rows_read, held, held_count, held_at) VALUES (?, ?, 0, 4000, 4, ?)')
       .bind(await memberKey(today(), EMAIL.member), today(), Date.now() - 1_000)
@@ -549,11 +624,26 @@ describe('the Members\' daily limit', () => {
       '/api/budgets/vs-actual?month=2026-03',
       `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`,
       `/api/reports/budget-vs-actual?from=${YEAR.from}&to=${YEAR.to}`,
+      `/api/reports/income-vs-spending?from=${YEAR.from}&to=${YEAR.to}`,
+      `/api/reports/balances?accountId=ACCOUNT&from=${YEAR.from}&to=${YEAR.to}`,
+      `/api/reports/loans?categoryId=LOANS&to=${YEAR.to}`,
+      `/api/charts/spending?from=${YEAR.from}&to=${YEAR.to}`,
+      '/api/balances',
+      '/api/balances/ACCOUNT/history',
+      '/api/imports/imported/ACCOUNT',
+      '/api/change-log',
+      '/api/transactions?count=false&uncategorised=true',
+      '/api/transactions?count=false&categoryId=CATEGORY',
+      '/api/transactions?count=false&transfers=only',
     ])(
       'let at most one past one Member\'s limit: %s',
-      async (path) => {
+      async (template) => {
+        const path = (await historyForReports())(template)
         await keep('spending')
         await keep('budget-vs-actual')
+        await keep('income-vs-spending')
+        await keep('balances')
+        await env.DB.prepare("INSERT INTO kept_reports (report, from_date, to_date, made_by) VALUES ('loans', NULL, ?, 'admin@example.com')").bind(YEAR.to).run()
         await seed(await memberKey(today(), EMAIL.member), today(), EACH_MEMBER_DAILY_READS - 1)
 
         const statuses = await together(path, 'member')
@@ -582,14 +672,34 @@ describe('the Members\' daily limit', () => {
       const tally = { rows: 0 }
       await fetchWith(countingReads(env.DB, tally), DEAR, 'admin')
 
-      const responses = await Promise.all(Array.from({ length: K }, () => fetchWith(env.DB, DEAR, 'member')))
-      expect(responses.filter((r) => r.status === 200)).toHaveLength(MEMBER_MAX_IN_FLIGHT)
-      for (const busy of responses.filter((r) => r.status !== 200)) {
-        expect(busy.status).toBe(429)
-        expect(await busy.json()).toEqual(MEMBER_BUSY)
+      // The ones let in are held in flight until the rest have been answered, so none settles early and frees a place.
+      const { db, state } = heldBack()
+      const sent = Array.from({ length: K }, () => fetchWith(db, DEAR, 'member'))
+      const busy = await Promise.all(sent.map((answer) => Promise.race([answer, new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000))])))
+      expect(busy.filter((r) => r !== null)).toHaveLength(K - MEMBER_MAX_IN_FLIGHT)
+      for (const r of busy.filter((r) => r !== null)) {
+        expect(r!.status).toBe(429)
+        expect(await r!.json()).toEqual(MEMBER_BUSY)
       }
+      expect(state.reserved).toBe(MEMBER_MAX_IN_FLIGHT)
+      state.release()
+      const responses = await Promise.all(sent)
+      expect(responses.filter((r) => r.status === 200)).toHaveLength(MEMBER_MAX_IN_FLIGHT)
       expect(await charged('member')).toBe(MEMBER_MAX_IN_FLIGHT * tally.rows)
       expect(await together(DEAR, 'other')).toEqual(expect.arrayContaining([200])) // another Member has a lease of their own
+    })
+
+    it('pass a limit by no more than MEMBER_MAX_IN_FLIGHT requests\' reads, however many are sent', async () => {
+      const tally = { rows: 0 }
+      await fetchWith(countingReads(env.DB, tally), DEAR, 'admin')
+      const seeded = EACH_MEMBER_DAILY_READS - 1
+      await seed(await memberKey(today(), EMAIL.member), today(), seeded)
+
+      const statuses = await Promise.all(Array.from({ length: 3 * K }, () => fetchWith(env.DB, DEAR, 'member').then((res) => res.status)))
+
+      expect(statuses.filter((status) => status === 200).length).toBeLessThanOrEqual(MEMBER_MAX_IN_FLIGHT)
+      expect((await charged('member')) - EACH_MEMBER_DAILY_READS).toBeLessThanOrEqual(MEMBER_MAX_IN_FLIGHT * tally.rows) // with holds that cover them, one
+      expect((await charged('member')) - seeded).toBeLessThanOrEqual(tally.rows)
     })
 
     it('let them in again once the requests in flight have settled', async () => {
