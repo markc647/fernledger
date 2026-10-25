@@ -10,6 +10,22 @@ const origin = 'http://localhost:5173'
 type Who = 'admin' | 'member' | 'other'
 const EMAIL = { member: 'dev.member@example.com', other: 'dev@example.com' }
 
+describe("a Member's key", () => {
+  it('is the same for the same day, email and secret, and differs with the secret', async () => {
+    const day = '2026-10-26'
+    expect(await memberKey(day, EMAIL.member, 'secret-one')).toBe(await memberKey(day, EMAIL.member, 'secret-one'))
+    expect(await memberKey(day, EMAIL.member, 'secret-one')).not.toBe(await memberKey(day, EMAIL.member, 'secret-two'))
+    expect(await memberKey(day, EMAIL.member, 'secret-one')).not.toBe(await memberKey(day, EMAIL.member))
+    // HMAC-SHA-256 of the same text, worked out apart from the code: Node's createHmac('sha256', 'secret-one').update(`2026-10-26\n${EMAIL.member}`).
+    expect(await memberKey(day, EMAIL.member, 'secret-one')).toBe('f30df655f8b147606b32bc119b193d188dd39e1f8f6a73c8a1870eca1e1d41df')
+  })
+
+  it('is the plain hash of the day and email without a secret, as before the secret', async () => {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`2026-10-26\n${EMAIL.member}`)))
+    expect(await memberKey('2026-10-26', EMAIL.member)).toBe([...digest].map((b) => b.toString(16).padStart(2, '0')).join(''))
+  })
+})
+
 const call = (path: string, who: Who) => exports.default.fetch(new Request(`${origin}${path}`, { headers: { Cookie: `fernledger_dev_as=${who}` } }))
 
 const today = () => utcDay(new Date())
@@ -55,9 +71,9 @@ const holdOf = async (perTransaction: number) =>
   perTransaction * (await env.DB.prepare('SELECT MAX(id) AS id FROM transactions').first<{ id: number }>())!.id
 
 /** The Worker's own handler, called with `db` standing in for D1 (CODING_STANDARDS.md: Tests), as `who`. */
-async function fetchWith(db: D1Database, path: string, who: Who) {
+async function fetchWith(db: D1Database, path: string, who: Who, more: Partial<Env> = {}) {
   const ctx = createExecutionContext()
-  const res = await worker.fetch!(new Request(`${origin}${path}`, { headers: { Cookie: `fernledger_dev_as=${who}` } }) as never, { ...env, DB: db }, ctx)
+  const res = await worker.fetch!(new Request(`${origin}${path}`, { headers: { Cookie: `fernledger_dev_as=${who}` } }) as never, { ...env, ...more, DB: db }, ctx)
   await waitOnExecutionContext(ctx)
   return res
 }
@@ -317,6 +333,17 @@ describe('charging a small read by chance', () => {
 })
 
 describe('the Members\' daily limit', () => {
+  it('keeps the count under the HMAC of MEMBER_KEY_SECRET when the Worker has it, and goes on counting under it', async () => {
+    const secret = 'member_key_example'
+    expect((await fetchWith(env.DB, DEAR, 'member', { MEMBER_KEY_SECRET: secret })).status).toBe(200)
+    const rows = await usage()
+    expect(rows.map((row) => row.member_key)).toEqual([await memberKey(today(), EMAIL.member, secret)])
+    expect(rows[0]!.member_key).not.toBe(await memberKey(today(), EMAIL.member)) // not the plain hash a backup's reader could work out
+
+    expect((await fetchWith(env.DB, DEAR, 'member', { MEMBER_KEY_SECRET: secret })).status).toBe(200)
+    expect(await usage()).toHaveLength(1)
+  })
+
   it('charges a Member\'s request that read at least CHARGE_FROM_ROWS, and writes nothing for a cheaper one the draw passes over', async () => {
     for (let i = 0; i < 100; i++) expect((await call(CHEAP, 'member')).status).toBe(200)
     expect(await usage()).toEqual([])

@@ -55,6 +55,8 @@ else if (key === 'd1 time-travel info') out({ bookmark: state.bookmark })
 else if (cmd === 'd1 execute') out([{ results: [{ n: 0 }] }]) // no tables yet: a first deploy, so no backup (scripts/backup-teardown.test.mjs covers the rest)
 else if (key === 'd1 migrations apply') console.log('Applied 1 migration')
 else if (words[0] === 'deploy') console.log('Deployed fernledger to https://fernledger.example.workers.dev')
+else if (cmd === 'secret list') out(Object.keys(state.secrets).map((name) => ({ name, type: 'secret_text' })))
+else if (cmd === 'secret put') { state.secrets[words[2]] = fs.readFileSync(0, 'utf8'); save(); console.log('Success! Uploaded secret ' + words[2]) } // the value comes on stdin, as from Wrangler's prompt
 else console.log('ok ' + cmd)
 `
 
@@ -63,7 +65,7 @@ function fakeAccount(state = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'fernledger-test-wrangler-'))
   cleanup.push(dir)
   writeFileSync(join(dir, 'wrangler.cjs'), fakeWrangler)
-  const initial = { accounts: [{ name: 'Test Account', id: 'acct-1' }], databases: [], buckets: [], replication: 'disabled', bookmark: '00000085-0000024c-00004c6d-test', ...state }
+  const initial = { accounts: [{ name: 'Test Account', id: 'acct-1' }], databases: [], buckets: [], replication: 'disabled', bookmark: '00000085-0000024c-00004c6d-test', secrets: {}, ...state }
   writeFileSync(join(dir, 'state.json'), JSON.stringify(initial))
   const calls = () => {
     try {
@@ -295,7 +297,9 @@ test('deploy dry run prints build, restore point, migrations, deploy, then the r
     'npx wrangler d1 time-travel info fernledger --json',
     'npx wrangler d1 migrations apply fernledger --remote',
     'npx wrangler deploy --strict',
+    'npx wrangler secret list --format json',
   ])
+  assert.match(r.out, /Dry run: if the Worker has no MEMBER_KEY_SECRET, a real run makes a random one and sets it\./)
   assert.match(r.out, /CLOUDFLARE_ACCOUNT_ID=<account id> npx wrangler d1 time-travel restore fernledger --bookmark=<bookmark>/)
   assert.match(r.out, /CLOUDFLARE_ACCOUNT_ID=<account id> npx wrangler rollback/)
 })
@@ -337,6 +341,43 @@ test('deploy records the bookmark before migrating, then deploys, then prints th
   assert.ok(at(order, 'd1 time-travel info') < at(order, 'd1 migrations apply'))
   assert.ok(at(order, 'd1 migrations apply') < at(order, 'deploy'))
   assert.match(r.out, new RegExp(`Restore point.*${bookmark}`))
+})
+
+// The key the Members' read counts are kept under (worker/member-read-limit.ts memberKey): made by deploy, once, with its value only ever on Wrangler's stdin.
+test('deploy sets a missing MEMBER_KEY_SECRET after deploying, with a random value on stdin that is in no argument and no output', () => {
+  const account = fakeAccount(ready)
+  const r = run('deploy.mjs', deployArgs, account.env)
+  assert.equal(r.status, 0, r.out)
+  const order = account.order()
+  assert.ok(at(order, 'deploy') < at(order, 'secret list'))
+  assert.ok(at(order, 'secret list') < at(order, 'secret put MEMBER_KEY_SECRET'))
+  const value = account.state().secrets.MEMBER_KEY_SECRET
+  assert.match(value, /^[0-9a-f]{64}$/)
+  assert.ok(!account.calls().some((c) => c.args.some((a) => a.includes(value))), 'the value is never an argument')
+  assert.ok(!r.out.includes(value), 'the value is never printed')
+  assert.match(r.out, /Set MEMBER_KEY_SECRET/)
+})
+
+test('deploy leaves an existing MEMBER_KEY_SECRET as it is', () => {
+  const account = fakeAccount({ ...ready, secrets: { MEMBER_KEY_SECRET: 'kept-value' } })
+  const r = run('deploy.mjs', deployArgs, account.env)
+  assert.equal(r.status, 0, r.out)
+  assert.ok(!account.order().some((o) => o.startsWith('secret put')), account.order().join(' | '))
+  assert.equal(account.state().secrets.MEMBER_KEY_SECRET, 'kept-value')
+  assert.match(r.out, /MEMBER_KEY_SECRET is set\. Kept as it is\./)
+})
+
+test('deploy still reports the deploy done when MEMBER_KEY_SECRET cannot be checked or set, says how to set it, and leaks no Wrangler output', () => {
+  for (const failing of ['secret list', 'secret put']) {
+    const account = fakeAccount(ready)
+    const r = run('deploy.mjs', deployArgs, { ...account.env, FAKE_FAIL: failing })
+    assert.equal(r.status, 0, r.out)
+    assert.match(r.out, /Deployed\./)
+    assert.match(r.out, failing === 'secret list' ? /Could not read the Worker's secrets/ : /Could not set MEMBER_KEY_SECRET/)
+    assert.match(r.out, /Run `npm run deploy` again to set it\./)
+    assert.doesNotMatch(r.out, /owner@example\.com|SECRET123/)
+    assert.equal(account.state().secrets.MEMBER_KEY_SECRET, undefined)
+  }
 })
 
 test('deploy shows what Wrangler reported on success, but never the whoami output', () => {

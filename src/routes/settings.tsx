@@ -248,7 +248,7 @@ function SetupNeeded() {
       <h2 id="setup-needed" className="text-lg font-semibold">
         Setup needed
       </h2>
-      <p className="mt-1 text-sm text-muted-foreground">These features are switched off until you do the following. Everything else keeps working, and an optional feature can stay off if you don't need it.</p>
+      <p className="mt-1 text-sm text-muted-foreground">These features are switched off, or not doing all they should, until you do the following. Everything else keeps working, and an optional feature can stay off if you don't need it.</p>
       <ul className="mt-3 space-y-3">
         {off.map((feature) => (
           <li key={feature.id}>

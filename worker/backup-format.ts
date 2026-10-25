@@ -37,9 +37,11 @@ export type Manifest = z.infer<typeof manifest>
 /** A backup that can't be trusted or read. Messages name a table, part, line number or count, never a value. */
 export class BackupFormatError extends Error {}
 
+/** Bytes as lower-case hex, two digits each. */
+export const toHex = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>)
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>)))
 }
 
 /**
@@ -91,7 +93,7 @@ type Cell = string | null | { $number: string } | { $blob: string }
 const NEEDS_HEX = /BEGIN|COMMIT|[\u0000-\u0008\u000a-\u001f]/i
 
 function textLiteral(value: string): string {
-  if (NEEDS_HEX.test(value)) return `CAST(X'${[...new TextEncoder().encode(value)].map((b) => b.toString(16).padStart(2, '0')).join('')}' AS TEXT)`
+  if (NEEDS_HEX.test(value)) return `CAST(X'${toHex(new TextEncoder().encode(value))}' AS TEXT)`
   return `'${value.replaceAll("'", "''")}'`
 }
 

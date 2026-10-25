@@ -23,7 +23,7 @@ Run these from a checkout of the release you want. Why the region matters is in 
    npm run deploy                 # confirms the account, then runs them
    ```
 
-   In order, `npm run deploy` confirms the account, confirms the workers.dev subdomain (below), checks the database and bucket exist (it stops and points you at `npm run setup` rather than let Wrangler create them with no location), builds, takes a complete backup ([below](#the-backup-before-a-deploy)), records a D1 bookmark (restore point), applies remote migrations from `migrations/`, and deploys. **If the backup fails it stops there, with nothing changed.** It ends by printing the bookmark with rollback instructions, and prints them too if a migration or the deploy fails. The printed commands start with `CLOUDFLARE_ACCOUNT_ID=<id>` so they run as printed. In PowerShell, set `$env:CLOUDFLARE_ACCOUNT_ID` first and drop the prefix. [Rolling back](#rolling-back) covers what to do with them.
+   In order, `npm run deploy` confirms the account, confirms the workers.dev subdomain (below), checks the database and bucket exist (it stops and points you at `npm run setup` rather than let Wrangler create them with no location), builds, takes a complete backup ([below](#the-backup-before-a-deploy)), records a D1 bookmark (restore point), applies remote migrations from `migrations/`, deploys, and sets the key for the Members' read counts if the Worker has none ([below](#the-key-for-the-members-read-counts)). **If the backup fails it stops there, with nothing changed.** It ends by printing the bookmark with rollback instructions, and prints them too if a migration or the deploy fails. The printed commands start with `CLOUDFLARE_ACCOUNT_ID=<id>` so they run as printed. In PowerShell, set `$env:CLOUDFLARE_ACCOUNT_ID` first and drop the prefix. [Rolling back](#rolling-back) covers what to do with them.
 
 Every script takes `--yes` to skip the account prompt (needed when there's no terminal). `npm run deploy` also takes `--workers-dev-registered` (below), `--skip-build` if `dist/` is already built, and `--skip-backup` (only after you've made a copy by hand). If a script fails, it names the Wrangler command and its exit code and nothing more, because Wrangler's own output can contain your account email. Run the printed command by hand to see it.
 
@@ -35,6 +35,14 @@ If an account has no workers.dev subdomain, Wrangler registers one during the fi
 - With `--yes` and no terminal it stops unless you also pass `--workers-dev-registered`.
 
 To check, open `https://dash.cloudflare.com/<account id>/workers/subdomain` (the deploy script prints the link). If none is registered, register one there first, then deploy.
+
+### The key for the Members' read counts
+
+The Members' daily read limit keeps each Member's count under a code worked out from the day and their email address (`worker/member-read-limit.ts`). With only those two, someone holding a backup could try the household's few email addresses and tell whose count is whose. So the code also uses a key, the Worker secret `MEMBER_KEY_SECRET`, which is kept outside the database and so is in no backup.
+
+You never choose, see or type it. After deploying, `npm run deploy` checks whether the Worker has it and, if not, makes a random one and gives it to Wrangler on its input, never on a command line or in a file. It never replaces one that is there. Until it is set (a Worker deployed some other way, or a deploy that couldn't set it, which says so), the counts are kept under the code without the key, as before, and Settings says Setup needed. Running `npm run deploy` again sets it.
+
+**To change the key:** `npx wrangler secret delete MEMBER_KEY_SECRET`, then `npm run deploy`. Nothing else needs to change: that day's counts start again under the new key, so each Member could read up to about twice the daily limit that day.
 
 ### How resource IDs stay out of the repo
 
@@ -97,7 +105,7 @@ A run longer than one invocation is a rolling copy, not a single point in time: 
 
 README ("Recoverable") says what each layer protects. In order of how much each costs you:
 
-1. **Code only (the usual fix).** Migrations only add (ADR 0009), so the previous release still runs on the newer schema. Redeploy it: check out the previous release's tag (`git checkout <tag>`, then `npm install`) and run `npm run deploy`, or run `npx wrangler rollback` to put back the previous deployed version. Either leaves your data as it is. `npm run deploy` prints the commands, with your account ID in them.
+1. **Code only (the usual fix).** Migrations only add (ADR 0009), so the previous release still runs on the newer schema. Redeploy it: check out the previous release's tag (`git checkout <tag>`, then `npm install`) and run `npm run deploy`, or run `npx wrangler rollback` to put back the previous deployed version. Either leaves your data as it is. Cloudflare's documentation doesn't say whether a rollback to a version from before the [key for the Members' read counts](#the-key-for-the-members-read-counts) was set keeps it. If Settings says Setup needed for it afterwards, the next `npm run deploy` sets a new one. On the deploy that first sets the key, setting it made a version of its own, so `npx wrangler rollback` would only go back to the same release without the key: redeploy the previous release's tag instead. `npm run deploy` prints the commands, with your account ID in them.
 2. **Data, within 7 days: the restore point.** If the migration or the release damaged data, restore the D1 bookmark that `npm run deploy` printed (just before the migrations):
 
    ```bash

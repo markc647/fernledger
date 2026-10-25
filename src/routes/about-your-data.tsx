@@ -23,6 +23,8 @@ function AboutYourData() {
   const { data: settings, isError: settingsFailed } = useQuery(settingsQuery)
   const { data: features, isPending: featuresPending } = useQuery(featuresQuery)
   const akahu = features?.find((feature) => feature.id === 'akahu-sync')
+  // The key the Members' read counts are kept under is said only once the Worker has it (worker/features.ts MEMBER_KEY): without it they are a plain hash.
+  const memberKeySet = features?.find((feature) => feature.id === 'member-key')?.enabled === true
   // 'on' and 'off' are what the Worker said; 'unknown' is when it could not say. The promise below is not written until it has said one or the other.
   const usageFigures = !features ? 'unknown' : features.find((feature) => feature.id === 'd1-usage')?.enabled === true ? 'on' : 'off'
   // Until both have arrived there is nothing to show for the two Settings: a Member must not read the neutral line
@@ -65,7 +67,7 @@ function AboutYourData() {
             <strong className="font-semibold">Who may sign in:</strong> Cloudflare Access keeps the list of Members' email addresses. Fernledger doesn't keep a list of its own. It writes the Admin's email address into each Change Log entry, and into the record that lets a big change, such as applying the Rules to every Transaction, carry on in steps, and into the list of Reports the Admin has kept, as the one who last showed each. No page displays it there.
           </li>
           <li>
-            <strong className="font-semibold">Members' reads today:</strong> how much each Member has read from the database today, for the daily limit that keeps one Member from using up the free plan for everyone, and, while a Member's pages are still reading, how much they are expected to read, how many are reading, and when the last began. It is kept under a code worked out from the day and the Member's email address, not the address itself. Earlier days' counts are deleted when a later day's are first kept, once none of that day's pages is still reading.
+            <strong className="font-semibold">Members' reads today:</strong> how much each Member has read from the database today, for the daily limit that keeps one Member from using up the free plan for everyone, and, while a Member's pages are still reading, how much they are expected to read, how many are reading, and when the last began. It is kept under a code worked out from the day and the Member's email address, not the address itself.{memberKeySet && " The code also uses a key kept outside the database, so a copy of the database can't link the counts to a Member."} Earlier days' counts are deleted when a later day's are first kept, once none of that day's pages is still reading.
           </li>
           <li>
             <strong className="font-semibold">Settings:</strong> the app title and the text on this page.

@@ -80,6 +80,8 @@ test.describe('About your data', () => {
     ])
     // The daily limit's counts are kept under a code, never a Member's email address (worker/member-read-limit.ts).
     await expect(held.getByRole('listitem').filter({ hasText: "Members' reads today:" })).toContainText("a code worked out from the day and the Member's email address, not the address itself")
+    // The tests' Worker has no MEMBER_KEY_SECRET, so the page doesn't claim a key it hasn't got (the claim's own test is below).
+    await expect(held.getByRole('listitem').filter({ hasText: "Members' reads today:" })).not.toContainText('a key kept outside the database')
     await expect(held.getByRole('listitem').filter({ hasText: 'Balances:' })).toContainText('balance a bank reported')
     // The Change Log keeps values, Notes included, and is where the Admin's email address is held.
     await expect(held.getByRole('listitem').filter({ hasText: 'The Change Log:' })).toContainText('often with the values from before and after')
@@ -225,6 +227,15 @@ test.describe('About your data', () => {
     await expect(section(page, 'What is held')).not.toContainText("isn't set up")
     await expect(section(page, 'What is held')).not.toContainText(/Sync is on|can also arrive/)
     await expect(section(page, 'What is held')).not.toContainText('Worker secrets')
+  })
+
+  test("says the daily read counts' code uses a key kept outside the database once the Worker has one (#53)", async ({ page, context }) => {
+    await signInAs(context, 'member')
+    await page.route('**/api/features', (route) => route.fulfill({ json: { features: [{ id: 'member-key', name: "Members' read count key", enabled: true }] } }))
+    await page.goto('/about-your-data')
+    await expect(section(page, 'What is held').getByRole('listitem').filter({ hasText: "Members' reads today:" })).toContainText(
+      "The code also uses a key kept outside the database, so a copy of the database can't link the counts to a Member.",
+    )
   })
 
   test('says so, rather than showing neutral lines, when the Settings cannot be loaded', async ({ page, context }) => {

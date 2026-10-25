@@ -1,6 +1,6 @@
 import { createMiddleware } from 'hono/factory'
 import type { AppEnv } from './app-env'
-import { sha256Hex } from './backup-format'
+import { sha256Hex, toHex } from './backup-format'
 import { logEvent } from './log'
 import { isWrite } from './request-format'
 import { utcDay } from './rule-rerun'
@@ -197,8 +197,17 @@ const SETTLE_LATER = `INSERT INTO member_read_usage (member_key, usage_day, rows
   ON CONFLICT (member_key) DO UPDATE SET
     rows_read = MAX(0, rows_read + excluded.rows_read), held = MAX(0, held + excluded.held), held_count = MAX(0, held_count + excluded.held_count)`
 
-/** A Member's key for a day: no email is stored, and yesterday's key says nothing about today's. */
-export const memberKey = (day: string, email: string) => sha256Hex(new TextEncoder().encode(`${day}\n${email}`))
+/**
+ * A Member's key for a day: no email is stored, and yesterday's key says nothing about today's. It is an HMAC keyed by the Worker secret
+ * MEMBER_KEY_SECRET, which `npm run deploy` sets and no backup holds, so a backup's rows can't be linked to a Member by trying the household's
+ * few emails. Without the secret it is the plain hash, which can be, and Settings says Setup needed (worker/features.ts MEMBER_KEY).
+ */
+export async function memberKey(day: string, email: string, secret?: string) {
+  const text = new TextEncoder().encode(`${day}\n${email}`)
+  if (!secret) return sha256Hex(text)
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return toHex(new Uint8Array(await crypto.subtle.sign('HMAC', key, text)))
+}
 
 /**
  * The binding with every statement's `meta.rows_read` added to `tally.rows`. `first` and `raw` don't give D1's meta, so they run as `all`.
@@ -242,8 +251,9 @@ export const memberReadLimit = createMiddleware<AppEnv>(async (c, next) => {
   const db = c.env.DB
   const now = Date.now()
   const day = utcDay(new Date(now))
-  const key = await memberKey(day, member.email)
-  const dayBefore = await memberKey(utcDay(new Date(now - 86_400_000)), member.email)
+  const secret = c.env.MEMBER_KEY_SECRET?.trim()
+  const key = await memberKey(day, member.email, secret)
+  const dayBefore = await memberKey(utcDay(new Date(now - 86_400_000)), member.email, secret)
   const params = new URL(c.req.url).searchParams
   const reads = dearReads(c.req.path, params)
   const page = pageRows(c.req.path, params)
@@ -267,7 +277,7 @@ export const memberReadLimit = createMiddleware<AppEnv>(async (c, next) => {
     // The answer is already made: a charge that fails (D1's daily writes gone, say) is logged rather than turned into an error for a read that
     // worked. A dear request's hold then stays charged, so the limits still hold.
     const finished = utcDay(new Date())
-    const finishedKey = finished === day ? key : await memberKey(finished, member.email)
+    const finishedKey = finished === day ? key : await memberKey(finished, member.email, secret)
     const charge = hold > 0 ? Math.max(tally.rows, CHARGE_FROM_ROWS) : chargeFor(tally.rows)
     try {
       if (hold > 0 && finished === day) await db.prepare(SETTLE).bind(key, charge, hold, began).run()
