@@ -9,23 +9,29 @@ import { utcDay } from './rule-rerun'
 // sort or net worth reads each one several times, so without a limit one Member's requests could use up the day for everyone, the Admin and the
 // cron included. The Admin's requests are not counted: the Admin owns the deployment, and the re-run (rule-rerun.ts) keeps its own share.
 //
-// - Each Member GET under /api/* runs on a copy of the D1 binding that adds up the `meta.rows_read` D1 reports for each statement.
-// - Once a request is answered, what it read is charged to today's tally (member_read_usage, 5001_member_read_usage.sql). A request that read
-//   CHARGE_FROM_ROWS or more is charged what it read. A cheaper one is charged CHARGE_FROM_ROWS by chance, with the chance rows / CHARGE_FROM_ROWS,
-//   and otherwise writes nothing: on average it is charged what it read, so many small reads reach the limit as one large one does, and the
-//   tally still writes at most about MEMBER_DAILY_READS / CHARGE_FROM_ROWS rows a day. The table's trigger clears earlier days on a
-//   Member's first charge of the day.
-// - A Member's request runs one D1 query more than the route's, two when it is charged, of the 50 an invocation may run (ADR 0004).
-// - Before a request runs, today's tally is read. Once all Members together have reached MEMBER_DAILY_READS, or this Member has reached
-//   EACH_MEMBER_DAILY_READS, the request is refused with a 429 and writes nothing. A request can pass a limit by its own cost, since
-//   what it reads is known only afterwards; the largest (net worth at 100,000 Transactions) is about 600,000 rows.
-// - The day is the UTC day, when D1's allowance resets (about midday in New Zealand).
+// - Each Member GET under /api/* runs on a copy of the D1 binding that adds up the `meta.rows_read` D1 reports for each statement, and is
+//   charged to the tally (member_read_usage, 5001_member_read_usage.sql) of the UTC day its reads finished. The table's trigger clears
+//   earlier days on a Member's first row of the day.
+// - A dear request (`readsPerTransaction`: net worth and the other charts, the Reports but the Transactions Report, Budget vs actual, the
+//   CSV export, and a Transaction list that searches text, sorts by other than date or counts) reads every Transaction, or every one in its dates, one or more times. Before it runs, one statement reserves a hold sized by that and by the
+//   number of Transactions (their highest ID, one row to read), and only if neither limit has been reached: a single statement is atomic,
+//   so requests sent together can't all pass on the same tally, and the most a limit is passed by is about one request. Once answered, the
+//   hold is settled to what the request read (CHARGE_FROM_ROWS at the least, so every dear request counts towards the limits however few
+//   Transactions there are). That is two rows written a dear request, at most 2 * MEMBER_DAILY_READS / CHARGE_FROM_ROWS a day.
+// - Any other request is checked and charged without a hold. Most read a few rows or a page; a few read about one pass over an Account's
+//   Transactions or more and are not dear here (an Account's balance history, the current balances, an Account's count of imported rows, a
+//   list page far into the Transactions). Before it runs, the tally is read, and the request refused if a limit has been reached. Once answered, it is charged what it read from CHARGE_FROM_ROWS up; below that,
+//   CHARGE_FROM_ROWS with the chance rows / CHARGE_FROM_ROWS, and otherwise nothing: the same on average, so many small reads reach the limit
+//   as surely as a few large ones, while these charges write at most about MEMBER_DAILY_READS / CHARGE_FROM_ROWS rows a day. Requests sent
+//   together can each pass the check, by that request's reads each.
+// - A refused request is a 429 and writes nothing. Either way a Member's request runs two D1 queries more than the route's (one when a
+//   cheap one isn't charged), of the 50 an invocation may run (ADR 0004).
 
 /** All Members together: with the re-run's 2.5 million, this leaves 1 million for the Admin, Imports, Sync and the backup. */
 export const MEMBER_DAILY_READS = 1_500_000
 /** One Member, so no one Member can use up the others' share. */
 export const EACH_MEMBER_DAILY_READS = 1_000_000
-/** A request that read fewer rows is charged this many by chance (`chargeFor`). */
+/** A cheap request that read fewer rows is charged this many by chance (`chargeFor`), and a dear one at least this many. */
 export const CHARGE_FROM_ROWS = 1_000
 
 /**
@@ -43,10 +49,59 @@ const UNCOUNTED = new Set(['/api/me', '/api/settings', '/api/features'])
 
 export const MEMBER_LIMIT_REACHED = { error: 'Daily limit reached', reason: 'member-reads' } as const
 
+/**
+ * How many times each dear route reads a Transaction, at most (ADR 0004; member-read-limit.test.ts measures each against it). Balance history
+ * (net worth, the balances Report) is about 6, measured up to 7 with Overrides and a balance check, so 8; the Loans Report reads a loan for every
+ * page and again for its opening balance, about 11; the CSV export about 7 (transaction-export.test.ts), measured up to 8.3, so 9. The Transactions Report reads a page through its index, not every Transaction, so it is 0.
+ */
+const READS_PER_TRANSACTION: Record<string, number> = {
+  '/api/charts/net-worth': 8,
+  '/api/charts/spending': 4,
+  '/api/reports/transactions': 0,
+  '/api/reports/spending': 4,
+  '/api/reports/income-vs-spending': 4,
+  '/api/reports/loans': 11,
+  '/api/reports/balances': 8,
+  '/api/reports/budget-vs-actual': 4,
+  '/api/budgets/vs-actual': 4,
+  '/api/transactions/export.csv': 9,
+}
+/** A chart or Report not in the list is held as the dearest, so a new one is never cheap by mistake. */
+const UNLISTED_READS = Math.max(...Object.values(READS_PER_TRANSACTION))
+
+/**
+ * How many times a dear request reads each Transaction, at most, and 0 for a cheap one. The query string is read as sent: the route validates
+ * it afterwards, and a refused one reads nothing more.
+ */
+export function readsPerTransaction(path: string, params: URLSearchParams): number {
+  const listed = READS_PER_TRANSACTION[path]
+  if (listed !== undefined) return listed
+  if (path.startsWith('/api/charts/') || path.startsWith('/api/reports/')) return UNLISTED_READS
+  if (path !== '/api/transactions') return 0
+  const sort = params.get('sort') ?? 'date'
+  const count = params.get('count')
+  const counts = count === 'true' || count === 'only' || (count === null && Number(params.get('offset') ?? 0) === 0) // as the route reads it: offset=00 is the first page
+  return (sort === 'date' ? 0 : 4) + ((params.get('text') ?? '').trim() === '' ? 0 : 2) + (counts ? 1 : 0)
+}
+
+// ?1 the UTC day, ?2 the Member's key for it.
 const TODAY = `SELECT COALESCE(SUM(rows_read), 0) AS everyone, COALESCE(SUM(CASE WHEN member_key = ?2 THEN rows_read END), 0) AS mine
   FROM member_read_usage WHERE usage_day = ?1`
 const CHARGE = `INSERT INTO member_read_usage (member_key, usage_day, rows_read) VALUES (?2, ?1, ?3)
   ON CONFLICT (member_key) DO UPDATE SET rows_read = rows_read + excluded.rows_read`
+// The hold: ?3 reads for each Transaction, CHARGE_FROM_ROWS (?4) at the least. Adds it only while neither limit (?5 everyone, ?6 one Member)
+// has been reached, and hands it back; no row comes back when one has.
+const HOLD = `MAX(?4, ?3 * COALESCE((SELECT MAX(id) FROM transactions), 0))`
+const RESERVE = `INSERT INTO member_read_usage (member_key, usage_day, rows_read)
+  SELECT ?2, ?1, ${HOLD}
+  WHERE (SELECT COALESCE(SUM(rows_read), 0) FROM member_read_usage WHERE usage_day = ?1) < ?5
+    AND (SELECT COALESCE(SUM(rows_read), 0) FROM member_read_usage WHERE usage_day = ?1 AND member_key = ?2) < ?6
+  ON CONFLICT (member_key) DO UPDATE SET rows_read = rows_read + excluded.rows_read
+  RETURNING ${HOLD} AS hold`
+// Charges ?3 to the day the reads finished (?1, the key ?2), less the hold (?4): the hold when that is the day it was reserved on (the same
+// key), and 0 when not, since a hold reserved on the day before is on that day's row, which the trigger clears, and not on this one.
+const SETTLE = `INSERT INTO member_read_usage (member_key, usage_day, rows_read) VALUES (?2, ?1, ?3)
+  ON CONFLICT (member_key) DO UPDATE SET rows_read = MAX(0, rows_read + excluded.rows_read - ?4)`
 
 /** A Member's key for a day: no email is stored, and yesterday's key says nothing about today's. */
 export const memberKey = (day: string, email: string) => sha256Hex(new TextEncoder().encode(`${day}\n${email}`))
@@ -86,27 +141,43 @@ export function countingReads(db: D1Database, tally: { rows: number }): D1Databa
   } as unknown as D1Database
 }
 
-/** Counts a Member's reads, refuses them past the limits, and charges each request what `chargeFor` says. */
+/** Counts a Member's reads, refuses them past the limits, and charges them: a dear request by a hold settled afterwards, a cheap one by `chargeFor`. */
 export const memberReadLimit = createMiddleware<AppEnv>(async (c, next) => {
   const { member } = c.var
   if (member.role === 'admin' || isWrite(c.req.method) || UNCOUNTED.has(c.req.path)) return next()
   const db = c.env.DB
   const day = utcDay(new Date())
   const key = await memberKey(day, member.email)
-  const today = await db.prepare(TODAY).bind(day, key).first<{ everyone: number; mine: number }>()
-  if (today!.everyone >= MEMBER_DAILY_READS || today!.mine >= EACH_MEMBER_DAILY_READS) {
-    logEvent('request.member-read-limit', { count: today!.mine })
-    return c.json(MEMBER_LIMIT_REACHED, 429)
+  const perTransaction = readsPerTransaction(c.req.path, new URL(c.req.url).searchParams)
+  let hold = 0
+  if (perTransaction > 0) {
+    const held = await db.prepare(RESERVE).bind(day, key, perTransaction, CHARGE_FROM_ROWS, MEMBER_DAILY_READS, EACH_MEMBER_DAILY_READS).first<{ hold: number }>()
+    if (!held) return refused()
+    hold = held.hold
+  } else {
+    const today = await db.prepare(TODAY).bind(day, key).first<{ everyone: number; mine: number }>()
+    if (today!.everyone >= MEMBER_DAILY_READS || today!.mine >= EACH_MEMBER_DAILY_READS) return refused()
   }
   const tally = { rows: 0 }
   c.env = { ...c.env, DB: countingReads(db, tally) }
-  await next()
-  const charge = chargeFor(tally.rows)
-  if (charge === 0) return
-  // The answer is already made: a charge that fails (D1's daily writes gone, say) is logged rather than turned into an error for a read that worked.
   try {
-    await db.prepare(CHARGE).bind(day, key, charge).run()
-  } catch (error) {
-    logEvent('request.member-read-charge-failed', { error })
+    await next()
+  } finally {
+    // The answer is already made: a charge that fails (D1's daily writes gone, say) is logged rather than turned into an error for a read that
+    // worked. A dear request's hold then stays charged, so the limits still hold.
+    const finished = utcDay(new Date())
+    const finishedKey = finished === day ? key : await memberKey(finished, member.email)
+    const charge = hold > 0 ? Math.max(tally.rows, CHARGE_FROM_ROWS) : chargeFor(tally.rows)
+    try {
+      if (hold > 0) await db.prepare(SETTLE).bind(finished, finishedKey, charge, finished === day ? hold : 0).run()
+      else if (charge > 0) await db.prepare(CHARGE).bind(finished, finishedKey, charge).run()
+    } catch (error) {
+      logEvent('request.member-read-charge-failed', { error })
+    }
+  }
+
+  function refused() {
+    logEvent('request.member-read-limit')
+    return c.json(MEMBER_LIMIT_REACHED, 429)
   }
 })

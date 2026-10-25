@@ -1,7 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CHARGE_FROM_ROWS, chargeFor, countingReads, EACH_MEMBER_DAILY_READS, MEMBER_DAILY_READS, MEMBER_LIMIT_REACHED, memberKey } from './member-read-limit'
+import { CHARGE_FROM_ROWS, chargeFor, countingReads, readsPerTransaction, EACH_MEMBER_DAILY_READS, MEMBER_DAILY_READS, MEMBER_LIMIT_REACHED, memberKey } from './member-read-limit'
 import worker from './index'
 import { utcDay } from './rule-rerun'
 
@@ -21,6 +21,60 @@ const seed = (key: string, day: string, rows: number) => env.DB.prepare('INSERT 
 // A cheap read (the Categories, a few dozen rows) and a dear one (net worth reads every Transaction several times; ADR 0004).
 const CHEAP = '/api/categories'
 const DEAR = '/api/charts/net-worth?range=all'
+const TRANSACTIONS = 1_200 // more than one chunk of the CSV export (EXPORT_CHUNK_ROWS), so its sizing is measured
+const YEAR = { from: '2025-10-01', to: '2026-09-30' } // the dates the Transactions below are in
+// Every dear route, as a Member would ask it, with its reads for each Transaction.
+const DEAR_ROUTES = [
+  { path: DEAR, perTransaction: 8 },
+  { path: `/api/charts/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
+  { path: '/api/transactions?sort=amount', perTransaction: 5 },
+  { path: '/api/transactions?text=EXAMPLE', perTransaction: 3 },
+  { path: `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 9 },
+  { path: `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
+  { path: `/api/reports/income-vs-spending?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
+  { path: `/api/reports/loans?categoryId=LOANS&to=${YEAR.to}`, perTransaction: 11 },
+  { path: `/api/reports/balances?accountId=ACCOUNT&from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 8 },
+  { path: `/api/reports/budget-vs-actual?from=${YEAR.from}&to=${YEAR.to}`, perTransaction: 4 },
+  { path: '/api/budgets/vs-actual?month=2026-03', perTransaction: 4 },
+]
+/** The hold a dear request reserves: its reads for each Transaction times the highest Transaction ID (the count here, as beforeEach starts the IDs again). */
+const holdOf = async (perTransaction: number) =>
+  perTransaction * (await env.DB.prepare('SELECT MAX(id) AS id FROM transactions').first<{ id: number }>())!.id
+
+/** The Worker's own handler, called with `db` standing in for D1 (CODING_STANDARDS.md: Tests), as `who`. */
+async function fetchWith(db: D1Database, path: string, who: Who) {
+  const ctx = createExecutionContext()
+  const res = await worker.fetch!(new Request(`${origin}${path}`, { headers: { Cookie: `fernledger_dev_as=${who}` } }) as never, { ...env, DB: db }, ctx)
+  await waitOnExecutionContext(ctx)
+  return res
+}
+/**
+ * What the Reports need to read their most: a balance check for balance history, a Budget, and half the Transactions given the Loans
+ * Category. Gives back what turns a path's ACCOUNT and LOANS into those IDs.
+ */
+async function historyForReports() {
+  const ids = (await env.DB.prepare("SELECT (SELECT id FROM accounts) AS account, (SELECT id FROM categories WHERE kind = 'loans' ORDER BY id LIMIT 1) AS loans, (SELECT id FROM categories WHERE kind = 'spending' ORDER BY id LIMIT 1) AS spending").first<{ account: number; loans: number; spending: number }>())!
+  await env.DB.batch([
+    env.DB.prepare('UPDATE transactions SET override_category = CASE WHEN id % 2 = 0 THEN ?1 ELSE ?2 END').bind(ids.loans, ids.spending),
+    env.DB.prepare("INSERT INTO balance_checks (account_id, as_of_date, bank_cents, source, through_transaction_id, status) VALUES (?1, '2026-09-30', 123456, 'import', (SELECT MAX(id) FROM transactions), 'alone')").bind(ids.account),
+    env.DB.prepare("INSERT INTO budgets (category_id, effective_from_month, amount_cents) VALUES (?1, '2025-10', 50000)").bind(ids.spending),
+  ])
+  return (path: string) => path.replace('ACCOUNT', String(ids.account)).replace('LOANS', String(ids.loans))
+}
+
+/** D1 whose charges (a cheap request's and a dear one's settling, which share their VALUES) fail, as when D1's daily writes are gone. */
+const failingCharges = () =>
+  withDb((target, sql) => (sql.includes('VALUES (?2, ?1, ?3)') ? ({ bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } as never) : target.prepare(sql)))
+
+/** D1 whose `prepare` goes through `prepare(target, sql)`. */
+const withDb = (prepare: (target: D1Database, sql: string) => D1PreparedStatement) =>
+  new Proxy(env.DB, {
+    get(target, property) {
+      if (property === 'prepare') return (sql: string) => prepare(target, sql)
+      const value = Reflect.get(target, property)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
 
 // The draw a small read is charged by. Mulberry32, so a seeded run gives the same draws every time.
 const seeded = (seed: number) => () => {
@@ -41,10 +95,13 @@ afterEach(() => vi.restoreAllMocks())
 
 beforeEach(async () => {
   drawWith(() => NEVER) // so a test that does not draw on purpose sees no small read charged
-  await env.DB.batch(['member_read_usage', 'transactions', 'accounts'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)))
+  await env.DB.batch([
+    ...['member_read_usage', 'kept_reports', 'budgets', 'balance_checks', 'transactions', 'accounts'].map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
+    env.DB.prepare("DELETE FROM sqlite_sequence WHERE name = 'transactions'"), // so the highest ID is the count, as in a database never cleared
+  ])
   await env.DB.prepare("INSERT INTO accounts (name, account_number) VALUES ('Example everyday', '99-9999-9999999-99')").run()
   await env.DB.prepare(
-    `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < 400)
+    `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${TRANSACTIONS})
      INSERT INTO transactions (account_id, date, amount_cents, description, source)
      SELECT (SELECT id FROM accounts), date('2025-10-01', '+' || (i % 365) || ' days'), -100, 'EXAMPLE ' || i, 'import' FROM seq`,
   ).run()
@@ -70,6 +127,48 @@ describe('counting a Member\'s reads', () => {
     expect(column).toBe(first!.id)
     expect(raw[0]).toEqual(['id', 'description'])
     expect(raw).toHaveLength(all.results.length + 1)
+  })
+})
+
+describe('which requests are dear', () => {
+  it('holds by the reads for each Transaction for net worth, the other charts and a Transaction list that searches, sorts or counts', () => {
+    const per = (path: string, query = '') => readsPerTransaction(path, new URLSearchParams(query))
+
+    expect(per('/api/charts/net-worth', 'range=all')).toBe(8)
+    expect(per('/api/charts/spending', 'period=this-month')).toBe(4)
+    expect(per('/api/transactions')).toBe(1) // the first page counts
+    expect(per('/api/transactions', 'offset=200')).toBe(0)
+    expect(per('/api/transactions', 'offset=00')).toBe(1) // the route reads it as the first page, which counts
+    expect(per('/api/transactions', 'count=false')).toBe(0)
+    expect(per('/api/transactions', 'count=only')).toBe(1)
+    expect(per('/api/transactions', 'count=false&text=EXAMPLE')).toBe(2)
+    expect(per('/api/transactions', 'count=false&text=%20%20')).toBe(0)
+    expect(per('/api/transactions', 'count=false&sort=amount')).toBe(4)
+    expect(per('/api/transactions', 'sort=date&offset=200')).toBe(0)
+    expect(per('/api/categories')).toBe(0)
+    expect(per('/api/transactions/pending')).toBe(0)
+    expect(per('/api/transactions/export.csv')).toBe(9)
+    expect(per('/api/reports/transactions')).toBe(0) // a page through its index
+    expect(per('/api/reports/spending')).toBe(4)
+    expect(per('/api/reports/loans')).toBe(11)
+    expect(per('/api/reports/balances')).toBe(8)
+    expect(per('/api/budgets/vs-actual')).toBe(4)
+    expect(per('/api/budgets')).toBe(0)
+    expect(per('/api/reports/some-new-report')).toBe(11) // a Report not in the list is held as the dearest
+    expect(per('/api/charts/some-new-chart')).toBe(11)
+  })
+
+  // Every dear route's reads, measured, are within its reads for each Transaction times the number of Transactions (not the highest ID, which
+  // only makes a hold larger): otherwise requests sent together could pass a limit by the difference.
+  it.each(DEAR_ROUTES.map((r) => [r.path, r.perTransaction]))('holds enough for %s', async (path, perTransaction) => {
+    const url = new URL((await historyForReports())(path), origin)
+    const tally = { rows: 0 }
+    const res = await fetchWith(countingReads(env.DB, tally), url.pathname + url.search, 'admin')
+
+    expect(res.status, await res.clone().text()).toBe(200)
+    expect(readsPerTransaction(url.pathname, url.searchParams)).toBe(perTransaction)
+    expect(tally.rows).toBeGreaterThan(TRANSACTIONS / 4) // it read the seeded history, not an empty answer
+    expect(tally.rows).toBeLessThanOrEqual(perTransaction * TRANSACTIONS)
   })
 })
 
@@ -176,20 +275,160 @@ describe('the Members\' daily limit', () => {
     expect(await charged('other')).toBe(5_000)
   })
 
-  it('still answers a read whose charge fails', async () => {
-    const failing = new Proxy(env.DB, {
-      get(target, property) {
-        if (property === 'prepare') return (sql: string) => (sql.startsWith('INSERT INTO member_read_usage') ? { bind: () => ({ run: () => Promise.reject(new Error('D1 is full')) }) } : target.prepare(sql))
-        const value = Reflect.get(target, property)
-        return typeof value === 'function' ? value.bind(target) : value
-      },
-    })
-    const ctx = createExecutionContext()
-    const res = await worker.fetch!(new Request(`${origin}${DEAR}`, { headers: { Cookie: 'fernledger_dev_as=member' } }) as never, { ...env, DB: failing }, ctx)
-    await waitOnExecutionContext(ctx)
+  it('still answers a dear read whose settling fails, and keeps its hold charged so the limits still hold', async () => {
+    const failing = failingCharges()
 
-    expect(res.status).toBe(200)
+    expect((await fetchWith(failing, DEAR, 'member')).status).toBe(200)
+    expect(await charged('member')).toBe(await holdOf(8)) // the hold: net worth's 8 reads for each Transaction
+  })
+
+  it('still answers a cheap read whose charge fails', async () => {
+    drawWith(() => 0) // the draw charges it
+    const failing = failingCharges()
+
+    expect((await fetchWith(failing, CHEAP, 'member')).status).toBe(200)
     expect(await usage()).toEqual([])
+  })
+
+  describe('with few Transactions or none', () => {
+    beforeEach(() => env.DB.prepare('DELETE FROM transactions').run())
+
+    it('holds CHARGE_FROM_ROWS at the least, and keeps it when settling fails', async () => {
+      const failing = failingCharges()
+
+      expect((await fetchWith(failing, DEAR, 'member')).status).toBe(200)
+      expect(await charged('member')).toBe(CHARGE_FROM_ROWS)
+    })
+
+    it('charges a dear request CHARGE_FROM_ROWS at the least, so dear requests write at most about 2 * MEMBER_DAILY_READS / CHARGE_FROM_ROWS rows a day', async () => {
+      const tally = { rows: 0 }
+      await fetchWith(countingReads(env.DB, tally), DEAR, 'admin')
+      expect(tally.rows).toBeLessThan(CHARGE_FROM_ROWS) // it reads next to nothing
+
+      for (let i = 1; i <= 3; i++) {
+        expect((await call(DEAR, 'member')).status).toBe(200)
+        expect(await charged('member')).toBe(i * CHARGE_FROM_ROWS)
+      }
+    })
+
+    it('still lets only one dear request past a limit when they are sent together', async () => {
+      await seed(await memberKey(today(), EMAIL.member), today(), EACH_MEMBER_DAILY_READS - 1)
+
+      const statuses = await Promise.all(Array.from({ length: 8 }, () => fetchWith(env.DB, DEAR, 'member').then((res) => res.status)))
+
+      expect(statuses.filter((s) => s === 200)).toHaveLength(1)
+    })
+  })
+
+  it('settles a dear request to exactly what it read', async () => {
+    const tally = { rows: 0 }
+    await fetchWith(countingReads(env.DB, tally), DEAR, 'admin') // the Admin's request reads what the route reads, and is never charged
+
+    expect((await call(DEAR, 'member')).status).toBe(200)
+    expect(tally.rows).toBeGreaterThan(CHARGE_FROM_ROWS)
+    expect(tally.rows).not.toBe(await holdOf(8)) // so the charge below is the reads, not the hold
+    expect(await charged('member')).toBe(tally.rows)
+  })
+
+  describe('a request that runs across 00:00 UTC', () => {
+    // The clock passes 00:00 UTC while the route reads.
+    const acrossMidnight = async (path: string) => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-25T23:59:59.900Z'))
+      const midnight = withDb((target, sql) => {
+        if (!sql.includes('member_read_usage')) vi.setSystemTime(new Date('2026-10-26T00:00:00.100Z'))
+        return target.prepare(sql)
+      })
+      try {
+        return await fetchWith(midnight, path, 'member')
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+    const reads = async (path: string) => {
+      const tally = { rows: 0 }
+      await fetchWith(countingReads(env.DB, tally), path, 'admin')
+      return tally.rows
+    }
+
+    it('charges a dear one to the day its reads finished, and the hold on the day before goes with that day', async () => {
+      const read = await reads(DEAR)
+
+      expect((await acrossMidnight(DEAR)).status).toBe(200)
+      const rows = await usage()
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toEqual({ usage_day: '2026-10-26', member_key: await memberKey('2026-10-26', EMAIL.member), rows_read: read })
+    })
+
+    it('takes nothing off what the new day has already charged the Member', async () => {
+      const read = await reads(DEAR)
+      await seed(await memberKey('2026-10-26', EMAIL.member), '2026-10-26', 5_000) // another request already charged on the 26th
+
+      expect((await acrossMidnight(DEAR)).status).toBe(200)
+      expect((await usage()).find((r) => r.usage_day === '2026-10-26')).toMatchObject({ rows_read: 5_000 + read })
+    })
+
+    it('charges a cheap one to the day its reads finished', async () => {
+      drawWith(() => 0) // the draw charges it
+
+      expect((await acrossMidnight(CHEAP)).status).toBe(200)
+      expect(await usage()).toEqual([{ usage_day: '2026-10-26', member_key: await memberKey('2026-10-26', EMAIL.member), rows_read: CHARGE_FROM_ROWS }])
+    })
+  })
+
+  describe('requests sent together', () => {
+    const K = 8
+    const together = (path: string, who: 'member' | 'other') => Promise.all(Array.from({ length: K }, () => fetchWith(env.DB, path, who).then((res) => res.status)))
+
+    // A Member reads a Report only once the Admin has kept it (kept-reports.ts).
+    const keep = (report: string) =>
+      env.DB.prepare("INSERT INTO kept_reports (report, account_id, from_date, to_date, made_by) VALUES (?, NULL, ?, ?, 'admin@example.com')").bind(report, YEAR.from, YEAR.to).run()
+
+    it.each([
+      DEAR,
+      '/api/transactions?sort=amount',
+      '/api/transactions?text=EXAMPLE',
+      '/api/transactions?count=only',
+      `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`,
+      '/api/budgets/vs-actual?month=2026-03',
+      `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`,
+      `/api/reports/budget-vs-actual?from=${YEAR.from}&to=${YEAR.to}`,
+    ])(
+      'let at most one past one Member\'s limit: %s',
+      async (path) => {
+        await keep('spending')
+        await keep('budget-vs-actual')
+        await seed(await memberKey(today(), EMAIL.member), today(), EACH_MEMBER_DAILY_READS - 1)
+
+        const statuses = await together(path, 'member')
+
+        expect(statuses.filter((s) => s === 200)).toHaveLength(1)
+        expect(statuses.filter((s) => s === 429)).toHaveLength(K - 1)
+      },
+    )
+
+    it.each([DEAR, '/api/transactions?sort=amount', `/api/transactions/export.csv?from=${YEAR.from}&to=${YEAR.to}`, `/api/reports/spending?from=${YEAR.from}&to=${YEAR.to}`, `/api/reports/budget-vs-actual?from=${YEAR.from}&to=${YEAR.to}`, '/api/budgets/vs-actual?month=2026-03'])('let at most one past all Members\' limit: %s', async (path) => {
+      await keep('spending')
+      await keep('budget-vs-actual')
+      const tally = { rows: 0 }
+      await fetchWith(countingReads(env.DB, tally), path, 'admin')
+      await seed('another member', today(), MEMBER_DAILY_READS - 1)
+
+      const statuses = await together(path, 'member')
+
+      expect(statuses.filter((s) => s === 200)).toHaveLength(1)
+      // One request's reads (1,000 at the least, and a row or two more for a Member's kept-Report check): the refused ones' holds were never added.
+      expect(await charged('member')).toBeGreaterThanOrEqual(Math.max(tally.rows, CHARGE_FROM_ROWS))
+      expect(await charged('member')).toBeLessThanOrEqual(Math.max(tally.rows, CHARGE_FROM_ROWS) + 3)
+    })
+
+    it('all pass, and are all charged, while well under the limits', async () => {
+      const tally = { rows: 0 }
+      await fetchWith(countingReads(env.DB, tally), DEAR, 'admin')
+
+      expect(await together(DEAR, 'member')).toEqual(Array(K).fill(200))
+      expect(await charged('member')).toBe(K * tally.rows)
+    })
   })
 
   it('starts each UTC day at nothing, and the next charge clears the days before', async () => {

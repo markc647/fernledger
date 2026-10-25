@@ -694,7 +694,11 @@ describe('a Member reading a Report', () => {
     // No chance charge of the Members' daily limit (member-read-limit.ts), whose write would read a row or two more.
     vi.spyOn(crypto, 'getRandomValues').mockImplementation(<T extends ArrayBufferView | null>(array: T) => (array as unknown as Uint32Array).fill(0xffffffff) as unknown as T)
     const rowsRead = async (who: Who) => {
-      const { db, usage } = meteredDb()
+      const { db: metered, usage } = meteredDb()
+      // The Members' daily limit's own statements (its hold and settling; member-read-limit.test.ts measures them) are left out of the count.
+      const db = new Proxy(metered, {
+        get: (target, property) => (property === 'prepare' ? (sql: string) => (sql.includes('member_read_usage') ? env.DB.prepare(sql) : target.prepare(sql)) : Reflect.get(target, property)),
+      })
       const ctx = createExecutionContext()
       const res = await worker.fetch!(new Request(`${origin}/api/reports/spending?from=2026-10-01&to=2026-10-31`, { headers: { Cookie: `fernledger_dev_as=${who}` } }) as never, { ...env, DB: db }, ctx)
       await waitOnExecutionContext(ctx)

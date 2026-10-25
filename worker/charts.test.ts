@@ -1,6 +1,6 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import worker from './index'
 import { EVERY_DATE, MAX_NET_WORTH_ACCOUNTS, type NetWorth, type NetWorthRange } from './net-worth'
 import { monthEnd, monthsBefore, monthStart, nzMonth } from './months'
@@ -311,16 +311,13 @@ describe('net worth\'s cost (ADR 0004)', () => {
   it('uses one statement for the list and one for each Account, and with the most Accounts it reads a request from a Member stays within the 50 the free plan allows', async () => {
     await addAccounts(MAX_NET_WORTH_ACCOUNTS)
 
-    // The draw charges this small read, so the request runs the limit's check and its charge: the most queries a Member's request adds.
-    vi.spyOn(crypto, 'getRandomValues').mockImplementation(((words: Uint32Array) => words.fill(0)) as never)
     const { res, watched } = await measured('/api/charts/net-worth?range=24-months', 'member')
-    vi.restoreAllMocks()
 
     const body = (await res.json()) as NetWorth
     expect(res.status).toBe(200)
     expect(body.tooManyAccounts).toBeNull()
     expect(body.notCounted).toHaveLength(MAX_NET_WORTH_ACCOUNTS) // none has a balance
-    const limit = watched.prepared.filter((sql) => sql.includes('member_read_usage')) // the Members' daily limit: its check, and a charge when the request read enough
+    const limit = watched.prepared.filter((sql) => sql.includes('member_read_usage')) // the Members' daily limit: net worth is dear, so its hold and its settling
     expect(limit).toHaveLength(2)
     expect(watched.prepared).toHaveLength(1 + MAX_NET_WORTH_ACCOUNTS + 2)
     expect(watched.prepared.length).toBeLessThanOrEqual(50)

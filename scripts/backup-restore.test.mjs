@@ -427,7 +427,8 @@ test('restore will not clear the starter Categories while a table that refers to
 
 test('every text a backup holds comes back exactly through the real `wrangler d1 execute --local --file`', async () => {
   // Wrangler edits a --file as plain text before running it, so these are the kinds of text it could reach: its own
-  // transaction words, statement and comment syntax, quotes, line breaks, every ASCII character and some that aren't.
+  // transaction words, statement and comment syntax, quotes, line breaks, control characters, every ASCII character and some that
+  // aren't. Each goes as hex or as a quoted literal (backup-format.ts), so both are loaded here.
   const values = [
     'REF COMMIT; PAYEE',
     'BEGIN TRANSACTION; DUMMY',
@@ -435,8 +436,9 @@ test('every text a backup holds comes back exactly through the real `wrangler d1
     'begin transaction; commit;',
     "O'Brien \"quoted\"; DROP TABLE settings; -- /* not a comment */",
     'Line one\r\nLine two\rLine three\n',
+    'NUL\u0000inside, and a bell\u0007',
     'Café ☕ Māori ā 𝄞',
-    Array.from({ length: 127 }, (_, i) => String.fromCharCode(i + 1)).join(''),
+    Array.from({ length: 128 }, (_, i) => String.fromCharCode(i)).join(''), // every ASCII character, NUL included
     '',
   ]
   const dir = tempDir()
