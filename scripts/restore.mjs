@@ -11,7 +11,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BackupFormatError, checkPart, insertStatements, loadOrder, parseManifest, quote } from '../worker/backup-format.ts'
+import { ownTables, rowCounts } from './backup-run.mjs'
 import { ScriptError, confirmAccount, createRunner, main, readResourceNames } from './wrangler-cli.mjs'
+
+// The database's own tables, of `sqlite_master m`: D1 keeps tables of its own (`_cf_KV`) and refuses with SQLITE_AUTH a query that reads their
+// columns or keys through a pragma, remotely and locally.
+const OWN_TABLES = ownTables('m.')
 
 const args = process.argv.slice(2)
 const dryRun = args.includes('--dry-run')
@@ -65,7 +70,7 @@ await main(async () => {
 
     // The target must already have the schema, and be empty: a restore adds rows, it never overwrites any.
     const columns = new Map()
-    for (const { tbl, col } of query("SELECT m.name AS tbl, p.name AS col FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE m.type = 'table'")) {
+    for (const { tbl, col } of query(`SELECT m.name AS tbl, p.name AS col FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE ${OWN_TABLES}`)) {
       if (!columns.has(tbl)) columns.set(tbl, new Set())
       columns.get(tbl).add(col)
     }
@@ -76,14 +81,14 @@ await main(async () => {
     // A newer schema may have extra columns (migrations only add). A column the backup has and the target lacks would lose data.
     const lacking = manifest.tables.flatMap((t) => t.columns.filter((c) => !columns.get(t.name).has(c)).map((c) => `${t.name}.${c}`))
     if (lacking.length) throw new ScriptError(`Database "${database}" lacks ${lacking.join(', ')}, which the backup has. It is on an older schema: apply the migrations first.`)
-    const countSql = manifest.tables.map((t) => `SELECT '${t.name.replaceAll("'", "''")}' AS name, count(*) AS n FROM ${quote(t.name)}`).join(' UNION ALL ')
-    const counts = () => new Map(query(countSql).map((r) => [r.name, r.n]))
+    const count = rowCounts(manifest.tables.map((t) => t.name))
+    const counts = () => count.read(query(count.sql))
     // A migration may seed a table (the starter Categories), so a freshly migrated database isn't quite empty. If every other
     // table is empty, nothing the Admin did can be in the seeded ones (any Admin change leaves a Change Log row), so they hold
     // only the seed and the restore replaces them with the backup's own rows. A backup that predates the seeded table leaves
     // the seed alone. Deleting seed rows can't break a foreign key: a table that refers to them must be empty too, even when
     // the backup doesn't include it.
-    const references = query("SELECT m.name AS tbl, f.\"table\" AS ref FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE m.type = 'table'").map((r) => [r.tbl, r.ref])
+    const references = query(`SELECT m.name AS tbl, f."table" AS ref FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE ${OWN_TABLES}`).map((r) => [r.tbl, r.ref])
     const notEmpty = [...counts()].filter(([name, n]) => n !== 0 && !SEEDED_TABLES.includes(name)).map(([name]) => name)
     const clearSeeded = manifest.tables.filter((t) => SEEDED_TABLES.includes(t.name) && counts().get(t.name) !== 0).map((t) => t.name)
     const referrers = new Set(references.filter(([table, ref]) => table !== ref && clearSeeded.includes(ref)).map(([table]) => table))

@@ -68,8 +68,26 @@ function remoteEnv(runner, { database, bucket }, work) {
   }
 }
 
-// The tables the backup looks at: the ones worker/backup.ts reads, plus those it skips.
-const OWN_TABLES = "type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name <> 'd1_migrations'"
+/**
+ * The tables the backup looks at, of `sqlite_master` (or of `${as}`): the ones worker/backup.ts reads, plus those it skips. Not SQLite's
+ * own, not D1's (`_cf_KV`: D1 refuses with SQLITE_AUTH a pragma that reads one), and not Wrangler's list of applied migrations.
+ */
+export const ownTables = (as = '') =>
+  `${as}type = 'table' AND ${as}name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND ${as}name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND ${as}name <> 'd1_migrations'`
+const OWN_TABLES = ownTables()
+
+/**
+ * One query giving each of `names`' row counts, and how to read its one row back as a Map. A column of a subquery each, not a SELECT each
+ * joined by UNION ALL: D1 refuses a compound SELECT of more than 5 terms ("too many terms in compound SELECT"). A column each, so it holds
+ * for as many tables as D1 allows result columns (about 100; a backup has 13).
+ */
+export const rowCounts = (names) => {
+  if (!names.length) throw new ScriptError('There are no tables to count.') // `SELECT ` alone is not SQL; both callers have a table at least
+  return {
+    sql: `SELECT ${names.map((name, i) => `(SELECT count(*) FROM ${quote(name)}) AS c${i}`).join(', ')}`,
+    read: (rows) => new Map(names.map((name, i) => [name, rows[0]?.[`c${i}`]])),
+  }
+}
 
 const queryRows = (runner, database, sql) => {
   const result = runner.json(['d1', 'execute', database, '--remote', '--json', '--command', sql], { quiet: true })
@@ -153,9 +171,8 @@ export function localPath(outDir, prefix, key) {
 export function liveDifferences(runner, database, manifest) {
   const problems = []
   if (manifest.tables.length) {
-    const literal = (name) => `'${name.replaceAll("'", "''")}'`
-    const sql = manifest.tables.map((t) => `SELECT ${literal(t.name)} AS name, count(*) AS n FROM ${quote(t.name)}`).join(' UNION ALL ')
-    const live = new Map(queryRows(runner, database, sql).map((r) => [r.name, r.n]))
+    const count = rowCounts(manifest.tables.map((t) => t.name))
+    const live = count.read(queryRows(runner, database, count.sql))
     for (const t of manifest.tables) {
       if (live.get(t.name) !== t.rows) problems.push(`${t.name} (backup ${t.rows} rows, database ${live.get(t.name) ?? 'unreadable'})`)
     }

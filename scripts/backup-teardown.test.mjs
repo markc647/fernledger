@@ -57,6 +57,8 @@ else if (key === 'd1 migrations apply') console.log('Applied 1 migration')
 else if (words[0] === 'deploy') console.log('Deployed')
 else if (cmd === 'd1 execute') {
   const db = new DatabaseSync(path.join(dir, words[2] + '.sqlite'))
+  // D1 refuses a compound SELECT of more than 5 terms, so this does too.
+  if (value('--command').split('UNION ALL').length > 5) fail('too many terms in compound SELECT')
   try { out([{ results: db.prepare(value('--command')).all().map((r) => ({ ...r })) }]) } catch (e) { fail('SQL error') }
 } else if (key === 'r2 object get') {
   const source = path.join(bucketDir, objectKey())
@@ -86,6 +88,7 @@ function fakeAccount({ database = true, bucket = true, data = true, accounts = [
     if (data) {
       for (const sql of migrationFiles) db.exec(sql)
       db.exec("CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO d1_migrations (name) VALUES ('0201_settings.sql')")
+      db.exec('CREATE TABLE _cf_KV (key TEXT PRIMARY KEY, value BLOB)') // a table of D1's own, as every D1 database has
       db.exec(`INSERT INTO settings (key, value) VALUES ('app_title', 'Fern''s money'), ('about_contact', 'Sam')`)
     }
     db.close() // Windows won't delete a folder holding an open database
@@ -513,12 +516,12 @@ test('teardown refuses to delete when the database changed after the backup was 
 
 test('teardown refuses to delete when the database changed while the confirmation was waiting', () => {
   const account = fakeAccount()
-  // The row-count check runs once after the backup and once right after the typed name. A write lands between them.
+  // The row-count check (backup-run.mjs rowCounts) runs once after the backup and once right after the typed name. A write lands between them.
   const writer = `
     const fs = require('node:fs'), path = require('node:path')
     const real = path.join(process.env.FAKE_DIR, 'real-wrangler.cjs')
     const args = process.argv.slice(2)
-    if (args[0] === 'd1' && args[1] === 'execute' && args.some((a) => a.includes('UNION ALL'))) {
+    if (args[0] === 'd1' && args[1] === 'execute' && args.some((a) => a.includes('(SELECT count(*) FROM'))) {
       const counter = path.join(process.env.FAKE_DIR, 'count-checks')
       const n = (fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0) + 1
       fs.writeFileSync(counter, String(n))
