@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
-import { usageFigures, usageOn } from './rule-helpers'
+import { stubPaidPlan, usageFigures, usageOn } from './rule-helpers'
 import type { D1Usage } from '../src/generated/api/d1-usage'
 import { expectTextSize, navigateTo, openHeaderControls, siteHeader, textSizeButton, textSizeGroup } from './shell-helpers'
 
@@ -32,6 +32,24 @@ const FIGURES_READ = 'Rows read today: 1,234,567 of 5,000,000'
 const FIGURES_WRITTEN = 'Rows written today: 4,321 of 100,000'
 
 test.describe("the Admin's header", () => {
+  test('has no bar on the Paid Plan, which has no daily allowance to have left (ADR 0018)', async ({ page, context }) => {
+    await signInAs(context, 'admin')
+    await stubAllowance(page)
+    await stubPaidPlan(page)
+    await page.setViewportSize(WIDE)
+    const paid = page.waitForResponse((res) => new URL(res.url()).pathname === '/api/settings')
+    await page.goto('/reports')
+    await paid // the header knows the plan
+    await expect(textSizeGroup(page)).toBeVisible()
+    await expect(bar(page)).toHaveCount(0)
+    await expect(siteHeader(page).getByText(LABEL)).toHaveCount(0)
+
+    // The same header on the Free Plan has it, so it is the plan that took it away.
+    await page.unroute('**/api/settings')
+    await page.reload()
+    await expect(bar(page)).toBeVisible()
+  })
+
   test('says how much of today is left, in one bar named for it, as an estimate, and with the word the Rules page has for it, Plenty left', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await stubAllowance(page)

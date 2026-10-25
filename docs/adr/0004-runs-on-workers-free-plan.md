@@ -2,6 +2,8 @@
 
 The app must run within the Workers Free plan, so anyone can self-host it at no cost. That rules out anything that needs Workers Paid, such as Containers or long CPU-bound requests.
 
+A site on the Workers Paid plan can say so on Settings, which lifts the daily caps below (the Members' daily read limit and the re-run's share of the day) and nothing else: the per-request limits stand on either plan ([ADR 0018](0018-paid-plan-lifts-the-daily-caps.md)).
+
 ## Consequences
 
 - Each request and cron run gets 10 ms of CPU. Waiting on D1 or `fetch` doesn't count, but parsing and looping in the Worker does. Heavy work is split up: a large CSV Import is parsed in the browser and sent in chunks of about 500 rows, and Rules re-run as SQL, not in JS loops. A CSV export is written by D1 in chunks of at most 500 Transactions and 256 KB, each one finished string, so the Worker only passes text along, and it stops at 5,000 Transactions or about 0.75 MB (`worker/transaction-export.ts`): reading and formatting 50,000 rows in JS measured about 100 ms in Node, and a 10,000-row export's own steps 4 to 6 ms in a local workerd on a busy machine, which leaves too little of 10 ms. These are estimates, since CPU can't be seen from a test; lower the limits if CPU errors (1102) show.

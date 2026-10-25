@@ -28,7 +28,7 @@ describe('GET /api/settings', () => {
   it('gives a Member the defaults before anything is set', async () => {
     const res = await send('/api/settings', { as: 'member' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ app_title: 'Fernledger', about_contact: '', about_retention: '' })
+    expect(await res.json()).toEqual({ app_title: 'Fernledger', about_contact: '', about_retention: '', cloudflare_plan: 'free' })
   })
 })
 
@@ -36,7 +36,7 @@ describe('PATCH /api/settings', () => {
   it('lets the Admin change Settings, and logs the change with before and after', async () => {
     const res = await send('/api/settings', { as: 'admin', method: 'PATCH', body: { app_title: "Mum's finances", about_contact: 'Sam, 021 000 0000' } })
     expect(res.status).toBe(200)
-    const expected = { app_title: "Mum's finances", about_contact: 'Sam, 021 000 0000', about_retention: '' }
+    const expected = { app_title: "Mum's finances", about_contact: 'Sam, 021 000 0000', about_retention: '', cloudflare_plan: 'free' }
     expect(await res.json()).toEqual(expected)
     expect(await (await send('/api/settings', { as: 'member' })).json()).toEqual(expected)
 
@@ -51,10 +51,25 @@ describe('PATCH /api/settings', () => {
     })
   })
 
+  it('lets the Admin say the Cloudflare account is on the Paid plan, and back, logging each', async () => {
+    const res = await send('/api/settings', { as: 'admin', method: 'PATCH', body: { cloudflare_plan: 'paid' } })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ cloudflare_plan: 'paid' })
+    expect(await (await send('/api/settings', { as: 'member' })).json()).toMatchObject({ cloudflare_plan: 'paid' })
+    await send('/api/settings', { as: 'admin', method: 'PATCH', body: { cloudflare_plan: 'free' } })
+    const entries = await changeLog()
+    expect(entries.map((entry) => [entry.summary, entry.before, entry.after])).toEqual(
+      expect.arrayContaining([
+        ['Changed settings: Cloudflare plan', JSON.stringify({ cloudflare_plan: 'free' }), JSON.stringify({ cloudflare_plan: 'paid' })],
+        ['Changed settings: Cloudflare plan', JSON.stringify({ cloudflare_plan: 'paid' }), JSON.stringify({ cloudflare_plan: 'free' })],
+      ]),
+    )
+  })
+
   it('changes only the Settings sent, and trims them', async () => {
     await send('/api/settings', { as: 'admin', method: 'PATCH', body: { about_retention: 'Kept until you ask' } })
     const res = await send('/api/settings', { as: 'admin', method: 'PATCH', body: { app_title: '  Nan  ' } })
-    expect(await res.json()).toEqual({ app_title: 'Nan', about_contact: '', about_retention: 'Kept until you ask' })
+    expect(await res.json()).toEqual({ app_title: 'Nan', about_contact: '', about_retention: 'Kept until you ask', cloudflare_plan: 'free' })
   })
 
   it('lets the Admin clear the About-your-data fields but not the title', async () => {
@@ -109,7 +124,7 @@ describe('PATCH /api/settings', () => {
       const res = await interrupted({ app_title: 'Dad', about_contact: 'Sam' }, patch({ about_retention: 'Kept' }))
 
       expect(res.status).toBe(200)
-      expect(await readSettings(env.DB)).toEqual({ app_title: 'Dad', about_contact: 'Sam', about_retention: 'Kept' })
+      expect(await readSettings(env.DB)).toEqual({ app_title: 'Dad', about_contact: 'Sam', about_retention: 'Kept', cloudflare_plan: 'free' })
       expect(await changeLog()).toMatchObject([{ summary: 'Changed settings: retention' }, { summary: 'Changed settings: app title, contact', before: '{"app_title":"Fernledger","about_contact":""}' }])
     })
   })
@@ -117,7 +132,7 @@ describe('PATCH /api/settings', () => {
   describe('refuses', () => {
     const logAndSettingsUntouched = async () => {
       expect(await changeLog()).toEqual([])
-      expect(await (await send('/api/settings', { as: 'member' })).json()).toEqual({ app_title: 'Fernledger', about_contact: '', about_retention: '' })
+      expect(await (await send('/api/settings', { as: 'member' })).json()).toEqual({ app_title: 'Fernledger', about_contact: '', about_retention: '', cloudflare_plan: 'free' })
     }
 
     it('a Member, without writing or logging anything', async () => {
@@ -146,6 +161,7 @@ describe('PATCH /api/settings', () => {
       ['a title over 60 characters', { app_title: 'x'.repeat(61) }, ['app_title']],
       ['a contact over 500 characters', { about_contact: 'x'.repeat(501) }, ['about_contact']],
       ['a retention that is not text', { about_retention: 7 }, ['about_retention']],
+      ['a Cloudflare plan that is neither free nor paid', { cloudflare_plan: 'business' }, ['cloudflare_plan']],
       ['several bad fields at once', { app_title: '', about_contact: null }, ['app_title', 'about_contact']],
     ])('%s, naming the field and never echoing the value', async (_name, body, fields) => {
       const res = await send('/api/settings', { as: 'admin', method: 'PATCH', body })

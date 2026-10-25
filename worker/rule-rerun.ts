@@ -39,6 +39,7 @@ import { recordChange } from './changelog'
 import { isDailyLimitError } from './d1-errors'
 import { logEvent } from './log'
 import { firstMatchingRule } from './rule-apply'
+import { PAID_PLAN } from './settings'
 
 export const RERUN_KIND = 'rules-rerun'
 
@@ -106,6 +107,8 @@ type JobRow = {
   usage_day: string | null
   day_rows_read: number
   day_rows_written: number
+  /** 1 on the Paid plan (`PAID_PLAN`), 0 on Free. */
+  paid: number
   /** Rules in use, which sets the size of a chunk: read only by the queries that answer the page (`RULES_IN_USE`). */
   rule_count?: number
 }
@@ -138,8 +141,9 @@ export type RerunJob = {
 }
 
 const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+// `paid` rides on every read of the job, so the daily share needs no query of its own (`isPaused`).
 const COLUMNS = `id, status, cursor, end_id, total_rows, done_rows, changed_rows, restarts, started_by, started_at, updated_at, finished_at,
-  usage_day, day_rows_read, day_rows_written`
+  usage_day, day_rows_read, day_rows_written, ${PAID_PLAN} AS paid`
 // The number of Rules in use, at most 100 reads. Only the queries that answer the page ask for it, so a cron run that finds nothing to do
 // reads one table.
 const RULES_IN_USE = `(SELECT COUNT(*) FROM rules WHERE removed_at IS NULL) AS rule_count`
@@ -147,9 +151,12 @@ const RULES_IN_USE = `(SELECT COUNT(*) FROM rules WHERE removed_at IS NULL) AS r
 /** The UTC day a moment is in, as D1 counts a day. */
 export const utcDay = (now: Date) => now.toISOString().slice(0, 10)
 
-/** Whether the next chunk of a running job would pass its share of today's rows. A job that has done nothing today never is. */
+/**
+ * Whether the next chunk of a running job would pass its share of today's rows. A job that has done nothing today never is, and nor is one on
+ * the Paid plan, which has no daily allowance to share.
+ */
 export function isPaused(job: JobRow, now: Date): boolean {
-  if (job.status !== 'running') return false
+  if (job.status !== 'running' || job.paid) return false
   const today = job.usage_day === utcDay(now)
   const reads = today ? job.day_rows_read : 0
   const writes = today ? job.day_rows_written : 0

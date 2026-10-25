@@ -1,5 +1,6 @@
 import type { APIRequestContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
+import { stubPaidPlan } from './rule-helpers'
 import { navigateTo } from './shell-helpers'
 
 // Ticket 30: the pages every Member can open (About your data, How to sign in) and the Home Screen app. Axe runs on both
@@ -236,6 +237,18 @@ test.describe('About your data', () => {
     await expect(section(page, 'What is held').getByRole('listitem').filter({ hasText: "Members' reads today:" })).toContainText(
       "The code also uses a key kept outside the database, so a copy of the database can't link the counts to a Member.",
     )
+  })
+
+  test("says Members' reads aren't counted on Cloudflare's Paid Plan, and only then (ADR 0018)", async ({ page, context }) => {
+    await signInAs(context, 'member')
+    const reads = (p: Page) => section(p, 'What is held').getByRole('listitem').filter({ hasText: "Members' reads today:" })
+    await page.goto('/about-your-data')
+    await expect(reads(page)).toContainText('Earlier days')
+    await expect(reads(page)).not.toContainText('Paid Plan')
+
+    await stubPaidPlan(page)
+    await page.reload()
+    await expect(reads(page)).toContainText("This Fernledger is on Cloudflare's Paid Plan, which has no daily limit to share, so Members' reads aren't counted and nothing new is kept here.")
   })
 
   test('says so, rather than showing neutral lines, when the Settings cannot be loaded', async ({ page, context }) => {

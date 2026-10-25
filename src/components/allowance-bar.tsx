@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { allowanceLeft, ESTIMATE_NOTE, FILL, resetSentence, TONE, type Level } from '@/lib/d1-usage'
 import { d1AllowanceQuery } from '@/lib/d1-usage-query'
 import { featuresQuery } from '@/lib/features'
+import { settingsQuery } from '@/lib/settings'
 import { useMediaQuery } from '@/lib/use-media-query'
 import { cn } from '@/lib/utils'
 
@@ -26,7 +27,9 @@ const LABEL = 'Free allowance left today'
  */
 export function useAllowanceOn(admin: boolean) {
   const { data: features } = useQuery({ ...featuresQuery, enabled: admin })
-  return admin && features?.find((candidate) => candidate.id === 'd1-usage')?.enabled === true
+  // The bar is what is left of a Free Plan day, so it is not shown on the Paid Plan, nor until the Settings say which (ADR 0018).
+  const { data: settings } = useQuery(settingsQuery)
+  return admin && settings?.cloudflare_plan === 'free' && features?.find((candidate) => candidate.id === 'd1-usage')?.enabled === true
 }
 
 /**

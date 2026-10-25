@@ -3,10 +3,11 @@ import { useId } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { FILL, LEVEL_WORDS, meters, resetSentence, STALE_NOTE, TONE, unavailableNote, type Meter } from '@/lib/d1-usage'
+import { FILL, LEVEL_WORDS, meters, paidSentence, resetSentence, STALE_NOTE, TONE, unavailableNote, type Meter } from '@/lib/d1-usage'
 import { d1UsageQuery } from '@/lib/d1-usage-query'
 import { featuresQuery } from '@/lib/features'
 import { HttpError } from '@/lib/me'
+import { settingsQuery } from '@/lib/settings'
 
 /**
  * The Admin's D1 usage, in two places on the Rules page: the question that opens before the Rules are applied to all Transactions (an alert dialog), and the frame of a run that is
@@ -18,17 +19,20 @@ import { HttpError } from '@/lib/me'
  */
 export function D1UsageBar() {
   const { data: features } = useQuery(featuresQuery)
+  const { data: settings } = useQuery(settingsQuery)
   const feature = features?.find((candidate) => candidate.id === 'd1-usage')
   const on = feature?.enabled === true
   const usage = useQuery({ ...d1UsageQuery, enabled: on })
   const heading = useId()
+  // On the Paid Plan there is no daily allowance: today's figures, without bars against the Free Plan's day or its words.
+  const paid = settings?.cloudflare_plan === 'paid'
 
   // Nothing until the Worker has said whether it is set up, and nothing if it could not say: the panel is complete without this.
   if (!feature) return null
   return (
     <section aria-labelledby={heading} className="mt-3">
       <h3 id={heading} className="text-lg font-medium">
-        Free database allowance
+        {paid ? 'Database usage today' : 'Free database allowance'}
       </h3>
       {!on ? (
         // Setup needed (GLOSSARY): optional, so it reads as an offer and not a fault. The words, the steps included, are the Worker's.
@@ -41,6 +45,11 @@ export function D1UsageBar() {
             Check again
           </Button>
         </div>
+      ) : usage.data && paid ? (
+        <>
+          <p className="mt-1">{paidSentence(usage.data)}</p>
+          <p className="mt-1 text-muted-foreground">{STALE_NOTE}</p>
+        </>
       ) : usage.data ? (
         <>
           {meters(usage.data).map((meter) => (

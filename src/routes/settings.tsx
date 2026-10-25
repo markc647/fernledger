@@ -7,6 +7,8 @@ import { HelpHeading, PageHeading } from '@/components/help-sheet'
 import { Status } from '@/components/status'
 import { SyncNow } from '@/components/sync-now'
 import { Button } from '@/components/ui/button'
+import { Field, FieldContent, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Switch } from '@/components/ui/switch'
 import { api } from '@/lib/api'
 import { featuresQuery } from '@/lib/features'
 import { formatDate } from '@/lib/format'
@@ -23,6 +25,7 @@ const FIELD_LABELS: Record<keyof Settings, string> = {
   app_title: 'App title',
   about_contact: 'Who to contact about this data',
   about_retention: 'How long the data is kept',
+  cloudflare_plan: 'Cloudflare Paid Plan',
 }
 
 const inputStyle =
@@ -133,6 +136,29 @@ function SettingsForm({ saved }: { saved: Settings }) {
           </label>
           <textarea {...field('about_retention')} rows={3} maxLength={500} className={inputStyle} />
         </div>
+      </fieldset>
+      {/* The Cloudflare account's plan: only the Admin knows it, and Fernledger can't check it (ADR 0018). Off is the Free Plan. */}
+      <fieldset className="space-y-3">
+        <legend className="text-lg font-semibold">Cloudflare plan</legend>
+        <Field orientation="horizontal">
+          <FieldContent>
+            <FieldLabel htmlFor="cloudflare_plan">{FIELD_LABELS.cloudflare_plan}</FieldLabel>
+            <FieldDescription id="cloudflare_plan-hint">
+              Turn this on only if this Cloudflare account is on the Workers Paid plan. Fernledger then stops holding Members' reads, Imports and applying the Rules to
+              the Free Plan's daily allowance. On the Free Plan, the day's allowance could then run out, and Fernledger would stop working until 00:00 UTC (about midday in
+              New Zealand).
+            </FieldDescription>
+          </FieldContent>
+          <Switch
+            id="cloudflare_plan"
+            checked={values.cloudflare_plan === 'paid'}
+            aria-describedby="cloudflare_plan-hint"
+            onCheckedChange={(paid) => {
+              setValues({ ...values, cloudflare_plan: paid ? 'paid' : 'free' })
+              save.reset()
+            }}
+          />
+        </Field>
       </fieldset>
       <div className="flex flex-wrap items-center gap-4">
         <Button type="submit" size="touch" disabled={save.isPending}>

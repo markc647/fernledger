@@ -48,6 +48,17 @@ export async function withRules<Words extends string[]>(
 /** What the Worker says of the features when the D1 usage bar is switched on (local development has no Cloudflare token, so the specs that look at the bar stub it). */
 export const usageOn = { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] }
 
+/**
+ * Says the Cloudflare account is on the Paid Plan (ADR 0018), in this page only: the Settings it reads say 'paid', and the shared test database keeps
+ * Free, so specs running beside this one keep their daily caps (as #57 found of other Settings).
+ */
+export const stubPaidPlan = (page: Page) =>
+  page.route('**/api/settings', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const response = await route.fetch()
+    await route.fulfill({ response, json: { ...(await response.json()), cloudflare_plan: 'paid' } })
+  })
+
 /** What the Worker says of the day's database use, changed by what a spec passes: Plenty left on both bars unless it says otherwise. */
 export const usageFigures = (over: Partial<D1Usage> = {}): D1Usage => ({
   rowsRead: 1_234_567,

@@ -2,7 +2,7 @@ import type { BrowserContext, Page } from '@playwright/test'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
 import { findTransactions, transactionId } from './report-helpers'
-import { addRule, applyAnswer, applyButton, applyDialog, applyTheRules, categoryId, frameHeading, openApplyDialog, pageOrder, progressFrame, removeRule, ruleActions, ruleIds, runningJob, spinner, stubUsageReadings, usageFigures, usageOn, withRules } from './rule-helpers'
+import { addRule, applyAnswer, applyButton, applyDialog, applyTheRules, categoryId, frameHeading, openApplyDialog, pageOrder, progressFrame, removeRule, ruleActions, ruleIds, runningJob, spinner, stubPaidPlan, stubUsageReadings, usageFigures, usageOn, withRules } from './rule-helpers'
 import { arrowTo, chooseAction, menuAction, openActions, ruleActionButtons } from './row-actions-helpers'
 import { chooseTextSize, mainNav, navGroup, navigateTo } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
@@ -594,6 +594,23 @@ test('the Admin applies a Rule to the Transactions already on file, and one set 
   const cleared = await found()
   expect(cleared.find((t) => t.description.endsWith('PLAIN'))).toMatchObject({ categoryName: null, categorySource: null })
   expect(cleared.find((t) => t.description.endsWith('HAND'))).toMatchObject({ categoryName: 'Travel', categorySource: 'override' })
+})
+
+// On the Paid Plan there is no daily allowance (ADR 0018): the question shows today's figures alone, with no bars against the Free Plan's day and none of its words.
+test("the question before applying shows today's database figures without the Free Plan's limits on the Paid Plan", async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  await stubPaidPlan(page)
+  await page.route('**/api/features', (route) => route.fulfill({ json: usageOn }))
+  await page.route('**/api/d1-usage', (route) => route.fulfill({ json: usageFigures() }))
+  await page.route('**/api/rules/rerun', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { job: null } }) : route.fallback()))
+  await page.goto('/rules')
+  await expect(applyButton(page)).toBeEnabled()
+
+  const usage = (await openApplyDialog(page)).getByRole('region', { name: 'Database usage today' })
+  await expect(usage).toContainText('1,234,567 rows read and 4,321 rows written today. On the Paid Plan there is no daily limit to run out of.')
+  await expect(usage.getByRole('progressbar')).toHaveCount(0)
+  await expect(usage).not.toContainText(/Plenty left|Running low|Almost used|Used up|5,000,000|starts again/)
+  await noAxeViolations(page)
 })
 
 test.describe('while the Rules are being applied', () => {

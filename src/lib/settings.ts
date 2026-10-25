@@ -5,7 +5,7 @@ import { HttpError } from './me'
 /** What the sidebar's title says if the app title can't be loaded. The Worker's default (`DEFAULT_SETTINGS`) is the same word. */
 export const FALLBACK_APP_TITLE = 'Fernledger'
 
-/** The app title and the About-your-data fields. Anyone signed in can read them; only the Admin can change them. */
+/** The app title, the About-your-data fields and the Cloudflare plan. Anyone signed in can read them; only the Admin can change them. */
 export const settingsQuery = queryOptions({
   queryKey: ['settings'],
   queryFn: async () => {

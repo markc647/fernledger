@@ -87,6 +87,10 @@ export const resetSentence = (usage: D1Usage) => `The allowance starts again on 
 
 export const STALE_NOTE = 'These figures are for the whole Cloudflare account, not only Fernledger, and run a few minutes behind.'
 
+/** Today's figures on the Paid Plan, which has no daily allowance to measure them against (Settings: Cloudflare Paid Plan, ADR 0018). */
+export const paidSentence = (usage: D1Usage) =>
+  `${usage.rowsRead.toLocaleString('en-NZ')} rows read and ${usage.rowsWritten.toLocaleString('en-NZ')} rows written today. On the Paid Plan there is no daily limit to run out of.`
+
 // Where the steps are. The heading is docs/setup.md's, and the Worker's Setup needed words (worker/features.ts: D1_USAGE) say it too:
 // scripts/setup-docs.test.mjs fails if any of the three drifts.
 const STEPS = 'The steps are in docs/setup.md, under "D1 usage bar (optional)".'
