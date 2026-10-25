@@ -1,5 +1,6 @@
 // Deploys to the Cloudflare account you confirm: takes a complete backup, records a D1 restore point (bookmark),
-// applies remote migrations, deploys, runs the smoke check (scripts/smoke.mjs), then prints the bookmark with rollback instructions.
+// applies remote migrations, deploys, sets the Members' read count key if the Worker has none, runs the smoke check (scripts/smoke.mjs), then prints
+// the bookmark with rollback instructions.
 // Usage: node scripts/deploy.mjs [--dry-run] [--yes] [--workers-dev-registered] [--skip-build] [--skip-backup]
 import { randomBytes } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
@@ -131,7 +132,12 @@ await main(async () => {
     return
   }
   console.log(dryRun ? '\nDry run only. Nothing was changed.' : '\nDeployed.')
-  ensureMemberKey(runner) // before the smoke check, as setting it deploys a new version
+  try {
+    ensureMemberKey(runner) // before the smoke check, as setting it deploys a new version
+  } catch (e) {
+    if (!(e instanceof ScriptError)) throw e
+    console.error(`${e.message} ${MEMBER_KEY} was not set: run \`npm run deploy\` again to set it.`) // the deploy has worked, so the rest still runs
+  }
   const smokeFailed = await smoke()
   if (smokeFailed) process.exitCode = 1
   console.log(rollbackInstructions(database, bookmark, accountId, backup))

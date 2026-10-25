@@ -209,5 +209,9 @@ What the Rules page shows the Admin, in the question it asks before "Apply the R
 _Avoid_: Quota meter, analytics
 
 **Setup needed**:
-What the Admin is shown for a feature that is switched off until the Deployer adds configuration it requires, with what to add and how; Members see only that the feature isn't set up. For an optional feature such as Akahu Sync, it can be ignored.
+What the Admin is shown for a feature that is switched off, or not doing all it should, until the Deployer adds configuration it requires, with what to add and how; Members see only that the feature isn't set up. For an optional feature such as Akahu Sync, it can be ignored.
+
+**Members' read count key**:
+The Worker secret `MEMBER_KEY_SECRET`, which the code each Member's daily read count is kept under also uses, so a backup alone can't link a count to a Member. `npm run deploy` makes it when the Worker has none, and nobody sees it; without it the counts are kept under the day and email alone, and Settings says Setup needed.
+_Avoid_: Member secret, salt
 _Avoid_: Misconfigured, disabled, error

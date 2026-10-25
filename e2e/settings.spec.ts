@@ -82,6 +82,10 @@ test('the Admin is told what to set up, and how, for a feature that is switched 
   await expect(setup).toContainText('Optional: you only need this to use the D1 usage bar.')
   await expect(setup).toContainText('Setup needed: the Cloudflare analytics token. Add it as the Worker secret CF_ANALYTICS_TOKEN.')
   await expect(setup).toContainText('The steps are in docs/setup.md, under "D1 usage bar (optional)".')
+  // The tests' Worker has no Members' read count key, which npm run deploy sets (#53): not optional, and nothing is switched off without it.
+  await expect(setup).toContainText("Members' read count key")
+  await expect(setup).toContainText("Setup needed: the key for the Members' read counts. Run npm run deploy, which sets the Worker secret MEMBER_KEY_SECRET.")
+  await expect(setup).toContainText('These features are switched off, or not doing all they should, until you do the following.')
 })
 
 // "Run a Sync now" (worker/sync-route.ts). The browser tests run with no Akahu tokens, so what is reachable here is the

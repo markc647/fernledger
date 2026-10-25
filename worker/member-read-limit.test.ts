@@ -16,7 +16,8 @@ describe("a Member's key", () => {
     expect(await memberKey(day, EMAIL.member, 'secret-one')).toBe(await memberKey(day, EMAIL.member, 'secret-one'))
     expect(await memberKey(day, EMAIL.member, 'secret-one')).not.toBe(await memberKey(day, EMAIL.member, 'secret-two'))
     expect(await memberKey(day, EMAIL.member, 'secret-one')).not.toBe(await memberKey(day, EMAIL.member))
-    expect(await memberKey(day, EMAIL.member, 'secret-one')).toMatch(/^[0-9a-f]{64}$/)
+    // HMAC-SHA-256 of the same text, worked out apart from the code: Node's createHmac('sha256', 'secret-one').update(`2026-10-26\n${EMAIL.member}`).
+    expect(await memberKey(day, EMAIL.member, 'secret-one')).toBe('f30df655f8b147606b32bc119b193d188dd39e1f8f6a73c8a1870eca1e1d41df')
   })
 
   it('is the plain hash of the day and email without a secret, as before the secret', async () => {
