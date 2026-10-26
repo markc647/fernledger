@@ -1,4 +1,4 @@
-import type { BrowserContext, Page } from '@playwright/test'
+import type { BrowserContext, Page, Route } from '@playwright/test'
 import { dateField, pickDate } from './date-helpers'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { expectTableLook } from './table-look-helpers'
@@ -394,6 +394,17 @@ test.describe('on screen', () => {
       const accounts = (await (await context.request.get('/api/accounts')).json()) as { name: string; accountNumber: string }[]
       expect(accounts.length).toBeGreaterThan(5)
       await signInToOpen(context, baseURL, 'member', { report: 'balances', from: `${start}-01-01`, to: `${end}-12-31` })
+      // The Worker answers each so quickly that the browser seldom has more than four in flight at once. So the first ones are held until one more than a Member may have
+      // in flight (MEMBER_MAX_IN_FLIGHT, 4) has been asked, and then all go together; the ones asked again after that go straight through.
+      let held: Route[] | null = []
+      await page.route('**/api/reports/balances?**', async (route) => {
+        if (held === null) return route.continue()
+        held.push(route)
+        if (held.length <= 4) return
+        const all = held
+        held = null
+        await Promise.all(all.map((each) => each.continue()))
+      })
       const answers: number[] = []
       page.on('response', (res) => {
         if (new URL(res.url()).pathname === '/api/reports/balances') answers.push(res.status())
