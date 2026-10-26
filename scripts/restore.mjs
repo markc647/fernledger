@@ -2,8 +2,9 @@
 // (migrations applied). It downloads and verifies every part against the manifest's checksums before it
 // writes anything, refuses a database that already holds rows or lacks a backed-up column, and checks the
 // row counts afterwards.
-// Usage: node scripts/restore.mjs <backup date, YYYY-MM-DD, or a final backup folder, YYYY-MM-DD-final-<time>> [--database NAME] [--local] [--dry-run] [--yes]
+// Usage: node scripts/restore.mjs <backup date, YYYY-MM-DD, or a final backup folder, YYYY-MM-DD-final-<time>> [--database NAME] [--bucket NAME] [--local] [--dry-run] [--yes]
 //   --database  restore into this D1 database instead of the one in wrangler.jsonc (for a practice run)
+//   --bucket    read the backup from this R2 bucket instead of the one in wrangler.jsonc (scripts/restore-practice.mjs uses one of its own)
 //   --local     read and write Wrangler's local dev storage instead of the Cloudflare account
 //   --dry-run   does everything except load the database: downloads the backup (read-only), verifies it,
 //               checks the target, and prints the load commands it would run
@@ -25,7 +26,7 @@ const flagValue = (name) => {
   const i = args.indexOf(name)
   return i === -1 ? undefined : args[i + 1]
 }
-const date = args.find((a, i) => !a.startsWith('-') && args[i - 1] !== '--database')
+const date = args.find((a, i) => !a.startsWith('-') && args[i - 1] !== '--database' && args[i - 1] !== '--bucket')
 
 // A backup folder name under backups/: an NZ date, or a teardown's final backup (backup-run.mjs finalBackupPrefix). Nothing else, so no path separators.
 const BACKUP_FOLDER = /^\d{4}-\d{2}-\d{2}(-final-\d{8}T\d{9}Z)?$/
@@ -38,10 +39,11 @@ const rowsOf = (result) => (Array.isArray(result) ? (result[0]?.results ?? []) :
 
 await main(async () => {
   if (!date || !BACKUP_FOLDER.test(date)) {
-    throw new ScriptError('Usage: node scripts/restore.mjs <backup date, YYYY-MM-DD, or a final backup folder, YYYY-MM-DD-final-<time>> [--database NAME] [--local] [--dry-run] [--yes]')
+    throw new ScriptError('Usage: node scripts/restore.mjs <backup date, YYYY-MM-DD, or a final backup folder, YYYY-MM-DD-final-<time>> [--database NAME] [--bucket NAME] [--local] [--dry-run] [--yes]')
   }
   const names = readResourceNames()
   const database = flagValue('--database') ?? names.database
+  const bucket = flagValue('--bucket') ?? names.bucket
   const where = local ? ['--local'] : ['--remote']
   const prefix = `backups/${date}`
 
@@ -50,7 +52,7 @@ await main(async () => {
   const reader = createRunner({ dryRun: false, accountId })
   const loader = createRunner({ dryRun, accountId })
   const work = mkdtempSync(join(tmpdir(), 'fernledger-restore-'))
-  const download = (key, file) => reader.run(['r2', 'object', 'get', `${names.bucket}/${key}`, '--file', file, ...where], { note: 'downloads from the backup bucket' })
+  const download = (key, file) => reader.run(['r2', 'object', 'get', `${bucket}/${key}`, '--file', file, ...where], { note: 'downloads from the backup bucket' })
   const query = (sql) => rowsOf(reader.json(['d1', 'execute', database, ...where, '--json', '--command', sql]))
   try {
     const manifestFile = join(work, 'manifest.json')

@@ -11,6 +11,7 @@ import { dirname, join, resolve } from 'node:path'
 import { after, test } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { continueBackup, startBackup } from '../worker/backup.ts'
+import { HARD_TEXTS } from './hard-text.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const cleanup = []
@@ -441,29 +442,12 @@ test('restore will not clear the starter Categories while a table that refers to
 })
 
 test('restore --local loads a backup into the real Wrangler\'s local D1, every text exactly and the tables in foreign-key order', async () => {
-  // Wrangler edits a --file as plain text before running it, so these are the kinds of text it could reach: its own
-  // transaction words, statement and comment syntax, quotes, line breaks, control characters, every ASCII character and some that
-  // aren't. Each goes as hex or as a quoted literal (backup-format.ts), so both are loaded here.
-  const values = [
-    'REF COMMIT; PAYEE',
-    'BEGIN TRANSACTION; DUMMY',
-    'BEGIN TRANSACTION',
-    'begin transaction; commit;',
-    "O'Brien \"quoted\"; DROP TABLE settings; -- /* not a comment */",
-    'Line one\r\nLine two\rLine three\n',
-    'NUL\u0000inside, and a bell\u0007',
-    'EXAMPLE LINE\n'.repeat(50), // 50 line breaks: as || char(10) || terms, past SQLite's expression depth of 100
-    'EXAMPLE LINE\r\n'.repeat(40),
-    'Café ☕ Māori ā 𝄞',
-    Array.from({ length: 128 }, (_, i) => String.fromCharCode(i)).join(''), // every ASCII character, NUL included
-    '',
-  ]
   const dir = tempDir()
   const bucketDir = join(dir, 'bucket')
   const source = newDatabase(join(dir, 'source.sqlite'))
   source.exec('DROP TABLE odd') // the real target has only the migrations' tables
   const insert = source.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
-  values.forEach((v, i) => insert.run(`key ${i}: ${v}`, v))
+  HARD_TEXTS.forEach((v, i) => insert.run(`key ${i}: ${v}`, v))
   // A Transaction whose Override uses a Category made after the starter ones: real D1 enforces the foreign key.
   source.exec(`
     INSERT INTO categories (name) VALUES ('Pets');

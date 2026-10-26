@@ -139,7 +139,18 @@ If a load fails part-way, the database holds some of the rows: empty it (or crea
 
 ### Restore practice run, twice a year
 
-A backup you have never restored is a guess. Twice a year (say April and October), restore the latest backup (find its date as above) into a scratch database, check the row counts the script prints against the manifest, then delete the scratch database. It touches nothing live:
+A backup you have never restored is a guess. Twice a year (say April and October), do both of these.
+
+**The hard text.** `npm run restore:practice` restores the text a restore is likeliest to get wrong (`scripts/hard-text.mjs`: Wrangler's and SQL's own words, quotes, line breaks, NUL and other control characters, non-ASCII text, the empty string) through your account's real D1, which CI can't reach. It makes two throwaway D1 databases and a throwaway R2 bucket, all named `fernledger-practice…`; writes made-up rows (bank code 99) into one; backs that up into the bucket with the Worker's backup code; restores it into the other with `npm run restore`; and compares every row, value and type of the two. Then it deletes the bucket's objects, the bucket and both databases, whether it passed or not, and says if anything is left to delete by hand. It never reads or writes the live database or the backup bucket. A backup run keeps its state in its bucket, and the Worker's crons carry on whatever run that names, so a practice backup in the live bucket could end up copying the live database.
+
+```bash
+npm run restore:practice -- --dry-run   # says what it would create, run and delete
+npm run restore:practice
+```
+
+It passes when it prints "Practice restore passed". It takes a few minutes: each migration and each backup step is a Wrangler call.
+
+**Your latest backup.** Restore it (find its date as above) into a scratch database, check the row counts the script prints against the manifest, then delete the scratch database. It touches nothing live:
 
 ```bash
 npx wrangler d1 create fernledger-practice --location oc
