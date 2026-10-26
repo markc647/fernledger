@@ -1,6 +1,24 @@
 import type { Locator, Page } from '@playwright/test'
 import { expect, settle } from './fixtures'
 
+const settingsOverrides = new WeakMap<Page, Record<string, unknown>>()
+
+/**
+ * Gives this page Settings of its own, in what it reads, and leaves the shared Settings alone: written to the database, a Setting is shared by every spec running at the
+ * same time, and another spec's reset can change it partway through a test (#57). A later call on the same page adds to the earlier ones. Call it before the page first loads.
+ */
+export async function stubSettings(page: Page, overrides: Record<string, unknown>) {
+  const existing = settingsOverrides.get(page)
+  if (existing) return void Object.assign(existing, overrides)
+  const all = { ...overrides }
+  settingsOverrides.set(page, all)
+  await page.route('**/api/settings', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const response = await route.fetch()
+    await route.fulfill({ response, json: { ...(await response.json()), ...all } })
+  })
+}
+
 // The app shell (src/routes/__root.tsx): a sticky header across the top (the page's banner), and the sidebar beside the page. On a phone the sidebar is a sheet and the
 // header's controls are in one menu. These find the same things at every width, so a spec says what it does and not where the control is today.
 

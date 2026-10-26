@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, signInAs } from './fixtures'
+import { stubSettings } from './shell-helpers'
 import type { D1Usage } from '../src/generated/api/d1-usage'
 
 // Rules made through the API for a spec to look at and change, and taken away again when it is done: the order of the Rules is the same for every spec and both themes, so a spec
@@ -49,15 +50,10 @@ export async function withRules<Words extends string[]>(
 export const usageOn = { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] }
 
 /**
- * Says the Cloudflare account is on the Paid Plan (ADR 0018), in this page only: the Settings it reads say 'paid', and the shared test database keeps
- * Free, so specs running beside this one keep their daily caps (as #57 found of other Settings).
+ * Says the Cloudflare account is on the Paid Plan (ADR 0018), in this page only (`stubSettings`): the shared test database keeps Free, so specs running beside this one
+ * keep their daily caps.
  */
-export const stubPaidPlan = (page: Page) =>
-  page.route('**/api/settings', async (route) => {
-    if (route.request().method() !== 'GET') return route.fallback()
-    const response = await route.fetch()
-    await route.fulfill({ response, json: { ...(await response.json()), cloudflare_plan: 'paid' } })
-  })
+export const stubPaidPlan = (page: Page) => stubSettings(page, { cloudflare_plan: 'paid' })
 
 /** What the Worker says of the day's database use, changed by what a spec passes: Plenty left on both bars unless it says otherwise. */
 export const usageFigures = (over: Partial<D1Usage> = {}): D1Usage => ({

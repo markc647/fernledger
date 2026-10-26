@@ -595,6 +595,38 @@ test.describe('a Member, when the Admin takes back a Report between the list and
     await frames(page, 5)
     expect(await printed(page)).toBe(0)
   })
+
+  // #55: back on Reports the list draws what it last read at once and reads it again. A Report the Admin kept again comes back with a new id and the same
+  // choices; rows are keyed by the choices (keptChoicesKey), so a menu opened before the list's answer lands stays open and acts on the Report it now holds.
+  // The answer is held until the menu is open, which is when the race used to close it.
+  test('keeps a menu open when the list is read again and the Admin has kept the same Report again meanwhile', async ({ page, context, baseURL, request }, testInfo) => {
+    const { year, account } = dataFor(testInfo.project.name)
+    const { accountId } = await seed(context, baseURL!, testInfo.project.name)
+    const choices = { report: 'spending', accountId, from: `${year}-01-01`, to: `${year}-12-31` }
+    await keep(context, baseURL, choices)
+    await signInAs(context, 'member')
+    await page.goto('/reports')
+    const row = actionsButton(page, rowName('Spending by Category', range(year), account.name))
+    await expect(row).toBeVisible()
+    await navLink(page, 'Summary').click()
+
+    await forgetKeptReports(request, baseURL)
+    expect((await request.post('/api/kept-reports', { headers: { Origin: baseURL! }, data: choices })).ok()).toBe(true)
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route('**/api/kept-reports', async (route) => {
+      await held
+      await route.fallback()
+    })
+    await navLink(page, 'Reports').click()
+    await openActions(row) // on the row the list last read
+    const readAgain = page.waitForResponse((res) => new URL(res.url()).pathname === '/api/kept-reports')
+    release()
+    await readAgain
+    await expect(page.getByRole('menu')).toBeVisible()
+    await menuAction(page, 'Open').click()
+    await expect(page.getByRole('article', { name: 'Spending by Category' })).toBeVisible()
+  })
 })
 
 test.describe('a Member, when a kept Loans Report is of a Category that has since been removed', () => {
