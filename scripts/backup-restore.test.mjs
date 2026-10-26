@@ -2,7 +2,7 @@
 // Worker's own backup code, restore it with scripts/restore.mjs into a second database, and compare.
 // SQLite (node:sqlite) stands in for D1 and a folder for R2; a fake Wrangler connects the script to both.
 // Nothing here touches Cloudflare. (worker/backup.test.ts covers the Worker against real local D1 and R2.)
-// One test loads the parts with the real `wrangler d1 execute --local --file`, since that loader rewrites the file.
+// One test runs restore.mjs --local against the real Wrangler's local D1, since D1 refuses things SQLite allows and Wrangler rewrites a --file.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -11,7 +11,6 @@ import { dirname, join, resolve } from 'node:path'
 import { after, test } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { continueBackup, startBackup } from '../worker/backup.ts'
-import { insertStatements, parseManifest } from '../worker/backup-format.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const cleanup = []
@@ -436,7 +435,25 @@ test('restore will not clear the starter Categories while a table that refers to
   assert.equal(target.prepare('SELECT count(*) AS n FROM categories').get().n, 23)
 })
 
-test('every text a backup holds comes back exactly through the real `wrangler d1 execute --local --file`', async () => {
+// Wrangler with only R2 standing in: `r2 object get` copies from the bucket folder, and everything else runs the real Wrangler
+// on local storage in PERSIST_DIR, so restore.mjs meets real D1's refusals, not only the ones the stand-in above knows.
+const realD1Wrangler = `
+const fs = require('node:fs')
+const path = require('node:path')
+const { spawnSync } = require('node:child_process')
+const args = process.argv.slice(2)
+if (args[0] === 'r2') {
+  const words = args.filter((a) => !a.startsWith('-'))
+  const source = path.join(process.env.FAKE_DIR, 'bucket', words[3].slice(words[3].indexOf('/') + 1))
+  if (!fs.existsSync(source)) { console.error('The specified key does not exist.'); process.exit(1) }
+  fs.copyFileSync(source, args[args.indexOf('--file') + 1])
+} else {
+  const r = spawnSync(process.execPath, [process.env.REAL_WRANGLER, ...args, '--persist-to', process.env.PERSIST_DIR], { stdio: 'inherit' })
+  process.exit(r.status ?? 1)
+}
+`
+
+test('restore --local loads a backup into the real Wrangler\'s local D1, every text exactly and the tables in foreign-key order', async () => {
   // Wrangler edits a --file as plain text before running it, so these are the kinds of text it could reach: its own
   // transaction words, statement and comment syntax, quotes, line breaks, control characters, every ASCII character and some that
   // aren't. Each goes as hex or as a quoted literal (backup-format.ts), so both are loaded here.
@@ -457,30 +474,39 @@ test('every text a backup holds comes back exactly through the real `wrangler d1
   const dir = tempDir()
   const bucketDir = join(dir, 'bucket')
   const source = newDatabase(join(dir, 'source.sqlite'))
+  source.exec('DROP TABLE odd') // the real target has only the migrations' tables
   const insert = source.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
   values.forEach((v, i) => insert.run(`key ${i}: ${v}`, v))
+  // A Transaction whose Override uses a Category made after the starter ones: real D1 enforces the foreign key.
+  source.exec(`
+    INSERT INTO categories (name) VALUES ('Pets');
+    INSERT INTO accounts (account_number, name) VALUES ('99-9999-9999999-97', 'Everyday');
+    INSERT INTO transactions (account_id, date, amount_cents, description, source, override_category)
+      VALUES (1, '2026-09-30', -4200, 'Vet', 'import', (SELECT id FROM categories WHERE name = 'Pets'));
+  `)
   await backUp(source, bucketDir, Date.parse('2026-10-11T15:00:00Z'))
+  writeFileSync(join(dir, 'fake-wrangler.cjs'), realD1Wrangler)
 
   const persist = join(dir, 'd1')
+  const env = { REAL_WRANGLER: join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js'), PERSIST_DIR: persist, WRANGLER_SEND_METRICS: 'false' }
   const wrangler = (...args) => {
-    const r = spawnSync(process.execPath, [join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js'), 'd1', ...args, '--local', '--persist-to', persist], {
-      cwd: root,
-      encoding: 'utf8',
-      env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
-    })
+    const r = spawnSync(process.execPath, [env.REAL_WRANGLER, 'd1', ...args, '--local', '--persist-to', persist], { cwd: root, encoding: 'utf8', env: { ...process.env, ...env } })
     assert.equal(r.status, 0, r.stdout + r.stderr)
     return r.stdout
   }
   wrangler('migrations', 'apply', 'DB')
-  const manifest = parseManifest(readFileSync(join(bucketDir, 'backups', '2026-10-12', 'manifest.json'), 'utf8'))
-  const table = manifest.tables.find((t) => t.name === 'settings')
-  for (const [i, part] of table.parts.entries()) {
-    const file = join(dir, `part-${i}.sql`)
-    writeFileSync(file, insertStatements(table, readFileSync(join(bucketDir, part.key), 'utf8'), part.key).join('\n') + '\n')
-    wrangler('execute', 'DB', '--file', file)
-  }
 
-  const query = 'SELECT key, value, typeof(value) AS type FROM settings ORDER BY key'
-  const [{ results }] = JSON.parse(wrangler('execute', 'DB', '--json', '--command', query))
-  assert.deepEqual(results, source.prepare(query).all().map((r) => ({ ...r })))
+  const r = restore({ dir }, ['2026-10-12', '--local'], env)
+
+  assert.equal(r.status, 0, r.out)
+  assert.match(r.out, /Row counts match the manifest/)
+  for (const query of [
+    'SELECT key, value, typeof(value) AS type FROM settings ORDER BY key',
+    'SELECT * FROM categories ORDER BY id',
+    'SELECT * FROM accounts ORDER BY id',
+    'SELECT * FROM transactions ORDER BY id',
+  ]) {
+    const [{ results }] = JSON.parse(wrangler('execute', 'DB', '--json', '--command', query))
+    assert.deepEqual(results, source.prepare(query).all().map((row) => ({ ...row })), query)
+  }
 })
