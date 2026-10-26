@@ -13,9 +13,42 @@ test.afterEach(async ({ context, request, baseURL }) => {
   await signInAs(context, 'admin')
   const reset = await request.patch('/api/settings', {
     headers: { Origin: baseURL! },
-    data: { app_title: 'Fernledger', about_contact: '', about_retention: '' },
+    data: { app_title: 'Fernledger', about_contact: '', about_retention: '', cloudflare_plan: 'free' },
   })
   expect(reset.ok()).toBe(true)
+})
+
+// The Cloudflare plan (ADR 0018). Its save is answered here, so the shared test database stays on the Free Plan and specs running beside this one
+// keep their daily caps; the Worker's tests keep the Setting (worker/settings.test.ts).
+test('the Admin turns on Cloudflare Paid Plan, a switch that is off by default and says what it does, and saves it with the Settings', async ({ page, context }) => {
+  await signInAs(context, 'admin')
+  let sent: Record<string, unknown> | undefined
+  await page.route('**/api/settings', async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    sent = route.request().postDataJSON()
+    await route.fulfill({ json: sent })
+  })
+  await page.goto('/settings')
+  const plan = page.getByRole('switch', { name: 'Cloudflare Paid Plan' })
+  await expect(plan).toHaveAttribute('aria-checked', 'false') // the Free Plan
+  await expect(plan).toHaveAccessibleDescription(/^Turn this on only if this Cloudflare account is on the Workers Paid plan\. .*Fernledger would stop working until 00:00 UTC/)
+
+  await plan.click()
+  await expect(plan).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('button', { name: 'Save settings' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Settings saved' })).toBeVisible()
+  expect(sent).toMatchObject({ cloudflare_plan: 'paid' })
+  await noAxeViolations(page)
+
+  // The label turns it too, and so do Space and Enter on the switch, as on a button.
+  await page.getByText('Cloudflare Paid Plan', { exact: true }).click()
+  await expect(plan).toHaveAttribute('aria-checked', 'false')
+  await plan.focus()
+  await page.keyboard.press('Space')
+  await expect(plan).toHaveAttribute('aria-checked', 'true')
+  await page.keyboard.press('Enter')
+  await expect(plan).toHaveAttribute('aria-checked', 'false')
+  await expect(page.getByRole('status').filter({ hasText: 'Settings saved' })).toHaveCount(0) // a change since the save
 })
 
 test('the Admin edits the app title and the About-your-data fields, and they are kept', async ({ page, context }) => {
@@ -149,7 +182,7 @@ test('the Settings screen has no WCAG 2.2 AA violations when saved, and when sho
 test('fields and the save button are at least 44px tall', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.goto('/settings')
-  for (const control of [page.getByLabel('App title'), page.getByRole('button', { name: 'Save settings' })]) {
+  for (const control of [page.getByLabel('App title'), page.getByRole('switch', { name: 'Cloudflare Paid Plan' }), page.getByRole('button', { name: 'Save settings' })]) {
     expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(44)
   }
 })

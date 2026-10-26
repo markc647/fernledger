@@ -19,6 +19,7 @@ import { countOnOrAfter, cutoverOffer, type CutoverOffer, DAILY_ROW_WRITES, MAX_
 import { describeStop } from '@/lib/import-stop'
 import { meQuery } from '@/lib/me'
 import { accountsQuery, carryPreviewQuery, importedRowsQuery } from '@/lib/queries'
+import { settingsQuery } from '@/lib/settings'
 import { ImportStopped, runImport, type ImportSummary, type LostTransaction } from '@/lib/run-import'
 
 export const Route = createFileRoute('/import')({
@@ -581,6 +582,8 @@ function ReplaceDialog(props: {
   useEffect(() => keepButton.current?.focus(), [])
   const inSteps = imported !== undefined && imported > REPLACE_SLICE
   const overOneDay = imported !== undefined && replaceWrites(imported, props.incomingRows, withOwnWork + waiting, paired) > DAILY_ROW_WRITES
+  // The Free Plan's day of writes is said only on the Free Plan: the Paid Plan has no daily limit (ADR 0018).
+  const freePlan = useQuery(settingsQuery).data?.cloudflare_plan !== 'paid'
   return (
     <section
       role="alertdialog"
@@ -616,9 +619,10 @@ function ReplaceDialog(props: {
           <p>
             That is more than {REPLACE_SLICE.toLocaleString('en-NZ')}, so the old Transactions are removed in steps of {REPLACE_SLICE.toLocaleString('en-NZ')}, the oldest dates first, before the file is imported. Each step is final: if the
             Import stops part way, the part of the old history already removed can't be put back.{' '}
-            {overOneDay
+            {freePlan &&
+              (overOneDay
               ? `Removing and importing this many Transactions takes more database writes than the free plan allows in a day (${DAILY_ROW_WRITES.toLocaleString('en-NZ')}). Fernledger stops when the limit is reached, and you choose the same file again tomorrow to finish.`
-              : `Each step uses about ${(REPLACE_SLICE * WRITES_PER_ROW).toLocaleString('en-NZ')} of the ${DAILY_ROW_WRITES.toLocaleString('en-NZ')} database writes the free plan allows each day, and a few more for each Override, Note, Not a Transfer mark or Transfer it holds.`}
+              : `Each step uses about ${(REPLACE_SLICE * WRITES_PER_ROW).toLocaleString('en-NZ')} of the ${DAILY_ROW_WRITES.toLocaleString('en-NZ')} database writes the free plan allows each day, and a few more for each Override, Note, Not a Transfer mark or Transfer it holds.`)}
           </p>
         )}
       </div>

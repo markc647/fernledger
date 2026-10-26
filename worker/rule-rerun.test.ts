@@ -915,6 +915,23 @@ describe('a small history', () => {
       expect(await latest()).toMatchObject({ paused: true })
     })
 
+    it('never pauses on the Paid plan, which has no daily allowance to share, and counts no query more to know it', async () => {
+      await saveRules()
+      await startOk()
+      await setTally(today(), DAILY_READ_BUDGET - 1, DAILY_WRITE_BUDGET - 1)
+      await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cloudflare_plan', 'paid')").run()
+      try {
+        const { db, usage } = metered()
+        const job = await stepRerun(db)
+        expect(job).toMatchObject({ status: 'running', paused: false })
+        expect(job!.doneRows).toBeGreaterThan(0)
+        expect(usage.queries).toBeLessThanOrEqual(1 + QUERIES_PER_CHUNK) // the same queries as a step on Free
+      } finally {
+        await env.DB.prepare("DELETE FROM settings WHERE key = 'cloudflare_plan'").run()
+      }
+      expect(await latest()).toMatchObject({ paused: true }) // back on Free, the share of the day holds again
+    })
+
     it('leaves a paused job alone on a cron run, for the one query it takes to look', async () => {
       await saveRules()
       await startOk()

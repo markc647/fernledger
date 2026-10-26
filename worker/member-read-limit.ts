@@ -4,6 +4,7 @@ import { sha256Hex, toHex } from './backup-format'
 import { logEvent } from './log'
 import { isWrite } from './request-format'
 import { utcDay } from './rule-rerun'
+import { PAID_PLAN } from './settings'
 import { DEFAULT_LIMIT, MAX_LIMIT } from './transaction-search'
 
 // The Members' share of D1 Free's day (5 million rows read; ADR 0004). Every Member reads the same Transactions, and a text search, a non-date
@@ -156,13 +157,15 @@ const COUNTED = `CASE WHEN usage_day = ?1 THEN rows_read + held WHEN ${YOUNG} TH
 const EVERYONE = `(SELECT COALESCE(SUM(${COUNTED}), 0) FROM member_read_usage)`
 const MINE = `(SELECT COALESCE(SUM(${COUNTED}), 0) FROM member_read_usage WHERE member_key IN (?2, ?3))`
 const IN_FLIGHT = `(SELECT COALESCE(SUM(CASE WHEN ${YOUNG} THEN held_count ELSE 0 END), 0) FROM member_read_usage WHERE member_key IN (?2, ?3))`
-const STATE = `SELECT ${EVERYONE} AS everyone, ${MINE} AS mine`
+// `paid`: the Admin has said the account is on the Paid plan, which has no daily allowance to protect, so Members' reads are neither counted nor limited.
+const STATE = `SELECT ${EVERYONE} AS everyone, ${MINE} AS mine, ${PAID_PLAN} AS paid`
 // A cheap request's charge: ?3 to the day its reads finished (?1, the key ?2).
 const CHARGE = `INSERT INTO member_read_usage (member_key, usage_day, rows_read) VALUES (?2, ?1, ?3)
   ON CONFLICT (member_key) DO UPDATE SET rows_read = rows_read + excluded.rows_read`
 // The hold: ?5 reads for each Transaction and ?11 for each Change Log entry, and READS_PER_PAGE_ROW for each of a list page's ?6 rows
 // skipped and shown (`pageRows`; ?7 its page), capped at the highest ID and a page, CHARGE_FROM_ROWS (?8) at the least. Added only while
-// neither limit (?9 everyone, ?10 one Member) has been reached and fewer than ?12 of the Member's holds are in flight, and handed back with
+// neither limit (?9 everyone, ?10 one Member) has been reached and fewer than ?12 of the Member's holds are in flight, and not on the Paid
+// plan (nothing is held then, and STATE says why), and handed back with
 // `held_at`, which its settling names; no row comes back otherwise. A row with no holds, or whose holds began HOLD_EXPIRY_MS ago, starts
 // again at this one: what it held is charged as spent. SET reads the row as it was, and RETURNING the row as it is now.
 const HIGHEST_ID = `COALESCE((SELECT MAX(id) FROM transactions), 0)`
@@ -171,7 +174,7 @@ const HOLD = `MAX(?8, ?5 * ${HIGHEST_ID} + ?11 * ${HIGHEST_ENTRY} + ${READS_PER_
 const STARTS_AGAIN = `(held_count = 0 OR held_at IS NULL OR held_at < ?4 - ${HOLD_EXPIRY_MS})`
 const RESERVE = `INSERT INTO member_read_usage (member_key, usage_day, rows_read, held, held_count, held_at)
   SELECT ?2, ?1, 0, ${HOLD}, 1, ?4
-  WHERE ${EVERYONE} < ?9 AND ${MINE} < ?10 AND ${IN_FLIGHT} < ?12
+  WHERE NOT ${PAID_PLAN} AND ${EVERYONE} < ?9 AND ${MINE} < ?10 AND ${IN_FLIGHT} < ?12
   ON CONFLICT (member_key) DO UPDATE SET
     rows_read = rows_read + CASE WHEN ${STARTS_AGAIN} THEN held ELSE 0 END,
     held = CASE WHEN ${STARTS_AGAIN} THEN 0 ELSE held END + excluded.held,
@@ -244,7 +247,10 @@ export function countingReads(db: D1Database, tally: { rows: number }): D1Databa
   } as unknown as D1Database
 }
 
-/** Counts a Member's reads, refuses them past the limits, and charges them: a dear request by a hold settled afterwards, a cheap one by `chargeFor`. */
+/**
+ * Counts a Member's reads, refuses them past the limits, and charges them: a dear request by a hold settled afterwards, a cheap one by `chargeFor`.
+ * On the Paid plan (`PAID_PLAN`) it lets them through uncounted, having learnt so in the queries it makes anyway, and writes nothing.
+ */
 export const memberReadLimit = createMiddleware<AppEnv>(async (c, next) => {
   const { member } = c.var
   if (member.role === 'admin' || isWrite(c.req.method) || UNCOUNTED.has(c.req.path)) return next()
@@ -257,7 +263,7 @@ export const memberReadLimit = createMiddleware<AppEnv>(async (c, next) => {
   const params = new URL(c.req.url).searchParams
   const reads = dearReads(c.req.path, params)
   const page = pageRows(c.req.path, params)
-  const state = () => db.prepare(STATE).bind(day, key, dayBefore, now).first<{ everyone: number; mine: number; in_flight: number }>()
+  const state = async () => (await db.prepare(STATE).bind(day, key, dayBefore, now).first<{ everyone: number; mine: number; paid: number }>())!
   const overLimit = (s: { everyone: number; mine: number }) => s.everyone >= MEMBER_DAILY_READS || s.mine >= EACH_MEMBER_DAILY_READS
   let hold = 0
   let began = 0
@@ -266,9 +272,17 @@ export const memberReadLimit = createMiddleware<AppEnv>(async (c, next) => {
       .prepare(RESERVE)
       .bind(day, key, dayBefore, now, reads.perTransaction, page.rows, page.limit, CHARGE_FROM_ROWS, MEMBER_DAILY_READS, EACH_MEMBER_DAILY_READS, reads.perEntry, MEMBER_MAX_IN_FLIGHT)
       .first<{ hold: number; began: number }>()
-    if (!held) return overLimit((await state())!) ? refused() : busy()
+    if (!held) {
+      const s = await state()
+      if (s.paid) return next() // on the Paid plan nothing is held or charged: the second query a dear request makes, as settling is on Free
+      return overLimit(s) ? refused() : busy()
+    }
     ;({ hold, began } = held)
-  } else if (overLimit((await state())!)) return refused()
+  } else {
+    const s = await state()
+    if (s.paid) return next()
+    if (overLimit(s)) return refused()
+  }
   const tally = { rows: 0 }
   c.env = { ...c.env, DB: countingReads(db, tally) }
   try {

@@ -59,7 +59,8 @@ describe('asking again while the Member is busy', () => {
 
 describe("the Members' daily read limit", () => {
   it('is noted for the UTC day a request meets it, and not by other answers', async () => {
-    const now = Date.parse('2026-10-26T23:59:00Z')
+    // A day that is not today: the test above notes the limit for the real day, which the module keeps.
+    const now = Date.parse('2001-10-26T23:59:00Z')
     await busyRetryingFetch(answering(ok, () => new Response('not JSON', { status: 429 })).inner)('/api/transactions')
     expect(dayLimitReached(now)).toBe(false)
 
@@ -67,7 +68,7 @@ describe("the Members' daily read limit", () => {
     await busyRetryingFetch(answering(limit).inner)('/api/transactions')
     vi.useRealTimers()
     expect(dayLimitReached(now)).toBe(true)
-    expect(dayLimitReached(Date.parse('2026-10-27T00:00:00Z'))).toBe(false) // it starts again at 00:00 UTC
+    expect(dayLimitReached(Date.parse('2001-10-27T00:00:00Z'))).toBe(false) // it starts again at 00:00 UTC
   })
 
   it('starts again at 00:00 UTC, said as New Zealand time and day', () => {

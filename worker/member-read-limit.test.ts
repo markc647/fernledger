@@ -333,6 +333,19 @@ describe('charging a small read by chance', () => {
 })
 
 describe('the Members\' daily limit', () => {
+  it('neither counts nor limits a Member on the Paid plan, and writes nothing', async () => {
+    await seed(await memberKey(today(), EMAIL.member), today(), EACH_MEMBER_DAILY_READS) // past the limit
+    const before = await usage()
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cloudflare_plan', 'paid')").run()
+    try {
+      for (const path of [DEAR, CHEAP]) expect((await call(path, 'member')).status, path).toBe(200)
+      expect(await usage()).toEqual(before) // nothing held, settled or charged
+    } finally {
+      await env.DB.prepare("DELETE FROM settings WHERE key = 'cloudflare_plan'").run()
+    }
+    expect((await call(DEAR, 'member')).status).toBe(429) // back on Free, the limit holds again
+  })
+
   it('keeps the count under the HMAC of MEMBER_KEY_SECRET when the Worker has it, and goes on counting under it', async () => {
     const secret = 'member_key_example'
     expect((await fetchWith(env.DB, DEAR, 'member', { MEMBER_KEY_SECRET: secret })).status).toBe(200)

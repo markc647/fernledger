@@ -229,6 +229,28 @@ const syncRun = async (p) => {
   await button.click()
   await syncSection(p).getByText(/^Sync (finished|did not finish)/).waitFor({ timeout: 30_000 })
 }
+/** The Cloudflare Paid Plan switch turned on, brought into view. */
+async function paidPlanSwitched(page) {
+  const plan = page.getByRole('switch', { name: 'Cloudflare Paid Plan' })
+  await plan.click()
+  await plan.scrollIntoViewIfNeeded()
+  await page.getByRole('group', { name: 'Cloudflare plan' }).waitFor()
+}
+
+/** The question before applying the Rules on the Paid Plan: the Settings say 'paid' and the D1 usage bar has figures, both in this page only. */
+async function paidUsageShown(page) {
+  await page.route('**/api/settings', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const response = await route.fetch()
+    await route.fulfill({ response, json: { ...(await response.json()), cloudflare_plan: 'paid' } })
+  })
+  await page.route('**/api/features', (route) => route.fulfill({ json: { features: [{ id: 'd1-usage', name: 'D1 usage bar', enabled: true }] } }))
+  await page.route('**/api/d1-usage', (route) => route.fulfill({ json: { rowsRead: 1_234_567, rowsWritten: 4_321, readLimit: 5_000_000, writeLimit: 100_000, resetsAt: '2026-10-15T00:00:00.000Z' } }))
+  await page.reload()
+  await page.getByRole('button', { name: 'Apply the Rules to all Transactions' }).click()
+  await page.getByRole('region', { name: 'Database usage today' }).getByText('rows written today').waitFor()
+}
+
 /** A Member's reads refused for the day's limit: the page again, so its reads meet the refusal. */
 async function dayLimitShown(page) {
   await page.route(/\/api\/transactions\?/, (route) => route.fulfill({ status: 429, json: { error: 'Daily limit reached', reason: 'member-reads' } }))
@@ -265,6 +287,10 @@ const SHOTS = [
   { name: 'rules-menu', path: '/rules', fullPage: false, before: async (p) => { await p.getByRole('button', { name: /^Actions for Rule/ }).first().click(); await p.getByRole('menu').waitFor() } },
   { name: 'budgets', path: '/budgets' },
   { name: 'settings', path: '/settings' },
+  // The Cloudflare plan (ADR 0018): the switch on, not saved, and the Rules page's question on the Paid Plan, from stubbed Settings and figures.
+  { name: 'settings-paid-plan', path: '/settings', fullPage: false, before: paidPlanSwitched },
+  { name: 'rules-usage-paid', path: '/rules', fullPage: false, before: paidUsageShown },
+  { name: 'rules-usage-paid-dark', path: '/rules', theme: 'dark', fullPage: false, before: paidUsageShown },
   // "Run a Sync now": its Setup-needed state, which is what an instance with no Akahu tokens sees.
   { name: 'settings-sync', path: '/settings', fullPage: false, before: syncShown },
   // And a run, which needs the tokens. They reach the Worker through the build, so this one cannot use --skip-build:

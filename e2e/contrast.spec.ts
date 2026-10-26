@@ -521,7 +521,10 @@ const PAGES: {
         return
       }
       await expect(page.getByRole('region', { name: 'Setup needed' })).toBeVisible()
-      await scan('as it opens')
+      await scan('as it opens') // the Cloudflare Paid Plan switch off
+      await page.getByRole('switch', { name: 'Cloudflare Paid Plan' }).click() // on, and not saved: the shared database stays on Free
+      await scan('with the Cloudflare Paid Plan switch on')
+      await page.getByRole('switch', { name: 'Cloudflare Paid Plan' }).click()
       await page.getByLabel('App title').fill('Nan')
       await page.getByRole('button', { name: 'Save settings' }).click()
       await expect(page.getByRole('status').filter({ hasText: 'Settings saved' })).toBeVisible()

@@ -68,6 +68,7 @@ function AboutYourData() {
           </li>
           <li>
             <strong className="font-semibold">Members' reads today:</strong> how much each Member has read from the database today, for the daily limit that keeps one Member from using up the free plan for everyone, and, while a Member's pages are still reading, how much they are expected to read, how many are reading, and when the last began. It is kept under a code worked out from the day and the Member's email address, not the address itself.{memberKeySet && " The code also uses a key kept outside the database, so a copy of the database can't link the counts to a Member."} Earlier days' counts are deleted when a later day's are first kept, once none of that day's pages is still reading.
+            {settings?.cloudflare_plan === 'paid' && " This Fernledger is on Cloudflare's Paid Plan, which has no daily limit to share, so Members' reads aren't counted and nothing new is kept here."}
           </li>
           <li>
             <strong className="font-semibold">Settings:</strong> the app title and the text on this page.
@@ -143,8 +144,8 @@ function AboutYourData() {
 const AKAHU_ONLY_IF = 'It contacts no one but Akahu (only if this Fernledger uses Akahu Sync)'
 const contacts = {
   off: `${AKAHU_ONLY_IF} and, to check a sign-in, your own Cloudflare Access.`,
-  on: `${AKAHU_ONLY_IF} and your own Cloudflare account: its Access, to check a sign-in, and its usage figures, which whoever runs Fernledger has turned on to show the Admin how much of the day's free database allowance is left. Asking for those sends no Transactions, Notes or other data of yours.`,
-  unknown: `${AKAHU_ONLY_IF} and your own Cloudflare account: its Access, to check a sign-in, and, if whoever runs Fernledger has turned it on, its usage figures for the Admin, to show how much of the day's free database allowance is left.`,
+  on: `${AKAHU_ONLY_IF} and your own Cloudflare account: its Access, to check a sign-in, and its usage figures, which whoever runs Fernledger has turned on to show the Admin how much of the database the account has used today. Asking for those sends no Transactions, Notes or other data of yours.`,
+  unknown: `${AKAHU_ONLY_IF} and your own Cloudflare account: its Access, to check a sign-in, and, if whoever runs Fernledger has turned it on, its usage figures for the Admin, to show how much of the database the account has used today.`,
 }
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
