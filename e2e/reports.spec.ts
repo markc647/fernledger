@@ -616,6 +616,29 @@ test.describe('around a Report', () => {
     await expect(page).toHaveTitle(`Mum's finances – Transaction listing – All Accounts – ${first} to ${last}`)
   })
 
+  // #57: when the Settings arrive after the Report, the Report's title and the app title are set in the same moment, and the Report's ran first and
+  // found index.html's "Fernledger", which it put back when it was left. The first read of the Settings is held until the Report has arrived.
+  test('goes back to the app title when it is left, even when the Settings arrived after the Report', async ({ page, context, request, baseURL }, testInfo) => {
+    const { year, first, last, savings } = dataFor(testInfo.project.name)
+    const { savingsId } = await seed(context, baseURL!, testInfo.project.name)
+    await setTitle(request, baseURL, "Mum's finances")
+    await signInAs(context, 'admin')
+    const reportArrived = page.waitForResponse((res) => new URL(res.url()).pathname === '/api/reports/transactions')
+    await page.route(
+      '**/api/settings',
+      async (route) => {
+        await reportArrived
+        await route.fallback()
+      },
+      { times: 1 },
+    )
+    await page.goto(reportAddress(savingsId, year))
+    await expect(page).toHaveTitle(`Mum's finances – Transaction listing – ${savings.name} – ${first} to ${last}`)
+    await page.getByRole('link', { name: 'Back to Reports' }).click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible()
+    await expect(page).toHaveTitle("Mum's finances")
+  })
+
   test('another printed page keeps the screen padding: only a Report sets its own margins', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/how-to-sign-in')

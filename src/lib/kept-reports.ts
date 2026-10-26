@@ -32,6 +32,13 @@ export function keepRequest(report: ReportInfo, chosen: Chosen) {
   }
 }
 
+/**
+ * A kept Report's choices as one key: the columns of the unique index `kept_reports_choices` (migration 9701), so no two kept Reports share it. A Report the Admin
+ * removes and keeps again comes back with a new `id` and the same choices, and the list keys its rows by this, so a row, and a menu open on it, stay when the list is
+ * read again (#55).
+ */
+export const keptChoicesKey = (kept: KeptReport) => [kept.report, kept.to, kept.from ?? '', kept.accountId ?? 0, kept.categoryId ?? 0].join('|')
+
 /** The address a kept Report opens at: its Report's page, with its choices in the order its form has them. */
 export function keptHref(kept: KeptReport): string | null {
   const report = reportOf(kept)

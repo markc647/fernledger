@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { api } from '@/lib/api'
 import { formatDateTime } from '@/lib/format'
-import { keptAccount, keptDates, keptHref, keptInSentence, keptLoan, keptName, keptRowName, type KeptReport } from '@/lib/kept-reports'
+import { keptAccount, keptChoicesKey, keptDates, keptHref, keptInSentence, keptLoan, keptName, keptRowName, type KeptReport } from '@/lib/kept-reports'
 import { HttpError, meQuery } from '@/lib/me'
 import { askToPrint, clearPrintRequest } from '@/lib/print-request'
 import { keptReportsQuery } from '@/lib/queries'
@@ -29,7 +29,7 @@ function Reports() {
   const { data: kept, error } = useQuery(keptReportsQuery)
   // Until `me` arrives nobody is the Admin: Delete fails closed. The API refuses a Member's delete whatever the page shows.
   const isAdmin = me?.role === 'admin'
-  const [deleting, setDeleting] = useState<number | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null) // the choices of the Report being asked about (keptChoicesKey), which outlast its id on a read again
   const [notice, setNotice] = useState('')
 
   // Back to the row's Actions button when a question is closed without a change (or, if its row is gone, the message).
@@ -63,14 +63,14 @@ function Reports() {
       header: 'Action',
       align: 'end',
       cell: (k) =>
-        deleting === k.id ? (
+        deleting === keptChoicesKey(k) ? (
           <DeleteConfirm
             kept={k}
             onDone={(message) => done(message)}
             onCancel={() => done('', actionsId(k))}
           />
         ) : (
-          <KeptActions kept={k} isAdmin={isAdmin} onDelete={() => { setNotice(''); setDeleting(k.id) }} />
+          <KeptActions kept={k} isAdmin={isAdmin} onDelete={() => { setNotice(''); setDeleting(keptChoicesKey(k)) }} />
         ),
     },
   ]
@@ -102,7 +102,7 @@ function Reports() {
             caption="Kept Reports"
             columns={columns}
             rows={kept}
-            getRowKey={(k) => k.id}
+            getRowKey={keptChoicesKey}
             emptyMessage={isAdmin ? 'No Reports have been made yet. Choose one under Reports in the sidebar to make the first.' : 'No Reports have been made yet. The Admin makes them.'}
           />
         )}

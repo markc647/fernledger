@@ -111,8 +111,7 @@ export function ReportFrame({
   // The page's title names the file "Save as PDF" suggests, and it is what a browser's own print header shows.
   const title = appTitle ? reportHeading({ appTitle, name, accounts: accountsInTitle, range }) : undefined
   useEffect(() => {
-    if (title === undefined) return
-    const before = document.title
+    if (title === undefined || appTitle === undefined) return
     let cancelled = false
     // The app's header sets the page title to the app title when the Settings arrive, and an effect in a parent runs after its
     // children's, so a Report that appeared in the same moment would lose to it. A microtask runs after every effect of this render.
@@ -121,9 +120,11 @@ export function ReportFrame({
     })
     return () => {
       cancelled = true
-      document.title = before
+      // Back to the app title, not to the title this found: when the Settings arrive in the same moment as the Report, this runs before
+      // the header has set the app title, so it found index.html's "Fernledger", and the header doesn't set it again (#57).
+      document.title = appTitle
     }
-  }, [title])
+  }, [title, appTitle])
 
   // The Report has arrived (or been read again): if the form asked for it, the page moves to its top, now that the page is long enough to.
   const scroll = useReportScroll()
