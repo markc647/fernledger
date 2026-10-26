@@ -3,7 +3,31 @@
     "0201_settings.sql": "77391fbdae4d94cad4212d94525e8e3705bfa26c0b5ebf6561b2bbb409f7ee10",
     "0202_change_log.sql": "e490583c524aca611caa18272958ca6575ba1928e4ca03b17d0e6ae07f2ad1e8",
     "0801_accounts.sql": "98cbf166be237683571125eb5bf853c3f1934dd81b4ea9a056697192e936a5d0",
-    "0802_transactions.sql": "3685d5dba23935569a825b0f7ba734dd56c4e4bc067c2aed526f0c1d68471b68"
+    "0802_transactions.sql": "3685d5dba23935569a825b0f7ba734dd56c4e4bc067c2aed526f0c1d68471b68",
+    "0901_cutover_date.sql": "940626156a41ceec562b99e10b398166621513335b71898c607c5457c221e2e5",
+    "1001_balance_checks.sql": "b4c701df321fa8af87c8f80f87285c4fdf12ccf52f0b2744ee5e46c240a64cce",
+    "1002_transactions_account_date.sql": "f2f6f3233bb7ec175757bf55cee91f80e0288a6e2d4e095747abd75f53355756",
+    "1101_categories.sql": "d0eae8c6b77b06a91e753c0cc5d0433d400da1ff7cb79e5802330b37a56078b3",
+    "1201_transaction_details.sql": "a3d3f58a52cf4cec78e2dae40aadf9d816beb4a8f40358883072c335720e470f",
+    "1301_rules.sql": "004f36fd08a51765f2471da173f45df133abd76810639b93e6e18ccdca8919af",
+    "1401_data_migration_progress.sql": "1a8b24cbd6875cd277955abc6676494d1df9105a853581b59963d613742ec691",
+    "1402_transactions_rule_category.sql": "91b730a0427680beead4cb18d19b4c1d59cfbebffd4ad89ff3eb37d289e799db",
+    "1501_transfers.sql": "a812d16e8dd9e1b5c3e2bf52219d17f8cdddbc464eadeac0e8dca504c8c3aad3",
+    "1601_budgets.sql": "1c69abd568044eaa2755d6440d0bad3de9590a7b377f69590df4dd885bc679d4",
+    "1602_category_kind.sql": "fa6dde1f7fa2239c5b5dd97d09f243faae89aedad4d6b67e4820d6f74a3e4a87",
+    "2401_change_log_type.sql": "400900cba2ce4080b0b5cf63d137c6cc120b3c10fe29f7316cc83a479cc71a21",
+    "2701_akahu_link.sql": "70ac00f4e2c8aaee7e7ded2a7b6d3331c9bbdf8c72a49a3a904b61adc7b4acde",
+    "2901_pending_and_link.sql": "36bf6b06e65a1dca7ce4a9bac575e187a0cff979c98481de9b29ad6e26577e3a",
+    "3601_carry_over.sql": "c41d8e3f1af835136926bea690e594ec9540a1bd9907828bf5367372d1ef835d",
+    "3701_not_a_transfer.sql": "8358517f7f24db3e71572735ffa635592b83b3185a33dff4dbddb04bec973ed8",
+    "3702_not_a_transfer_carry_over.sql": "901d7461721c8034e3ee1d0bb2f0703b5d71b1e6d2cb8a08c2e9c540e95edab5",
+    "4201_akahu_account.sql": "7a566bd0fac207c024cedf73569f234341bf25c181e9d40cd956e0bdd03f9ba2",
+    "4301_akahu_transaction.sql": "62496f9ef1e517bcfe463ec432a7a5ede3e9a171aa04b0d1a80070960498a13b",
+    "4501_account_position.sql": "58789289773fefff4c3e092bbdb28cd57e2cc35bccb6492fbb92d154a8dc4337",
+    "5001_member_read_usage.sql": "65afb8813f942ce5794beac10bd568d4c0997f423e3c6f50d8377a121730dc92",
+    "5002_member_read_holds.sql": "0303aa4276642d1c8a96d63c49814445a922cffb9a749000b1da77009fe541d7",
+    "9601_accounts_akahu_synced_at.sql": "d9311cfcd7344067056d9f76b685ae4d94749d2e5fbfdb05dfe69ed5a249b30b",
+    "9701_kept_reports.sql": "38d0373b126c545258520dd8f2fa2c6b904725fb3ca65afd58c21bcc070734e5"
   },
   "tables": {
     "settings": {
@@ -11,20 +35,7 @@
         "key",
         "value"
       ],
-      "rows": [
-        [
-          "about_contact",
-          "Sam Example, sam@example.com"
-        ],
-        [
-          "about_retention",
-          "Kept until the Admin deletes it"
-        ],
-        [
-          "app_title",
-          "Example family finances"
-        ]
-      ]
+      "rows": []
     },
     "change_log": {
       "columns": [
@@ -33,43 +44,90 @@
         "actor",
         "summary",
         "before",
-        "after"
+        "after",
+        "type"
       ],
-      "rows": [
-        [
-          1,
-          "2026-09-01T02:00:00.000Z",
-          "admin@example.com",
-          "Changed the app title",
-          "{\"app_title\":\"Fernledger\"}",
-          "{\"app_title\":\"Example family finances\"}"
-        ],
-        [
-          2,
-          "2026-09-02T03:30:00.000Z",
-          "admin@example.com",
-          "Renamed an Account",
-          "{\"name\":\"Savings\"}",
-          "{\"name\":\"Savings Example\"}"
-        ]
-      ]
+      "rows": []
     },
     "accounts": {
       "columns": [
         "id",
         "account_number",
-        "name"
+        "name",
+        "cutover_date",
+        "akahu_account_id",
+        "akahu_missing_since",
+        "akahu_last_failure",
+        "akahu_name",
+        "akahu_formatted_account",
+        "akahu_status",
+        "akahu_type",
+        "akahu_attributes",
+        "akahu_connection_id",
+        "akahu_connection_name",
+        "akahu_connection_logo",
+        "akahu_connection_type",
+        "akahu_balance_currency",
+        "akahu_balance_current_cents",
+        "akahu_balance_available_cents",
+        "akahu_refreshed_balance_at",
+        "akahu_refreshed_meta_at",
+        "akahu_refreshed_transactions_at",
+        "position",
+        "akahu_synced_at"
       ],
       "rows": [
         [
           1,
           "99-9999-9999999-99",
-          "Savings Example"
+          "Savings Example",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
         ],
         [
           2,
           "99-9999-9999999-98",
-          "Everyday Example"
+          "Everyday Example",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
         ]
       ]
     },
@@ -84,7 +142,33 @@
         "bank_type",
         "bank_reference",
         "source",
-        "bank_unique_id"
+        "bank_unique_id",
+        "override_category",
+        "note",
+        "bank_counterparty_account",
+        "bank_card_suffix",
+        "bank_particulars",
+        "bank_payment_code",
+        "akahu_date_raw",
+        "has_bank_time",
+        "akahu_first_seen_at",
+        "rule_id",
+        "rule_category",
+        "rule_transfer",
+        "transfer_of",
+        "akahu_id",
+        "merchant",
+        "not_transfer_with",
+        "akahu_category_id",
+        "akahu_category_name",
+        "akahu_category_group_id",
+        "akahu_category_group_name",
+        "akahu_balance_cents",
+        "akahu_hash",
+        "akahu_updated_at",
+        "akahu_posted_date",
+        "akahu_connection_id",
+        "bank_time_from_memo"
       ],
       "rows": [
         [
@@ -97,7 +181,33 @@
           "INT",
           null,
           "import",
-          "2026083101"
+          "2026083101",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
         ],
         [
           2,
@@ -109,7 +219,33 @@
           "EFTPOS",
           null,
           "import",
-          "2026090401"
+          "2026090401",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
         ],
         [
           3,
@@ -121,7 +257,33 @@
           "D/C",
           null,
           "import",
-          "2026091201"
+          "2026091201",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
         ],
         [
           4,
@@ -133,7 +295,33 @@
           "CHQ",
           "000123",
           "import",
-          "2026091801"
+          "2026091801",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
         ],
         [
           5,
@@ -145,7 +333,33 @@
           "EFTPOS",
           null,
           "import",
-          "2026090401"
+          "2026090401",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
         ],
         [
           6,
@@ -157,9 +371,343 @@
           "D/D",
           null,
           "import",
-          "2026092001"
+          "2026092001",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
         ]
       ]
+    },
+    "balance_checks": {
+      "columns": [
+        "id",
+        "account_id",
+        "as_of_date",
+        "bank_cents",
+        "source",
+        "through_transaction_id",
+        "status",
+        "checked_against",
+        "calculated_cents",
+        "difference_cents"
+      ],
+      "rows": [
+        [
+          1,
+          1,
+          "2026-09-15",
+          349300,
+          "import",
+          6,
+          "alone",
+          null,
+          null,
+          null
+        ],
+        [
+          2,
+          1,
+          "2026-09-30",
+          344800,
+          "import",
+          6,
+          "differs",
+          "2026-09-15",
+          344300,
+          500
+        ],
+        [
+          3,
+          2,
+          "2026-09-10",
+          45401,
+          "import",
+          6,
+          "alone",
+          null,
+          null,
+          null
+        ],
+        [
+          4,
+          2,
+          "2026-09-30",
+          33401,
+          "import",
+          6,
+          "matched",
+          "2026-09-10",
+          33401,
+          0
+        ]
+      ]
+    },
+    "categories": {
+      "columns": [
+        "id",
+        "name",
+        "removed_at",
+        "kind"
+      ],
+      "rows": [
+        [
+          1,
+          "Groceries",
+          null,
+          "spending"
+        ],
+        [
+          2,
+          "Eating out",
+          null,
+          "spending"
+        ],
+        [
+          3,
+          "Fuel",
+          null,
+          "spending"
+        ],
+        [
+          4,
+          "Transport",
+          null,
+          "spending"
+        ],
+        [
+          5,
+          "Power and gas",
+          null,
+          "spending"
+        ],
+        [
+          6,
+          "Rates and water",
+          null,
+          "spending"
+        ],
+        [
+          7,
+          "Phone and internet",
+          null,
+          "spending"
+        ],
+        [
+          8,
+          "Insurance",
+          null,
+          "spending"
+        ],
+        [
+          9,
+          "Health and medical",
+          null,
+          "spending"
+        ],
+        [
+          10,
+          "Rent or mortgage",
+          null,
+          "spending"
+        ],
+        [
+          11,
+          "Home and garden",
+          null,
+          "spending"
+        ],
+        [
+          12,
+          "Clothing",
+          null,
+          "spending"
+        ],
+        [
+          13,
+          "Entertainment",
+          null,
+          "spending"
+        ],
+        [
+          14,
+          "Gifts and donations",
+          null,
+          "spending"
+        ],
+        [
+          15,
+          "Travel",
+          null,
+          "spending"
+        ],
+        [
+          16,
+          "Education",
+          null,
+          "spending"
+        ],
+        [
+          17,
+          "Bank fees",
+          null,
+          "spending"
+        ],
+        [
+          18,
+          "Tax",
+          null,
+          "spending"
+        ],
+        [
+          19,
+          "NZ Super and benefits",
+          null,
+          "income"
+        ],
+        [
+          20,
+          "Wages and salary",
+          null,
+          "income"
+        ],
+        [
+          21,
+          "Interest",
+          null,
+          "income"
+        ],
+        [
+          22,
+          "Other income",
+          null,
+          "income"
+        ],
+        [
+          23,
+          "Loans",
+          null,
+          "loans"
+        ]
+      ]
+    },
+    "rules": {
+      "columns": [
+        "id",
+        "position",
+        "text_contains",
+        "bank_type",
+        "direction",
+        "min_cents",
+        "max_cents",
+        "category_id",
+        "is_transfer",
+        "removed_at"
+      ],
+      "rows": []
+    },
+    "data_migration_progress": {
+      "columns": [
+        "id",
+        "kind",
+        "status",
+        "cursor",
+        "end_id",
+        "total_rows",
+        "done_rows",
+        "changed_rows",
+        "restarts",
+        "started_by",
+        "started_at",
+        "updated_at",
+        "finished_at",
+        "usage_day",
+        "day_rows_read",
+        "day_rows_written"
+      ],
+      "rows": []
+    },
+    "budgets": {
+      "columns": [
+        "category_id",
+        "effective_from_month",
+        "amount_cents"
+      ],
+      "rows": []
+    },
+    "pending_transactions": {
+      "columns": [
+        "id",
+        "account_id",
+        "date",
+        "amount_cents",
+        "description",
+        "bank_type",
+        "synced_at"
+      ],
+      "rows": []
+    },
+    "carry_over": {
+      "columns": [
+        "account_id",
+        "bank_unique_id",
+        "override_category",
+        "note",
+        "applied",
+        "differs",
+        "date",
+        "amount_cents",
+        "description",
+        "category_name",
+        "not_transfer_with"
+      ],
+      "rows": []
+    },
+    "member_read_usage": {
+      "columns": [
+        "member_key",
+        "usage_day",
+        "rows_read",
+        "held",
+        "held_count",
+        "held_at"
+      ],
+      "rows": []
+    },
+    "kept_reports": {
+      "columns": [
+        "id",
+        "report",
+        "account_id",
+        "category_id",
+        "from_date",
+        "to_date",
+        "last_made_at",
+        "made_by"
+      ],
+      "rows": []
     }
   }
 }
