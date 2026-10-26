@@ -35,7 +35,20 @@
         "key",
         "value"
       ],
-      "rows": []
+      "rows": [
+        [
+          "about_contact",
+          "Sam Example, sam@example.com"
+        ],
+        [
+          "about_retention",
+          "Kept until the Admin deletes it"
+        ],
+        [
+          "app_title",
+          "Example family finances"
+        ]
+      ]
     },
     "change_log": {
       "columns": [
@@ -47,7 +60,26 @@
         "after",
         "type"
       ],
-      "rows": []
+      "rows": [
+        [
+          1,
+          "2026-09-01T02:00:00.000Z",
+          "admin@example.com",
+          "Changed the app title",
+          "{\"app_title\":\"Fernledger\"}",
+          "{\"app_title\":\"Example family finances\"}",
+          null
+        ],
+        [
+          2,
+          "2026-09-02T03:30:00.000Z",
+          "admin@example.com",
+          "Renamed an Account",
+          "{\"name\":\"Savings\"}",
+          "{\"name\":\"Savings Example\"}",
+          null
+        ]
+      ]
     },
     "accounts": {
       "columns": [
@@ -182,8 +214,8 @@
           null,
           "import",
           "2026083101",
-          null,
-          null,
+          1,
+          "Example note",
           null,
           null,
           null,

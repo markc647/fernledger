@@ -72,17 +72,23 @@ const columnsOf = (db, table) => db.prepare(`SELECT name FROM pragma_table_info(
 const rowsOf = (db, table, columns) =>
   db.prepare(`SELECT ${columns.map(quote).join(', ')} FROM ${quote(table)}${orderBy(columns.length)}`).all()
 
-/** The whole database as SQL: schema in creation order, then each table's rows. Loads with `exec`. */
+/**
+ * The whole database as SQL: schema in creation order, then each table's rows. Loads with `exec`. The rows load with foreign keys
+ * off, as SQLite's own `.dump` does: tables come in creation order, and a later migration can add a table an earlier one refers to
+ * (transactions.override_category -> categories). verifySample runs the foreign-key check once everything is in.
+ */
 export function dump(db) {
   const schema = db.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY rowid").all()
   const lines = ['-- A made-up Fernledger sample database (scripts/sample-db.mjs). Bank 99 and example.com data only.']
   lines.push(...schema.map((r) => `${r.sql};`))
+  lines.push('PRAGMA foreign_keys = OFF;')
   for (const table of [...userTables(db), 'd1_migrations']) {
     const columns = columnsOf(db, table)
     for (const row of rowsOf(db, table, columns)) {
       lines.push(`INSERT INTO ${quote(table)} (${columns.map(quote).join(', ')}) VALUES (${columns.map((c) => literal(row[c])).join(', ')});`)
     }
   }
+  lines.push('PRAGMA foreign_keys = ON;')
   return `${lines.join('\n')}\n`
 }
 
