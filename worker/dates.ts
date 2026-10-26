@@ -20,3 +20,6 @@ export const MAX_QUERY_DATE = '2100-12-31'
 
 /** Whether `value` is a real NZ date within the years a search accepts. Shared by the Change Log and the Transactions list. */
 export const isQueryDate = (value: unknown): value is string => isRealDate(value) && (value as string) >= MIN_QUERY_DATE && (value as string) <= MAX_QUERY_DATE
+
+/** The UTC day a moment is in, as D1 counts a day. */
+export const utcDay = (now: Date) => now.toISOString().slice(0, 10)

@@ -1,5 +1,6 @@
 import * as z from 'zod/mini'
 import { isQueryDate } from './dates'
+import { monthCount } from './months'
 import { ID } from './validate'
 
 // What every Report's query string starts with: the Account and the dates, both ends included. Each Report's own query adds what it
@@ -25,6 +26,10 @@ export const reportRangeOfAll = { accountId: z.optional(reportRange.accountId), 
 
 /** The last check of a Report's query: `from` is not after `to`. A refusal names `to`. */
 export const datesInOrder = z.refine<{ from: string; to: string }>((q) => q.from <= q.to, { path: ['to'] })
+
+/** A Report's dates span at most `max` NZ months, counting both ends' months. Dates left out (a named period) pass. A refusal names `to`. */
+export const monthsAtMost = (max: number) =>
+  z.refine<{ from?: string; to?: string }>((q) => q.from === undefined || q.to === undefined || monthCount(q.from.slice(0, 7), q.to.slice(0, 7)) <= max, { path: ['to'] })
 
 const ACCOUNT_EXISTS = 'SELECT id FROM accounts WHERE id = ?'
 

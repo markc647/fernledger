@@ -21,9 +21,9 @@
 // name, and an error class when there is one, and nothing else. This request never touches D1, so it still answers once the day's
 // allowance is gone.
 import * as z from 'zod/mini'
+import { utcDay } from './dates'
 import { DAILY_ROW_WRITES } from './import-rows'
 import { logEvent } from './log'
-import { utcDay } from './rule-rerun'
 
 export const GRAPHQL_URL = 'https://api.cloudflare.com/client/v4/graphql'
 /** D1 Free's daily allowance of rows read (developers.cloudflare.com/d1/platform/pricing); rows written is DAILY_ROW_WRITES (ADR 0004). */

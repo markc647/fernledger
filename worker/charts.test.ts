@@ -2,6 +2,7 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import worker from './index'
+import { MEMBER_LIMIT_QUERIES } from './member-read-limit'
 import { EVERY_DATE, MAX_NET_WORTH_ACCOUNTS, type NetWorth, type NetWorthRange } from './net-worth'
 import { monthEnd, monthsBefore, monthStart, nzMonth } from './months'
 import { readSpendingByCategory, type SpendingByCategory } from './spending-by-category'
@@ -321,8 +322,8 @@ describe('net worth\'s cost (ADR 0004)', () => {
     expect(body.tooManyAccounts).toBeNull()
     expect(body.notCounted).toHaveLength(MAX_NET_WORTH_ACCOUNTS) // none has a balance
     const limit = watched.prepared.filter((sql) => sql.includes('member_read_usage')) // the Members' daily limit: net worth is dear, so its hold and its settling
-    expect(limit).toHaveLength(2)
-    expect(watched.prepared).toHaveLength(1 + MAX_NET_WORTH_ACCOUNTS + 2)
+    expect(limit).toHaveLength(MEMBER_LIMIT_QUERIES)
+    expect(watched.prepared).toHaveLength(1 + MAX_NET_WORTH_ACCOUNTS + MEMBER_LIMIT_QUERIES)
     expect(watched.prepared.length).toBeLessThanOrEqual(50)
   })
 

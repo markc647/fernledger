@@ -1,7 +1,7 @@
 import * as z from 'zod/mini'
 import { ALL_CHANGES, budgetInMonth, budgetVsActual, IN_EFFECT, withChanges, type Change, type InEffect, type VsActual } from './budget-rules'
-import { monthCount, monthEnd, monthStart, monthState, nextMonth, nzMonth, type MonthState } from './months'
-import { datesInOrder, reportDates } from './report-query'
+import { monthEnd, monthStart, monthState, nextMonth, nzMonth, type MonthState } from './months'
+import { datesInOrder, monthsAtMost, reportDates } from './report-query'
 import { buildSpending, rollUp, type SpendingRow } from './spending'
 
 // The data of the Budget vs actual Report (GET /api/reports/budget-vs-actual): each NZ month the dates touch, whole, with the Budget each Spending
@@ -31,7 +31,7 @@ export const budgetReportQuery = z
   .object(reportDates)
   .check(
     datesInOrder,
-    z.refine<{ from: string; to: string }>((q) => monthCount(q.from.slice(0, 7), q.to.slice(0, 7)) <= MAX_REPORT_MONTHS, { path: ['to'] }),
+    monthsAtMost(MAX_REPORT_MONTHS),
   )
 
 export type BudgetReportRequest = { from: string; to: string }

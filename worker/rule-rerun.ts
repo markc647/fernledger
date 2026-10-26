@@ -37,6 +37,7 @@
 import type { Member } from './auth'
 import { recordChange } from './changelog'
 import { isDailyLimitError } from './d1-errors'
+import { utcDay } from './dates'
 import { logEvent } from './log'
 import { firstMatchingRule } from './rule-apply'
 import { PAID_PLAN } from './settings'
@@ -147,9 +148,6 @@ const COLUMNS = `id, status, cursor, end_id, total_rows, done_rows, changed_rows
 // The number of Rules in use, at most 100 reads. Only the queries that answer the page ask for it, so a cron run that finds nothing to do
 // reads one table.
 const RULES_IN_USE = `(SELECT COUNT(*) FROM rules WHERE removed_at IS NULL) AS rule_count`
-
-/** The UTC day a moment is in, as D1 counts a day. */
-export const utcDay = (now: Date) => now.toISOString().slice(0, 10)
 
 /**
  * Whether the next chunk of a running job would pass its share of today's rows. A job that has done nothing today never is, and nor is one on

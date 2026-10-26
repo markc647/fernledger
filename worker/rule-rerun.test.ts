@@ -6,7 +6,8 @@ import { applyRulesStatement } from './rule-apply'
 import { BACKUP_CRON, BACKUP_STATE_KEY } from './backup'
 import { MAX_RULES } from './rule-criteria'
 import { SYNC_CRON } from './sync'
-import { BACKUP_CHUNKS, chunkFor, continueRerun, CRON_CHUNKS, cronQueries, DAILY_READ_BUDGET, DAILY_WRITE_BUDGET, ESTIMATED_STEP_READS, ESTIMATED_WRITES_PER_ROW, MIN_CHUNK, QUERIES_PER_CHUNK, QUERIES_TO_FINISH, READS_PER_ROW, restartRerun, RERUN_CHUNK, startRerun, STEP_READS, stepRerun, stopRerun, utcDay } from './rule-rerun'
+import { BACKUP_CHUNKS, chunkFor, continueRerun, CRON_CHUNKS, cronQueries, DAILY_READ_BUDGET, DAILY_WRITE_BUDGET, ESTIMATED_STEP_READS, ESTIMATED_WRITES_PER_ROW, MIN_CHUNK, QUERIES_PER_CHUNK, QUERIES_TO_FINISH, READS_PER_ROW, restartRerun, RERUN_CHUNK, startRerun, STEP_READS, stepRerun, stopRerun } from './rule-rerun'
+import { utcDay } from './dates'
 
 // Seam 1: requests through the Worker's exported handler, as the local-development Admin or a read-only Member (the dev identity
 // cookie is honoured on localhost only; Access token handling is tested in api.test.ts).
