@@ -1,0 +1,214 @@
+import { Hono } from 'hono'
+import * as z from 'zod/mini'
+import { accountName, accountOrder, isoDate } from './account-fields'
+import { CLEAR_DETAILS, SELECT_DISPLAYED, toAttributeWords } from './akahu-details'
+import type { DisplayedDetails } from './akahu-details'
+import type { AppEnv } from './app-env'
+import { recordChange } from './changelog'
+import type { SyncFailure } from './sync'
+import { DELETE_PENDING_ON_RELINK } from './pending'
+import { CHANGED_MEANWHILE, pathId, validate } from './validate'
+
+// What Akahu said about a linked Account is null for one that is not linked, and until a Sync has read it (worker/akahu-details.ts).
+// `akahuSyncedAt` is when Sync last finished the Account (an instant in UTC), or null until it has.
+// `akahuMissingSince` is when Akahu first stopped listing the Account ("Account Link broken"), and `akahuLastFailure` why the last
+// Sync of it did not finish; both are null when there is nothing wrong. The Sync status is written from them (src/lib/sync-status.ts).
+type AccountRow = {
+  id: number
+  name: string
+  accountNumber: string
+  cutoverDate: string | null
+  akahuAccountId: string | null
+  akahuSyncedAt: string | null
+  akahuMissingSince: string | null
+  akahuLastFailure: SyncFailure | null
+} & {
+  [K in keyof DisplayedDetails]: DisplayedDetails[K] | null
+}
+
+/** One Account as the browser gets it: the row, with Akahu's attributes as the words they are rather than the JSON the column holds. */
+type Account = Omit<AccountRow, 'akahuAttributes'> & { akahuAttributes: string[] | null }
+
+const rename = z.object({ name: accountName })
+const addCardAccount = z.object({ name: accountName })
+
+/**
+ * A new Account for a credit card, whose bank prints no account number: Fernledger generates the key, `card-` and the highest
+ * card key held plus one, four digits (ADR 0017). The Admin types only the name and is never shown the key.
+ *
+ * The key is worked out inside the insert, so two requests cannot read the same highest number and then both write it: one
+ * statement reads and writes, and `account_number`'s UNIQUE constraint is left with nothing to decide. The aggregate returns a
+ * row even when no card Account is held yet, which is where `card-0001` comes from.
+ */
+const ADD_CARD_ACCOUNT = `
+  INSERT INTO accounts (account_number, name)
+  SELECT 'card-' || printf('%04d', COALESCE(MAX(CAST(SUBSTR(account_number, 6) AS INTEGER)), 0) + 1), ?1
+  FROM accounts WHERE account_number LIKE 'card-%'
+  RETURNING id, account_number AS accountNumber`
+const cutover = z.object({ cutoverDate: z.nullable(isoDate) })
+const orderBody = z.object({ ids: z.array(z.int().check(z.positive())).check(z.maxLength(500)) })
+// Akahu's own account ID, which is opaque: its shape is all that can be checked, and the link is only as good as the Admin's choice
+// from /api/akahu/accounts. Null unlinks the Account.
+const link = z.object({ akahuAccountId: z.nullable(z.string().check(z.regex(/^acc_[A-Za-z0-9]{1,64}$/))) })
+
+export const accounts = new Hono<AppEnv>()
+  .get('/', async (c) => {
+    const { results } = await c.env.DB.prepare(
+      `SELECT id, name, account_number AS accountNumber, cutover_date AS cutoverDate, akahu_account_id AS akahuAccountId, akahu_synced_at AS akahuSyncedAt,
+              akahu_missing_since AS akahuMissingSince, akahu_last_failure AS akahuLastFailure, ${SELECT_DISPLAYED}
+       FROM accounts a ORDER BY ${accountOrder('a')}`,
+    ).all<AccountRow>()
+    return c.json(results.map(({ akahuAttributes, ...account }): Account => ({ ...account, akahuAttributes: toAttributeWords(akahuAttributes) })))
+  })
+  .post('/', validate('json', addCardAccount), async (c) => {
+    const { name } = c.req.valid('json')
+    const db = c.env.DB
+    const [added] = await recordChange(db, db.prepare(ADD_CARD_ACCOUNT).bind(name), {
+      actor: c.var.member,
+      type: 'account',
+      summary: `Added the credit card Account ${name}`,
+      onlyIfChanged: false,
+      after: { name },
+    })
+    const { id, accountNumber } = added!.results[0] as { id: number; accountNumber: string }
+    return c.json({ id, name, accountNumber }, 201)
+  })
+  // The Admin's order of Accounts (#45), used wherever they are listed (accountOrder), as PUT /api/rules/order is for Rules. The list
+  // must be exactly the Accounts held, and the UPDATE runs only if they are still in the order read, so a page open while another
+  // changed them cannot lose an Account's place. Every Account gets a position, so one added afterwards goes last.
+  .put('/order', validate('json', orderBody), async (c) => {
+    const { ids } = c.req.valid('json')
+    const db = c.env.DB
+    const current = (await db.prepare(`SELECT id, name FROM accounts a ORDER BY ${accountOrder('a')}`).all<{ id: number; name: string }>()).results
+    const isTheAccounts = ids.length === current.length && new Set(ids).size === ids.length && current.every((account) => ids.includes(account.id))
+    if (!isTheAccounts) return c.json({ error: 'Invalid request', field: 'ids' }, 400)
+    if (ids.every((id, i) => id === current[i]!.id)) return c.json({ ids })
+
+    const nameOf = new Map(current.map((account) => [account.id, account.name]))
+    const numbered = (id: number, i: number) => `${i + 1}. ${nameOf.get(id)!}` // the Change Log joins a list with commas, and a name can have one
+    const [moved] = await recordChange(
+      db,
+      db
+        .prepare(
+          `UPDATE accounts SET position = j.key + 1 FROM json_each(?1) j
+           WHERE accounts.id = j.value
+             AND (SELECT COUNT(*) FROM accounts) = json_array_length(?2)
+             AND NOT EXISTS (
+               SELECT 1 FROM (SELECT x.id, row_number() OVER (ORDER BY ${accountOrder('x')}) AS n FROM accounts x) r
+               WHERE r.id IS NOT json_extract(?2, '$[' || (r.n - 1) || ']')
+             )`,
+        )
+        .bind(JSON.stringify(ids), JSON.stringify(current.map((account) => account.id))),
+      {
+        actor: c.var.member,
+        type: 'account',
+        summary: 'Changed the order of Accounts',
+        before: { order: current.map((account, i) => numbered(account.id, i)) },
+        after: { order: ids.map(numbered) },
+        onlyIfChanged: true,
+      },
+    )
+    if (moved!.meta.changes === 0) {
+      const now = (await db.prepare(`SELECT id FROM accounts a ORDER BY ${accountOrder('a')}`).all<{ id: number }>()).results.map((account) => account.id)
+      return now.length === ids.length && now.every((id, i) => id === ids[i]) ? c.json({ ids }) : c.json(CHANGED_MEANWHILE, 409)
+    }
+    return c.json({ ids })
+  })
+  .patch('/:id', validate('json', rename), async (c) => {
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
+    const { name } = c.req.valid('json')
+    const db = c.env.DB
+    const account = await db.prepare('SELECT name FROM accounts WHERE id = ?').bind(id).first<{ name: string }>()
+    if (!account) return c.json({ error: 'Not found' }, 404)
+    if (account.name === name) return c.json({ id, name })
+
+    // Only over the name that was read, and an entry only if it changed something (`onlyIfChanged`): another request can land between the read and the write, and the
+    // Change Log must not say the Account was renamed from a name it no longer had.
+    const [update] = await recordChange(db, db.prepare('UPDATE accounts SET name = ?1 WHERE id = ?2 AND name = ?3').bind(name, id, account.name), {
+      actor: c.var.member,
+      type: 'account',
+      summary: `Renamed Account ${account.name} to ${name}`,
+      before: { name: account.name },
+      after: { name },
+      onlyIfChanged: true,
+    })
+    if (update!.meta.changes === 0) {
+      const now = await db.prepare('SELECT name FROM accounts WHERE id = ?').bind(id).first<{ name: string }>()
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      return now.name === name ? c.json({ id, name }) : c.json(CHANGED_MEANWHILE, 409)
+    }
+    return c.json({ id, name })
+  })
+  // The Cutover Date (ADR 0003): Import drops rows dated on or after it. Setting it deletes nothing already saved.
+  .put('/:id/cutover-date', validate('json', cutover), async (c) => {
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
+    const { cutoverDate } = c.req.valid('json')
+    const db = c.env.DB
+    const account = await db.prepare('SELECT name, cutover_date FROM accounts WHERE id = ?').bind(id).first<{ name: string; cutover_date: string | null }>()
+    if (!account) return c.json({ error: 'Not found' }, 404)
+    if (account.cutover_date === cutoverDate) return c.json({ id, cutoverDate })
+
+    // As the rename is: only over the date that was read (`IS` is `=` that also matches NULL), and an entry only if it changed something.
+    const [update] = await recordChange(db, db.prepare('UPDATE accounts SET cutover_date = ?1 WHERE id = ?2 AND cutover_date IS ?3').bind(cutoverDate, id, account.cutover_date), {
+      actor: c.var.member,
+      type: 'account',
+      summary: cutoverDate === null ? `Cleared the Cutover Date for ${account.name}` : `Set the Cutover Date for ${account.name} to ${cutoverDate}`,
+      before: { cutoverDate: account.cutover_date },
+      after: { cutoverDate },
+      onlyIfChanged: true,
+    })
+    if (update!.meta.changes === 0) {
+      const now = await db.prepare('SELECT cutover_date FROM accounts WHERE id = ?').bind(id).first<{ cutover_date: string | null }>()
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      return now.cutover_date === cutoverDate ? c.json({ id, cutoverDate }) : c.json(CHANGED_MEANWHILE, 409)
+    }
+    return c.json({ id, cutoverDate })
+  })
+  // The Account Link (spec 29): which Akahu account this Account receives Sync from, or null to stop syncing it. Only linked
+  // Accounts are ever synced (ADR 0008), and unlinking deletes no Transaction: what Sync already brought in stays. What Akahu said about
+  // the old link (the bank, the balance, ...) goes in the same write, because it describes an account this one no longer takes from.
+  .put('/:id/akahu-link', validate('json', link), async (c) => {
+    const id = pathId(c.req.param('id'))
+    if (id === null) return c.json({ error: 'Not found' }, 404)
+    const { akahuAccountId } = c.req.valid('json')
+    const db = c.env.DB
+    const account = await db.prepare('SELECT name, akahu_account_id FROM accounts WHERE id = ?').bind(id).first<{ name: string; akahu_account_id: string | null }>()
+    if (!account) return c.json({ error: 'Not found' }, 404)
+    if (account.akahu_account_id === akahuAccountId) return c.json({ id, akahuAccountId })
+    // One Akahu account feeds at most one Account (the unique index in migration 2701), so say which Account has it rather than
+    // letting the write fail. Another request could still take it between this read and the write; that surfaces as the 409 below.
+    if (akahuAccountId !== null) {
+      const taken = await db.prepare('SELECT name FROM accounts WHERE akahu_account_id = ? AND id <> ?').bind(akahuAccountId, id).first<{ name: string }>()
+      if (taken) return c.json({ error: `That Akahu account is already linked to ${taken.name}` }, 409)
+    }
+
+    // As the Cutover Date is: only over the link that was read (`IS` is `=` that also matches NULL), and an entry only if it changed something.
+    // The Pending Transactions came from the old link and say nothing about the new one, so they go with it, in the same batch:
+    // an unlink that committed without them would leave pending money showing for an Account no Sync will ever replace it for.
+    // Two statements, the update second: the Change Log entry counts `changes()` of the statement just before it, and that has
+    // to be the update (worker/changelog.ts). `recordChange` hands the results back in the order given.
+    const [, update] = await recordChange(
+      db,
+      [
+        db.prepare(DELETE_PENDING_ON_RELINK).bind(id, account.akahu_account_id),
+        db.prepare(`UPDATE accounts SET akahu_account_id = ?1, ${CLEAR_DETAILS} WHERE id = ?2 AND akahu_account_id IS ?3`).bind(akahuAccountId, id, account.akahu_account_id),
+      ],
+      {
+      actor: c.var.member,
+      type: 'account',
+      // Akahu's ID is not in the summary: the Change Log is read by Members, and which Akahu account it is says nothing to them.
+      summary: akahuAccountId === null ? `Unlinked ${account.name} from Akahu` : `Linked ${account.name} to an Akahu account`,
+      before: { akahuAccountId: account.akahu_account_id },
+      after: { akahuAccountId },
+      onlyIfChanged: true,
+      },
+    )
+    if (update!.meta.changes === 0) {
+      const now = await db.prepare('SELECT akahu_account_id FROM accounts WHERE id = ?').bind(id).first<{ akahu_account_id: string | null }>()
+      if (!now) return c.json({ error: 'Not found' }, 404)
+      return now.akahu_account_id === akahuAccountId ? c.json({ id, akahuAccountId }) : c.json(CHANGED_MEANWHILE, 409)
+    }
+    return c.json({ id, akahuAccountId })
+  })

@@ -5,11 +5,11 @@ A self-hosted tracker for NZ bank accounts, synced via Akahu, that one Admin man
 ## People
 
 **Admin**:
-The one Member who can change Categories, Rules, Budgets, Overrides and Notes, and who owns the Akahu connection.
+The one Member who can change Categories, Rules, Budgets, Overrides, Notes and Not a Transfer marks, who makes Reports, and who owns the Akahu connection.
 _Avoid_: Super user, owner, editor
 
 **Member**:
-A person granted access to the dashboard; read-only unless they are the Admin.
+A person granted access to Fernledger; read-only unless they are the Admin.
 _Avoid_: User, viewer, household
 
 **Deployer**:
@@ -19,20 +19,36 @@ _Avoid_: Host, operator, owner
 ## Money
 
 **Account**:
-A bank account being tracked.
+A bank account being tracked. A credit card is one: the Admin adds it by name on the Accounts screen, because its bank prints no account number.
 _Avoid_: Bank account, wallet
+
+**Account number**:
+The Account's stable key, which is the bank's number (`BB-bbbb-AAAAAAA-SS`) when the bank prints one. Where the bank prints none, as for a credit card, Fernledger generates the key (`card-0001`): the Admin never types it and is never shown it as a number, and the Account's name is what identifies it ([ADR 0017](docs/adr/0017-account-number-is-the-accounts-key.md)). A card's own number is not an Account number, because a reissued card would split the Account in two; the card used is kept per Transaction instead.
+_Avoid_: Account ID, card number
 
 **Transaction**:
 A settled movement of money in or out of an Account.
 _Avoid_: Record, entry, line
 
 **Pending Transaction**:
-A Transaction the bank has reported but not yet settled; it may still change or disappear.
+A Transaction the bank has reported but not yet settled; it may still change or disappear. Every Sync replaces them all, they are listed above the Transactions table, and they count towards no Budget, Report or total ([ADR 0015](docs/adr/0015-pending-in-its-own-table.md)).
 _Avoid_: Unsettled, provisional
 
+**Sync status**:
+How current the bank data is, above the Balances on the Summary and the Dashboard: when the slowest linked Account was last Synced, red after two days, and the cause when something is wrong. The Admin is also told what to do about it; a Member sees the state and the cause.
+_Avoid_: Sync health, connection status
+
+**Account Link broken**:
+What a linked Account is called once Akahu stops listing the Akahu account it is linked to. A Sync of such an Account is never a Sync that finished: no Transaction is removed for it and its last Sync time stays where it was. The Admin reconnects the bank in Akahu and links the Account again.
+_Avoid_: Disconnected, dead link
+
 **Transfer**:
-A Transaction moving money between two tracked Accounts; it is not spending and is excluded from Budgets.
-_Avoid_: Internal payment, sweep
+A Transaction moving money between two tracked Accounts, found as one of a pair in different Accounts or marked by a Rule; it is not spending and is excluded from Budgets. The other Transaction of a pair is its matching Transaction. How pairs are found is in README [How it works](README.md#how-it-works).
+_Avoid_: Internal payment, sweep, other half
+
+**Not a Transfer**:
+The Admin's answer to a Transaction that a pairing or a Rule has made a Transfer but is not one. A pair loses both halves at once; neither is paired with another Transaction either, and a Rule's Transfer flag no longer applies to them, until the Admin treats them as a Transfer again. Each then counts under its own Category's kind, Spending when it has no Category. It is carried over when imported history is replaced.
+_Avoid_: Unpair, false match, exception
 
 ## Sources
 
@@ -41,23 +57,39 @@ A load of Transactions from bank-exported files; used for history older than Aka
 _Avoid_: Upload, migration
 
 **Bank Time**:
-The time of day of a Transaction, shown only when the bank actually supplied one; most Transactions have a date only.
+The time of day of a Transaction, shown only when the bank actually supplied one; most Transactions have a date only. It is Akahu's own `date` where that carries a time of day, and nothing else: a time written into the words of a description (Kiwibank's `POS W/D Example Store-12:07`) is left in those words and never read out as a time.
 _Avoid_: Timestamp, posted time
 
+**Akahu category**:
+Akahu's own label for a card Transaction (an NZFCC category and the personal-finance group above it), kept by Sync and shown on the Transaction's details as Akahu's. It is not a Category: it is never a Transaction's Category, and no Rule, Override, Uncategorised count or Report reads it. Absent means Akahu didn't say, not that there is none.
+_Avoid_: Suggested Category, auto-category
+
+**First-seen time**:
+When Akahu first reported a Transaction to Sync, shown in its details as "First seen by Akahu". Only Transactions that come through Sync have one: an Import's details say Akahu hasn't reported it. Not Bank Time, which is the time of day the bank supplied, and not the Transaction's date.
+_Avoid_: Created time, import time
+
 **Sync**:
-The daily pull of new Transactions and Pending Transactions from Akahu.
+The daily pull of new Transactions and Pending Transactions from Akahu. An Account is **Synced** when Sync has read it up to a moment in the last 24 hours (that moment is `accounts.akahu_synced_at`, which Sync writes when it finishes an Account: the run's own moment, or, for an Account still catching up on a long gap, the moment that run read to), and **Not Synced** when not; README [What it does](README.md#what-it-does) says where that shows.
 _Avoid_: Refresh, update, fetch
 
 **Account Link**:
-The association between an Account and its account in Akahu; it can break when a bank reconnects or migrates, and is then re-linked by the Admin.
-_Avoid_: Mapping, connection
+The association between an Account and its account in Akahu; it can break when a bank reconnects or migrates, and is then re-linked by the Admin. While it holds, each Sync keeps everything Akahu says about the account and the Accounts screen shows it: the bank's name, Akahu's own connection to that bank (its ID and the kind of connection it is), Akahu's own name for the account and the account number it formats, its type and status, what Akahu says it can do with the account (its attributes), its balance and currency, when Akahu last read the bank for it, and when Fernledger last Synced it (its Last Sync). The bank's logo address is kept too and never fetched, shown or sent to the browser (ADR 0010). Unlinking or re-linking clears the lot.
+
+Akahu's own *connection* is one of those fields, not another word for this: it is Akahu's object for the bank the account sits at, and it is only ever written as Akahu's (`akahuConnectionId`, "Akahu's connection ID").
+_Avoid_: Mapping, connection (for the Account Link itself)
+
+**Bank balance**:
+What the bank says an Account held on a date: the ledger balance in an Import's file, or the balance Akahu reports, recorded after a Sync that finished and dated the NZ day Akahu read the bank. An Account's balance is its latest bank balance the Transactions reach, plus the Transactions after it.
+_Avoid_: Statement balance
 
 **Balance Check**:
-The comparison, after each Sync, between an Account's balance as reported by the bank and the balance calculated from its Transactions.
+The comparison, after each Import and after each Sync that finished, between an Account's balance as reported by the bank (the one in the file, or the one Akahu reports) and the balance calculated from its Transactions. A bank balance is as at a date; Akahu's is dated the NZ day Akahu read the bank. README [What it does](README.md#what-it-does) says where the result shows.
+The rules are in README [Correct](README.md#correct).
 _Avoid_: Reconciliation, audit
 
 **Cutover Date**:
 For an Account linked to Akahu, the date before which Transactions come only from Imports and on or after which they come only from Sync.
+Today any Account can have one; limiting it to linked Accounts will ship with the Account Link ticket, because no link exists yet to check (ADR 0008).
 _Avoid_: Switchover, boundary
 
 ## Organising
@@ -66,9 +98,41 @@ _Avoid_: Switchover, boundary
 A label grouping Transactions by purpose, such as Groceries or Care Fees.
 _Avoid_: Tag, type, bucket
 
+**Category kind**:
+What a Category is for, which the Admin sets: Spending, Income or Loans. It decides how the Category's Transactions are totalled, and a Loans Category is what the Loans Report lists; the rules are in [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+_Avoid_: Type (that is Change type), group
+
+**Spending**:
+What the Spending Categories took out of the Accounts in a month or a range of dates, less what came back, such as a refund; Uncategorised counts as Spending. Transfers, Pending Transactions and Loans are not Spending. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+_Avoid_: Expenses, outgoings
+
+**Income**:
+What the Income Categories brought into the Accounts in a month, less what went out of them. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+_Avoid_: Earnings
+
+**Difference**:
+Income less Spending: in a month, or over the dates of the Income vs spending by month Report. Below zero when more was spent than came in. Money in that has no Category comes off Spending and is not Income, but the Difference is the same whichever Income or Spending Category it is given. A Loans Category drops the money out of the Difference.
+_Avoid_: Net, surplus, profit
+
+**Loans**:
+The Category kind for money lent or borrowed, such as a loan between family: neither Spending nor Income, and left out of Budgets. The Loans Report adds each one up. See [ADR 0012](docs/adr/0012-spending-and-category-kinds.md).
+_Avoid_: Debt
+
+**Uncategorised**:
+What a Transaction is when no Override, Rule or Akahu suggestion gives it a Category in use, so a removed Category counts as none; the Admin has a list of them. A Transfer is not Uncategorised and is left off that list. Removing a Category takes away its Overrides, and those Transactions fall back to their Rule or Akahu category, or are Uncategorised if neither applies.
+_Avoid_: Unassigned, unknown
+
 **Rule**:
-An Admin-defined pattern that assigns a Category to matching Transactions; it overrides Akahu's suggested category.
+An Admin-defined pattern that gives matching Transactions a Category, or marks them as Transfers. How Rules match and take precedence is in README [How it works](README.md#how-it-works).
 _Avoid_: Filter, mapping
+
+**Rule made from a Transaction**:
+A Rule the Admin makes with Create Rule in a Transaction's Edit panel, giving the Category chosen there to Transactions like it. It looks for text and a way the money went, and goes last in the order. As it is saved it also gives that Category to this Transaction (as a Rule's Category, or as an Override if the Rule does not give it) and to up to 1,000 other Uncategorised Transactions that it is the first Rule to match; the Re-run does the rest. README [How it works](README.md#how-it-works) says how.
+_Avoid_: Quick rule, auto-categorise
+
+**Re-run**:
+Applying the Rules as they are now to every Transaction already on file, in steps that keep their place, so a Rule change reaches the past as well as new Imports. It gives each Transaction the result of the first Rule that matches, or none, and never touches an Override or a Note. It is also what gives the Category of a Rule made from a Transaction to the Uncategorised Transactions beyond the 1,000 that Rule gave it at once, and to those an earlier Rule matches. The Rules page's button for it, beside "Add a Rule", says "Apply the Rules to all Transactions", which is the same thing in the words an Admin would use; it asks first. How it runs is in README [How it works](README.md#how-it-works).
+_Avoid_: Reapply, backfill, refresh
 
 **Override**:
 A Category the Admin sets by hand on a single Transaction; it outranks any Rule or Akahu suggestion.
@@ -78,16 +142,80 @@ _Avoid_: Manual category, exception
 Free text the Admin attaches to a single Transaction.
 _Avoid_: Comment, memo
 
+**Carry over (Overrides, Notes and Not a Transfer marks)**:
+What replacing an Account's imported history does with the Admin's Overrides, Notes and Not a Transfer marks: each goes to the re-imported Transaction with the same bank unique ID (the bank's own number for it; ASB makes it from the date and a count for the day). One with no match is lost; one that went to a Transaction with a different amount is counted, since the bank may have numbered that day differently. An Import that stops part way leaves them held until a replace completes or the Admin discards them. Not the Budget sense of the words: unspent Budget amounts do not carry over from month to month.
+_Avoid_: Migrate, restore, reapply
+
 **Budget**:
-A planned monthly spending amount for a Category, effective from a given month onward; unspent amounts do not carry over.
+A planned monthly Spending amount for a Spending Category, effective from a given month onward; unspent amounts do not carry over. Budget vs actual compares it each month with what the Category spent.
 _Avoid_: Limit, allowance, envelope
+
+**Budget vs actual**:
+A month's Budgets set against what the Spending Categories spent in it: each Category with a Budget that month, with its Budget, what it spent and where it stands (Under Budget, On Budget or Over Budget), then **Spending outside Budgets** (the Spending Categories with no Budget that month) and Uncategorised. The Summary shows this month's; the Budget vs actual Report shows every month of a range, for all Accounts together, and adds together only the months that have ended, because the month it is now has had part of its spending set against the whole of its Budget.
+_Avoid_: Variance, forecast
 
 ## Accountability
 
 **Change Log**:
-The record of every change the Admin makes, with when; visible to all Members.
+The record of every change the Admin makes: who, what and when; visible to all Members.
 _Avoid_: Audit trail, history
 
+**Change type**:
+What a Change Log entry changed, such as Settings, Import, Account, Category, Rule, Budget, Transaction, Transfer or Report; Members can filter the Change Log by it. Not a Category, and not a Category kind.
+_Avoid_: Type on its own
+
 **Report**:
-A print-formatted view of Transactions over a date range, which any Member can print or save as PDF.
+A print-formatted view of Transactions, of each Account's balances, of what each Spending Category spent, of Budget vs actual, of Income and Spending by month, or of what is owed on a loan, over a date range. Only the Admin makes one, by choosing it on its page; any Member can then open it, and print it or save it as PDF.
 _Avoid_: Statement, export
+
+**Kept Report**:
+A Report the Admin has made, kept in the Reports page's list as its choices only: which Report, its dates, and its Account (or, for the Loans Report, its Loans Category). It is not a snapshot: opening it works it out again from today's data. Showing the same Report with the same choices again keeps no second one; it updates when the Report was last made. A Member can open only a Report that is kept. The Admin can delete one from the list.
+_Avoid_: Saved Report, snapshot, history
+
+**Loans Report**:
+The Report of one Loans Category, or of each of them with a section each, from the first Transaction or a start date up to a date. A section lists the Category's Transactions with what is owed after each and on the last date: "Alice owes $300.00 to the Accounts" when more money went out than came in, "Alice is owed $300.00" when more came in. The person is named by the Category ("Loan – Alice"), and "the Accounts" are the household's side. It never says "we owe", because in Fernledger "we" is Fernledger itself ("the last Transaction we hold"). A start date begins it with what was owed before that date.
+_Avoid_: Loan statement, debt report
+
+**CSV export**:
+A spreadsheet file of the Transactions that match the filters last searched on the Export page, which has the same filters as the Transactions page.
+_Avoid_: Report
+
+## Viewing
+
+**Summary**:
+The page every Member lands on, except the Admin, who lands on the Dashboard: a column of cards with the balance of each Account (and whether it agrees with the bank, and, once Akahu Sync is set up, whether Sync reached it), the newest Transactions and, last, Budget vs actual for this month. The Dashboard has the same cards.
+_Avoid_: Home page
+
+**Dashboard**:
+The page the Admin lands on: every card of the Summary and nothing more, because the Admin's pages (Import, Uncategorised, Rules, Categories, Budgets, Settings) are in the sidebar. Where the Summary is for a Member, the Dashboard is for the Admin; the address is the same and the Admin's navigation calls it the Dashboard.
+_Avoid_: Home page, admin panel
+
+**Charts**:
+The two pictures that draw trends: net worth over time, which is the Net worth page (in the sidebar's Reports group), and spending by Category, a bar chart on the Spending by Category Report. Each chart is a picture of figures that are also written out in a table. Net worth waits for the reader to ask for it (it reads every Transaction); the spending chart is drawn from the Report's own figures and reads nothing more. Neither is on the Summary or the Dashboard.
+_Avoid_: Graphs, analytics
+
+**Net worth**:
+The money in the tracked Accounts added up at the end of each month, worked out from each Account's balance history. Only the money in those Accounts: a loan to or from someone whose account isn't tracked shows as a fall or a rise, and assets or investments entered by hand are not part of it (README, What it doesn't do). Months before an Account's first Transaction are an estimate. The Net worth page draws it; the Balances over time Report lists each Account's own.
+_Avoid_: Total balance, wealth
+
+## Configuration
+
+**Setting**:
+A value the Admin chooses in the app, such as the app title or the About your data text; the Admin themselves is not a Setting.
+_Avoid_: Preference, option, config
+
+**D1 usage bar**:
+What the Rules page shows the Admin, in the question it asks before "Apply the Rules to all Transactions" and in the progress of a run that is paused for the allowance, when the Deployer has added the two Cloudflare secrets for it: the Cloudflare account's rows read and rows written today, against D1 Free's 5,000,000 and 100,000 a day, as bars with a badge (Plenty left, Running low from 70% used, Almost used from 85% used, or Used up once the limit is reached) and the figures in words. On the Free Plan, the Admin's header shows the same figures as one bar, "Free allowance left today", of whichever of the two has gone further, as an estimate, with the same words and colours. It counts the whole account, runs a few minutes behind, and is optional, so its Setup needed can be ignored (ADR 0010). On the Cloudflare Paid Plan it shows today's figures alone, with no bars or badges (ADR 0018).
+_Avoid_: Quota meter, analytics
+
+**Cloudflare Paid Plan**:
+The Settings switch (the Setting `cloudflare_plan`) by which the Admin says the Cloudflare account is on the Workers Paid plan, which has no daily D1 allowance. It lifts the app's own daily caps (the Members' daily read limit and the Rules re-run's share of the day) and the words that name the Free Plan's day; the limits on each request stay. Off, the default, is the Free Plan. Fernledger can't check it (ADR 0018).
+_Avoid_: Pro, premium, unlimited
+
+**Setup needed**:
+What the Admin is shown for a feature that is switched off, or not doing all it should, until the Deployer adds configuration it requires, with what to add and how; Members see only that the feature isn't set up. For an optional feature such as Akahu Sync, it can be ignored.
+
+**Members' read count key**:
+The Worker secret `MEMBER_KEY_SECRET`, which the code each Member's daily read count is kept under also uses, so a backup alone can't link a count to a Member. `npm run deploy` makes it when the Worker has none, and nobody sees it; without it the counts are kept under the day and email alone, and Settings says Setup needed.
+_Avoid_: Member secret, salt
+_Avoid_: Misconfigured, disabled, error

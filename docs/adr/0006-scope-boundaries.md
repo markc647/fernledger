@@ -5,4 +5,5 @@ Fernledger is single-tenant. Each family deploys its own copy into its own Cloud
 ## Consequences
 
 - No `tenant_id` columns, no currency columns (amounts are NZD cents), no i18n framework.
+- A currency Akahu reports for a linked Account's balance may be stored as a record of what Akahu said. It is never converted, summed or used in Fernledger's own amounts, which stay NZD cents.
 - Supporting more than one family, or more than one currency, would be a new ADR and a significant migration, not a config switch.

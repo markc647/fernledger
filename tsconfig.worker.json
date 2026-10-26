@@ -5,7 +5,8 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "types": ["./worker-configuration.d.ts"],
-    "lib": ["ES2023"]
+    "lib": ["ES2023", "ES2024.String"]
   },
-  "include": ["worker", "worker-configuration.d.ts"]
+  "include": ["worker", "worker-configuration.d.ts"],
+  "exclude": ["worker/**/*.test.ts", "worker/test-setup.ts", "worker/test-support.ts"]
 }

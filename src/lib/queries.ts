@@ -1,0 +1,366 @@
+import { queryOptions } from '@tanstack/react-query'
+import type { PreviewRow } from '@/generated/api/import-rows'
+import { api } from './api'
+import { isLoansKind } from './category-kinds'
+import type { NetWorthRange } from './charts'
+import type { CarryPreview } from './import-carry'
+import { HttpError } from './me'
+import { loadBalances } from './report-balances'
+import { loadLoans } from './report-loans'
+import { loadListing } from './report-transactions'
+import { retryAtMost } from './session'
+import { apiQuery, filterQuery, filtersOf, type TransactionSearch } from './transaction-search'
+
+export const PAGE_SIZE = 50
+
+/**
+ * A Report's reads are asked for again when they fail, as any read is, except when the Worker refuses them (403): a Member who asks for a Report the Admin has not made is told so
+ * at once, and asking again would only be refused again. Nor once the sign-in is known to be gone (src/lib/session.ts), which asking again would only meet again.
+ */
+const retryUnlessRefused = (count: number, error: unknown) => !(error instanceof HttpError && error.status === 403) && retryAtMost(3)(count)
+
+export const accountsQuery = queryOptions({
+  queryKey: ['accounts'],
+  queryFn: async () => {
+    const res = await api.accounts.$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+export const CHANGE_LOG_PAGE_SIZE = 50
+
+export type ChangeLogFilters = { type: string; from: string; to: string }
+
+/** One page of the Change Log, newest first. Blank filters are left out. `page` is 0-based. */
+export const changeLogQuery = (filters: ChangeLogFilters, page: number) =>
+  queryOptions({
+    queryKey: ['change-log', filters, page],
+    queryFn: async () => {
+      const query: Record<string, string> = { limit: String(CHANGE_LOG_PAGE_SIZE), offset: String(page * CHANGE_LOG_PAGE_SIZE) }
+      for (const key of ['type', 'from', 'to'] as const) if (filters[key]) query[key] = filters[key]
+      const res = await api['change-log'].$get({ query })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
+/**
+ * One page of Transactions for a search (filters, sort and page), as the API returns it, without a count: counting reads
+ * every Transaction the filters keep (ADR 0004), so it is `transactionCountQuery`'s, asked once per search and not per page.
+ * Every key starts with 'transactions', so saving an Override or Note refreshes them all.
+ */
+export const transactionsQuery = (search: TransactionSearch) =>
+  queryOptions({
+    queryKey: ['transactions', 'list', search],
+    queryFn: async () => {
+      const res = await api.transactions.$get({ query: { ...apiQuery(search, PAGE_SIZE), count: 'false' } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
+/**
+ * The Pending Transactions: all of them, newest first, as the last Sync left them (worker/pending.ts). Not searched, filtered or
+ * paged, because pending money is a handful of rows and is replaced whole on every Sync.
+ */
+export const pendingTransactionsQuery = queryOptions({
+  queryKey: ['transactions', 'pending'],
+  queryFn: async () => {
+    const res = await api.transactions.pending.$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+/** How many Transactions a search matches. Only its filters count, so paging and sorting reuse the answer instead of asking again. */
+export const transactionCountQuery = (search: TransactionSearch) => {
+  const filters = filtersOf(search)
+  return queryOptions({
+    queryKey: ['transactions', 'count', filters],
+    queryFn: async () => {
+      const res = await api.transactions.$get({ query: { ...filterQuery(filters), count: 'only' } })
+      if (!res.ok) throw new HttpError(res.status)
+      const { total } = await res.json()
+      if (total === null) throw new Error('The API did not count') // count=only always does; this narrows the type
+      return total
+    },
+  })
+}
+
+/** One Transaction in full. A 404 means there is no such Transaction. */
+export const transactionQuery = (id: string) =>
+  queryOptions({
+    queryKey: ['transactions', 'detail', id],
+    retry: (count, error) => !(error instanceof HttpError && error.status === 404) && retryAtMost(3)(count),
+    queryFn: async () => {
+      const res = await api.transactions[':id'].$get({ param: { id } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
+/**
+ * The Transaction listing Report's data: every Transaction of `accounts` in the range, a page at a time (loadListing), up to
+ * the cap. The pages are read once and kept: a Report is a snapshot ("Generated … at …" is when the data arrived), so a refocused
+ * window doesn't read thousands of rows again.
+ */
+export const reportListingQuery = (accounts: { id: number; name: string; accountNumber: string }[], from: string, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'transactions', accounts.map((a) => a.id), from, to],
+    retry: retryUnlessRefused,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: () =>
+      loadListing({
+        accounts,
+        from,
+        to,
+        fetchPage: async ({ accountId, after, limit, ...range }) => {
+          const res = await api.reports.transactions.$get({ query: { accountId: String(accountId), ...range, limit: String(limit), ...(after === undefined ? {} : { after }) } })
+          if (!res.ok) throw new HttpError(res.status)
+          return res.json()
+        },
+      }),
+  })
+
+/**
+ * The balances-over-time Report's data: each Account's balance history at the end of each month in the range, one request for each
+ * Account (loadBalances). Read once and kept, as the Transaction listing is: a Report is a snapshot.
+ */
+export const reportBalancesQuery = (accounts: { id: number; name: string; accountNumber: string; cutoverDate: string | null }[], from: string, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'balances', accounts.map((a) => a.id), from, to],
+    retry: retryUnlessRefused,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: () =>
+      loadBalances({
+        accounts,
+        from,
+        to,
+        fetchReport: async ({ accountId, ...range }) => {
+          const res = await api.reports.balances.$get({ query: { accountId: String(accountId), ...range } })
+          if (!res.ok) throw new HttpError(res.status)
+          return res.json()
+        },
+      }),
+  })
+
+/**
+ * The spending-by-Category Report's data: what each Category spent over the range, for the one Account or, with none, all of them, as the
+ * `GET /api/charts/spending` gives it (worker/spending-by-category.ts), and the Report's bar chart is drawn from it. One request either way. Read once and kept, as the other Reports are: a Report is a snapshot.
+ */
+export const reportSpendingQuery = (accountId: number | undefined, from: string, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'spending', accountId ?? null, from, to],
+    retry: retryUnlessRefused,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const res = await api.reports.spending.$get({ query: { ...(accountId === undefined ? {} : { accountId: String(accountId) }), from, to } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
+/**
+ * The Budget vs actual Report's data: each month the dates touch, in one request for all the months (a Budget is for all Accounts together). Read once and kept, as
+ * the other Reports are: a Report is a snapshot.
+ */
+export const reportBudgetQuery = (from: string, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'budget-vs-actual', from, to],
+    retry: retryUnlessRefused,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const res = await api.reports['budget-vs-actual'].$get({ query: { from, to } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
+/**
+ * The income-vs-spending-by-month Report's data: Income and Spending in each month of the range, for the one Account or, with none, all of them. One request
+ * either way. Read once and kept, as the other Reports are: a Report is a snapshot.
+ */
+export const reportIncomeVsSpendingQuery = (accountId: number | undefined, from: string, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'income-vs-spending', accountId ?? null, from, to],
+    retry: retryUnlessRefused,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const res = await api.reports['income-vs-spending'].$get({ query: { ...(accountId === undefined ? {} : { accountId: String(accountId) }), from, to } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
+/**
+ * The Reports the Admin has made, newest first: one small query (worker/kept-reports.ts), and a kept Report is only its choices, so it is never out of date the way a Report's figures
+ * would be. The Reports page is this table. The Admin showing a Report refreshes it.
+ */
+export const keptReportsQuery = queryOptions({
+  queryKey: ['kept-reports'],
+  queryFn: async () => {
+    const res = await api['kept-reports'].$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+/** The Categories in use, by name. */
+export const categoriesQuery = queryOptions({
+  queryKey: ['categories'],
+  queryFn: async () => {
+    const res = await api.categories.$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+/**
+ * The Loans Report's data: the Transactions of the Loans Category chosen or, with none chosen, of each Loans Category in use, a page at a time (loadLoans), up to the
+ * cap. It reads the Categories itself, once, so the Report is one snapshot of both the loans it lists and what is in them: a Category made or changed while it is open
+ * does not change it. `available` is how many Loans Categories there are, so a Report with none to list can say why. Read once and kept, as the other Reports are.
+ */
+export const reportLoansQuery = (category: number | undefined, from: string | undefined, to: string) =>
+  queryOptions({
+    queryKey: ['reports', 'loans', category ?? null, from ?? null, to],
+    retry: retryUnlessRefused,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const categories = await api.categories.$get()
+      if (!categories.ok) throw new HttpError(categories.status)
+      const loans = (await categories.json()).filter((c) => isLoansKind(c.kind))
+      const chosen = category === undefined ? loans : loans.filter((c) => c.id === category)
+      const listing = await loadLoans({
+        loans: chosen,
+        from,
+        to,
+        fetchPage: async ({ categoryId, after, limit, ...range }) => {
+          const res = await api.reports.loans.$get({ query: { categoryId: String(categoryId), to: range.to, ...(range.from === undefined ? {} : { from: range.from }), limit: String(limit), ...(after === undefined ? {} : { after }) } })
+          if (!res.ok) throw new HttpError(res.status)
+          return res.json()
+        },
+      })
+      return { available: loans.length, listing }
+    },
+  })
+
+/**
+ * Every Category in use with the Budget it has this NZ month (the Worker decides which month that is) and all of its Budget changes.
+ * Every key starts with 'budgets', so saving a Budget refreshes both.
+ */
+export const budgetsQuery = queryOptions({
+  queryKey: ['budgets', 'list'],
+  queryFn: async () => {
+    const res = await api.budgets.$get({ query: {} })
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+/** This NZ month's Budget vs actual: each Category that has a Budget, with what it has spent. */
+export const budgetVsActualQuery = queryOptions({
+  queryKey: ['budgets', 'vs-actual'],
+  queryFn: async () => {
+    const res = await api.budgets['vs-actual'].$get({ query: {} })
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+/** How many Import-sourced Transactions an Account holds, and how many of them have an Override or a Note, so a replace can say what it will remove. Read fresh each time it's asked. */
+export const importedRowsQuery = (accountId: number) =>
+  queryOptions({
+    queryKey: ['imported-rows', accountId],
+    gcTime: 0,
+    queryFn: async () => {
+      const res = await api.imports.imported[':accountId'].$get({ param: { accountId: String(accountId) } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })
+
+/**
+ * What a replace with this file would do with the Account's Overrides, Notes and Not a Transfer marks: asked of the Worker a chunk of the file's
+ * IDs and amounts at a time (the Worker takes at most CHUNK_SIZE in a request), and added up. Nothing is changed. `key` says
+ * which file and Cutover Date the chunks are of. Read fresh each time it's asked.
+ */
+export const carryPreviewQuery = (accountId: number, chunks: PreviewRow[][], key: string) =>
+  queryOptions({
+    queryKey: ['carry-preview', accountId, key],
+    gcTime: 0,
+    // Not re-asked on window focus or while open: each ask reads the Account's history (ADR 0004). Discarding refetches it.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async (): Promise<CarryPreview> => {
+      const preview: CarryPreview = { waiting: 0, carries: 0, differing: 0 }
+      for (const rows of chunks) {
+        const res = await api.imports['carry-preview'].$post({ json: { accountId, rows } })
+        if (!res.ok) throw new HttpError(res.status)
+        const body = await res.json()
+        if (!('waiting' in body)) throw new HttpError(res.status)
+        preview.waiting = body.waiting
+        preview.carries += body.carries
+        preview.differing += body.differing
+      }
+      return preview
+    },
+  })
+
+/** Every Account's balance now, from its latest bank balance. */
+export const balancesQuery = queryOptions({
+  queryKey: ['balances'],
+  queryFn: async () => {
+    const res = await api.balances.$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return (await res.json()).accounts
+  },
+})
+
+/** Balance Check warnings (where the bank and the Transactions disagree), and each Account's latest check. */
+export const balanceChecksQuery = queryOptions({
+  queryKey: ['balance-checks'],
+  retry: retryAtMost(1), // the Balances table waits for it: one more try, and then it says so, not three tries and a long wait
+  queryFn: async () => {
+    const res = await api['balance-checks'].$get()
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+export const RECENT_TRANSACTIONS = 5
+
+/** The newest few Transactions, for the Summary. */
+export const recentTransactionsQuery = queryOptions({
+  queryKey: ['transactions', 'recent'],
+  queryFn: async () => {
+    // No count: the Summary shows no total, and counting would read every Transaction on every visit (ADR 0004).
+    const res = await api.transactions.$get({ query: { limit: String(RECENT_TRANSACTIONS), count: 'false' } })
+    if (!res.ok) throw new HttpError(res.status)
+    return res.json()
+  },
+})
+
+/**
+ * Net worth at the end of each month, for a range. Working it out reads every Transaction of every Account about six times whatever the range (ADR 0004), so the
+ * answer is kept for five minutes and not asked again when the window is refocused. The key starts with 'balances', so an Import or a Cutover Date, which change
+ * the balances, ask again.
+ */
+export const netWorthQuery = (range: NetWorthRange) =>
+  queryOptions({
+    queryKey: ['balances', 'net-worth', range],
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: retryAtMost(1), // a failed answer has already read a great deal, so it is asked for once more at most (ADR 0004)
+    queryFn: async () => {
+      const res = await api.charts['net-worth'].$get({ query: { range } })
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+  })

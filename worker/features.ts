@@ -1,0 +1,100 @@
+import type { MiddlewareHandler } from 'hono'
+import type { Role } from './auth'
+
+// "Setup needed": a feature declares the configuration it can't run without. While any of it is missing the feature is
+// off, the Admin is told what to set up and how, and Members get a neutral message. Everything else keeps working
+// (README: Upgrading). Messages are written from the declarations below, never from the missing values, so a secret
+// can't reach a response.
+
+/** A Worker secret or variable that a feature needs. */
+export type Requirement = {
+  env: keyof Env
+  /** What it is, finishing "Setup needed: ...". */
+  what: string
+  /** The action to take, as a sentence. */
+  how: string
+}
+
+export type Feature = {
+  /** Stable and URL-safe: the browser and the API refer to the feature by this. */
+  id: string
+  /** What a Member calls it. */
+  name: string
+  requires: Requirement[]
+  /** True when the product works fully without this feature (ADR 0008), so its setup is offered, not demanded. */
+  optional?: boolean
+  /** True when the name takes "the" in a sentence ("the D1 usage bar"), as "Akahu Sync" does not. The name alone is still what a list calls it. */
+  the?: boolean
+  /** Where the Admin finds the steps, said after what to set up. Written once here, so Settings and the feature's own page say the same. */
+  steps?: string
+}
+
+export const AKAHU_SYNC: Feature = {
+  id: 'akahu-sync',
+  name: 'Akahu Sync',
+  optional: true,
+  requires: [
+    { env: 'AKAHU_APP_TOKEN', what: 'the Akahu app token', how: 'Add it as the Worker secret AKAHU_APP_TOKEN.' },
+    { env: 'AKAHU_USER_TOKEN', what: 'the Akahu user token', how: 'Add it as the Worker secret AKAHU_USER_TOKEN.' },
+  ],
+}
+
+/**
+ * The Rules page's D1 usage bar: how much of D1 Free's daily allowance the Cloudflare account has used. It asks Cloudflare's GraphQL
+ * Analytics API (worker/d1-usage.ts), which is the one outbound call a Deployer's own token turns on (ADR 0010). Nothing else needs it.
+ */
+export const D1_USAGE: Feature = {
+  id: 'd1-usage',
+  name: 'D1 usage bar',
+  optional: true,
+  the: true,
+  steps: 'The steps are in docs/setup.md, under "D1 usage bar (optional)".',
+  requires: [
+    { env: 'CF_ANALYTICS_TOKEN', what: 'the Cloudflare analytics token', how: 'Add it as the Worker secret CF_ANALYTICS_TOKEN.' },
+    { env: 'CF_ACCOUNT_ID', what: 'the Cloudflare account ID', how: 'Add it as the Worker secret CF_ACCOUNT_ID.' },
+  ],
+}
+
+/**
+ * The key the Members' read counts are kept under (worker/member-read-limit.ts `memberKey`). Nothing is switched off without it: the counts are
+ * kept under a plain hash, which someone holding a backup could link to a Member by trying the household's emails. `npm run deploy` sets it,
+ * so only a Worker deployed some other way is without it.
+ */
+export const MEMBER_KEY: Feature = {
+  id: 'member-key',
+  name: "Members' read count key",
+  the: true,
+  requires: [{ env: 'MEMBER_KEY_SECRET', what: "the key for the Members' read counts", how: 'Run npm run deploy, which sets the Worker secret MEMBER_KEY_SECRET.' }],
+}
+
+/** Every feature that can be switched off by missing configuration. A feature adds itself here. */
+export const FEATURES: Feature[] = [AKAHU_SYNC, D1_USAGE, MEMBER_KEY]
+
+const isSet = (value: unknown) => typeof value === 'string' && value.trim() !== ''
+
+export const missingFor = (feature: Feature, env: Env): Requirement[] => feature.requires.filter((requirement) => !isSet(env[requirement.env]))
+
+export type FeatureStatus = { id: string; name: string; enabled: boolean; message?: string }
+
+export function featureStatuses(features: Feature[], env: Env, role: Role): FeatureStatus[] {
+  return features.map((feature) => {
+    const { id, name } = feature
+    const missing = missingFor(feature, env)
+    if (!missing.length) return { id, name, enabled: true }
+    const setup = [...missing.map(({ what, how }) => `Setup needed: ${what}. ${how}`), ...(feature.steps ? [feature.steps] : [])].join(' ')
+    // A name that takes "the" says it mid-sentence and capitalises it at the start of one.
+    const inSentence = feature.the ? `the ${name}` : name
+    const atStart = feature.the ? `The ${name}` : name
+    // An optional feature says so first, so an instance that doesn't use it knows it can ignore the rest.
+    const message = role !== 'admin' ? `${atStart} isn't set up yet.` : feature.optional ? `Optional: you only need this to use ${inSentence}. ${setup}` : setup
+    return { id, name, enabled: false, message }
+  })
+}
+
+/** Put in front of a feature's routes: while the feature isn't set up, they answer 503 and say nothing more. */
+export const requireFeature =
+  (feature: Feature): MiddlewareHandler<{ Bindings: Env }> =>
+  async (c, next) => {
+    if (missingFor(feature, c.env).length) return c.json({ error: 'Not set up', feature: feature.id }, 503)
+    await next()
+  }

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Installed by `npm install` (git config core.hooksPath .githooks). Bypass in an emergency with
+# `git commit --no-verify`; CI runs the same checks, so it will catch anything skipped here.
+set -e
+npm run --silent lint
+npm run --silent typecheck
+node scripts/scan.mjs --staged

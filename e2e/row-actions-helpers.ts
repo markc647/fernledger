@@ -1,0 +1,77 @@
+import type { Locator, Page } from '@playwright/test'
+import { expect } from './fixtures'
+import { contrastOf, rgbOf, type Rgb } from './shell-helpers'
+
+// The "⋯" menu on a row of the Rules, Categories and kept Reports tables (src/components/row-actions.tsx), and the cards on a phone: the same button and menu at every width. A spec says which
+// row's actions it means and which it chooses, and not where the control is today. A row with one action (a Transaction, an Account, a Budget) has a button named for it instead: `rowButton`.
+
+/** The "⋯" button of a row. `row` is what it names: "Rule 3" for a Rule, the Category's name for a Category. */
+export const actionsButton = (page: Page, row: string) => page.getByRole('button', { name: `Actions for ${row}`, exact: true })
+
+/**
+ * The named button of a row that has one action, with its row in its name: `rowButton(page, 'Edit', "EXAMPLE CAFE, Mon 8 Oct 2012")`, `rowButton(page, 'Rename', account.name)`, `rowButton(page, 'Edit Budget for', category.name)`.
+ */
+export const rowButton = (page: Page, action: string, row: string) => page.getByRole('button', { name: `${action} ${row}`, exact: true })
+
+/** The "⋯" button of every Rule, in the order the page shows them. */
+export const ruleActionButtons = (page: Page) => page.getByRole('button', { name: /^Actions for Rule \d+$/ })
+
+/** The open menu, for `noAxeViolations(page, { within: OPEN_MENU })`: while it is open the rest of the page is hidden from a screen reader, and is not what is looked at. */
+export const OPEN_MENU = '[data-slot="dropdown-menu-content"]'
+
+/** The open menu's item by its words. */
+export const menuAction = (page: Page, action: string) => page.getByRole('menuitem', { name: action, exact: true })
+
+/**
+ * Waits, after Space has picked a row up by its drag handle (the "Picked up" announcement is said), until an arrow key will move it, as a
+ * person's next key would. dnd-kit's KeyboardSensor starts listening for keys in a `setTimeout` after the pick-up (node_modules/@dnd-kit/core,
+ * `attach`), so a key pressed before that task runs is lost, and it moves a row by where the rows were last measured, which takes a frame
+ * drawn. Timers of the same delay run in order, so a timeout set now runs after the sensor's; then two frames go by. Without this, an arrow
+ * key straight after the announcement was lost now and then on a busy machine, and in every run on CI for a Rule with a transform.
+ */
+export async function readyToMove(page: Page) {
+  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))))
+}
+
+/** Opens the row's menu. (While it is open the rest of the page is hidden from a screen reader, the button too, so it is no longer found by its role: ask the menu.) */
+export async function openActions(button: Locator) {
+  await button.click()
+  await expect(button.page().getByRole('menu')).toBeVisible()
+}
+
+/** With the menu open, the arrow keys down to an item (skipping the ones that are turned off, as they do), to choose it with the keyboard. */
+export async function arrowTo(page: Page, action: string) {
+  const focused = () => page.evaluate(() => document.activeElement?.textContent ?? '')
+  for (let presses = 0; presses < 6; presses++) {
+    const was = await focused()
+    if (was === action) return
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(focused).not.toBe(was) // the next item has focus before the next press
+  }
+  await expect(menuAction(page, action)).toBeFocused()
+}
+
+/** Opens the row's menu and chooses an item. */
+export async function chooseAction(button: Locator, action: string) {
+  await openActions(button)
+  await menuAction(button.page(), action).click()
+}
+
+/**
+ * The contrast of an element's text against what it is drawn on, as the browser paints it (WCAG 1.4.3): the fills of the element and of each element it is in, the first of them over
+ * the page, laid one over the next (a translucent fill, such as a tint, shows what is under it).
+ */
+export async function textContrast(target: Locator) {
+  const { text, fills } = await target.evaluate((element) => {
+    const fills: string[] = []
+    for (let node: Element | null = element; node; node = node.parentElement) fills.unshift(getComputedStyle(node).backgroundColor)
+    return { text: getComputedStyle(element).color, fills }
+  })
+  const [colour, ...layers] = await rgbOf(target.page(), [text, ...fills])
+  let behind: Rgb = { r: 255, g: 255, b: 255 }
+  for (const layer of layers) {
+    const alpha = layer.a / 255
+    behind = { r: layer.r * alpha + behind.r * (1 - alpha), g: layer.g * alpha + behind.g * (1 - alpha), b: layer.b * alpha + behind.b * (1 - alpha) }
+  }
+  return contrastOf(colour!, behind)
+}

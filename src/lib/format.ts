@@ -1,0 +1,124 @@
+import { isoDateParts } from './iso-date'
+
+// How money and dates read on screen. Money is integer NZD cents and dates are NZ dates (Pacific/Auckland);
+// every screen formats through here so they all read the same (README: Accessibility, "Plain language").
+
+const MINUS = '−' // a real minus sign: a hyphen is too short to read as one, and screen readers say "dash"
+
+// Whole numbers with the thousands marked ("1,234,567"), for the dollars of an amount and for a count alike.
+const thousands = new Intl.NumberFormat('en-NZ')
+
+/**
+ * A count of things that is not money, with the thousands marked: "1,234,567". The one count formatter: Transactions looked at, rows read. Money goes
+ * through `formatAmount`. It is called while a page renders, so it never throws: a figure that is not a number shows as `NaN`, not as a blank page.
+ */
+export function formatCount(count: number) {
+  return thousands.format(count)
+}
+
+// Built from integer parts, never `cents / 100`: a float loses the last cents near Number.MAX_SAFE_INTEGER.
+function dollarsFromCents(cents: number) {
+  // The message never includes the value: amounts are private (CODING_STANDARDS.md, Security and privacy).
+  if (!Number.isSafeInteger(cents)) throw new RangeError('Amounts are whole cents')
+  const magnitude = BigInt(Math.abs(cents)) // Math.abs(-0) is 0, so negative zero reads as "$0.00"
+  return `$${thousands.format(magnitude / 100n)}.${String(magnitude % 100n).padStart(2, '0')}`
+}
+
+/** A Transaction's amount, always signed: "+$1,234.56" for money in, "−$1,234.56" for money out, "$0.00" for none. */
+export function formatAmount(cents: number) {
+  const text = dollarsFromCents(cents)
+  return cents < 0 ? MINUS + text : cents > 0 ? `+${text}` : text
+}
+
+/** An Account balance: signed only when overdrawn, "−$50.00". */
+export function formatBalance(cents: number) {
+  const text = dollarsFromCents(cents)
+  return cents < 0 ? MINUS + text : text
+}
+
+const dayFormat = (timeZone: string) =>
+  new Intl.DateTimeFormat('en-NZ', { weekday: 'short', day: 'numeric', month: 'numeric', year: 'numeric', timeZone })
+
+// Written out because browsers disagree on `Intl`'s short month names ("Sep" or "Sept"); NZ writes "Sept".
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
+
+// Assembled from parts because en-NZ puts a comma after the weekday ("Thu, 8 Oct 2026").
+const readDay = (format: Intl.DateTimeFormat, date: Date) => {
+  const parts = Object.fromEntries(format.formatToParts(date).map((part) => [part.type, part.value]))
+  return `${parts.weekday} ${Number(parts.day)} ${MONTHS[Number(parts.month) - 1]} ${parts.year}`
+}
+
+const inNewZealand = dayFormat('Pacific/Auckland')
+const asCalendarDate = dayFormat('UTC')
+
+/** An NZ calendar date as stored ("2026-10-08"), such as a Transaction's date: "Thu 8 Oct 2026". Never shifted by a time zone. */
+export function formatDate(isoDate: string) {
+  // A date such as 30 February would roll over into March; refuse it rather than show a different day.
+  const parts = isoDateParts(isoDate)
+  if (!parts) throw new RangeError('Dates are YYYY-MM-DD')
+  return readDay(asCalendarDate, new Date(Date.UTC(parts.year, parts.month - 1, parts.day)))
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+/** An NZ calendar month as stored ("2026-10"), such as the one a Budget is effective from: "October 2026". Written in full, so "Sept" and "Sep" can't disagree. */
+export function formatMonth(month: string) {
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month)
+  if (!match) throw new RangeError('Months are YYYY-MM')
+  return `${MONTH_NAMES[Number(match[2]) - 1]} ${match[1]}`
+}
+
+/** An NZ calendar month as stored ("2026-10") in short form, for a chart's axis: "Oct 2026". Its names are the dates' ("Sept", not "Sep"). */
+export function formatMonthShort(month: string) {
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month)
+  if (!match) throw new RangeError('Months are YYYY-MM')
+  return `${MONTHS[Number(match[2]) - 1]} ${match[1]}`
+}
+
+/** A balance in whole dollars, for the numbers along a chart's axis: "$12,000" or "−$1,200". Rounded, so it is not for reading an amount: use `formatBalance`. */
+export function formatAxisDollars(cents: number) {
+  return formatBalance(Math.round(cents / 100) * 100).replace(/\.00$/, '')
+}
+
+const nzCalendarDay = new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit' })
+
+/** The NZ calendar date of a moment, written as dates are stored ("2026-10-08"): today's date, whatever the device's time zone, for a form that starts at today. */
+export function nzDate(instant: Date | number = Date.now()) {
+  const parts = Object.fromEntries(nzCalendarDay.formatToParts(new Date(instant)).map((part) => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
+/** A moment in time (such as when a Sync last ran) shown as its New Zealand day: "Thu 8 Oct 2026". */
+export function formatInstantDate(instant: Date | number) {
+  const date = new Date(instant)
+  if (Number.isNaN(date.getTime())) throw new RangeError('Not a valid moment')
+  return readDay(inNewZealand, date)
+}
+
+const nzClock = new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', hour: 'numeric', minute: '2-digit', hour12: true })
+
+const timeOfDay = (moment: Date) => {
+  const part = Object.fromEntries(nzClock.formatToParts(moment).map(({ type, value }) => [type, value]))
+  return `${part.hour}:${part.minute} ${part.dayPeriod.toLowerCase()}`
+}
+
+/** A moment as its NZ time of day: "1:00 pm". Always Pacific/Auckland. */
+export const formatNzTime = (instant: Date | number) => timeOfDay(new Date(instant))
+
+/**
+ * Whether a stored instant can be shown at all: text about something the app may hold no time for — or that an answer from before
+ * that time was stored leaves out — asks this and drops its clause, rather than failing the page on a date that is not one.
+ */
+export const isMoment = (instant: string | null | undefined): instant is string => instant !== null && instant !== undefined && !Number.isNaN(Date.parse(instant))
+
+/** A moment (ISO 8601, UTC) as NZ day and time: "Thu 8 Oct 2026, 3:42 pm". Always Pacific/Auckland, whatever the device's time zone. */
+export function formatDateTime(instant: string) {
+  const moment = new Date(instant)
+  return `${formatInstantDate(moment)}, ${timeOfDay(moment)}`
+}
+
+/** A moment as a sentence's NZ day and time: "Thu 8 Oct 2026 at 3:42 pm" (for "Generated …" on a Report). Always Pacific/Auckland. */
+export function formatDateAtTime(instant: Date | number) {
+  const moment = new Date(instant)
+  return `${formatInstantDate(moment)} at ${timeOfDay(moment)}`
+}

@@ -1,24 +1,30 @@
-import { authConfigFromEnv, authenticate, devMember, isWrite, type Member } from './auth'
-
-export async function handleApi(request: Request, member: Member): Promise<Response> {
-  if (isWrite(request.method) && member.role !== 'admin') {
-    return Response.json({ error: 'Read-only' }, { status: 403 })
-  }
-  const { pathname } = new URL(request.url)
-  if (pathname === '/api/me') return Response.json(member)
-  return Response.json({ error: 'Not found' }, { status: 404 })
-}
+import { app } from './app'
+import { BACKUP_CRON, continueBackup, startBackup } from './backup'
+import { logEvent } from './log'
+import { BACKUP_CHUNKS, continueRerun, CRON_CHUNKS } from './rule-rerun'
+import { SYNC_CRON, syncAll } from './sync'
 
 export default {
-  async fetch(request, env) {
-    const config = authConfigFromEnv(env)
-    const member = devMember(request, env) ?? (config && (await authenticate(request, config)))
-    if (!member) return Response.json({ error: 'Unauthorised' }, { status: 401 })
-    return handleApi(request, member)
-  },
+  fetch: app.fetch,
 
-  async scheduled(controller) {
-    // Phase 3 (Sync) and Phase 7 (backup) hook in here, keyed on controller.cron.
-    console.log('cron', controller.cron)
+  async scheduled(controller, env) {
+    logEvent('cron.run')
+    // Akahu Sync has the morning cron to itself: its Accounts can spend most of the invocation's 50 D1 queries (MAX_QUERIES), so
+    // nothing else runs beside it. It does nothing at all unless both Akahu tokens are set and an Account is linked (ADR 0008), so
+    // a deployment that imports CSVs costs no query here. A failed Sync is not retried by a cron: it waits for
+    // tomorrow's, or the Admin's "Run a Sync now".
+    if (controller.cron === SYNC_CRON) {
+      await syncAll(env, new Date(controller.scheduledTime))
+      return
+    }
+    // The weekly cron starts a backup; every other cron carries on an unfinished one, and a Rules re-run that is running (the
+    // weekly cron spends 40 of its 50 queries on the backup). Each costs one query when there is nothing to do. A re-run does
+    // fewer chunks in a run that is carrying a backup on too, which already has the invocation's encoding and hashing to do.
+    if (controller.cron === BACKUP_CRON) {
+      await startBackup(env, controller.scheduledTime)
+    } else {
+      const carriedOn = await continueBackup(env)
+      await continueRerun(env.DB, carriedOn ? BACKUP_CHUNKS : CRON_CHUNKS)
+    }
   },
 } satisfies ExportedHandler<Env>

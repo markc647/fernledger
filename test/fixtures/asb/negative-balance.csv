@@ -1,0 +1,9 @@
+Created date / time : 2 October 2026 / 18:55:26
+Bank 99; Branch 9999; Account 9999999-100 (Overdraft Example)
+From date 20260901
+To date 20261002
+Avail Bal : 100.00 as of 20260930
+Ledger Balance : -1250.75 as of 20261002
+Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount
+
+2026/09/15,2026091501,EFTPOS,,"EXAMPLE CAFE TOWN","EFTPOS",-8.20

@@ -1,0 +1,29 @@
+{
+  "specs": {
+    "accounts-akahu.spec.ts": [27, 28, 29, 32, 34],
+    "budgets.spec.ts": [57, 58],
+    "categories.spec.ts": [88, 89],
+    "change-log.spec.ts": [90, 91],
+    "contrast.spec.ts": [19, 20, 21, 22, 23],
+    "cutover.spec.ts": [92, 93],
+    "dashboard.spec.ts": [64, 65, 66, 67],
+    "export.spec.ts": [24, 25],
+    "import.spec.ts": [94, 95, 96, 97, 99],
+    "kept-reports.spec.ts": [30, 31],
+    "pending-sync-status.spec.ts": [33],
+    "report-balances.spec.ts": [10, 11, 12, 13, 14, 15, 51, 52, 53, 54, 55, 56],
+    "report-budget.spec.ts": [80, 81, 82, 83],
+    "report-income-vs-spending.spec.ts": [39, 50, 59, 98],
+    "report-loans.spec.ts": [48, 49, 68, 69],
+    "report-notes.spec.ts": [35],
+    "report-spending.spec.ts": [74, 75, 76, 77, 78, 79],
+    "reports.spec.ts": [60, 61, 62, 63],
+    "rule-from-transaction.spec.ts": [26],
+    "rules.spec.ts": [84, 85],
+    "summary.spec.ts": [86, 87],
+    "table-look.spec.ts": [36, 37],
+    "transactions.spec.ts": [70, 71, 72, 73],
+    "transfers.spec.ts": [40, 41, 42, 43, 44, 45, 46, 47]
+  },
+  "mentionedOnly": [97]
+}

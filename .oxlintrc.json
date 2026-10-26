@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "rules": {
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "page",
+        "property": "waitForTimeout",
+        "message": "Await what the page shows (expect, expect.poll) instead of a fixed wait: see CODING_STANDARDS.md#tests."
+      }
+    ],
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["@dnd-kit/*"],
+            "message": "dnd-kit is imported only in src/components/sortable-rows.tsx, so only a page that drags loads it: see CODING_STANDARDS.md."
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/components/sortable-rows.tsx"],
+      "rules": { "no-restricted-imports": "off" }
+    }
+  ]
+}

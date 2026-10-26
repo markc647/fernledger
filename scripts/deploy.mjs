@@ -1,0 +1,170 @@
+// Deploys to the Cloudflare account you confirm: takes a complete backup, records a D1 restore point (bookmark),
+// applies remote migrations, deploys, sets the Members' read count key if the Worker has none, runs the smoke check (scripts/smoke.mjs), then prints
+// the bookmark with rollback instructions.
+// Usage: node scripts/deploy.mjs [--dry-run] [--yes] [--workers-dev-registered] [--skip-build] [--skip-backup]
+import { randomBytes } from 'node:crypto'
+import { existsSync, readdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { databaseHasTables, takeBackup } from './backup-run.mjs'
+import { readBuiltEntryScript, smokeCheckWithRetries, smokeSettings } from './smoke.mjs'
+import { ScriptError, askYesNo, bucketExists, confirmAccount, createRunner, databaseExists, main, readResourceNames, root } from './wrangler-cli.mjs'
+
+const args = process.argv.slice(2)
+const dryRun = args.includes('--dry-run')
+
+// Wrangler registers a workers.dev subdomain for an account that has none, and with no prompt in some
+// environments (CI mode, AI coding agents). Registering is the Deployer's decision, so this script
+// only deploys once the Deployer has said the account already has one. docs/setup.md explains why.
+async function requireWorkersDevSubdomain(accountId, { alreadyStated }) {
+  if (dryRun) {
+    console.log('Dry run: a real run stops here unless you confirm the account already has a workers.dev subdomain (--workers-dev-registered).')
+    return
+  }
+  const url = `https://dash.cloudflare.com/${accountId}/workers/subdomain`
+  console.log(`Check this account has a workers.dev subdomain: ${url}`)
+  if (alreadyStated) return
+  const stopped = `Not confirmed: once you have checked, re-run with --workers-dev-registered. If the account has no subdomain, register one at ${url} first.`
+  if (!(await askYesNo('Does this account already have a workers.dev subdomain?', stopped))) throw new ScriptError(stopped)
+}
+
+// The account is in the commands so they run as printed even when the login reaches several accounts.
+function rollbackInstructions(database, bookmark, accountId, backup) {
+  const wrangler = `CLOUDFLARE_ACCOUNT_ID=${accountId ?? '<account id>'} npx wrangler`
+  return [
+    '',
+    'Rollback',
+    `  Restore point (D1 bookmark): ${bookmark}`,
+    ...(backup ? [`  Backup taken first: ${backup.prefix} (docs/setup.md, "Rolling back")`] : []),
+    `  1. Usual fix, code only: \`${wrangler} rollback\` (or redeploy the previous release).`,
+    '     Migrations are add-only (ADR 0009), so the previous code still runs on the newer schema.',
+    `  2. Last resort, data: \`${wrangler} d1 time-travel restore ${database} --bookmark=${bookmark}\``,
+    '     This discards everything written since the bookmark. The free plan keeps restore points for 7 days.',
+    '     In PowerShell, set the account first: $env:CLOUDFLARE_ACCOUNT_ID = "<account id>", then run the command without the prefix.',
+  ].join('\n')
+}
+
+const MEMBER_KEY = 'MEMBER_KEY_SECRET'
+
+// The key the Members' read counts are kept under (worker/member-read-limit.ts `memberKey`), so a backup's rows can't be linked to a Member. It is made
+// here, so nobody chooses, sees or types it, and only when the Worker has none: a deploy never replaces it (rotating it is deleting it first, docs/setup.md).
+// The value goes to Wrangler on stdin. Without it the Worker keeps the counts under a plain hash and Settings says Setup needed, so a failure here is
+// said, and the deploy, which has worked, carries on.
+function ensureMemberKey(runner) {
+  const listed = runner.run(['secret', 'list', '--format', 'json'], { allowFailure: true, note: "is the key for the Members' read counts set?" })
+  if (runner.dry) return console.log(`Dry run: if the Worker has no ${MEMBER_KEY}, a real run makes a random one and sets it.`)
+  const again = `Run \`npm run deploy\` again to set it. Until then the Members' read counts are kept under a plain hash, and Settings says Setup needed.`
+  let names
+  try {
+    if (listed.status !== 0) throw new Error('secret list failed')
+    names = JSON.parse(listed.stdout.slice(listed.stdout.search(/[[{]/))).map((secret) => secret.name)
+  } catch {
+    return console.error(`Could not read the Worker's secrets, so ${MEMBER_KEY} was not checked. ${again}`)
+  }
+  if (names.includes(MEMBER_KEY)) return console.log(`${MEMBER_KEY} is set. Kept as it is.`)
+  const set = runner.run(['secret', 'put', MEMBER_KEY], { allowFailure: true, input: randomBytes(32).toString('hex'), note: 'a new random value, on stdin' })
+  if (set.status !== 0) return console.error(`Could not set ${MEMBER_KEY}. ${again}`)
+  console.log(`Set ${MEMBER_KEY}, the key for the Members' read counts: a random value nobody needs to know.`)
+}
+
+// The backup comes before the restore point and the migrations, and nothing has changed if it fails.
+// Returns the backup, or null when there is none to take.
+async function backupBeforeMigrations(runner, database, bucket) {
+  if (args.includes('--skip-backup')) {
+    console.log(`Skipping the backup (--skip-backup). Make sure you have a copy: npx wrangler d1 export ${database} --remote --output <file>.sql`)
+    return null
+  }
+  if (dryRun) {
+    console.log("Dry run: a complete backup would be taken here with the Worker's backup code, and deploy would wait for it to finish. It is skipped on a first deploy, when the database has no tables.")
+    return null
+  }
+  try {
+    if (!databaseHasTables(runner, database)) {
+      console.log(`First deploy: D1 database "${database}" has no tables yet, so there is nothing to back up. Skipping the backup.`)
+      return null
+    }
+    return await takeBackup(runner, { database, bucket })
+  } catch (e) {
+    if (!(e instanceof ScriptError)) throw e
+    throw new ScriptError(
+      [
+        `The backup before the migrations did not finish: ${e.message}`,
+        'Nothing was changed: no migrations were applied and nothing was deployed.',
+        'Run `npm run deploy` again. An unfinished backup carries on where it stopped.',
+        `To deploy without one, first make a copy by hand (npx wrangler d1 export ${database} --remote --output <file>.sql), then run \`npm run deploy -- --skip-backup\`.`,
+      ].join('\n'),
+    )
+  }
+}
+
+await main(async () => {
+  const { database, bucket, migrationsDir } = readResourceNames()
+  const accountId = await confirmAccount(createRunner({ dryRun }), { yes: args.includes('--yes') })
+  await requireWorkersDevSubdomain(accountId, { alreadyStated: args.includes('--workers-dev-registered') })
+  const runner = createRunner({ dryRun, accountId })
+
+  // Wrangler would create a missing D1 database or R2 bucket on deploy, with no location (ADR 0007), so check first.
+  const missing = []
+  if (databaseExists(runner, database) === false) missing.push(`D1 database "${database}"`)
+  if (bucketExists(runner, bucket) === false) missing.push(`R2 bucket "${bucket}"`)
+  if (missing.length) throw new ScriptError(`Missing ${missing.join(' and ')}. Run \`npm run setup\` first; deploying would create them without a location.`)
+
+  if (!args.includes('--skip-build')) runner.npm(['run', 'build'])
+
+  const backup = await backupBeforeMigrations(runner, database, bucket)
+
+  const info = runner.json(['d1', 'time-travel', 'info', database, '--json'], { note: 'records the restore point' })
+  const bookmark = dryRun ? '<bookmark>' : info?.bookmark
+  if (!bookmark) throw new ScriptError('Could not record a D1 restore point, so nothing was changed.')
+  console.log(`Restore point (D1 bookmark): ${bookmark}`)
+
+  const migrations = resolve(root, process.env.FERNLEDGER_MIGRATIONS_DIR || migrationsDir)
+  const hasMigrations = existsSync(migrations) && readdirSync(migrations).some((f) => f.endsWith('.sql'))
+  try {
+    if (hasMigrations) runner.run(['d1', 'migrations', 'apply', database, '--remote'], { show: true })
+    else console.log('No migrations to apply.')
+    // --strict: in CI mode Wrangler answers its own "overwrite remote changes?" prompts with yes; --strict makes it stop instead.
+    runner.run(['deploy', '--strict'], { show: true })
+  } catch (e) {
+    if (!(e instanceof ScriptError)) throw e
+    console.error(e.message)
+    console.error(rollbackInstructions(database, bookmark, accountId, backup))
+    process.exitCode = 1
+    return
+  }
+  console.log(dryRun ? '\nDry run only. Nothing was changed.' : '\nDeployed.')
+  try {
+    ensureMemberKey(runner) // before the smoke check, as setting it deploys a new version
+  } catch (e) {
+    if (!(e instanceof ScriptError)) throw e
+    console.error(`${e.message} ${MEMBER_KEY} was not set: run \`npm run deploy\` again to set it.`) // the deploy has worked, so the rest still runs
+  }
+  const smokeFailed = await smoke()
+  if (smokeFailed) process.exitCode = 1
+  console.log(rollbackInstructions(database, bookmark, accountId, backup))
+})
+
+// After the deploy, so a failure is reported with the rollback instructions; it never rolls back by itself.
+// Returns true when the check ran and failed.
+async function smoke() {
+  const settings = smokeSettings()
+  if (settings.missing) {
+    console.log(`Smoke check skipped: set ${settings.missing.join(', ')} to run it (docs/setup.md, "Smoke check").`)
+    return false
+  }
+  if (settings.problem) {
+    console.error(`Smoke check not run: ${settings.problem}`)
+    return true
+  }
+  if (dryRun) {
+    console.log(`Dry run: the smoke check would ask ${settings.origin} for the page and /api/me with the service token, and for the page without it.`)
+    return false
+  }
+  const entryScript = readBuiltEntryScript(resolve(root, 'dist/client/index.html'))
+  const failed = entryScript ? await smokeCheckWithRetries({ ...settings, entryScript }) : ["Could not find the build's entry script in dist/client/index.html."]
+  if (!failed.length) {
+    console.log(`Smoke check passed: ${settings.origin} serves this build behind Access, and the Worker refuses an identity with no email.`)
+    return false
+  }
+  console.error(['', 'Smoke check FAILED. The deploy is done; decide whether to roll back:', ...failed.map((f) => `  - ${f}`)].join('\n'))
+  return true
+}

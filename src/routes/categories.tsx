@@ -1,0 +1,334 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createFileRoute } from '@tanstack/react-router'
+import { useEffect, useRef, useState } from 'react'
+import { PageHeading } from '@/components/help-sheet'
+import { ResponsiveTable, type Column } from '@/components/responsive-table'
+import { RowAction, RowActions, useFocusBack } from '@/components/row-actions'
+import { Button } from '@/components/ui/button'
+import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { api } from '@/lib/api'
+import { KIND_HINTS, KIND_LABELS, KINDS, type CategoryKind } from '@/lib/category-kinds'
+import { CATEGORY_SORT_WORDS, sortCategories, type CategorySort, type CategorySortDirection, type CategorySortKey } from '@/lib/category-sort'
+import { HttpError, meQuery, reasonOf } from '@/lib/me'
+import { budgetsQuery, categoriesQuery } from '@/lib/queries'
+
+export const Route = createFileRoute('/categories')({
+  component: Categories,
+  staticData: { nav: { label: 'Categories', group: 'setup', order: 40 } },
+})
+
+type Category = { id: number; name: string; kind: CategoryKind }
+type Editing = { action: 'rename' | 'set-kind' | 'remove'; id: number } | null
+
+const NAME_TAKEN = 'A Category with that name already exists.'
+/** The Worker's 409 with reason "changed": something else changed this Category between the Worker reading it and writing. Trying again reads it as it is now. */
+const CHANGED = 'This Category was changed just now. Try again.'
+const NAME_HINT = 'Names are 1 to 40 characters, and each Category needs a different one.'
+
+/**
+ * Folds case the way the Worker's unique index does (SQLite NOCASE, which covers A to Z only), so this check and the
+ * server agree on which names clash: "Café" and "CAFÉ" are different names to both.
+ */
+const asciiFold = (name: string) => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+/** Why a save failed, in words for the reader. */
+const whyNot = (error: unknown) =>
+  error instanceof HttpError && error.status === 409
+    ? error.reason === 'changed'
+      ? CHANGED
+      : NAME_TAKEN
+    : error instanceof HttpError && error.status === 400
+      ? NAME_HINT
+      : 'That did not work. Try again.'
+
+function Categories() {
+  const { data: me } = useQuery(meQuery)
+  const { data: categories, error } = useQuery(categoriesQuery)
+  const [editing, setEditing] = useState<Editing>(null)
+  const [notice, setNotice] = useState('')
+  // How the list is sorted, until the reader leaves the page: null is the order the Worker lists them in (by name), which is the order a first visit shows.
+  const [sort, setSort] = useState<CategorySort | null>(null)
+  // Until `me` arrives nobody is the Admin: the controls fail closed. The API refuses a Member's write whatever the page shows.
+  const isAdmin = me?.role === 'admin'
+  // How many Budget changes each Spending Category has, for the questions that say what a change to it does to them. Only the Admin sees those.
+  const { data: budgets } = useQuery({ ...budgetsQuery, enabled: isAdmin })
+  const budgetChanges = (id: number) => budgets?.budgets.find((b) => b.categoryId === id)?.changes.length ?? 0
+
+  // Back to the button that opened the form (or, if its row is gone, the message).
+  const status = useRef<HTMLParagraphElement>(null)
+  const focusBack = useFocusBack(editing, status)
+  const done = (message: string, focusId?: string) => {
+    focusBack(focusId)
+    setNotice(message)
+    setEditing(null)
+  }
+  const sameName = (name: string, exceptId?: number) => categories?.some((c) => c.id !== exceptId && asciiFold(c.name) === asciiFold(name.trim())) ?? false
+
+  const sorting = (key: CategorySortKey, header: string): Column<Category>['sort'] => ({
+    direction: sort?.key === key ? sort.direction : null,
+    set: (direction: CategorySortDirection) => {
+      setSort({ key, direction })
+      setNotice(`Sorted by ${header}, ${CATEGORY_SORT_WORDS[direction]}.`)
+    },
+    labels: CATEGORY_SORT_WORDS,
+  })
+  const columns: Column<Category>[] = [
+    { key: 'name', header: 'Category', cell: (c) => c.name, sort: sorting('name', 'Category') },
+    { key: 'kind', header: 'Kind', cell: (c) => KIND_LABELS[c.kind], sort: sorting('kind', 'Kind') },
+  ]
+  if (isAdmin)
+    columns.push({
+      key: 'actions',
+      header: 'Action',
+      align: 'end',
+      cell: (c) =>
+        editing?.id === c.id && editing.action === 'rename' ? (
+          <RenameForm category={c} taken={sameName} onDone={(message) => done(message, `category-${c.id}-actions`)} onCancel={() => done('', `category-${c.id}-actions`)} />
+        ) : editing?.id === c.id && editing.action === 'set-kind' ? (
+          <KindForm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message, `category-${c.id}-actions`)} onCancel={() => done('', `category-${c.id}-actions`)} />
+        ) : editing?.id === c.id && editing.action === 'remove' ? (
+          <RemoveConfirm category={c} budgetChanges={budgetChanges(c.id)} onDone={(message) => done(message)} onCancel={() => done('', `category-${c.id}-actions`)} />
+        ) : (
+          <RowActions row={c.name} id={`category-${c.id}-actions`}>
+            <RowAction run={() => { setNotice(''); setEditing({ action: 'rename', id: c.id }) }}>Rename</RowAction>
+            <RowAction run={() => { setNotice(''); setEditing({ action: 'set-kind', id: c.id }) }}>Select kind</RowAction>
+            <DropdownMenuSeparator />
+            <RowAction variant="destructive" run={() => { setNotice(''); setEditing({ action: 'remove', id: c.id }) }}>Remove</RowAction>
+          </RowActions>
+        ),
+    })
+
+  return (
+    <>
+      <PageHeading
+        help={
+          <p>
+            A Category groups Transactions by purpose. Its kind says how its Transactions are added up: Spending, Income or Loans (money lent or borrowed, which the Loans Report adds up).{' '}
+            {isAdmin ? "Add, rename or remove them to suit you, and set each one's kind." : 'Only the Admin can change them.'}
+          </p>
+        }
+      >
+        Categories
+      </PageHeading>
+      {/* Always in the page, so a screen reader announces the text when it appears. */}
+      <p role="status" ref={status} tabIndex={-1} className="mt-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+        {notice}
+      </p>
+      {isAdmin && <AddForm taken={sameName} onAdded={(name) => setNotice(`Added ${name}.`)} />}
+      <div className="mt-6">
+        {error ? (
+          <p role="alert">Fernledger couldn't load the Categories. Reload the page to try again.</p>
+        ) : !categories ? (
+          <p role="status">Loading…</p>
+        ) : (
+          <ResponsiveTable caption="Categories" columns={columns} rows={sortCategories(categories, sort)} getRowKey={(c) => c.id} emptyMessage="There are no Categories. Add one above." />
+        )}
+      </div>
+    </>
+  )
+}
+
+function AddForm({ taken, onAdded }: { taken: (name: string) => boolean; onAdded: (name: string) => void }) {
+  const queryClient = useQueryClient()
+  const [name, setName] = useState('')
+  const [kind, setKind] = useState<CategoryKind>('spending')
+  // The list is on the page, so a name already in use is caught here; the Worker checks too.
+  const [clash, setClash] = useState(false)
+  const add = useMutation({
+    mutationFn: async () => {
+      const res = await api.categories.$post({ json: { name, kind } })
+      if (!res.ok) throw new HttpError(res.status)
+    },
+    onSuccess: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['budgets'] })])
+      onAdded(name.trim())
+      setName('')
+    },
+  })
+
+  return (
+    <form
+      aria-label="Add a Category"
+      className="mt-4 flex max-w-xl flex-wrap items-end gap-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (taken(name)) return setClash(true)
+        add.mutate()
+      }}
+    >
+      <div className="min-w-0 grow basis-60">
+        <label htmlFor="new-category" className="block font-medium">
+          New Category
+        </label>
+        <Input id="new-category" value={name} maxLength={40} required aria-describedby="new-category-hint" onChange={(event) => { setName(event.target.value); setClash(false); add.reset() }} />
+      </div>
+      <div className="min-w-0 basis-40">
+        <label htmlFor="new-category-kind" className="block font-medium">
+          Kind
+        </label>
+        <Select id="new-category-kind" value={kind} aria-describedby="new-category-kind-hint" onChange={(event) => { setKind(event.target.value as CategoryKind); add.reset() }}>
+          {KINDS.map((k) => (
+            <option key={k} value={k}>
+              {KIND_LABELS[k]}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <Button type="submit" size="touch" disabled={add.isPending || !name.trim()}>
+        Add Category
+      </Button>
+      <p id="new-category-hint" className="basis-full text-muted-foreground">
+        {NAME_HINT}
+      </p>
+      <p id="new-category-kind-hint" className="basis-full text-muted-foreground">
+        {KIND_HINTS[kind]}
+      </p>
+      {(clash || add.isError) && <p role="alert" className="basis-full font-medium text-destructive">{clash ? NAME_TAKEN : whyNot(add.error)}</p>}
+    </form>
+  )
+}
+
+function RenameForm({ category, taken, onDone, onCancel }: { category: Category; taken: (name: string, exceptId?: number) => boolean; onDone: (message: string) => void; onCancel: () => void }) {
+  const queryClient = useQueryClient()
+  const [name, setName] = useState(category.name)
+  const [clash, setClash] = useState(false)
+  const rename = useMutation({
+    mutationFn: async () => {
+      const res = await api.categories[':id'].$patch({ param: { id: String(category.id) }, json: { name } })
+      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined) // 409: a name in use, or the Category changed under the Admin
+    },
+    onSuccess: async () => {
+      // The Transactions list shows Category names too.
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['transactions'] }), queryClient.invalidateQueries({ queryKey: ['budgets'] })])
+      onDone(`Renamed ${category.name} to ${name.trim()}.`)
+    },
+  })
+
+  return (
+    <form
+      className="flex flex-wrap items-end justify-end gap-2 text-start"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (taken(name, category.id)) return setClash(true)
+        rename.mutate()
+      }}
+    >
+      <div>
+        <label htmlFor={`rename-${category.id}`} className="block font-medium">
+          Category name
+        </label>
+        <Input id={`rename-${category.id}`} value={name} maxLength={40} required autoFocus onChange={(event) => { setName(event.target.value); setClash(false) }} />
+      </div>
+      <Button type="submit" size="touch" disabled={rename.isPending || !name.trim()}>
+        Save name
+      </Button>
+      <Button type="button" size="touch" variant="outline" onClick={onCancel}>
+        Cancel
+      </Button>
+      {(clash || rename.isError) && <p role="alert" className="basis-full font-medium text-destructive">{clash ? NAME_TAKEN : whyNot(rename.error)}</p>}
+    </form>
+  )
+}
+
+function KindForm({ category, budgetChanges, onDone, onCancel }: { category: Category; budgetChanges: number; onDone: (message: string) => void; onCancel: () => void }) {
+  const queryClient = useQueryClient()
+  const [kind, setKind] = useState<CategoryKind>(category.kind)
+  const save = useMutation({
+    mutationFn: async () => {
+      const res = await api.categories[':id'].kind.$put({ param: { id: String(category.id) }, json: { kind } })
+      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined)
+    },
+    onSuccess: async () => {
+      // Budget vs actual and the Budgets page list Spending Categories only.
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['budgets'] })])
+      onDone(kind === category.kind ? `${category.name} is already ${KIND_LABELS[kind]}.` : `${category.name} is now ${KIND_LABELS[kind]}.`)
+    },
+  })
+
+  return (
+    <form
+      className="flex flex-col items-stretch gap-2 text-start"
+      onSubmit={(event) => {
+        event.preventDefault()
+        save.mutate()
+      }}
+    >
+      <div>
+        <label htmlFor={`kind-${category.id}`} className="block font-medium">
+          Kind
+        </label>
+        <Select id={`kind-${category.id}`} value={kind} autoFocus aria-describedby={`kind-${category.id}-hint`} onChange={(event) => { setKind(event.target.value as CategoryKind); save.reset() }}>
+          {KINDS.map((k) => (
+            <option key={k} value={k}>
+              {KIND_LABELS[k]}
+            </option>
+          ))}
+        </Select>
+        <p id={`kind-${category.id}-hint`} className="mt-1 text-muted-foreground">
+          {KIND_HINTS[kind]} A change counts for every month, past ones too.{category.kind === 'spending' && kind !== 'spending' && budgetChanges > 0 && ' Its Budgets are kept but not used.'}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" size="touch" disabled={save.isPending}>
+          Save kind
+        </Button>
+        <Button type="button" size="touch" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {save.isError && <p role="alert" className="font-medium text-destructive">{whyNot(save.error)}</p>}
+    </form>
+  )
+}
+
+function RemoveConfirm({ category, budgetChanges, onDone, onCancel }: { category: Category; budgetChanges: number; onDone: (message: string) => void; onCancel: () => void }) {
+  const queryClient = useQueryClient()
+  // Opens on the safe answer. Cancelling puts focus back on the row's Actions button (Categories' `done`), and a removal on the message.
+  const keep = useRef<HTMLButtonElement>(null)
+  useEffect(() => keep.current?.focus(), [])
+  const remove = useMutation({
+    mutationFn: async () => {
+      const res = await api.categories[':id'].$delete({ param: { id: String(category.id) }, json: {} })
+      if (res.status === 404) return null // another page, or a second click, removed it first: the list on this page is out of date, and nothing is left to remove
+      if (!res.ok) throw new HttpError(res.status)
+      return res.json()
+    },
+    onSuccess: async (removed) => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['categories'] }), queryClient.invalidateQueries({ queryKey: ['transactions'] }), queryClient.invalidateQueries({ queryKey: ['budgets'] })])
+      if (removed === null) return onDone(`${category.name} had already been removed, so nothing was changed. The list is up to date now.`)
+      const { overrides } = removed
+      onDone(
+        overrides === 0
+          ? `Removed ${category.name}.`
+          : `Removed ${category.name}. It was the Override on ${overrides} ${overrides === 1 ? 'Transaction' : 'Transactions'}. Each uses its Rule or Akahu category if it has one, and is Uncategorised if not.`,
+      )
+    },
+  })
+
+  return (
+    <div role="group" aria-label={`Remove ${category.name}`} className="space-y-2 text-start">
+      <p>Remove {category.name}? Transactions with it as their Override lose that Override and fall back to their Rule or Akahu category, or Uncategorised if neither applies.</p>
+      {category.kind !== 'spending' && (
+        <p>
+          {category.name} is {category.kind === 'income' ? 'an Income' : 'a Loans'} Category, so its Transactions stop counting as {category.kind === 'income' ? 'income' : 'a loan'}. Those that end up Uncategorised count as Spending.
+        </p>
+      )}
+      {budgetChanges > 0 && (
+        <p>
+          Its Budget ({budgetChanges} {budgetChanges === 1 ? 'change' : 'changes'}) stops being used in every month, past ones too, and Budget vs actual no longer lists it.
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button size="touch" aria-label={`Yes, remove ${category.name}`} disabled={remove.isPending} onClick={() => remove.mutate()}>
+          Yes, remove
+        </Button>
+        <Button ref={keep} size="touch" variant="outline" onClick={onCancel}>
+          Keep it
+        </Button>
+      </div>
+      {remove.isError && <p role="alert" className="font-medium text-destructive">{whyNot(remove.error)}</p>}
+    </div>
+  )
+}
