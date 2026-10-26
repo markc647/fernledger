@@ -8,6 +8,10 @@ updates:
       npm-dependencies:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # Node's types follow the Node that CI and package.json's engines run (24); a newer major types APIs it lacks.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
