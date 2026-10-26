@@ -265,7 +265,7 @@ test.describe('text size', () => {
       await signInAs(context, 'admin')
       await page.setViewportSize({ width: 900, height: 800 }) // narrower than 1100px, so the sidebar starts as the icon rail
       await page.goto('/styleguide')
-      await expect(mainNav(page).getByRole('button', { name: 'Transactions' })).toBeVisible()
+      await expect(mainNav(page).getByRole('button', { name: 'Set up' })).toBeVisible() // once who is signed in is known: before, the rail has only the groups everyone sees
       for (const target of [...(await mainNav(page).getByRole('button').all()), ...(await mainNav(page).getByRole('link').all())]) {
         const box = await target.boundingBox()
         expect(box?.height).toBeGreaterThanOrEqual(44)
