@@ -1,5 +1,6 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
+import { vi } from 'vitest'
 import worker from './index'
 import type { SettingKey } from './settings'
 
@@ -119,3 +120,13 @@ export const putSetting = (db: D1Database, key: SettingKey, value: string): D1Pr
 
 /** The Setting's value, or null if it has never been set. */
 export const getSetting = (db: D1Database, key: SettingKey): Promise<string | null> => db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<string>('value')
+
+/** Makes crypto.getRandomValues fill with `next()`'s words, so the Members' daily limit's chance charge (member-read-limit.ts) draws what a test chooses. */
+export const drawWith = (next: () => number) =>
+  vi.spyOn(crypto, 'getRandomValues').mockImplementation(((words: Uint32Array) => {
+    for (let i = 0; i < words.length; i++) words[i] = next()
+    return words
+  }) as never)
+
+/** A draw no small read is charged on. */
+export const NEVER = 0xffffffff

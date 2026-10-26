@@ -1,9 +1,9 @@
 import { createMiddleware } from 'hono/factory'
 import type { AppEnv } from './app-env'
 import { sha256Hex, toHex } from './backup-format'
+import { utcDay } from './dates'
 import { logEvent } from './log'
 import { isWrite } from './request-format'
-import { utcDay } from './rule-rerun'
 import { PAID_PLAN } from './settings'
 import { DEFAULT_LIMIT, MAX_LIMIT } from './transaction-search'
 
@@ -34,8 +34,11 @@ import { DEFAULT_LIMIT, MAX_LIMIT } from './transaction-search'
 //   CHARGE_FROM_ROWS with the chance rows / CHARGE_FROM_ROWS, and otherwise nothing: the same on average, so many small reads reach the limit
 //   as surely as a few large ones, while these charges write at most about MEMBER_DAILY_READS / CHARGE_FROM_ROWS rows a day. Requests sent
 //   together can each pass the check, by a page each.
-// - A refused request is a 429 and writes nothing. Either way a Member's request runs two D1 queries more than the route's (one when a
+// - A refused request is a 429 and writes nothing. Either way a Member's request runs two D1 queries (MEMBER_LIMIT_QUERIES) more than the route's (one when a
 //   cheap one isn't charged; a refused dear one runs one more to say why, and none of the route's), of the 50 an invocation may run (ADR 0004).
+
+/** The D1 queries the limit adds to a Member's dear request: its hold and its settling. */
+export const MEMBER_LIMIT_QUERIES = 2
 
 /** All Members together: with the re-run's 2.5 million, this leaves 1 million for the Admin, Imports, Sync and the backup. */
 export const MEMBER_DAILY_READS = 1_500_000

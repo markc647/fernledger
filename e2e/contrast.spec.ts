@@ -194,7 +194,7 @@ const PAGES: {
     },
   },
   {
-    // Net worth, drawn from a stubbed answer (net worth is refused for more than 47 Accounts, which the specs that share this database can reach), with its figures open.
+    // Net worth, drawn from a stubbed answer (net worth is refused for more than MAX_NET_WORTH_ACCOUNTS Accounts (worker/net-worth.ts), which the specs that share this database can reach), with its figures open.
     path: NET_WORTH_PATH,
     setup: async ({ page }) => {
       await stubNetWorth(page)

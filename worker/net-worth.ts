@@ -1,6 +1,7 @@
 import * as z from 'zod/mini'
 import { accountOrder } from './account-fields'
 import type { BalanceStatus } from './balance-rules'
+import { MEMBER_LIMIT_QUERIES } from './member-read-limit'
 import { carryForward } from './month-balances'
 import { monthEnd, monthsBefore, monthStart, nzMonth } from './months'
 import { REPORT_HISTORY, type HistoryRow } from './report-balances'
@@ -28,8 +29,8 @@ export const DEFAULT_NET_WORTH_RANGE = '24-months' satisfies NetWorthRange
 /** The query string: the range, which a refusal names. */
 export const netWorthQuery = z.object({ range: z.optional(z.enum(NET_WORTH_RANGES)) })
 
-/** Accounts a request reads: 1 statement for the list, 1 for each Account's history and the 2 of the Members' daily limit (member-read-limit.ts) must stay within the 50 D1 queries of one invocation (ADR 0004). */
-export const MAX_NET_WORTH_ACCOUNTS = 47
+/** Accounts a request reads: 1 statement for the list, 1 for each Account's history and the Members' daily limit's (member-read-limit.ts) must stay within the 50 D1 queries of one invocation (ADR 0004). */
+export const MAX_NET_WORTH_ACCOUNTS = 50 - 1 - MEMBER_LIMIT_QUERIES
 
 /** REPORT_HISTORY takes the dates it picks months from; these are every date, so a range that is all begins before any Transaction and ends after every one. */
 export const EVERY_DATE = { from: '0000-01-01', to: '9999-12-31' }

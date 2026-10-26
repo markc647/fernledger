@@ -1,7 +1,7 @@
 import * as z from 'zod/mini'
-import { monthCount, monthEnd, monthStart, monthState, nextMonth, type MonthState } from './months'
+import { monthEnd, monthStart, monthState, nextMonth, type MonthState } from './months'
 import { nzDate } from './nz-time'
-import { accountMissing, datesInOrder, reportRangeOfAll } from './report-query'
+import { accountMissing, datesInOrder, monthsAtMost, reportRangeOfAll } from './report-query'
 import { buildMonthlySpending, rollUpMonthly, type MonthlyRow, type SpendingRange } from './spending'
 
 // The data of the income-vs-spending-by-month Report (GET /api/reports/income-vs-spending): what came in as Income and what was spent as Spending in each NZ
@@ -26,7 +26,7 @@ export const incomeVsSpendingQuery = z
   .object(reportRangeOfAll)
   .check(
     datesInOrder,
-    z.refine<{ from: string; to: string }>((q) => monthCount(q.from.slice(0, 7), q.to.slice(0, 7)) <= MAX_INCOME_MONTHS, { path: ['to'] }),
+    monthsAtMost(MAX_INCOME_MONTHS),
   )
 
 /**

@@ -2,8 +2,9 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CHARGE_FROM_ROWS, chargeFor, countingReads, dearReads, HOLD_EXPIRY_MS, MEMBER_BUSY, MEMBER_MAX_IN_FLIGHT, OFFSET_FROM, pageRows, readsPerTransaction, EACH_MEMBER_DAILY_READS, MEMBER_DAILY_READS, MEMBER_LIMIT_REACHED, memberKey } from './member-read-limit'
+import { utcDay } from './dates'
 import worker from './index'
-import { utcDay } from './rule-rerun'
+import { drawWith, NEVER } from './test-support'
 
 const origin = 'http://localhost:5173'
 // 'member' signs in as dev.member@example.com; 'other' as DEV_USER_EMAIL, which is not the Admin, so a second Member.
@@ -152,12 +153,6 @@ const seeded = (seed: number) => () => {
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
   return (t ^ (t >>> 14)) >>> 0
 }
-const drawWith = (next: () => number) =>
-  vi.spyOn(crypto, 'getRandomValues').mockImplementation(((words: Uint32Array) => {
-    for (let i = 0; i < words.length; i++) words[i] = next()
-    return words
-  }) as never)
-const NEVER = 0xffffffff // a draw no small read is charged on
 
 afterEach(() => vi.restoreAllMocks())
 

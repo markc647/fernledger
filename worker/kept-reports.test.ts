@@ -6,7 +6,7 @@ import { REPORTS } from '../src/lib/reports'
 import { app } from './app'
 import worker from './index'
 import { KEPT_LIMIT, keepBody, NOT_KEPT, REPORT_IDS, requestedChoices, SHAPES, type ReportId } from './kept-reports'
-import { callAsAdminWith, callWhileInterrupted, meteredDb } from './test-support'
+import { callAsAdminWith, callWhileInterrupted, drawWith, meteredDb, NEVER } from './test-support'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -692,7 +692,7 @@ describe('a Member reading a Report', () => {
     for (const to of days(30)) await seedKept({ report: 'spending', to })
     await seedKept({ report: 'spending', to: '2026-10-31' })
     // No chance charge of the Members' daily limit (member-read-limit.ts), whose write would read a row or two more.
-    vi.spyOn(crypto, 'getRandomValues').mockImplementation(<T extends ArrayBufferView | null>(array: T) => (array as unknown as Uint32Array).fill(0xffffffff) as unknown as T)
+    drawWith(() => NEVER)
     const rowsRead = async (who: Who) => {
       const { db: metered, usage } = meteredDb()
       // The Members' daily limit's own statements (its hold and settling; member-read-limit.test.ts measures them) are left out of the count.
