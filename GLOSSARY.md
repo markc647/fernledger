@@ -205,8 +205,12 @@ A value the Admin chooses in the app, such as the app title or the About your da
 _Avoid_: Preference, option, config
 
 **D1 usage bar**:
-What the Rules page shows the Admin, in the question it asks before "Apply the Rules to all Transactions" and in the progress of a run that is paused for the allowance, when the Deployer has added the two Cloudflare secrets for it: the Cloudflare account's rows read and rows written today, against D1 Free's 5,000,000 and 100,000 a day, as bars with a badge (Plenty left, Running low from 70% used, Almost used from 85% used, or Used up once the limit is reached) and the figures in words. The Admin's header shows the same figures as one bar, "Free allowance left today", of whichever of the two has gone further, as an estimate, with the same words and colours. It counts the whole account, runs a few minutes behind, and is optional, so its Setup needed can be ignored (ADR 0010).
+What the Rules page shows the Admin, in the question it asks before "Apply the Rules to all Transactions" and in the progress of a run that is paused for the allowance, when the Deployer has added the two Cloudflare secrets for it: the Cloudflare account's rows read and rows written today, against D1 Free's 5,000,000 and 100,000 a day, as bars with a badge (Plenty left, Running low from 70% used, Almost used from 85% used, or Used up once the limit is reached) and the figures in words. On the Free Plan, the Admin's header shows the same figures as one bar, "Free allowance left today", of whichever of the two has gone further, as an estimate, with the same words and colours. It counts the whole account, runs a few minutes behind, and is optional, so its Setup needed can be ignored (ADR 0010). On the Cloudflare Paid Plan it shows today's figures alone, with no bars or badges (ADR 0018).
 _Avoid_: Quota meter, analytics
+
+**Cloudflare Paid Plan**:
+The Settings switch (the Setting `cloudflare_plan`) by which the Admin says the Cloudflare account is on the Workers Paid plan, which has no daily D1 allowance. It lifts the app's own daily caps (the Members' daily read limit and the Rules re-run's share of the day) and the words that name the Free Plan's day; the limits on each request stay. Off, the default, is the Free Plan. Fernledger can't check it (ADR 0018).
+_Avoid_: Pro, premium, unlimited
 
 **Setup needed**:
 What the Admin is shown for a feature that is switched off, or not doing all it should, until the Deployer adds configuration it requires, with what to add and how; Members see only that the feature isn't set up. For an optional feature such as Akahu Sync, it can be ignored.

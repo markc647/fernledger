@@ -2,14 +2,13 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 
 // shadcn/ui Field, trimmed to the parts the app uses (a field, its content, label and description), with a plain <label> for shadcn's Label, which
-// is Radix's and does nothing a label element doesn't here.
+// is Radix's and does nothing a label element doesn't here. No role="group": a field holds one control, named by its label, and a group with no
+// name only adds a word for a screen reader to say.
 
 function Field({ className, orientation = 'vertical', ...props }: React.ComponentProps<'div'> & { orientation?: 'vertical' | 'horizontal' }) {
   return (
     <div
-      role="group"
       data-slot="field"
-      data-orientation={orientation}
       className={cn('flex w-full gap-3', orientation === 'horizontal' ? 'flex-row items-center justify-between' : 'flex-col', className)}
       {...props}
     />

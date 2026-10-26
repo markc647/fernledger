@@ -20,16 +20,20 @@ function Switch({
       data-slot="switch"
       data-state={state}
       onClick={() => onCheckedChange(!checked)}
-      className={cn('group inline-flex min-h-11 shrink-0 items-center rounded-full outline-none disabled:cursor-not-allowed disabled:opacity-50', className)}
+      className={cn(
+        'group inline-flex min-h-11 shrink-0 items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50',
+        className,
+      )}
       {...props}
     >
+      {/* In Windows high contrast the fills go; src/index.css draws the track's edge and both states in the reader's palette. */}
       <span
         data-slot="switch-track"
-        className="inline-flex h-7 w-12 items-center rounded-full border-2 border-foreground/60 bg-background p-0.5 transition-colors group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-ring group-data-[state=checked]:border-primary group-data-[state=checked]:bg-primary"
+        className="inline-flex h-7 w-12 items-center rounded-full border-2 border-foreground/60 bg-background p-0.5 transition-colors group-data-[state=checked]:border-primary group-data-[state=checked]:bg-primary"
       >
         <span
           data-slot="switch-thumb"
-          className="pointer-events-none block size-5 rounded-full bg-foreground/60 transition-transform motion-reduce:transition-none group-data-[state=checked]:translate-x-5 group-data-[state=checked]:bg-primary-foreground"
+          className="pointer-events-none block size-5 rounded-full bg-foreground/60 transition-transform group-data-[state=checked]:translate-x-5 group-data-[state=checked]:bg-primary-foreground"
         />
       </span>
     </button>

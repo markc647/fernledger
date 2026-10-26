@@ -27,9 +27,9 @@ const LABEL = 'Free allowance left today'
  */
 export function useAllowanceOn(admin: boolean) {
   const { data: features } = useQuery({ ...featuresQuery, enabled: admin })
-  // The bar is what is left of a Free Plan day, so it is not shown on the Paid Plan, nor until the Settings say which (ADR 0018).
+  // The bar is what is left of a Free Plan day, so it is not shown on the Paid Plan (ADR 0018). Settings that can't be read leave it as it was on Free.
   const { data: settings } = useQuery(settingsQuery)
-  return admin && settings?.cloudflare_plan === 'free' && features?.find((candidate) => candidate.id === 'd1-usage')?.enabled === true
+  return admin && settings?.cloudflare_plan !== 'paid' && features?.find((candidate) => candidate.id === 'd1-usage')?.enabled === true
 }
 
 /**
