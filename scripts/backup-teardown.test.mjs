@@ -25,8 +25,9 @@ const migrationFiles = readdirSync(join(root, 'migrations'))
   .sort()
   .map((f) => readFileSync(join(root, 'migrations', f), 'utf8'))
 
-// A stand-in for Wrangler. Accounts live in state.json, D1 databases are <name>.sqlite, the R2 bucket is bucket/.
-// Every call is logged to calls.jsonl. FAKE_FAIL lists commands (two or three words, e.g. "r2 object put") that fail.
+// A stand-in for Wrangler. Accounts live in state.json, D1 databases are <name>.sqlite, the R2 bucket is bucket/ (another bucket is
+// bucket-<name>/). Every call is logged to calls.jsonl. FAKE_FAIL lists commands (two or three words, e.g. "r2 object put") that fail.
+// FAKE_TAMPER names a database whose --file loads are changed afterwards, as a restore that loses text would.
 const fakeWrangler = `
 const fs = require('node:fs')
 const path = require('node:path')
@@ -46,8 +47,10 @@ const out = (v) => console.log(JSON.stringify(v))
 const fail = (msg) => { console.error(msg + ' owner@example.com token=SECRET123'); process.exit(1) }
 const failing = (process.env.FAKE_FAIL || '').split(',')
 if (failing.includes(cmd) || failing.includes(key)) fail('simulated failure of ' + key)
-const bucketDir = path.join(dir, 'bucket')
+const bucketDirOf = (name) => path.join(dir, name === 'fernledger-backups' ? 'bucket' : 'bucket-' + name)
+const bucketDir = bucketDirOf('fernledger-backups')
 const objectKey = () => words[3].slice(words[3].indexOf('/') + 1)
+const objectPath = () => path.join(bucketDirOf(words[3].slice(0, words[3].indexOf('/'))), objectKey())
 const hasObjects = (d) => fs.existsSync(d) && fs.readdirSync(d, { withFileTypes: true }).some((e) => !e.isDirectory() || hasObjects(path.join(d, e.name)))
 if (words[0] === 'whoami') out({ loggedIn: true, accounts: state.accounts })
 else if (cmd === 'd1 list') out(state.databases.map((name) => ({ name })))
@@ -55,24 +58,36 @@ else if (key === 'r2 bucket info') state.buckets.includes(words[3]) ? out({ name
 else if (key === 'd1 time-travel info') out({ bookmark: 'bookmark-test' })
 else if (key === 'd1 migrations apply') console.log('Applied 1 migration')
 else if (words[0] === 'deploy') console.log('Deployed')
-else if (cmd === 'd1 execute') {
+else if (cmd === 'd1 create') {
+  state.databases.push(words[2]); save()
+  new DatabaseSync(path.join(dir, words[2] + '.sqlite')).close()
+} else if (key === 'r2 bucket create') {
+  state.buckets.push(words[3]); save()
+} else if (cmd === 'd1 execute' && args.includes('--file')) {
+  const db = new DatabaseSync(path.join(dir, words[2] + '.sqlite'))
+  try { db.exec(fs.readFileSync(value('--file'), 'utf8')) } catch (e) { fail('SQL error') }
+  if (process.env.FAKE_TAMPER === words[2]) db.exec("UPDATE settings SET value = value || '!'")
+  out([{ results: [] }])
+} else if (cmd === 'd1 execute') {
   const db = new DatabaseSync(path.join(dir, words[2] + '.sqlite'))
   // D1 refuses a compound SELECT of more than 5 terms, so this does too.
   if (value('--command').split('UNION ALL').length > 5) fail('too many terms in compound SELECT')
   try { out([{ results: db.prepare(value('--command')).all().map((r) => ({ ...r })) }]) } catch (e) { fail('SQL error') }
 } else if (key === 'r2 object get') {
-  const source = path.join(bucketDir, objectKey())
+  const source = objectPath()
   if (!fs.existsSync(source)) fail('The specified key does not exist. [code: 10007]')
   fs.copyFileSync(source, value('--file'))
 } else if (key === 'r2 object put') {
-  const target = path.join(bucketDir, objectKey())
+  const target = objectPath()
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.copyFileSync(value('--file'), target)
+} else if (key === 'r2 object delete') {
+  fs.rmSync(objectPath(), { force: true })
 } else if (cmd === 'd1 delete') {
   state.databases = state.databases.filter((n) => n !== words[2]); save()
   fs.rmSync(path.join(dir, words[2] + '.sqlite'), { force: true })
 } else if (key === 'r2 bucket delete') {
-  if (hasObjects(bucketDir)) fail('The bucket you tried to delete (' + words[3] + ') is not empty. [code: 10008]')
+  if (hasObjects(bucketDirOf(words[3]))) fail('The bucket you tried to delete (' + words[3] + ') is not empty. [code: 10008]')
   state.buckets = state.buckets.filter((n) => n !== words[3]); save()
 } else console.log('ok ' + cmd)
 `
@@ -682,4 +697,67 @@ test('downloading a backup whose manifest has a part key outside it fetches no p
   assert.deepEqual(fetched, [`b/${prefix}/manifest.json`], 'only the manifest was fetched')
   assert.ok(!existsSync(join(dir, 'x', 'escaped.ndjson')) && !existsSync(join(dir, 'escaped.ndjson')))
   assert.ok(!existsSync(out), 'what did not verify is not kept')
+})
+
+// ---- restore practice run ----
+
+const practise = (account, extra = ['--yes'], env = {}) => run('restore-practice.mjs', extra, { ...account.env, ...env })
+// Every call the practice run made that named the live database or bucket. It must make none.
+const liveCalls = (account) => account.calls().filter((c) => c.args.includes('fernledger') || c.args.some((a) => a.startsWith('fernledger-backups')))
+const objectsIn = (dir) => (existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name) : [])
+
+test('the restore practice run restores the hard text into a database of its own, compares it, and deletes everything it made', () => {
+  const account = fakeAccount()
+
+  const r = practise(account)
+
+  assert.equal(r.status, 0, r.out)
+  assert.match(r.out, /Practice restore passed/)
+  assert.match(r.out, /Restored \d+ rows in \d+ tables into "fernledger-hard-text-target"\. Row counts match the manifest\./, 'restore.mjs did the restore')
+  assert.match(r.out, /Deleted the bucket fernledger-hard-text, the D1 database fernledger-hard-text-source, the D1 database fernledger-hard-text-target\./)
+  assert.doesNotMatch(r.out, /Not deleted/)
+  assert.deepEqual(account.state().databases, ['fernledger'])
+  assert.deepEqual(account.state().buckets, ['fernledger-backups'])
+  assert.deepEqual(objectsIn(join(account.dir, 'bucket-fernledger-hard-text')), [])
+  assert.deepEqual(liveCalls(account), [], 'the live database and bucket are never touched')
+  assert.deepEqual(objectsIn(join(account.dir, 'bucket')), [])
+})
+
+test('the restore practice run fails when the restored text differs, and still deletes everything it made', () => {
+  const account = fakeAccount()
+
+  const r = practise(account, ['--yes'], { FAKE_TAMPER: 'fernledger-hard-text-target' })
+
+  assert.notEqual(r.status, 0)
+  assert.match(r.out, /settings in fernledger-hard-text-target differ from fernledger-hard-text-source/)
+  assert.doesNotMatch(r.out, /Practice restore passed/)
+  assert.deepEqual(account.state().databases, ['fernledger'])
+  assert.deepEqual(account.state().buckets, ['fernledger-backups'])
+  assert.deepEqual(objectsIn(join(account.dir, 'bucket-fernledger-hard-text')), [])
+})
+
+for (const [left, state] of [
+  ['its database', { databases: ['fernledger', 'fernledger-hard-text-target'] }],
+  ['its bucket', { buckets: ['fernledger-backups', 'fernledger-hard-text'] }],
+]) {
+  test(`the restore practice run stops before changing anything when an earlier run left ${left} behind`, () => {
+    const account = fakeAccount()
+    writeFileSync(join(account.dir, 'state.json'), JSON.stringify({ ...account.state(), ...state }))
+
+    const r = practise(account)
+
+    assert.notEqual(r.status, 0)
+    assert.match(r.out, /Left from a restore:practice run that didn't finish: .*fernledger-hard-text.*Nothing was changed/)
+    assert.deepEqual(account.order().filter((o) => /create|execute|delete/.test(o)), [])
+  })
+}
+
+test('the restore practice run --dry-run says what it would do and calls no Wrangler', () => {
+  const account = fakeAccount()
+
+  const r = practise(account, ['--dry-run'])
+
+  assert.equal(r.status, 0, r.out)
+  assert.match(r.out, /never reads or writes the live database or the backup bucket/)
+  assert.deepEqual(account.calls(), [])
 })
