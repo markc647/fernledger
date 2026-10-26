@@ -305,6 +305,7 @@ test.describe('the sidebar navigation', () => {
   test('the group holding the current page is shown as current while it is shut', async ({ page, context }) => {
     await signInAs(context, 'admin')
     await page.goto('/import')
+    await expect(navGroup(page, 'Set up')).toBeVisible() // once who is signed in is known, so the sidebar is not drawn again after the click
     const group = navGroup(page, 'Transactions')
     await expect(group).toHaveAttribute('data-active', 'false') // its page is marked in the open group, not twice
     await group.click()
