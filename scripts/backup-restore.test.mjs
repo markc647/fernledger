@@ -88,9 +88,11 @@ async function backUp(db, bucketDir, time, prefix) {
 
 // A stand-in for Wrangler. `r2 object get <bucket>/<key> --file F` copies from the folder; `d1 execute <db>`
 // runs --command or --file on <db>.sqlite in the same folder. Every call is logged to calls.jsonl.
+// With REAL_WRANGLER set, d1 calls run the real Wrangler instead, on local storage in PERSIST_DIR.
 const fakeWrangler = `
 const fs = require('node:fs')
 const path = require('node:path')
+const { spawnSync } = require('node:child_process')
 const { DatabaseSync } = require('node:sqlite')
 const dir = process.env.FAKE_DIR
 const args = process.argv.slice(2)
@@ -102,6 +104,9 @@ if (words[0] === 'r2') {
   const source = path.join(dir, 'bucket', key)
   if (!fs.existsSync(source)) { console.error('The specified key does not exist.'); process.exit(1) }
   fs.copyFileSync(source, value('--file'))
+} else if (words[0] === 'd1' && process.env.REAL_WRANGLER) {
+  const r = spawnSync(process.execPath, [process.env.REAL_WRANGLER, ...args, '--persist-to', process.env.PERSIST_DIR], { stdio: 'inherit' })
+  process.exit(r.status ?? 1)
 } else if (words[0] === 'd1') {
   const db = new DatabaseSync(path.join(dir, words[2] + '.sqlite'))
   try {
@@ -435,24 +440,6 @@ test('restore will not clear the starter Categories while a table that refers to
   assert.equal(target.prepare('SELECT count(*) AS n FROM categories').get().n, 23)
 })
 
-// Wrangler with only R2 standing in: `r2 object get` copies from the bucket folder, and everything else runs the real Wrangler
-// on local storage in PERSIST_DIR, so restore.mjs meets real D1's refusals, not only the ones the stand-in above knows.
-const realD1Wrangler = `
-const fs = require('node:fs')
-const path = require('node:path')
-const { spawnSync } = require('node:child_process')
-const args = process.argv.slice(2)
-if (args[0] === 'r2') {
-  const words = args.filter((a) => !a.startsWith('-'))
-  const source = path.join(process.env.FAKE_DIR, 'bucket', words[3].slice(words[3].indexOf('/') + 1))
-  if (!fs.existsSync(source)) { console.error('The specified key does not exist.'); process.exit(1) }
-  fs.copyFileSync(source, args[args.indexOf('--file') + 1])
-} else {
-  const r = spawnSync(process.execPath, [process.env.REAL_WRANGLER, ...args, '--persist-to', process.env.PERSIST_DIR], { stdio: 'inherit' })
-  process.exit(r.status ?? 1)
-}
-`
-
 test('restore --local loads a backup into the real Wrangler\'s local D1, every text exactly and the tables in foreign-key order', async () => {
   // Wrangler edits a --file as plain text before running it, so these are the kinds of text it could reach: its own
   // transaction words, statement and comment syntax, quotes, line breaks, control characters, every ASCII character and some that
@@ -485,18 +472,22 @@ test('restore --local loads a backup into the real Wrangler\'s local D1, every t
       VALUES (1, '2026-09-30', -4200, 'Vet', 'import', (SELECT id FROM categories WHERE name = 'Pets'));
   `)
   await backUp(source, bucketDir, Date.parse('2026-10-11T15:00:00Z'))
-  writeFileSync(join(dir, 'fake-wrangler.cjs'), realD1Wrangler)
+  writeFileSync(join(dir, 'fake-wrangler.cjs'), fakeWrangler)
 
+  const realWrangler = join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js')
   const persist = join(dir, 'd1')
-  const env = { REAL_WRANGLER: join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js'), PERSIST_DIR: persist, WRANGLER_SEND_METRICS: 'false' }
   const wrangler = (...args) => {
-    const r = spawnSync(process.execPath, [env.REAL_WRANGLER, 'd1', ...args, '--local', '--persist-to', persist], { cwd: root, encoding: 'utf8', env: { ...process.env, ...env } })
+    const r = spawnSync(process.execPath, [realWrangler, 'd1', ...args, '--local', '--persist-to', persist], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
+    })
     assert.equal(r.status, 0, r.stdout + r.stderr)
     return r.stdout
   }
   wrangler('migrations', 'apply', 'DB')
 
-  const r = restore({ dir }, ['2026-10-12', '--local'], env)
+  const r = restore({ dir }, ['2026-10-12', '--local'], { REAL_WRANGLER: realWrangler, PERSIST_DIR: persist, WRANGLER_SEND_METRICS: 'false' })
 
   assert.equal(r.status, 0, r.out)
   assert.match(r.out, /Row counts match the manifest/)
