@@ -89,7 +89,8 @@ export const rowCounts = (names) => {
   }
 }
 
-const queryRows = (runner, database, sql) => {
+/** The rows of one query on a remote database. */
+export const queryRows = (runner, database, sql) => {
   const result = runner.json(['d1', 'execute', database, '--remote', '--json', '--command', sql], { quiet: true })
   return Array.isArray(result) ? (result[0]?.results ?? []) : []
 }

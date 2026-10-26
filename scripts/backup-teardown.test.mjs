@@ -713,11 +713,12 @@ test('the restore practice run restores the hard text into a database of its own
 
   assert.equal(r.status, 0, r.out)
   assert.match(r.out, /Practice restore passed/)
-  assert.match(r.out, /Restored \d+ rows in \d+ tables into "fernledger-practice"\. Row counts match the manifest\./, 'restore.mjs did the restore')
-  assert.match(r.out, /Deleted both databases and the bucket/)
+  assert.match(r.out, /Restored \d+ rows in \d+ tables into "fernledger-hard-text-target"\. Row counts match the manifest\./, 'restore.mjs did the restore')
+  assert.match(r.out, /Deleted the bucket fernledger-hard-text, the D1 database fernledger-hard-text-source, the D1 database fernledger-hard-text-target\./)
+  assert.doesNotMatch(r.out, /Not deleted/)
   assert.deepEqual(account.state().databases, ['fernledger'])
   assert.deepEqual(account.state().buckets, ['fernledger-backups'])
-  assert.deepEqual(objectsIn(join(account.dir, 'bucket-fernledger-practice')), [])
+  assert.deepEqual(objectsIn(join(account.dir, 'bucket-fernledger-hard-text')), [])
   assert.deepEqual(liveCalls(account), [], 'the live database and bucket are never touched')
   assert.deepEqual(objectsIn(join(account.dir, 'bucket')), [])
 })
@@ -725,25 +726,31 @@ test('the restore practice run restores the hard text into a database of its own
 test('the restore practice run fails when the restored text differs, and still deletes everything it made', () => {
   const account = fakeAccount()
 
-  const r = practise(account, ['--yes'], { FAKE_TAMPER: 'fernledger-practice' })
+  const r = practise(account, ['--yes'], { FAKE_TAMPER: 'fernledger-hard-text-target' })
 
   assert.notEqual(r.status, 0)
-  assert.match(r.out, /settings in fernledger-practice differ from fernledger-practice-source/)
+  assert.match(r.out, /settings in fernledger-hard-text-target differ from fernledger-hard-text-source/)
   assert.doesNotMatch(r.out, /Practice restore passed/)
   assert.deepEqual(account.state().databases, ['fernledger'])
   assert.deepEqual(account.state().buckets, ['fernledger-backups'])
+  assert.deepEqual(objectsIn(join(account.dir, 'bucket-fernledger-hard-text')), [])
 })
 
-test('the restore practice run stops before changing anything when an earlier run left its database behind', () => {
-  const account = fakeAccount()
-  writeFileSync(join(account.dir, 'state.json'), JSON.stringify({ ...account.state(), databases: ['fernledger', 'fernledger-practice'] }))
+for (const [left, state] of [
+  ['its database', { databases: ['fernledger', 'fernledger-hard-text-target'] }],
+  ['its bucket', { buckets: ['fernledger-backups', 'fernledger-hard-text'] }],
+]) {
+  test(`the restore practice run stops before changing anything when an earlier run left ${left} behind`, () => {
+    const account = fakeAccount()
+    writeFileSync(join(account.dir, 'state.json'), JSON.stringify({ ...account.state(), ...state }))
 
-  const r = practise(account)
+    const r = practise(account)
 
-  assert.notEqual(r.status, 0)
-  assert.match(r.out, /Left from a practice run that didn't finish: fernledger-practice\. .*Nothing was changed/)
-  assert.deepEqual(account.order().filter((o) => /create|execute|delete/.test(o)), [])
-})
+    assert.notEqual(r.status, 0)
+    assert.match(r.out, /Left from a restore:practice run that didn't finish: .*fernledger-hard-text.*Nothing was changed/)
+    assert.deepEqual(account.order().filter((o) => /create|execute|delete/.test(o)), [])
+  })
+}
 
 test('the restore practice run --dry-run says what it would do and calls no Wrangler', () => {
   const account = fakeAccount()

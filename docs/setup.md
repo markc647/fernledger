@@ -68,7 +68,8 @@ With `CI=true` (which the scripts set) Wrangler answers its own yes/no prompts i
 | Write resource IDs back into `wrangler.jsonc` | Skipped | Relies on `CI=true`; check `git diff wrangler.jsonc` after a manual deploy |
 | "Your last deployment has multiple versions… continue?" (a gradual rollout is in progress) | Yes, replacing the rollout. `--strict` does not stop this | Nothing yet. Finish or roll back any gradual rollout in the dashboard before deploying |
 | "About to apply N migration(s)… continue?" (`d1 migrations apply`) | Yes | Your account confirmation, the backup and the restore point before it are the safeguard. The migrations applied are printed |
-| "Delete this database?" (`d1 delete`) | Yes | `npm run teardown` passes `--skip-confirmation` itself, and only after you type the database name ([Leaving Fernledger](#leaving-fernledger-teardown)) |
+| "Delete this database?" (`d1 delete`) | Yes | `npm run teardown` passes `--skip-confirmation` itself, and only after you type the database name ([Leaving Fernledger](#leaving-fernledger-teardown)). `npm run restore:practice` passes it for the two databases it created in the same run, after checking neither existed before |
+| "Would you like Wrangler to add it on your behalf?" (`d1 create`, `r2 bucket create`) | No | Nothing needed: `npm run setup` and `npm run restore:practice` create by name, and nothing is written to `wrangler.jsonc` |
 
 ### Test-only environment variables
 
@@ -141,7 +142,7 @@ If a load fails part-way, the database holds some of the rows: empty it (or crea
 
 A backup you have never restored is a guess. Twice a year (say April and October), do both of these.
 
-**The hard text.** `npm run restore:practice` restores the text a restore is likeliest to get wrong (`scripts/hard-text.mjs`: Wrangler's and SQL's own words, quotes, line breaks, NUL and other control characters, non-ASCII text, the empty string) through your account's real D1, which CI can't reach. It makes two throwaway D1 databases and a throwaway R2 bucket, all named `fernledger-practice…`; writes made-up rows (bank code 99) into one; backs that up into the bucket with the Worker's backup code; restores it into the other with `npm run restore`; and compares every row, value and type of the two. Then it deletes the bucket's objects, the bucket and both databases, whether it passed or not, and says if anything is left to delete by hand. It never reads or writes the live database or the backup bucket. A backup run keeps its state in its bucket, and the Worker's crons carry on whatever run that names, so a practice backup in the live bucket could end up copying the live database.
+**The hard text.** `npm run restore:practice` restores the text a restore is likeliest to get wrong (`scripts/hard-text.mjs`: Wrangler's and SQL's own words, quotes, line breaks, NUL and other control characters, non-ASCII text, the empty string) through your account's real D1, which CI can't reach. It makes two throwaway D1 databases and a throwaway R2 bucket, all named `fernledger-hard-text…`; writes made-up rows (bank code 99) into one; backs that up into the bucket with the Worker's backup code; restores it into the other with `npm run restore`; and compares every row, value and type of the two. Then it deletes the bucket's objects, the bucket and both databases, whether it passed or not, and says if anything is left to delete by hand. It never reads or writes the live database or the backup bucket. A backup run keeps its state in its bucket, and the Worker's crons carry on whatever run that names, so a practice backup in the live bucket could end up copying the live database.
 
 ```bash
 npm run restore:practice -- --dry-run   # says what it would create, run and delete
