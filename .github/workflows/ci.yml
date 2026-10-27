@@ -20,9 +20,10 @@ on:
         required: false
         default: '1'
 
-# One run for a branch: a push to a branch that has a pull request starts both a push run and a pull request run, and the newer replaces the older.
+# A newer push replaces the run still going for the older one. A push to a branch that has a pull request starts both a push run and a pull request run of the same
+# commit, and both finish: main's protection counts a check the other run cancelled as not passed.
 concurrency:
-  group: ci-${{ github.head_ref || github.ref_name }}
+  group: ci-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
