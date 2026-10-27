@@ -20,19 +20,20 @@ on:
         required: false
         default: '1'
 
-# One run for a branch: a push to a branch that has a pull request starts both a push run and a pull request run, and the newer replaces the older.
+# A newer push replaces the run still going for the older one. A push to a branch that has a pull request starts both a push run and a pull request run of the same
+# commit, and both finish: main's protection counts a check the other run cancelled as not passed.
 concurrency:
-  group: ci-${{ github.head_ref || github.ref_name }}
+  group: ci-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -48,8 +49,8 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -65,7 +66,7 @@ jobs:
           REPEAT: ${{ inputs.repeat || '1' }}
       # The traces of the tests that failed (playwright.config.ts), for `npx playwright show-trace`.
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-traces-${{ matrix.shard }}
           path: test-results/
@@ -75,10 +76,10 @@ jobs:
   secrets-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_VERSION: 8.24.3 # keep equal to VERSION in scripts/gitleaks.mjs

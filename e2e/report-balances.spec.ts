@@ -394,6 +394,17 @@ test.describe('on screen', () => {
       const accounts = (await (await context.request.get('/api/accounts')).json()) as { name: string; accountNumber: string }[]
       expect(accounts.length).toBeGreaterThan(5)
       await signInToOpen(context, baseURL, 'member', { report: 'balances', from: `${start}-01-01`, to: `${end}-12-31` })
+      // Past the requests a Member may have in flight (MEMBER_MAX_IN_FLIGHT, 4) the Worker answers 429 MEMBER_BUSY, which worker/member-read-limit.test.ts holds for this
+      // route. It answers each so quickly that the browser seldom has more than four in flight at once, even when they are sent together, so its answer is given for it
+      // here: each request after the first four is refused once, and asked again goes to the Worker.
+      let asked = 0
+      const refused = new Set<string>()
+      await page.route('**/api/reports/balances?**', (route) => {
+        const url = route.request().url()
+        if (++asked <= 4 || refused.has(url)) return route.continue()
+        refused.add(url)
+        return route.fulfill({ status: 429, json: { error: 'Too many requests at once', reason: 'member-busy' } })
+      })
       const answers: number[] = []
       page.on('response', (res) => {
         if (new URL(res.url()).pathname === '/api/reports/balances') answers.push(res.status())
