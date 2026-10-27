@@ -1,8 +1,6 @@
 # Fernledger
 
-**A private, self-hosted tracker for New Zealand bank accounts.** It will sync daily from your bank through [Akahu](https://www.akahu.nz) (until then you import your bank's CSV files), and runs on your own Cloudflare account, on the free plan. One person manages it, and a small group of family members can view it read-only.
-
-> **Status: early development.** The design is settled and the code is being built. Nothing here is ready for real data yet. This README records each decision as it is made, so you can judge whether Fernledger suits you before you use it.
+**A private, self-hosted tracker for New Zealand bank accounts.** It syncs daily from your bank through [Akahu](https://www.akahu.nz), takes your history from your bank's CSV files, and runs on your own Cloudflare account, on the free plan. One person manages it, and a small group of family members can view it read-only.
 
 ---
 
@@ -393,9 +391,9 @@ Why not build on Actual Budget, Sure or Firefly III? Each was evaluated in [ADR 
 | Settings screen and "Setup needed" | Done |
 | Change Log page | Done |
 | Member pages (About your data, How to sign in) and Home Screen app | Done |
-| Database, CSV import (ASB) | In progress |
+| Database, CSV import (ASB, Kiwibank) | Done |
 | Balances, balance check after every import, the Summary | Done |
-| Akahu sync | Planned |
+| Akahu sync | Done |
 | Categories, overrides and notes | Done |
 | Transaction search and details | Done |
 | Rules for new transactions | Done |
