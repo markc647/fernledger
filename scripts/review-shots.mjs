@@ -269,6 +269,8 @@ async function exportBusy(page) {
 const SHOTS = [
   { name: 'dashboard', path: '/' },
   { name: 'transactions', path: '/transactions' },
+  // For the README's screenshots (README.md#what-it-looks-like): the top of the list, a screen high rather than all 50 rows.
+  { name: 'transactions-top', path: '/transactions', fullPage: false, before: tableShown },
   { name: 'transactions-edit', path: '/transactions', fullPage: false, before: (p) => p.getByRole('button', { name: /^Edit / }).first().click() },
   { name: 'uncategorised', path: '/uncategorised' },
   // The detail of the first Transaction in the list. The made-up household is imported, not Synced, so this is the Import's short
@@ -281,6 +283,7 @@ const SHOTS = [
   { name: 'report-income', path: `/reports/income-vs-spending?${DATES}`, before: tableShown },
   { name: 'report-budget', path: `/reports/budget-vs-actual?${DATES}`, before: tableShown },
   { name: 'net-worth', path: '/reports/net-worth' },
+  { name: 'net-worth-chart', path: '/reports/net-worth', fullPage: false, before: async (p) => { await p.getByRole('button', { name: 'Show net worth' }).click(); await p.getByText('Show the figures').waitFor() } },
   { name: 'accounts', path: '/accounts' },
   { name: 'categories', path: '/categories' },
   { name: 'rules', path: '/rules' },
@@ -310,6 +313,7 @@ const SHOTS = [
   { name: 'dashboard-dark', path: '/', theme: 'dark' },
   { name: 'transactions-dark', path: '/transactions', theme: 'dark' },
   { name: 'phone-dashboard', path: '/', viewport: PHONE },
+  { name: 'phone-dashboard-top', path: '/', viewport: PHONE, fullPage: false },
   { name: 'phone-transactions', path: '/transactions', viewport: PHONE },
 ]
 

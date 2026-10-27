@@ -10,6 +10,7 @@
 
 - [Who it's for](#who-its-for)
 - [What it does](#what-it-does)
+- [What it looks like](#what-it-looks-like)
 - [What it doesn't do](#what-it-doesnt-do)
 - [What you need](#what-you-need)
 - [What it costs](#what-it-costs)
@@ -70,6 +71,23 @@ Fernledger is **one family per deployment**. You run your own copy, nobody else'
 - **Add to Home Screen:** opens like an app on an iPad or phone, with its own icon. There's no offline mode and no push notifications. The icon's label comes from a fixed file, so it is normally "Fernledger" whatever title the Admin sets, though some iOS versions use the page title instead. You can rename it when you add it.
 - **Sign out:** a "Sign out" link in the header (in its menu on a phone), on every page, ends your Cloudflare Access sign-in, which is what to use on a computer that isn't yours. Cloudflare ends your session for every Access application, not only Fernledger.
 - **When your sign-in runs out:** Cloudflare Access ends a sign-in after the session length the Deployer set for it ([docs/setup.md](docs/setup.md#cloudflare-access-one-time-by-hand) suggests 24 hours, so usually every day). If nothing has loaded yet (you opened a tab that had been left overnight), the page says **Your sign-in has expired**, with a **Sign in again** button that loads the same page again, which sends you to Cloudflare's sign-in page and back to where you were. If a page is already open, it stays as it is, with what you had typed in it, and a banner over it says "Your sign-in has expired. Sign in again, then save again; nothing on this page has been lost." Its **Sign in again** opens Cloudflare's sign-in in a new tab, so you can sign in there, come back and press Save again; the banner goes when the next thing Fernledger asks for works. It does not take the keyboard's focus. The Download CSV link checks your sign-in first and saves nothing while it has expired, so Cloudflare's sign-in page is never saved as a file. The page is never kept by the browser, so a tab left open overnight, Reload and Back all reach Cloudflare's sign-in page rather than an app with nothing behind it. **Not signed in** is a different thing: Cloudflare let you through but Fernledger did not accept the sign-in, which signing in again does not fix and the Deployer has to look into (docs/setup.md, Cloudflare Access). Over a page that is open it is a banner too ("Fernledger couldn't confirm who you are. Try again; if it keeps happening, reload the page"), and it goes away when the next thing works; a banner is not printed.
+
+## What it looks like
+
+A made-up household (four Accounts at bank 99, which is no real bank, from May to October 2026), as the Admin sees it. Select a picture to see it full size.
+
+**The Dashboard:** each Account's balance and whether it agrees with the bank, the latest Transactions, and this month's Budgets.
+
+![The Dashboard: balances of four Accounts, recent Transactions, and Budget vs actual for October 2026](docs/screenshots/dashboard.png)
+
+| | |
+|---|---|
+| **Transactions**, with each one's Category and where it came from (a Rule or an Override) [![The Transactions list](docs/screenshots/transactions-top.png)](docs/screenshots/transactions-top.png) | **Rules** that give Transactions their Category, in order [![The Rules page](docs/screenshots/rules.png)](docs/screenshots/rules.png) |
+| **Spending by Category**, a printable Report [![The Spending by Category Report](docs/screenshots/report-spending.png)](docs/screenshots/report-spending.png) | **Income vs spending by month** [![The Income vs spending by month Report](docs/screenshots/report-income.png)](docs/screenshots/report-income.png) |
+| **Net worth** over time [![The Net worth chart](docs/screenshots/net-worth-chart.png)](docs/screenshots/net-worth-chart.png) | **Dark theme** [![The Dashboard in the dark theme](docs/screenshots/dashboard-dark.png)](docs/screenshots/dashboard-dark.png) |
+| **On a phone** [![The Dashboard on a phone](docs/screenshots/phone-dashboard-top.png)](docs/screenshots/phone-dashboard-top.png) | |
+
+To take them again after a change: `node scripts/review-shots.mjs --only "dashboard|transactions-top|rules|report-spending|report-income|net-worth-chart"`, then copy `dashboard`, `transactions-top`, `rules`, `report-spending`, `report-income`, `net-worth-chart`, `dashboard-dark` and `phone-dashboard-top` from `test-results/review-shots/` to `docs/screenshots/` ([docs/agents/design-review.md](docs/agents/design-review.md)).
 
 ## What it doesn't do
 
