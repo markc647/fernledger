@@ -3,7 +3,7 @@ import { drawn, LINE, NET_WORTH, NET_WORTH_PATH, netWorth, pressShowNetWorth, sh
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { openHelp } from './help-helpers'
 import { readPdf, textOf } from './pdf-text'
-import { chooseTextSize, mainNav, navGroup, navLink, openNavGroup } from './shell-helpers'
+import { chooseTextSize, mainNav, navGroup, navLink, openNavGroup, targetSize } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
 // The Dashboard (where the Admin lands) and the Summary (where a Member does), which are the same column of cards, and the Net worth page, which has net worth over time, against the
@@ -356,7 +356,7 @@ test('the button that shows net worth is a touch target with a clear name, works
   const region = netWorth(page)
   const show = region.getByRole('button', { name: 'Show net worth', exact: true })
   await expect(show).toBeVisible()
-  expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+  expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(await targetSize(page))
   await chooseTextSize(page, 'Xtra Large')
   const { live, element } = await liveRegion(region)
 
@@ -466,7 +466,7 @@ test('net worth\'s figures open from the keyboard, and the control is a touch ta
   await page.goto(NET_WORTH_PATH)
   await showNetWorth(page)
   const summary = netWorth(page).getByText('Show the figures')
-  expect((await summary.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+  expect((await summary.boundingBox())?.height).toBeGreaterThanOrEqual(await targetSize(page))
   await summary.focus()
   await page.keyboard.press('Enter')
   await expect(netWorth(page).getByRole('table')).toBeVisible()

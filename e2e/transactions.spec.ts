@@ -864,7 +864,7 @@ test('a panel whose top would be under the sticky header is scrolled out from un
 
 test('a panel too tall for the window has its row at the top, under the header, and not its foot with the row hidden', async ({ page, context, baseURL }, testInfo) => {
   const { stamp, edit } = await seedEditRows(context, baseURL!, testInfo.project.name)
-  await page.setViewportSize({ width: 1100, height: 420 })
+  await page.setViewportSize({ width: 1100, height: 360 })
   await page.goto(`/transactions?q=${stamp}`)
   const row = EDIT_ROWS - 8
   await expect(edit(page, row)).toBeVisible()
@@ -873,7 +873,7 @@ test('a panel too tall for the window has its row at the top, under the header, 
   await expect(editPanel(page)).toBeVisible()
   const header = (await siteHeader(page).boundingBox())!
   const [button, box] = [(await edit(page, row).boundingBox())!, (await editPanel(page).boundingBox())!]
-  expect(box.height).toBeGreaterThan(420 - header.height) // it does not fit under the header
+  expect(box.height).toBeGreaterThan(360 - header.height) // it does not fit under the header
   expect(button.y).toBeGreaterThanOrEqual(header.y + header.height - 1) // so the button the reader pressed is whole, below the header, and not scrolled off under it
   expect(box.y).toBeGreaterThanOrEqual(button.y + button.height) // with the top of the panel under it
   await expect(page.getByRole('heading', { level: 2, name: /^Edit Category and Note/ })).toBeInViewport()

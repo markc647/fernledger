@@ -13,8 +13,8 @@ import {
   expectIdentityOnEveryPage,
   expectIdentityRow,
   expectJustTheReport,
-  expectNoTextUnder12pt,
-  expectNoTypeUnder12pt,
+  expectNoTextUnder10_5pt,
+  expectNoTypeUnder10_5pt,
   expectOwnPage,
   expectPageNumbers,
   expectTitleBlock,
@@ -657,15 +657,15 @@ test.describe('printed', () => {
     await expectBlackOnWhite(page, 20) // every word, including the money, the minus signs, "back" and the notice, is black
   })
 
-  test('has no text under 12pt', async ({ page }) => {
-    await expectNoTextUnder12pt(page, article(page), 20)
+  test('has no text under 10.5pt', async ({ page }) => {
+    await expectNoTextUnder10_5pt(page, article(page), 20)
   })
 
   test('is its own page with its own margins, repeats the table heading and keeps a row whole', async ({ page }) => {
     await expectOwnPage(page)
   })
 
-  test('prints every month, the totals, the notice and the page numbers, every figure in at least 12pt type, with the table heading on each page that has the table', async ({ page }, testInfo) => {
+  test('prints every month, the totals, the notice and the page numbers, every figure in at least 10.5pt type, with the table heading on each page that has the table', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     const all = textOf({ width: 0, height: 0, text: pages.flatMap((p) => p.text) })
@@ -680,7 +680,7 @@ test.describe('printed', () => {
     expect(squash(all)).toContain(squash(noCategoryNotice(NO_CATEGORY)))
     expectPageNumbers(pages)
     expectBareMargins(pages)
-    expectNoTypeUnder12pt(pages, 50)
+    expectNoTypeUnder10_5pt(pages, 50)
     // The table's heading, with what the Report is, when it was generated, what the Difference is, what is not counted and what has no Category, is on every page that has the table.
     const withTable = expectIdentityOnEveryPage(pages, 'The Difference is income less spending.', `${TITLE} – ${NAME} – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`, 1)
     for (const p of withTable) {
@@ -771,8 +771,8 @@ test.describe('printed over several pages', () => {
     expectBareMargins(pages)
   })
 
-  test('sets every word of it, the page numbers included, in at least 12pt type', async ({ page }) => {
-    expectNoTypeUnder12pt(await readPdf(await page.pdf({ format: 'A4' })), 400) // 120 rows of four, and the rest
+  test('sets every word of it, the page numbers included, in at least 10.5pt type', async ({ page }) => {
+    expectNoTypeUnder10_5pt(await readPdf(await page.pdf({ format: 'A4' })), 400) // 120 rows of four, and the rest
   })
 })
 

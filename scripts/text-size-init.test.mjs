@@ -11,11 +11,12 @@ const script = readFileSync(new URL('../public/text-size-init.js', import.meta.u
 const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
 
 /** Runs the script against a fake page; returns the data-text-size it set (null if it set none) and the keys it read. `saved` and `earlier` are what is under each key. */
-function run({ saved = null, earlier = null, storageThrows = false, noStorage = false }) {
+function run({ saved = null, earlier = null, storageThrows = false, noStorage = false, touch = false }) {
   const keysRead = []
   let attribute = null
   const context = {
     document: { documentElement: { setAttribute: (name, value) => name === 'data-text-size' && (attribute = value) } },
+    matchMedia: (query) => ({ matches: touch && query === '(pointer: coarse)' }),
   }
   if (!noStorage) {
     context.localStorage = {
@@ -42,7 +43,9 @@ test('the keys are two different keys', () => {
 const values = [null, '', 'small', 'medium', 'large', 'xlarge', 'a', 'a-plus', 'a-plus-plus', 'A+', 'huge', 'constructor', '__proto__', 'toString']
 for (const saved of values) {
   test(`saved ${JSON.stringify(saved)}, with anything under the earlier key, sets what text-size.ts picks`, () => {
-    for (const earlier of values) assert.equal(run({ saved, earlier }).attribute, parseTextSize(saved, earlier), `earlier ${JSON.stringify(earlier)}`)
+    for (const earlier of values) {
+      for (const touch of [false, true]) assert.equal(run({ saved, earlier, touch }).attribute, parseTextSize(saved, earlier, touch), `earlier ${JSON.stringify(earlier)}, touch ${touch}`)
+    }
   })
 }
 
@@ -64,12 +67,13 @@ test('the new Large is Large, not the Large the earlier control saved', () => {
   assert.equal(run({ saved: 'xlarge' }).attribute, 'xlarge')
 })
 
-test('uses the standard size when storage is blocked', () => {
-  assert.equal(run({ storageThrows: true }).attribute, 'medium')
+test('uses the default size, Small, when storage is blocked', () => {
+  assert.equal(run({ storageThrows: true }).attribute, 'small')
+  assert.equal(run({ storageThrows: true, touch: true }).attribute, 'medium')
 })
 
-test('uses the standard size when there is no storage object', () => {
-  assert.equal(run({ noStorage: true }).attribute, 'medium')
+test('uses the default size, Small, when there is no storage object', () => {
+  assert.equal(run({ noStorage: true }).attribute, 'small')
 })
 
 for (const { value, percent } of TEXT_SIZES) {

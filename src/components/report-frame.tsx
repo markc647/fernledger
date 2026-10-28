@@ -45,7 +45,7 @@ function PrintedNotes({ notes }: { notes: ReportNotes }) {
   const id = useId()
   return (
     <section aria-labelledby={id} className="mt-6 hidden print:mt-4 print:block">
-      <h2 id={id} className="text-lg font-semibold print:text-[13pt]">
+      <h2 id={id} className="text-lg font-semibold print:text-[12pt]">
         {notes.title}
       </h2>
       <div className="[&_p]:mt-1">{notes.body}</div>
@@ -57,10 +57,10 @@ function PrintedNotes({ notes }: { notes: ReportNotes }) {
  * The frame every Report is printed in (README: Reports). It writes the Report's own title block, because a printout leaves
  * out the app header and the sidebar, and with them the app title: the app title from Settings, the Report's name, its Account(s) and dates, and
  * "Generated Thu 8 Oct 2026 at 3:42 pm". A Report is shown on its own page, under the form that asked for it, and
- * is all that is printed of that page; it puts what it lists in `children`, as tables (ResponsiveTable with `print:text-[12pt]` and a
+ * is all that is printed of that page; it puts what it lists in `children`, as tables (ResponsiveTable with `print:text-[10.5pt]` and a
  * `printHeading` from `useReportIdentity`) and headings no smaller than 12pt.
  *
- * On paper (src/index.css, `.report-frame`): text is black on white and at least 12pt, table headings repeat on every page,
+ * On paper (src/index.css, `.report-frame`): text is black on white and at least 10.5pt, table headings repeat on every page,
  * and a row never splits across pages. The two lines that identify the Report come back on every page in every browser, in
  * each table's heading. Page numbers ("Page 2 of 5") sit in the Report's own page margin, which only Chrome and Edge 131 and later
  * draw; other browsers print the Report without them, and number the pages in their own header and footer if the reader turns
@@ -202,7 +202,7 @@ export function ReportFrame({
       )}
       <article aria-label={name} className="report-frame">
         <header>
-          <p className="text-lg font-semibold print:text-[14pt]">{appTitle}</p>
+          <p className="text-lg font-semibold print:text-[12pt]">{appTitle}</p>
           {/* The page's own heading, above the form, is the h1 on screen, so here the name is text (the article's label says it). On paper that heading is not there, and the name is the Report's h1.
               The "?" beside it is the Report's own, for its notes, and is not the page's ("About this page", beside the h1). A printout has the notes as a section instead (below). */}
           <div className="mt-1 flex min-h-11 items-center gap-3 print:hidden">
@@ -211,7 +211,7 @@ export function ReportFrame({
             </p>
             {notes && <HelpSheet label={notes.title}>{notes.body}</HelpSheet>}
           </div>
-          <h1 className="mt-1 hidden text-2xl font-semibold print:block print:text-[20pt]">
+          <h1 className="mt-1 hidden text-2xl font-semibold print:block print:text-[13pt]">
             {name}
           </h1>
           <dl className="mt-3 grid gap-1">

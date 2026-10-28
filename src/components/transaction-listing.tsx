@@ -97,7 +97,7 @@ function AccountSection({ section }: { section: AccountListing }) {
               columns={columns}
               rows={section.rows}
               getRowKey={(row) => row.id}
-              className="print:text-[12pt]"
+              className="print:text-[10.5pt]"
               printHeading={printHeading}
             />
           </div>
@@ -125,7 +125,7 @@ export function TransactionListing({ listing }: { listing: Listing }) {
     <>
       {sections.length > 1 && (
         <section aria-labelledby="all-accounts-total" className="mt-8 break-inside-avoid print:mt-6">
-          <h2 id="all-accounts-total" className="text-xl font-semibold print:text-[15pt]">
+          <h2 id="all-accounts-total" className="text-xl font-semibold print:text-[13pt]">
             All Accounts
           </h2>
           <p className="mt-1">{countOf(listing.rowCount)} listed.</p>

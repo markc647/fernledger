@@ -2,7 +2,7 @@ import type { BrowserContext } from '@playwright/test'
 import type { Role } from '../src/generated/api/auth'
 import { expect, noAxeViolations, test } from './fixtures'
 import { openHelp } from './help-helpers'
-import { sidebarTitle } from './shell-helpers'
+import { sidebarTitle, targetSize } from './shell-helpers'
 
 // Cookies are not scoped by port, so the dev identity needs no copy of the port from playwright.config.ts.
 const signInAs = (context: BrowserContext, role: Role) =>
@@ -179,11 +179,11 @@ test('the Settings screen has no WCAG 2.2 AA violations when saved, and when sho
   await noAxeViolations(page)
 })
 
-test('fields and the save button are at least 44px tall', async ({ page, context }) => {
+test('fields and the save button are 44px targets, in proportion to the text', async ({ page, context }) => {
   await signInAs(context, 'admin')
   await page.goto('/settings')
   for (const control of [page.getByLabel('App title'), page.getByRole('switch', { name: 'Cloudflare Paid Plan' }), page.getByRole('button', { name: 'Save settings' })]) {
-    expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+    expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(await targetSize(page))
   }
 })
 

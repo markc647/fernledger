@@ -12,8 +12,8 @@ import {
   expectBlackOnWhite,
   expectIdentityOnEveryPage,
   expectJustTheReport,
-  expectNoTextUnder12pt,
-  expectNoTypeUnder12pt,
+  expectNoTextUnder10_5pt,
+  expectNoTypeUnder10_5pt,
   expectOwnPage,
   expectPageNumbers,
   expectTitleBlock,
@@ -624,8 +624,8 @@ test.describe('printed', () => {
     await expectBlackOnWhite(page, 100) // every word, including the muted ones, the money and the statuses, is black
   })
 
-  test('has no text under 12pt', async ({ page }) => {
-    await expectNoTextUnder12pt(page, article(page), 100)
+  test('has no text under 10.5pt', async ({ page }) => {
+    await expectNoTextUnder10_5pt(page, article(page), 100)
   })
 
   test('is its own page with its own margins, repeats table headings and keeps a row whole', async ({ page }) => {
@@ -678,8 +678,8 @@ test.describe('printed', () => {
     expectBareMargins(await readPdf(await page.pdf({ format: 'A4' })))
   })
 
-  test('sets every word of it, the page numbers and the statuses included, in at least 12pt type', async ({ page }) => {
-    expectNoTypeUnder12pt(await readPdf(await page.pdf({ format: 'A4' })), 300)
+  test('sets every word of it, the page numbers and the statuses included, in at least 10.5pt type', async ({ page }) => {
+    expectNoTypeUnder10_5pt(await readPdf(await page.pdf({ format: 'A4' })), 300)
   })
 
   test('prints the same from a phone-width window: still tables', async ({ page }) => {

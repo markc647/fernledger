@@ -87,7 +87,7 @@ export function IncomeVsSpendingReport({ report, accounts }: { report: IncomeVsS
   return (
     <>
       <section aria-labelledby="income-vs-spending-heading" className="mt-8 print:mt-6">
-        <h2 id="income-vs-spending-heading" className="text-xl font-semibold print:text-[15pt]">
+        <h2 id="income-vs-spending-heading" className="text-xl font-semibold print:text-[13pt]">
           Income and spending by month
         </h2>
         {notice && <p className="mt-3 border-2 border-foreground p-3 font-semibold break-inside-avoid">{notice}</p>}
@@ -118,7 +118,7 @@ export function IncomeVsSpendingReport({ report, accounts }: { report: IncomeVsS
                 columns={columns(report.from, report.to)}
                 rows={report.months}
                 getRowKey={(row) => row.month}
-                className="print:text-[12pt]"
+                className="print:text-[10.5pt]"
                 printHeading={printHeading}
               />
             </div>

@@ -202,8 +202,8 @@ export async function expectBlackOnWhite(page: Page, atLeast: number) {
   expect(Math.min(...paper)).toBeGreaterThan(240)
 }
 
-/** No word of the Report is under 12pt (16px), and the table's own text is at least that (a table's rule is `print:text-[12pt]`, which holds it there whatever the text size on screen). */
-export async function expectNoTextUnder12pt(page: Page, article: Locator, atLeast: number) {
+/** No word of the Report is under 10.5pt (14px), and the table's own text is exactly that (a table's rule is `print:text-[10.5pt]`, which holds it there whatever the text size on screen). */
+export async function expectNoTextUnder10_5pt(page: Page, article: Locator, atLeast: number) {
   const small = await page.evaluate(() => {
     const walker = document.createTreeWalker(document.querySelector('.report-frame')!, NodeFilter.SHOW_TEXT)
     const found: string[] = []
@@ -212,14 +212,14 @@ export async function expectNoTextUnder12pt(page: Page, article: Locator, atLeas
       if (!node.textContent?.trim()) continue
       texts += 1
       const size = parseFloat(getComputedStyle(node.parentElement!).fontSize)
-      if (size < 16) found.push(`${size}px: ${node.textContent.trim().slice(0, 30)}`)
+      if (size < 14) found.push(`${size}px: ${node.textContent.trim().slice(0, 30)}`)
     }
     return { found, texts }
   })
   expect(small.texts).toBeGreaterThan(atLeast)
-  expect(small.found).toEqual([]) // 12pt is 16px
+  expect(small.found).toEqual([]) // 10.5pt is 14px
   const cell = await article.locator('tbody td').first().evaluate((el) => getComputedStyle(el).fontSize)
-  expect(parseFloat(cell)).toBeGreaterThanOrEqual(16)
+  expect(parseFloat(cell)).toBe(14)
 }
 
 /**
@@ -316,9 +316,9 @@ export function expectBareMargins(pages: PdfPage[]) {
   }
 }
 
-/** Every word of the PDF, the page numbers included, is set in at least 12pt type, and there is more than `atLeast` of it, so the check read something. */
-export function expectNoTypeUnder12pt(pages: PdfPage[], atLeast: number) {
-  expect(pages.flatMap((p, index) => p.text.filter((t) => t.size < 11.95).map((t) => `page ${index + 1}: ${t.size}pt "${t.str}"`))).toEqual([])
+/** Every word of the PDF, the page numbers included, is set in at least 10.5pt type, and there is more than `atLeast` of it, so the check read something. */
+export function expectNoTypeUnder10_5pt(pages: PdfPage[], atLeast: number) {
+  expect(pages.flatMap((p, index) => p.text.filter((t) => t.size < 10.45).map((t) => `page ${index + 1}: ${t.size}pt "${t.str}"`))).toEqual([])
   expect(pages.flatMap((p) => p.text).length).toBeGreaterThan(atLeast)
 }
 

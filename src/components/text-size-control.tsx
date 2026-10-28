@@ -3,7 +3,7 @@ import { TEXT_SIZES, type TextSize } from '@/lib/text-size'
 import { cn } from '@/lib/utils'
 
 /**
- * The text size: Small (14px), Medium (16px, the default), Large (18px) and Xtra Large (20px), as one group of four radio buttons. They are real radio buttons (a `fieldset`
+ * The text size: Small (14px, the default with a mouse), Medium (16px, the default on a touch screen), Large (18px) and Xtra Large (20px), as one group of four radio buttons. They are real radio buttons (a `fieldset`
  * of `input type="radio"`), so a screen reader says what they are, Tab stops at the group once, and the arrow keys move between them and choose, as radio buttons do. Which is
  * chosen, and remembering it, is `useTextSize` (src/lib/use-text-size.ts), in the layout, so the group in the header and the one in a phone's menu show the same choice.
  * Each is named in full ("Xtra Large text") and starts with the word it shows. The input is the whole of the button, invisible and on top, so a click or a tap lands on it; the
