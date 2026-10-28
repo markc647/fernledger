@@ -126,7 +126,7 @@ test.describe("the Admin's header", () => {
     await page.keyboard.press('Escape')
     await expect(tooltip).toHaveCount(0)
     await page.keyboard.press('Tab')
-    await expect(textSizeButton(page, 'Medium')).toBeFocused() // not a trap, and on to the controls
+    await expect(textSizeButton(page, 'Small')).toBeFocused() // not a trap, and on to the controls
     await expect(tooltip).toHaveCount(0)
   })
 

@@ -70,7 +70,7 @@ function LoanSectionView({ section, from, to }: { section: LoanSection; from: st
   const printHeading = useReportIdentity()(section.name)
   return (
     <section aria-labelledby={headingId} className="mt-8 print:mt-6">
-      <h2 id={headingId} className="text-xl font-semibold print:text-[15pt]">
+      <h2 id={headingId} className="text-xl font-semibold print:text-[13pt]">
         {section.name}
       </h2>
       {section.status === 'not-listed' ? (
@@ -104,7 +104,7 @@ function LoanSectionView({ section, from, to }: { section: LoanSection; from: st
                 columns={columnsFor(person)}
                 rows={section.lines}
                 getRowKey={(row) => row.id}
-                className="print:text-[12pt]"
+                className="print:text-[10.5pt]"
                 printHeading={printHeading}
               />
             </div>
@@ -128,7 +128,7 @@ function LoansSummary({ sections, to }: { sections: LoanSection[]; to: string })
   ]
   return (
     <section aria-labelledby="loans-summary" className="mt-8 print:mt-6">
-      <h2 id="loans-summary" className="text-xl font-semibold print:text-[15pt]">
+      <h2 id="loans-summary" className="text-xl font-semibold print:text-[13pt]">
         All loans
       </h2>
       <dl className="mt-3 grid max-w-md gap-1 break-inside-avoid">
@@ -141,7 +141,7 @@ function LoansSummary({ sections, to }: { sections: LoanSection[]; to: string })
         </p>
       )}
       <div className="mt-4">
-        <ResponsiveTable caption="What each loan owes" columns={columns} rows={sections} getRowKey={(section) => section.categoryId} className="print:text-[12pt]" printHeading={printHeading} />
+        <ResponsiveTable caption="What each loan owes" columns={columns} rows={sections} getRowKey={(section) => section.categoryId} className="print:text-[10.5pt]" printHeading={printHeading} />
       </div>
     </section>
   )

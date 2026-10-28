@@ -57,7 +57,7 @@ function Differences({ section }: { section: AccountBalances }) {
   return (
     // Not a section with a name of its own: every Account has one, and landmarks with the same name are hard to tell apart.
     <div className="mt-6 print:mt-4">
-      <h3 className="text-lg font-semibold print:text-[13pt]">Balance Check differences</h3>
+      <h3 className="text-lg font-semibold print:text-[12pt]">Balance Check differences</h3>
       {summary !== null && <p className="mt-1">{summary}</p>}
       {report.differences.length > 0 && (
         <ul className="mt-2 grid gap-3">
@@ -118,7 +118,7 @@ function AccountSection({ section }: { section: AccountBalances }) {
               columns={columns}
               rows={report.rows}
               getRowKey={(row) => row.date}
-              className="print:text-[12pt]"
+              className="print:text-[10.5pt]"
               printHeading={printHeading}
             />
           </div>

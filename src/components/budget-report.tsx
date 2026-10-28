@@ -108,7 +108,7 @@ function AllMonths({ report, accounts }: { report: BudgetReport; accounts: strin
   const { together, total } = report
   return (
     <section aria-labelledby="all-months" className="mt-8 print:mt-6">
-      <h2 id="all-months" className="text-xl font-semibold print:text-[15pt]">
+      <h2 id="all-months" className="text-xl font-semibold print:text-[13pt]">
         All months together
       </h2>
       <p className="mt-1">{togetherCovers(report)}</p>
@@ -131,7 +131,7 @@ function AllMonths({ report, accounts }: { report: BudgetReport; accounts: strin
               columns={periodColumns}
               rows={periodRows(report)}
               getRowKey={(row) => row.key}
-              className="print:text-[12pt]"
+              className="print:text-[10.5pt]"
               printHeading={printHeading}
             />
           </div>
@@ -151,7 +151,7 @@ function MonthSection({ month, noBudgets, accounts }: { month: ReportMonth; noBu
   const nothing = !hasBudgets && month.otherCents === 0 && month.uncategorisedCents === 0
   return (
     <section aria-labelledby={id} className="mt-8 print:mt-6">
-      <h2 id={id} className="text-xl font-semibold print:text-[15pt]">
+      <h2 id={id} className="text-xl font-semibold print:text-[13pt]">
         {label}
       </h2>
       {note !== null && <p className="mt-1">{note}</p>}
@@ -167,7 +167,7 @@ function MonthSection({ month, noBudgets, accounts }: { month: ReportMonth; noBu
               columns={monthColumns}
               rows={budgetRows(month)}
               getRowKey={(row) => row.key}
-              className="print:text-[12pt]"
+              className="print:text-[10.5pt]"
               printHeading={printHeading}
             />
           </div>

@@ -15,8 +15,8 @@ import {
   expectIdentityOnEveryPage,
   expectIdentityRow,
   expectJustTheReport,
-  expectNoTextUnder12pt,
-  expectNoTypeUnder12pt,
+  expectNoTextUnder10_5pt,
+  expectNoTypeUnder10_5pt,
   expectOwnPage,
   expectPageNumbers,
   expectTitleBlock,
@@ -652,15 +652,15 @@ test.describe('printed', () => {
     await expectBlackOnWhite(page, 20) // every word, including the money and "back", is black
   })
 
-  test('has no text under 12pt', async ({ page }) => {
-    await expectNoTextUnder12pt(page, article(page), 20)
+  test('has no text under 10.5pt', async ({ page }) => {
+    await expectNoTextUnder10_5pt(page, article(page), 20)
   })
 
   test('is its own page with its own margins, repeats the table heading and keeps a row whole', async ({ page }) => {
     await expectOwnPage(page)
   })
 
-  test('prints on one A4 page with the Categories, the total and the page number, every figure in at least 12pt type', async ({ page }, testInfo) => {
+  test('prints on one A4 page with the Categories, the total and the page number, every figure in at least 10.5pt type', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     expect(pages).toHaveLength(1)
@@ -673,7 +673,7 @@ test.describe('printed', () => {
     expect(text).toContain(spent(EVERYDAY.uncategorised))
     expect(text).toContain(`Total spending ${spent(total(EVERYDAY))}`)
     expect(text).toContain('Page 1 of 1')
-    expectNoTypeUnder12pt(pages, 25)
+    expectNoTypeUnder10_5pt(pages, 25)
     // The table's heading, with what the Report is, when it was generated and what is not counted, is on the page that has the table.
     expectIdentityOnEveryPage(pages, 'Total spending', `${TITLE} – Spending by Category – ${d.everyday.name} (${d.everyday.number}) – ${range(d.year)}`, 1)
     expect(squash(text)).toContain(squash(NOT_COUNTED))
@@ -750,8 +750,8 @@ test.describe('printed over several pages', () => {
     expectBareMargins(pages)
   })
 
-  test('sets every word of it, the page numbers included, in at least 12pt type', async ({ page }) => {
-    expectNoTypeUnder12pt(await readPdf(await page.pdf({ format: 'A4' })), 150) // 80 rows of two, and the rest
+  test('sets every word of it, the page numbers included, in at least 10.5pt type', async ({ page }) => {
+    expectNoTypeUnder10_5pt(await readPdf(await page.pdf({ format: 'A4' })), 150) // 80 rows of two, and the rest
   })
 })
 

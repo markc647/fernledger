@@ -5,8 +5,7 @@ export type TextSize = 'small' | 'medium' | 'large' | 'xlarge'
 /**
  * The four text sizes, smallest first. `percent` is the share of the browser's own text size and must match the `html[data-text-size]` rules in src/index.css
  * (scripts/text-size-init.test.mjs checks it): 14px, 16px, 18px and 20px on a browser set to 16px. All text that is not a heading is exactly this size, in every part of the
- * page (src/index.css says how). Medium, the default, is the 16px body size the README's Accessibility section promises; Small is a choice someone makes, never what they
- * start with. `name` is the accessible name of the button, which starts with its label.
+ * page (src/index.css says how). Small, 14px, is the default with a mouse, and Medium on a touch screen (`defaultTextSize`). `name` is the accessible name of the button, which starts with its label.
  */
 export const TEXT_SIZES: readonly { value: TextSize; label: string; name: string; percent: number }[] = [
   { value: 'small', label: 'Small', name: 'Small text', percent: 87.5 },
@@ -36,16 +35,25 @@ const SAVED_BY_EARLIER_CONTROLS = new Map<string, TextSize>([
 ])
 
 /**
- * The size `saved` (what is under `TEXT_SIZE_STORAGE_KEY`) names; when that is nothing, the one `savedEarlier` (what is under `EARLIER_TEXT_SIZE_STORAGE_KEY`) names; Medium
- * when neither does. A choice made on this control always wins over an earlier one.
+ * The size someone starts with: Small with a mouse, and Medium on a touch screen, where Small would make a 44px target about 38px (README, Accessibility).
+ * public/text-size-init.js repeats this.
  */
-export function parseTextSize(saved: string | null, savedEarlier: string | null = null): TextSize {
-  return TEXT_SIZES.find((size) => size.value === saved)?.value ?? SAVED_BY_EARLIER_CONTROLS.get(savedEarlier ?? '') ?? 'medium'
+export const defaultTextSize = (touch: boolean): TextSize => (touch ? 'medium' : 'small')
+
+/** Whether this device's main pointer is a finger: the `pointer: coarse` media query, which `pointer-coarse:` styles also follow. */
+const isTouch = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+
+/**
+ * The size `saved` (what is under `TEXT_SIZE_STORAGE_KEY`) names; when that is nothing, the one `savedEarlier` (what is under `EARLIER_TEXT_SIZE_STORAGE_KEY`) names; the
+ * default for a `touch` screen or not when neither does. A choice made on this control always wins over an earlier one.
+ */
+export function parseTextSize(saved: string | null, savedEarlier: string | null = null, touch = false): TextSize {
+  return TEXT_SIZES.find((size) => size.value === saved)?.value ?? SAVED_BY_EARLIER_CONTROLS.get(savedEarlier ?? '') ?? defaultTextSize(touch)
 }
 
-/** The size saved on this device; Medium when none is saved or storage is blocked. */
-export const loadTextSize = (storage: DeviceStorage): TextSize =>
-  parseTextSize(readDevice(storage, TEXT_SIZE_STORAGE_KEY), readDevice(storage, EARLIER_TEXT_SIZE_STORAGE_KEY))
+/** The size saved on this device; the default for it (`defaultTextSize`) when none is saved or storage is blocked. */
+export const loadTextSize = (storage: DeviceStorage, touch = isTouch()): TextSize =>
+  parseTextSize(readDevice(storage, TEXT_SIZE_STORAGE_KEY), readDevice(storage, EARLIER_TEXT_SIZE_STORAGE_KEY), touch)
 
 /** Remembers the size on this device. False when it couldn't be saved; the size still applies until the page closes. */
 export const saveTextSize = (size: TextSize, storage: DeviceStorage) => writeDevice(storage, TEXT_SIZE_STORAGE_KEY, size)

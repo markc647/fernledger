@@ -4,7 +4,7 @@ import { openHelp } from './help-helpers'
 import { findTransactions, transactionId } from './report-helpers'
 import { addRule, applyAnswer, applyButton, applyDialog, applyTheRules, categoryId, frameHeading, openApplyDialog, pageOrder, progressFrame, removeRule, ruleActions, ruleIds, runningJob, spinner, stubPaidPlan, stubUsageReadings, usageFigures, usageOn, withRules } from './rule-helpers'
 import { arrowTo, chooseAction, menuAction, openActions, ruleActionButtons } from './row-actions-helpers'
-import { chooseTextSize, mainNav, navGroup, navigateTo } from './shell-helpers'
+import { chooseTextSize, mainNav, navGroup, navigateTo, targetSize } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
 // The light and dark projects share one local database, so each test uses text and an Account of its own, no earlier run used
@@ -400,8 +400,8 @@ test.describe("the form's hints", () => {
     const [label, button] = [(await page.locator('label[for="rule-text"]').boundingBox())!, (await help.boundingBox())!]
     expect(button.x, 'to the right of its label').toBeGreaterThanOrEqual(label.x + label.width)
     expect(button.y + button.height, 'above the box').toBeLessThanOrEqual((await input.boundingBox())!.y)
-    expect(button.width, 'a touch target').toBeGreaterThanOrEqual(44)
-    expect(button.height).toBeGreaterThanOrEqual(44)
+    expect(button.width, 'a touch target').toBeGreaterThanOrEqual(await targetSize(page))
+    expect(button.height).toBeGreaterThanOrEqual(await targetSize(page))
 
     await help.click()
     await expect(hint).toContainText(text)
@@ -460,7 +460,7 @@ test.describe('Apply the Rules to all Transactions, beside Add a Rule', () => {
     const [addBox, applyBox] = [(await add.boundingBox())!, (await applyButton(page).boundingBox())!]
     expect(applyBox.x, 'to the right of Add a Rule').toBeGreaterThanOrEqual(addBox.x + addBox.width)
     expect(Math.abs(applyBox.y + applyBox.height / 2 - (addBox.y + addBox.height / 2)), 'on the same row').toBeLessThan(4)
-    expect(applyBox.height, 'a touch target').toBeGreaterThanOrEqual(44)
+    expect(applyBox.height, 'a touch target').toBeGreaterThanOrEqual(await targetSize(page))
 
     // With the form open Add a Rule is off and not gone, so Apply the Rules to all Transactions stays under the pointer.
     await add.click()

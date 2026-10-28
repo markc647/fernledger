@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { expect, signInAs, test } from './fixtures'
 import { helpButton } from './help-helpers'
+import { targetSize } from './shell-helpers'
 import {
   BALANCES_NOTES_TITLE,
   closeNotes,
@@ -84,8 +85,8 @@ test.describe('the Spending by Category Report', () => {
     expect(middle, 'level with the title').toBeGreaterThan(titleBox.y)
     expect(middle).toBeLessThan(titleBox.y + titleBox.height)
     expect(buttonBox.y, 'under the form').toBeGreaterThan(formBox.y + formBox.height)
-    expect(buttonBox.width, 'a touch target, as every button is').toBeGreaterThanOrEqual(44)
-    expect(buttonBox.height).toBeGreaterThanOrEqual(44)
+    expect(buttonBox.width, 'a touch target, as every button is').toBeGreaterThanOrEqual(await targetSize(page))
+    expect(buttonBox.height).toBeGreaterThanOrEqual(await targetSize(page))
 
     // The notes are in the page for paper, and not on the screen: nothing named for them, and none of their words showing.
     const says = report.getByText(SPENDING.says)

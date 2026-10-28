@@ -13,8 +13,8 @@ import {
   expectIdentityOnEveryPage,
   expectIdentityRow,
   expectJustTheReport,
-  expectNoTextUnder12pt,
-  expectNoTypeUnder12pt,
+  expectNoTextUnder10_5pt,
+  expectNoTypeUnder10_5pt,
   expectOwnPage,
   expectPageNumbers,
   expectTitleBlock,
@@ -755,15 +755,15 @@ test.describe('printed', () => {
     await expectBlackOnWhite(page, 30) // every word, including the money, is black
   })
 
-  test('has no text under 12pt', async ({ page }, testInfo) => {
-    await expectNoTextUnder12pt(page, tableOf(page, dataFor(testInfo.project.name).aliceLoan), 30)
+  test('has no text under 10.5pt', async ({ page }, testInfo) => {
+    await expectNoTextUnder10_5pt(page, tableOf(page, dataFor(testInfo.project.name).aliceLoan), 30)
   })
 
   test('is its own page with its own margins, repeats the table heading and keeps a row whole', async ({ page }) => {
     await expectOwnPage(page)
   })
 
-  test('prints the opening balance, every Transaction and what is owed on the last date, with the page numbers, every figure in at least 12pt type', async ({ page }, testInfo) => {
+  test('prints the opening balance, every Transaction and what is owed on the last date, with the page numbers, every figure in at least 10.5pt type', async ({ page }, testInfo) => {
     const d = dataFor(testInfo.project.name)
     const pages = await readPdf(await page.pdf({ format: 'A4' }))
     const all = squash(pages.map(textOf).join(' '))
@@ -774,7 +774,7 @@ test.describe('printed', () => {
     expect(all).toContain(squash('First repayment'))
     expectPageNumbers(pages)
     expectBareMargins(pages)
-    expectNoTypeUnder12pt(pages, 40)
+    expectNoTypeUnder10_5pt(pages, 40)
     // The table's headings, and the lines that say what the Report is, are at the top of every page that has some of its rows.
     const withRows = expectIdentityOnEveryPage(pages, 'LOANRPT', `${TITLE} – Loans – ${d.aliceLoan} – ${range(d.year)}`, 1)
     for (const p of withRows) expect(squash(textOf(p)), `headings on page ${pages.indexOf(p) + 1}`).toContain(HEADINGS)
@@ -843,8 +843,8 @@ test.describe('printed over several pages', () => {
     expectBareMargins(pages)
   })
 
-  test('sets every word of it, the page numbers included, in at least 12pt type', async ({ page }) => {
-    expectNoTypeUnder12pt(await readPdf(await page.pdf({ format: 'A4' })), 300)
+  test('sets every word of it, the page numbers included, in at least 10.5pt type', async ({ page }) => {
+    expectNoTypeUnder10_5pt(await readPdf(await page.pdf({ format: 'A4' })), 300)
   })
 })
 

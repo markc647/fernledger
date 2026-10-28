@@ -59,7 +59,7 @@ export function SpendingByCategoryReport({ report, accounts }: { report: Spendin
   return (
     <>
       <section aria-labelledby="spending-heading" className="mt-8 print:mt-6">
-        <h2 id="spending-heading" className="text-xl font-semibold print:text-[15pt]">
+        <h2 id="spending-heading" className="text-xl font-semibold print:text-[13pt]">
           Spending in each Category
         </h2>
         {report.categories.length === 0 ? (
@@ -79,7 +79,7 @@ export function SpendingByCategoryReport({ report, accounts }: { report: Spendin
                 columns={columns}
                 rows={report.categories}
                 getRowKey={(row) => row.categoryId ?? 'uncategorised'}
-                className="print:text-[12pt]"
+                className="print:text-[10.5pt]"
                 printHeading={printHeading}
               />
             </div>

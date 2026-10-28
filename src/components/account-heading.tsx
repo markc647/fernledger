@@ -6,7 +6,7 @@ import { isGeneratedKey } from '@/lib/account-key'
  */
 export function AccountHeading({ id, name, accountNumber }: { id: string; name: string; accountNumber: string }) {
   return (
-    <h2 id={id} className="text-xl font-semibold print:text-[15pt]">
+    <h2 id={id} className="text-xl font-semibold print:text-[13pt]">
       {isGeneratedKey(accountNumber) ? (
         name
       ) : (
