@@ -180,7 +180,7 @@ describe('adding a Rule', () => {
     })
   })
 
-  it('takes exactly the largest text, type and amount, and refuses a hundred and first Rule', async () => {
+  it('takes exactly the largest text, type and amount, and refuses one Rule more than MAX_RULES', async () => {
     const groceries = await categoryId('Groceries')
     await addRule({ textContains: 'x'.repeat(100), bankType: 'y'.repeat(40), maxCents: 100_000_000_000, categoryId: groceries })
 
@@ -975,7 +975,7 @@ describe('what putting the Rules in order reads (ADR 0004)', () => {
     const res = await callAsAdminWith(db, '/api/rules/order', 'PUT', { ids: ids.toReversed() })
 
     expect(res.status).toBe(200)
-    // Measured at 100 Rules: 1,005 through the route, 801 of them the write and its check. Finding each Rule's place by scanning the list, which the write did (5,250 reads) and the check did again
+    // Measured at 100 Rules (the limit then): 1,005 through the route, 801 of them the write and its check. Finding each Rule's place by scanning the list, which the write did (5,250 reads) and the check did again
     // (5,250 more), was about 10,800 through the route.
     expect(usage.rowsRead).toBeLessThanOrEqual(MAX_RULES * 11)
   })
@@ -993,7 +993,7 @@ describe('what applying Rules and previewing read (ADR 0004: the free plan allow
       .bind(accountId, name, count)
       .run()
   const lastId = async () => (await env.DB.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM transactions').first<{ id: number }>())!.id
-  /** Saves Rules for these texts, in this order, straight to the database (a hundred through the API is slow). */
+  /** Saves Rules for these texts, in this order, straight to the database (the most there can be, through the API, is slow). */
   const saveRules = async (texts: string[]) => {
     const groceries = await categoryId('Groceries')
     await env.DB.batch(texts.map((text, i) => env.DB.prepare('INSERT INTO rules (position, text_contains, category_id) VALUES (?, ?, ?)').bind(i + 1, text, groceries)))

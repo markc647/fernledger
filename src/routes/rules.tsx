@@ -20,7 +20,7 @@ import { HttpError, meQuery, reasonOf } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
 import { MAX_INLINE_APPLY } from '@/lib/rule-from-transaction'
 import { announcement, estimateSentence, frameTitle, pausedSentence, progressSentence, restartNote, updatedSentence, waitBeforeAsking, type RerunJob } from '@/lib/rerun'
-import { dollarsForInput, DRAG_INSTRUCTIONS, DRAG_ROLE, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleResult, ruleWhen, type RuleView } from '@/lib/rules'
+import { dollarsForInput, DRAG_INSTRUCTIONS, DRAG_ROLE, dragAnnouncements, inOrder, moveRuleBy, moveRuleTo, readDollars, ruleResult, RULES_FULL, ruleWhen, type RuleView } from '@/lib/rules'
 
 export const Route = createFileRoute('/rules')({
   component: Rules,
@@ -634,7 +634,7 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
     mutationFn: async () => {
       const json = { ...criteria, categoryId: values.target === 'transfer' ? null : Number(values.target), transfer: values.target === 'transfer' }
       const res = rule ? await api.rules[':id'].$put({ param: { id: String(rule.id) }, json }) : await api.rules.$post({ json })
-      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined) // 409: 100 Rules already, or the Rule changed under the Admin
+      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined) // 409: MAX_RULES already, or the Rule changed under the Admin
     },
     onSuccess: async () => {
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['rules'] }), queryClient.invalidateQueries({ queryKey: ['rerun'] })])
@@ -657,7 +657,7 @@ function RuleForm({ rule, runGoing, onDone, onCancel }: { rule?: RuleView; runGo
     save.error instanceof HttpError && save.error.status === 409
       ? save.error.reason === 'changed'
         ? 'This Rule was changed just now. Try again.'
-        : 'There are already 100 Rules. Remove one before adding another.'
+        : RULES_FULL
       : save.isError
         ? 'The Rule could not be saved. Check the boxes above and try again.'
         : ''
