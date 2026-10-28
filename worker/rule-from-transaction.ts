@@ -14,8 +14,8 @@
 // Category and not this one's; the answer says how many (`heldByEarlierRule`).
 //
 // Free plan (ADR 0004): how much it can write is bounded, because the rows it gives the Category to are written now, in the request. At most MAX_INLINE_APPLY other Transactions
-// are: 1,000 Transactions are about 2,000 of the day's 100,000 rows written (3,000 at the most, as the re-run budgets them) and, at the most there can be, 100 Rules and so about
-// 110,000 of its 5 million read. With more than that to give the Category to, the Rule and this Transaction are saved, nothing else is, and the answer says how many more match, so the
+// are: 1,000 Transactions are about 2,000 of the day's 100,000 rows written (3,000 at the most, as the re-run budgets them) and, at the most there can be, 200 Rules and so about
+// 210,000 of its 5 million read. With more than that to give the Category to, the Rule and this Transaction are saved, nothing else is, and the answer says how many more match, so the
 // page can send the Admin to Apply the Rules to all Transactions, which keeps to its own share of the day. The reads are:
 //   - one batch of four queries for the Category, the Rules in use, this Transaction and up to MAX_INLINE_APPLY + 1 of the others, which reads each Transaction
 //     at most once and stops once it has found that many (rule-preview.ts: the one pass over the Transactions is what a search for text costs, there being no index on it);
