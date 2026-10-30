@@ -790,7 +790,7 @@ test.describe('focus', () => {
   // The header sticks to the top. Going back up a long page, the browser brings what has focus to the top edge of the window, which would be under the header
   // (WCAG 2.4.11) if the page did not keep room for it (`scroll-padding-top`, src/index.css).
   test('is never hidden under the sticky header as you tab back up a long page', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 480 })
+    await page.setViewportSize({ width: 1280, height: 360 }) // low enough that the Styleguide, shorter in Small text, still scrolls a long way
     await page.goto('/styleguide')
     await expect(page.getByRole('heading', { level: 1, name: 'Styleguide' })).toBeVisible()
     await page.keyboard.press('Shift+Tab') // from the top of the page, to the last thing on it
