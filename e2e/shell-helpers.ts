@@ -243,3 +243,9 @@ export async function focusIndicator(page: Page, control: Locator, shown: Locato
   const [colour, behind] = await rgbOf(page, [found.colour, found.behind])
   return { ...found, contrast: contrastOf(colour!, behind!) }
 }
+
+/**
+ * The least a target may be: 44px at Medium and in proportion at the other text sizes, as every target is sized in rem (README, Accessibility), so about 38px at Small, the
+ * default with a mouse. Half a pixel is left for rounding.
+ */
+export const targetSize = (page: Page) => page.evaluate(() => (parseFloat(getComputedStyle(document.documentElement).fontSize) * 44) / 16 - 0.5)

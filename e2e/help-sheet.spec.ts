@@ -4,7 +4,7 @@ import { stubBalances } from './balances-helpers'
 import { NET_WORTH_PATH, showNetWorth, stubNetWorth } from './chart-helpers'
 import { expect, noAxeViolations, settle, signInAs, test } from './fixtures'
 import { HELP_LABEL, helpButton as trigger, helpSheet as sheet } from './help-helpers'
-import { chooseTextSize } from './shell-helpers'
+import { chooseTextSize, targetSize } from './shell-helpers'
 
 // The page's "?" help sheet (src/components/help-sheet.tsx, CODING_STANDARDS.md#ui): the text a reader reads once is in a sheet that opens from the right, beside the page's heading, so a
 // table or a form is not pushed down by it. The component is tested once, on the Transactions page (its colours are scanned open in contrast.spec.ts); every page that uses it is then listed
@@ -33,8 +33,8 @@ test.describe('the sheet', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
     await expectBesideHeading(page)
     const button = (await trigger(page).boundingBox())!
-    expect(button.width, 'a touch target, as every button is').toBeGreaterThanOrEqual(44)
-    expect(button.height).toBeGreaterThanOrEqual(44)
+    expect(button.width, 'a touch target, as every button is').toBeGreaterThanOrEqual(await targetSize(page))
+    expect(button.height).toBeGreaterThanOrEqual(await targetSize(page))
     await expect(sheet(page)).toHaveCount(0)
 
     await trigger(page).click()
@@ -93,7 +93,7 @@ test.describe('the sheet', () => {
     expect(box.x, 'a strip of the page is left to tap on to close it').toBeGreaterThanOrEqual(20)
     const closeBox = (await sheet(page).getByRole('button', { name: 'Close' }).boundingBox())!
     expect(closeBox.y + closeBox.height, 'Close is in the window without scrolling').toBeLessThanOrEqual(600)
-    expect(closeBox.height, 'a touch target').toBeGreaterThanOrEqual(44)
+    expect(closeBox.height, 'a touch target').toBeGreaterThanOrEqual(await targetSize(page))
     // The text is longer than the room it has, so it scrolls inside the sheet and the Close button stays where it is.
     const scrolls = await sheet(page).locator('[tabindex="0"]').evaluate((el) => el.scrollHeight > el.clientHeight)
     expect(scrolls, 'the text scrolls inside the sheet').toBe(true)

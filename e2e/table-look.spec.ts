@@ -20,7 +20,8 @@ async function seed(context: BrowserContext, baseURL: string, project: string) {
     year: 2026,
     rows: [
       { date: '2026-10-01', payee: payee(project, 'ONE'), amountCents: -1234, uniqueId: `LOOK${project}1` },
-      { date: '2026-10-02', payee: payee(project, 'TWO'), amountCents: 5000, uniqueId: `LOOK${project}2` },
+      // A long payee (a bank's is at most 200 characters) squeezes the other columns, which is when a heading would wrap.
+      { date: '2026-10-02', payee: payee(project, `TWO ${'WITH A LONG PAYEE NAME '.repeat(7)}`.trim()), amountCents: 5000, uniqueId: `LOOK${project}2` },
     ],
   })
   return account

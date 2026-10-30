@@ -298,8 +298,8 @@ test.describe('the sidebar navigation', () => {
     const [bar, tint, pill] = await rgbOf(page, [on.bar!.colour, await page.locator('[data-slot="sidebar-inner"]').evaluate((el) => getComputedStyle(el).backgroundColor), on.fill])
     expect(contrastOf(bar!, tint!), 'the bar against the sidebar').toBeGreaterThanOrEqual(3)
     expect(contrastOf(bar!, pill!), 'the bar against the pill it is drawn on').toBeGreaterThanOrEqual(3)
-    // Its text is 16px at Medium: the page's size, like the rest of the sidebar (README, Accessibility: one size for all text).
-    expect(await current.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBe(16)
+    // Its text is 14px at Small, the default with a mouse: the page's size, like the rest of the sidebar (README, Accessibility: one size for all text).
+    expect(await current.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBe(14)
   })
 
   test('the group holding the current page is shown as current while it is shut', async ({ page, context }) => {
@@ -640,9 +640,11 @@ test('the header controls are one Tab stop each, in order, and the arrow keys ch
   await tab()
   await expect(toggleButton(page)).toBeFocused()
   await tab()
-  await expect(textSizeButton(page, 'Medium')).toBeFocused() // a group is one stop, at the chosen size...
+  await expect(textSizeButton(page, 'Small')).toBeFocused() // a group is one stop, at the chosen size...
   await page.keyboard.press('ArrowRight')
-  await expect(textSizeButton(page, 'Large')).toBeFocused() // ...and an arrow key moves within it, and chooses
+  await expect(textSizeButton(page, 'Medium')).toBeChecked() // ...and an arrow key moves within it, and chooses
+  await page.keyboard.press('ArrowRight')
+  await expect(textSizeButton(page, 'Large')).toBeFocused()
   await expect(textSizeButton(page, 'Large')).toBeChecked()
   await expectTextSize(page, 'Large')
   await page.keyboard.press('ArrowRight')
@@ -690,7 +692,7 @@ test('still works, without errors, when the browser blocks storage: the text siz
   const deviceIsDark = testInfo.project.name === 'dark'
   await blockStorage(page)
   await page.goto('/') // the fixture fails the test on any console error, uncaught error or CSP violation
-  await expect(textSizeButton(page, 'Medium')).toBeChecked()
+  await expect(textSizeButton(page, 'Small')).toBeChecked()
   await expect(page.locator('html')).toHaveClass(deviceIsDark ? /dark/ : /^(?!.*dark)/) // the theme follows the device
   await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded')
 
@@ -763,8 +765,8 @@ test.describe('focus', () => {
     const fill = (control: Locator) => control.evaluate((el) => getComputedStyle(el).backgroundColor)
     expect(await fill(navLink(page, 'Import'))).toBe(highlight) // the current page...
     expect(await fill(navLink(page, 'Uncategorised'))).not.toBe(highlight) // ...and not the rest
-    expect(await fill(textSizeLabel(page, 'Medium'))).toBe(highlight) // the chosen size...
-    expect(await fill(textSizeLabel(page, 'Small'))).not.toBe(highlight)
+    expect(await fill(textSizeLabel(page, 'Small'))).toBe(highlight) // the chosen size...
+    expect(await fill(textSizeLabel(page, 'Medium'))).not.toBe(highlight)
     await navGroup(page, 'Transactions').click() // a shut group that holds the current page is current too
     await expect(navGroup(page, 'Transactions')).toHaveAttribute('aria-expanded', 'false')
     expect(await fill(navGroup(page, 'Transactions'))).toBe(highlight)
@@ -788,7 +790,7 @@ test.describe('focus', () => {
   // The header sticks to the top. Going back up a long page, the browser brings what has focus to the top edge of the window, which would be under the header
   // (WCAG 2.4.11) if the page did not keep room for it (`scroll-padding-top`, src/index.css).
   test('is never hidden under the sticky header as you tab back up a long page', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 480 })
+    await page.setViewportSize({ width: 1280, height: 360 }) // low enough that the Styleguide, shorter in Small text, still scrolls a long way
     await page.goto('/styleguide')
     await expect(page.getByRole('heading', { level: 1, name: 'Styleguide' })).toBeVisible()
     await page.keyboard.press('Shift+Tab') // from the top of the page, to the last thing on it

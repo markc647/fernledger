@@ -53,13 +53,13 @@ export const STEP_READS = 25_000
  * Rows read for each Transaction beyond one for each Rule, at most. Measured (rule-rerun.test.ts pins it): a chunk reads each
  * Transaction in the walk (1, and 1 more to find where its chunk ends), and walks it past the Rules above the one that wins; one whose
  * result changes costs 6 more (the row the UPDATE finds, and its index entries). So 1,000 Transactions that all change read
- * 15,000 with 5 Rules, 40,000 with 30 and 110,000 with 100 when none matches early; one that needs no change costs 4 over the Rules.
+ * 15,000 with 5 Rules, 40,000 with 30 and 210,000 with 200 when none matches early; one that needs no change costs 4 over the Rules.
  */
 export const READS_PER_ROW = 10
 
 /**
  * Transactions looked at by one step when there are `rules` Rules in use: STEP_READS / (rules + READS_PER_ROW), from RERUN_CHUNK
- * (up to 15 Rules) down to MIN_CHUNK (100 Rules gives 227), so a step is about 25,000 reads, at most 5 to 8 D1 queries, and the
+ * (up to 15 Rules) towards MIN_CHUNK (200 Rules, the most there can be, gives 119), so a step is about 25,000 reads, at most 5 to 8 D1 queries, and the
  * Worker's own part is a few small objects, far inside 10 ms of CPU. A smaller chunk only multiplies the requests; a larger one
  * makes each wait longer and puts more in a failed chunk's way.
  */
@@ -145,7 +145,7 @@ const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
 // `paid` rides on every read of the job, so the daily share needs no query of its own (`isPaused`).
 const COLUMNS = `id, status, cursor, end_id, total_rows, done_rows, changed_rows, restarts, started_by, started_at, updated_at, finished_at,
   usage_day, day_rows_read, day_rows_written, ${PAID_PLAN} AS paid`
-// The number of Rules in use, at most 100 reads. Only the queries that answer the page ask for it, so a cron run that finds nothing to do
+// The number of Rules in use, at most 200 reads. Only the queries that answer the page ask for it, so a cron run that finds nothing to do
 // reads one table.
 const RULES_IN_USE = `(SELECT COUNT(*) FROM rules WHERE removed_at IS NULL) AS rule_count`
 

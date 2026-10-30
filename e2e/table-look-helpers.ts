@@ -17,7 +17,7 @@ const resolvedBackground = (page: Page, value: string) =>
 
 /**
  * The table has the shared look on screen: in a rounded box (with a border, or without one `inCard`, where the card is the box), a heading row in the muted fill, a divider under every
- * row but the last, and every word in the size of the page's text. A row whose details follow it in a row of their own (`detail`, the Accounts screen) is the one exception: the divider
+ * row but the last, every word in the size of the page's text, and every heading on one line. A row whose details follow it in a row of their own (`detail`, the Accounts screen) is the one exception: the divider
  * goes under the details, so the pair reads as one row. The table has two rows or more, so there is a divider to look at, unless the data is only ever one (`single`).
  */
 export async function expectTableLook(table: Locator, { inCard = false, single = false }: { inCard?: boolean; single?: boolean } = {}) {
@@ -37,6 +37,18 @@ export async function expectTableLook(table: Locator, { inCard = false, single =
         .map((row) => parseFloat(getComputedStyle(row).borderBottomWidth)),
       sizes: Array.from(new Set(Array.from(element.querySelectorAll('th, td')).map((cell) => getComputedStyle(cell).fontSize))),
       pageSize: getComputedStyle(document.body).fontSize,
+      // A text node that wraps has a box for each line it is on.
+      wrapped: Array.from(element.querySelectorAll('th'))
+        .filter((heading) => {
+          const words = document.createTreeWalker(heading, NodeFilter.SHOW_TEXT)
+          for (let node = words.nextNode(); node; node = words.nextNode()) {
+            const range = document.createRange()
+            range.selectNodeContents(node)
+            if (range.getClientRects().length > 1) return true
+          }
+          return false
+        })
+        .map((heading) => heading.textContent),
     }
   })
   expect(look, 'the table is in ResponsiveTable\'s frame').not.toBeNull()
@@ -46,6 +58,7 @@ export async function expectTableLook(table: Locator, { inCard = false, single =
   if (!single) expect(look!.dividers.length, 'a table with a divider to look at has two rows or more').toBeGreaterThan(0)
   expect(look!.dividers.every((width) => width > 0)).toBe(true)
   expect(look!.sizes).toEqual([look!.pageSize])
+  expect(look!.wrapped, 'every heading is on one line').toEqual([])
 }
 
 /** With print media emulated: the Report's table has none of the screen look and has the paper layout the Reports have always had (a rule under the headings, a divider under every row, text at the top of its cell). */

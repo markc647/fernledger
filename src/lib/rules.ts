@@ -1,4 +1,4 @@
-import type { MAX_AMOUNT_CENTS as WORKER_MAX_AMOUNT_CENTS } from '@/generated/api/rule-criteria'
+import type { MAX_AMOUNT_CENTS as WORKER_MAX_AMOUNT_CENTS, MAX_RULES as WORKER_MAX_RULES } from '@/generated/api/rule-criteria'
 import { formatBalance } from './format'
 
 // How the Rules page reads and writes a Rule: dollar amounts typed by the Admin, and a Rule described in words.
@@ -6,6 +6,12 @@ import { formatBalance } from './format'
 
 /** The Worker's limit on an amount a Rule can name, $1,000,000,000.00 (worker/rule-criteria.ts). Typed as the Worker's literal, so the build fails if the two drift apart. */
 export const MAX_AMOUNT_CENTS: typeof WORKER_MAX_AMOUNT_CENTS = 100_000_000_000
+
+/** The Worker's limit on the Rules in use (worker/rule-criteria.ts), typed as its literal in the same way. */
+export const MAX_RULES: typeof WORKER_MAX_RULES = 200
+
+/** What the Rules page and a Transaction's Edit panel say when a new Rule is refused because there are already MAX_RULES. */
+export const RULES_FULL = `There are already ${MAX_RULES} Rules. Remove one before adding another.`
 
 /** A Rule as the API lists it. */
 export type RuleView = {

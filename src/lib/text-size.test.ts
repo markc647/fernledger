@@ -26,8 +26,8 @@ describe('parseTextSize', () => {
     expect(parseTextSize('large')).toBe('large')
     expect(parseTextSize('xlarge')).toBe('xlarge')
   })
-  it('falls back to Medium for anything else', () => {
-    for (const raw of [null, '', 'A', 'Small', 'huge', '130', 'a', 'a-plus', 'xxlarge', 'constructor', '__proto__', 'toString']) expect(parseTextSize(raw)).toBe('medium')
+  it('falls back to Small for anything else', () => {
+    for (const raw of [null, '', 'A', 'Small', 'huge', '130', 'a', 'a-plus', 'xxlarge', 'constructor', '__proto__', 'toString']) expect(parseTextSize(raw)).toBe('small')
   })
 
   describe('what an earlier control saved, which is used only when nothing is saved by this one', () => {
@@ -52,8 +52,8 @@ describe('parseTextSize', () => {
       expect(parseTextSize('enormous', 'large')).toBe('xlarge')
       expect(parseTextSize('', 'small')).toBe('small')
     })
-    it('falls back to Medium for anything else', () => {
-      for (const earlier of [null, '', 'A', 'Small', 'xlarge', 'huge', 'a-plus-plus-plus', 'constructor', '__proto__']) expect(parseTextSize(null, earlier)).toBe('medium')
+    it('falls back to Small for anything else', () => {
+      for (const earlier of [null, '', 'A', 'Small', 'xlarge', 'huge', 'a-plus-plus-plus', 'constructor', '__proto__']) expect(parseTextSize(null, earlier)).toBe('small')
     })
   })
 })
@@ -91,20 +91,21 @@ describe('loadTextSize and saveTextSize', () => {
     saveTextSize('small', storage)
     expect(loadTextSize(storage)).toBe('small')
   })
-  it('start at Medium when nothing is saved', () => {
-    expect(loadTextSize(fakeStorage())).toBe('medium')
+  it('start at Small when nothing is saved, and at Medium on a touch screen', () => {
+    expect(loadTextSize(fakeStorage(), false)).toBe('small')
+    expect(loadTextSize(fakeStorage(), true)).toBe('medium')
   })
-  it('start at Medium when the saved value is junk', () => {
-    expect(loadTextSize(fakeStorage({ [TEXT_SIZE_STORAGE_KEY]: 'enormous', [EARLIER_TEXT_SIZE_STORAGE_KEY]: 'enormous' }))).toBe('medium')
+  it('start at Small when the saved value is junk', () => {
+    expect(loadTextSize(fakeStorage({ [TEXT_SIZE_STORAGE_KEY]: 'enormous', [EARLIER_TEXT_SIZE_STORAGE_KEY]: 'enormous' }))).toBe('small')
   })
-  it('fall back to Medium when storage is blocked, without throwing', () => {
-    expect(loadTextSize(blockedStorage())).toBe('medium')
+  it('fall back to Small when storage is blocked, without throwing', () => {
+    expect(loadTextSize(blockedStorage())).toBe('small')
   })
   it('report, without throwing, that a choice could not be saved when storage is blocked', () => {
     expect(saveTextSize('large', blockedStorage())).toBe(false)
   })
-  it('fall back to Medium when there is no storage object at all', () => {
-    expect(loadTextSize(undefined)).toBe('medium')
+  it('fall back to Small when there is no storage object at all', () => {
+    expect(loadTextSize(undefined)).toBe('small')
     expect(saveTextSize('large', undefined)).toBe(false)
   })
 })

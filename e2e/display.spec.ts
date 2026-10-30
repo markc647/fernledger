@@ -122,15 +122,15 @@ async function expectOneSize(page: Page, size: SizeName, atLeast = 10) {
 }
 
 test.describe('text size', () => {
-  test('starts at Medium with 16px body text; Small is 14px, Large 18px and Xtra Large 20px', async ({ page }) => {
+  test('starts at Small with 14px body text; Medium is 16px, Large 18px and Xtra Large 20px', async ({ page }) => {
     await page.goto('/styleguide')
-    await expect(textSizeButton(page, 'Medium')).toBeChecked()
-    expect(await fontSize(page, 'body')).toBe(16)
+    await expect(textSizeButton(page, 'Small')).toBeChecked()
+    expect(await fontSize(page, 'body')).toBe(14)
 
-    for (const size of ['Small', 'Large', 'Xtra Large'] as const) {
+    for (const size of ['Medium', 'Large', 'Xtra Large'] as const) {
       await textSizeButton(page, size).click()
       await expect(textSizeButton(page, size)).toBeChecked()
-      await expect(textSizeButton(page, 'Medium')).not.toBeChecked()
+      await expect(textSizeButton(page, 'Small')).not.toBeChecked()
       expect(await fontSize(page, 'body')).toBe(PIXELS[size])
     }
   })
@@ -212,11 +212,11 @@ test.describe('text size', () => {
       localStorage.setItem('fernledger-text-size-v2', 'enormous')
     })
     await page.goto('/styleguide')
-    await expect(textSizeButton(page, 'Medium')).toBeChecked()
-    expect(await fontSize(page, 'body')).toBe(16)
+    await expect(textSizeButton(page, 'Small')).toBeChecked()
+    expect(await fontSize(page, 'body')).toBe(14)
   })
 
-  // README, Accessibility: a target is 44px on a touch screen, where it matters. With a mouse the shell's rows and header buttons are 32px (2rem), a deliberate exception, and
+  // README, Accessibility: a target is 44px on a touch screen, where it matters, which starts at Medium (Small, the default with a mouse, makes it 12.5% smaller). With a mouse the shell's rows and header buttons are 32px (2rem), a deliberate exception, and
   // not under 24px at any text size (WCAG 2.5.8): Small makes every rem-sized thing 12.5% smaller, targets included.
   test.describe('on a touch screen', () => {
     test.use({ hasTouch: true })
@@ -225,6 +225,7 @@ test.describe('text size', () => {
       await page.setViewportSize({ width: 1280, height: 800 })
       await page.goto('/styleguide')
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      await expectTextSize(page, 'Medium') // where a touch screen starts
       for (const group of ['Transactions', 'Reports', 'Set up', 'Help']) await openNavGroup(page, group)
       const targets = [
         ...SIZE_NAMES.map((name) => textSizeButton(page, name)),
@@ -980,8 +981,8 @@ test.describe('zoom', () => {
   const frame = (page: Page) => page.locator('[data-slot="table-frame"]')
   for (const size of ['Medium', 'Xtra Large'] as const) {
     for (const path of Object.keys(TABLE_AT_768) as (keyof typeof TABLE_AT_768)[]) {
-      // The Transactions' seven columns cannot fit 768px at Xtra Large: its own test, below, is of the box that scrolls instead.
-      if (path === '/transactions' && size === 'Xtra Large') continue
+      // The Transactions' seven columns, each heading on one line, cannot fit 768px: its own test, below, is of the box that scrolls instead.
+      if (path === '/transactions') continue
       test(`${path} as a table at 768px wide and text size ${size} fits`, async ({ page, context }) => {
         await signInAs(context, 'admin')
         await TABLE_AT_768[path].stub(page)
@@ -1002,28 +1003,30 @@ test.describe('zoom', () => {
 
   // The one that does not fit: a table wider than its box scrolls in the box and not the page, and the box is a region with the table's name that the keyboard can reach and scroll (WCAG 2.1.1), as a box that
   // fits is not.
-  test('/transactions as a table at 768px wide and text size Xtra Large scrolls in a box that the keyboard can reach', async ({ page, context }) => {
-    await signInAs(context, 'admin')
-    await stubLongTransactions(page)
-    await page.setViewportSize({ width: 768, height: 1024 })
-    await page.goto('/transactions')
-    await chooseTextSize(page, 'Xtra Large')
-    await expectTextSize(page, 'Xtra Large')
-    await expect(page.getByRole('table', { name: 'Transactions' })).toBeVisible()
-    await settle(page)
-    const box = page.getByRole('region', { name: 'Transactions', exact: true })
-    await expect(box).toHaveAttribute('tabindex', '0')
-    expect(await box.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
-    const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
-    expect(scrollWidth).toBeLessThanOrEqual(clientWidth) // the page itself does not scroll sideways
-    await noAxeViolations(page) // including `scrollable-region-focusable`
+  for (const size of ['Medium', 'Xtra Large'] as const) {
+    test(`/transactions as a table at 768px wide and text size ${size} scrolls in a box that the keyboard can reach`, async ({ page, context }) => {
+      await signInAs(context, 'admin')
+      await stubLongTransactions(page)
+      await page.setViewportSize({ width: 768, height: 1024 })
+      await page.goto('/transactions')
+      await chooseTextSize(page, size)
+      await expectTextSize(page, size)
+      await expect(page.getByRole('table', { name: 'Transactions' })).toBeVisible()
+      await settle(page)
+      const box = page.getByRole('region', { name: 'Transactions', exact: true })
+      await expect(box).toHaveAttribute('tabindex', '0')
+      expect(await box.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
+      expect(scrollWidth).toBeLessThanOrEqual(clientWidth) // the page itself does not scroll sideways
+      await noAxeViolations(page) // including `scrollable-region-focusable`
 
-    await box.focus()
-    await expect(box).toBeFocused()
-    expect((await box.evaluate((element) => getComputedStyle(element).outlineStyle))).toBe('solid') // focus is drawn, inside the box's edge
-    await page.keyboard.press('ArrowRight')
-    await expect.poll(() => box.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
-  })
+      await box.focus()
+      await expect(box).toBeFocused()
+      expect((await box.evaluate((element) => getComputedStyle(element).outlineStyle))).toBe('solid') // focus is drawn, inside the box's edge
+      await page.keyboard.press('ArrowRight')
+      await expect.poll(() => box.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+    })
+  }
 
   // The Summary's Budget vs actual with its longest content: a long Category name, big amounts, and each Status. The data is stubbed.
   for (const { name, width, height } of zoomLevels) {
@@ -1297,14 +1300,15 @@ test.describe('zoom', () => {
   }
 
   // The same Report as a table, at 768px, where a table starts and a Report's columns are at their narrowest: its box has not had to scroll the table (at Medium, as for the Transactions list above).
-  test('/reports/transactions with long content as a table at 768px wide and text size Medium fits', async ({ page, context }) => {
+  // At Medium its headings, each on one line, are wider than 768px, and the box scrolls as the Transactions' does.
+  test('/reports/transactions with long content as a table at 768px wide and text size Small fits', async ({ page, context }) => {
     await signInAs(context, 'member')
     await stubLongListing(page)
     await page.setViewportSize({ width: 768, height: 1024 })
     await page.goto('/reports/transactions?account=1&from=2026-10-01&to=2026-10-31')
-    await chooseTextSize(page, 'Medium')
+    await chooseTextSize(page, 'Small')
     await expect(page.getByRole('article', { name: 'Transaction listing' })).toContainText('−$1,234,567.89')
-    await expectTextSize(page, 'Medium')
+    await expectTextSize(page, 'Small')
     await settle(page)
     const box = page.locator('[data-slot="table-frame"]')
     await expect(box).toHaveCount(1)

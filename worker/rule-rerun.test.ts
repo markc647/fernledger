@@ -395,8 +395,8 @@ describe('a big history', () => {
     })
 
     // The most there can be, none of which matches until the last: every Transaction walks past all of them (the Rules are read in
-    // priority order and the walk stops at the first match). This is the dear case: a step reads about 106,000 rows, and a
-    // 100,000-Transaction history 10 million, which is two days' reads, so the job would pause at the daily limit and carry on.
+    // priority order and the walk stops at the first match). This is the dear case: a 100,000-Transaction history is about 21 million
+    // reads at 200 Rules, which is four days' reads, so the job would pause at the daily limit and carry on.
     // With the most Rules the chunk is smaller (chunkFor), so a step stays about STEP_READS whatever the Rules.
     it.each([5, 30, MAX_RULES])('reads about a row per Rule for each Transaction, with %i Rules and no early match, in a chunk sized to them', LONG, async (rules) => {
       const groceries = await categoryId('Groceries')
@@ -408,7 +408,7 @@ describe('a big history', () => {
       const job = await stepRerun(db)
 
       expect(job!.doneRows).toBe(size)
-      expect(size).toBe(rules === 5 ? RERUN_CHUNK : rules === 30 ? 625 : 227)
+      expect(size).toBe(rules === 5 ? RERUN_CHUNK : rules === 30 ? 625 : 119)
       expect(usage.queries).toBeLessThanOrEqual(1 + QUERIES_PER_CHUNK + QUERIES_TO_FINISH)
       expect(usage.rowsRead).toBeLessThanOrEqual(size * (rules + READS_PER_ROW) + 400) // 400: the count of Rules, read with the job each time
       expect(usage.rowsRead).toBeGreaterThan(size * rules) // so a bound this tight is about the Rules, not slack

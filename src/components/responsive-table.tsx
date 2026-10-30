@@ -221,7 +221,7 @@ export function ResponsiveTable<Row>({
   rows: Row[]
   getRowKey: (row: Row) => string | number
   emptyMessage?: string
-  /** For the table (the wide layout), such as `print:text-[12pt]` on a Report. */
+  /** For the table (the wide layout), such as `print:text-[10.5pt]` on a Report. */
   className?: string
   /**
    * Shown above the column headings on paper only, and so repeated with them at the top of every page the table runs onto: what the
@@ -321,7 +321,7 @@ export function ResponsiveTable<Row>({
                 key={column.key}
                 scope="col"
                 aria-sort={column.sort ? (column.sort.direction ?? 'none') : undefined}
-                className={cn(column.handle ? HANDLE_CELL : column.sort ? 'px-1 py-1' : 'px-3 py-2', 'font-semibold whitespace-normal print:h-auto', align(column), column.className)}
+                className={cn(column.handle ? HANDLE_CELL : column.sort ? 'px-1 py-1' : 'px-3 py-2', 'font-semibold whitespace-nowrap print:h-auto print:whitespace-normal', align(column), column.className)}
               >
                 {column.handle ? <span className="sr-only">{column.header}</span> : column.sort ? <SortHeading column={{ ...column, sort: column.sort }} /> : column.header}
               </TableHead>

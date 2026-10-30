@@ -2,7 +2,7 @@ import type { BrowserContext, Locator, Page } from '@playwright/test'
 import { expect, noAxeViolations, signInAs, test } from './fixtures'
 import { dateText } from './report-helpers'
 import { actionsButton, chooseAction, menuAction, openActions, rowButton } from './row-actions-helpers'
-import { atEveryTextSize, mainNav, navigateTo } from './shell-helpers'
+import { atEveryTextSize, mainNav, navigateTo, targetSize } from './shell-helpers'
 import { expectTableLook } from './table-look-helpers'
 
 /** The light and dark projects share one local database, so each test imports a Transaction of its own, dated to sort first. */
@@ -470,8 +470,8 @@ test('a Note is a button that opens it, in All Transactions and in Uncategorised
     const button = noteButton(row)
     await expect(button).toHaveAccessibleName(`Read the Note on ${noted}, ${dateText('2026-10-09')}`)
     const box = (await button.boundingBox())!
-    expect(box.width, `${heading}: the button is 44px wide`).toBeGreaterThanOrEqual(44)
-    expect(box.height, `${heading}: the button is 44px tall`).toBeGreaterThanOrEqual(44)
+    expect(box.width, `${heading}: the button is a 44px target, in proportion to the text`).toBeGreaterThanOrEqual(await targetSize(page))
+    expect(box.height, `${heading}: the button is a 44px target, in proportion to the text`).toBeGreaterThanOrEqual(await targetSize(page))
 
     // It opens beside the button, ending where the button does, with the Note in it, which is what the pop-up is described by, and focus on the Note.
     await button.click()

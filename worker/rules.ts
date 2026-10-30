@@ -129,7 +129,7 @@ export const rules = new Hono<AppEnv>()
     // and a Rule left out of the list would be given no place. The check is on the whole order at once (?2, the ids as read, against the Rules in use numbered in order by a window
     // function, which is exact where the order of a group_concat is only what SQLite happens to do), and the UPDATE is the last statement, which `onlyIfChanged` looks at.
     // Both lookups go by position in a JSON array, and each is written to cost one read per Rule: `UPDATE … FROM json_each` walks the list once (a correlated `SELECT … FROM json_each`
-    // per Rule walks it once per Rule), and `json_extract` takes the n-th element directly (a `json_each` lookup per row walks it again). At 100 Rules that is about 800 rows read, not 10,600.
+    // per Rule walks it once per Rule), and `json_extract` takes the n-th element directly (a `json_each` lookup per row walks it again). Measured at 100 Rules (the limit then), that was about 800 rows read, not 10,600.
     const [, moved] = await recordChange(
       db,
       [

@@ -13,8 +13,8 @@ import {
   expectIdentityOnEveryPage,
   expectIdentityRow,
   expectJustTheReport,
-  expectNoTextUnder12pt,
-  expectNoTypeUnder12pt,
+  expectNoTextUnder10_5pt,
+  expectNoTypeUnder10_5pt,
   expectOwnPage,
   expectPageNumbers,
   expectTitleBlock,
@@ -510,8 +510,8 @@ test.describe('printed', () => {
     expect(cheque.unreadable).toEqual([])
   })
 
-  test('has no text under 12pt', async ({ page }) => {
-    await expectNoTextUnder12pt(page, article(page), 100)
+  test('has no text under 10.5pt', async ({ page }) => {
+    await expectNoTextUnder10_5pt(page, article(page), 100)
   })
 
   test('is its own page with its own margins, repeats table headings and keeps a row whole', async ({ page }) => {
@@ -553,15 +553,15 @@ test.describe('printed', () => {
     expectBareMargins(await readPdf(await page.pdf({ format: 'A4' })))
   })
 
-  test('sets every word of it, the page numbers and a Balance Check difference included, in at least 12pt type', async ({ page, context, baseURL }, testInfo) => {
+  test('sets every word of it, the page numbers and a Balance Check difference included, in at least 10.5pt type', async ({ page, context, baseURL }, testInfo) => {
     const { start, end } = dataFor(testInfo.project.name)
     const { chequeId } = await seed(context, baseURL!, testInfo.project.name)
-    expectNoTypeUnder12pt(await readPdf(await page.pdf({ format: 'A4' })), 300)
+    expectNoTypeUnder10_5pt(await readPdf(await page.pdf({ format: 'A4' })), 300)
 
     await page.goto(address(chequeId, `${start}-01-01`, `${end}-12-31`))
     await expect(article(page).getByText('Balance differs from bank by $3.00')).toBeVisible()
     const cheque = await readPdf(await page.pdf({ format: 'A4' }))
-    expectNoTypeUnder12pt(cheque, 0)
+    expectNoTypeUnder10_5pt(cheque, 0)
     expect(textOf({ width: 0, height: 0, text: cheque.flatMap((p) => p.text) })).toContain('Balance differs from bank by $3.00') // on whichever page it fell
   })
 

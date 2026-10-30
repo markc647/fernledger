@@ -12,7 +12,7 @@ import { HttpError, reasonOf } from '@/lib/me'
 import { categoriesQuery } from '@/lib/queries'
 import { countSentence, directionOf, savedRuleSentence, tooManyNote } from '@/lib/rule-from-transaction'
 import { suggestRuleText } from '@/lib/rule-text'
-import { ruleWhen } from '@/lib/rules'
+import { RULES_FULL, ruleWhen } from '@/lib/rules'
 import { isAccessRedirect, useSessionProblem } from '@/lib/session'
 import { NOT_TRANSFER_NOTE, notTransferSaved, transferEditHint, treatAsTransferAgainSaved, type TransferSource } from '@/lib/transfers'
 import { useDebounced } from '@/lib/use-debounced'
@@ -265,7 +265,7 @@ export function EditPanel({
         if (!res.ok) throw new HttpError(res.status)
       }
       const res = await api.rules['from-transaction'].$post({ json: { transactionId: row.id, textContains: made.rule.text.trim(), direction: made.rule.direction === '' ? null : made.rule.direction, categoryId: made.categoryId } })
-      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined) // 409: 100 Rules already, or the Transaction changed under the Admin
+      if (!res.ok) throw new HttpError(res.status, res.status === 409 ? await reasonOf(res) : undefined) // 409: MAX_RULES already, or the Transaction changed under the Admin
       return res.json()
     },
     onSuccess: async (made, asked) => {
@@ -279,7 +279,7 @@ export function EditPanel({
       ? saveRule.error.status === 409
         ? saveRule.error.reason === 'changed'
           ? 'This Transaction changed while you were saving. Try again.'
-          : 'There are already 100 Rules. Remove one before adding another.'
+          : RULES_FULL
         : saveRule.error.status === 404
           ? 'This Transaction is no longer there. Reload the page.'
           : 'The Rule could not be saved. Check the Category and the text, and try again.'
